@@ -2,6 +2,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "WowSessionState.h"
+#include "WowAutoLoginOptions.h"
 #include "WowLoginController.generated.h"
 
 class UWowConnectionManager;
@@ -36,6 +37,10 @@ public:
     TObjectPtr<AWowWorldManager> WorldManager;
 
 private:
+    void StopAutoLogin(const FString& Message);
+    void UpdateWorldCapture();
+    void OnWorldScreenshotProcessed();
+
     UFUNCTION() void OnStateChanged(EWowSessionState NewState);
     UFUNCTION() void OnRealmList(const TArray<FWowRealmInfo>& Realms);
     UFUNCTION() void OnCharacterList(const TArray<FWowCharacterInfo>& Characters);
@@ -110,4 +115,19 @@ private:
 
     /** Handle for login verify world delegate binding */
     FDelegateHandle LoginVerifyWorldHandle;
+
+    FWowAutoLoginOptions AutoLoginOptions;
+    bool bAutoLoginActive = false;
+    bool bAutoLoginSubmitted = false;
+    bool bWorldEntryComplete = false;
+    double AutoLoginStartedAt = 0.0;
+    float AutoLoginTimeoutSeconds = 120.0f;
+
+    FString WorldScreenshotPath;
+    float WorldScreenshotDelaySeconds = 5.0f;
+    bool bQuitAfterWorldScreenshot = false;
+    bool bWorldScreenshotRequested = false;
+    double WorldReadyAt = -1.0;
+    double WorldScreenshotRequestedAt = 0.0;
+    FDelegateHandle WorldScreenshotProcessedHandle;
 };

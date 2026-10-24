@@ -30,6 +30,11 @@
 #include "Mpq/MpqManager.h"
 #include "WowTextureFactory.h"
 #include "Formats/BlpParser.h"
+#include "HAL/FileManager.h"
+#include "HAL/PlatformTime.h"
+#include "Misc/Paths.h"
+#include "Misc/OutputDeviceRedirector.h"
+#include "UnrealClient.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowLogin, Log, All);
 
@@ -66,6 +71,7 @@ void AWowLoginController::BeginPlay()
 
 void AWowLoginController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+    FScreenshotRequest::OnScreenshotRequestProcessed().Remove(WorldScreenshotProcessedHandle);
     ClearCurrentScreen();
     if (CinematicManager)
     {
@@ -78,6 +84,24 @@ void AWowLoginController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void AWowLoginController::StartLoginFlow()
 {
+    AutoLoginOptions = FWowAutoLoginOptions::Parse(FCommandLine::Get());
+    bAutoLoginActive = AutoLoginOptions.bEnabled;
+    AutoLoginStartedAt = FPlatformTime::Seconds();
+    FParse::Value(FCommandLine::Get(), TEXT("-autologintimeout="), AutoLoginTimeoutSeconds);
+    AutoLoginTimeoutSeconds = FMath::Clamp(AutoLoginTimeoutSeconds, 10.0f, 600.0f);
+    FParse::Value(FCommandLine::Get(), TEXT("-worldscreenshot="), WorldScreenshotPath);
+    FParse::Value(FCommandLine::Get(), TEXT("-worldscreenshotdelay="), WorldScreenshotDelaySeconds);
+    WorldScreenshotDelaySeconds = FMath::Clamp(WorldScreenshotDelaySeconds, 0.0f, 60.0f);
+    bQuitAfterWorldScreenshot = FParse::Param(FCommandLine::Get(), TEXT("quitafterworldscreenshot"));
+    if (!WorldScreenshotPath.IsEmpty())
+    {
+        if (FPaths::IsRelative(WorldScreenshotPath))
+        {
+            WorldScreenshotPath = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Screenshots"), WorldScreenshotPath);
+        }
+        WorldScreenshotPath = FPaths::ConvertRelativePathToFull(WorldScreenshotPath);
+        WorldScreenshotPath = FPaths::SetExtension(WorldScreenshotPath, TEXT("png"));
+    }
     ConnectionManager = NewObject<UWowConnectionManager>(this);
     ConnectionManager->OnStateChanged.AddDynamic(this, &AWowLoginController::OnStateChanged);
     ConnectionManager->OnRealmList.AddDynamic(this, &AWowLoginController::OnRealmList);
@@ -187,6 +211,18 @@ void AWowLoginController::OnStateChanged(EWowSessionState NewState)
 
 void AWowLoginController::OnRealmList(const TArray<FWowRealmInfo>& Realms)
 {
+    if (bAutoLoginActive)
+    {
+        const int32 Index = AutoLoginOptions.FindRealm(Realms);
+        if (Index == INDEX_NONE)
+        {
+            StopAutoLogin(TEXT("Requested realm not found, or the realm list is empty."));
+            return;
+        }
+        UE_LOG(LogWowLogin, Log, TEXT("Autologin: selecting realm '%s'"), *Realms[Index].Name);
+        HandleRealmSelected(Index);
+        return;
+    }
     if (Realms.Num() == 1)
     {
         UE_LOG(LogWowLogin, Log, TEXT("Auto-selecting single realm: %s"), *Realms[0].Name);
@@ -200,12 +236,19 @@ void AWowLoginController::OnCharacterList(const TArray<FWowCharacterInfo>& Chara
 
     // Auto-enter world with first character when -autologin is active
     // Skip if -createchar is set — we'll enter after creation completes
-    if (FParse::Param(FCommandLine::Get(), TEXT("autologin")) && Characters.Num() > 0
+    if (bAutoLoginActive
         && !FParse::Param(FCommandLine::Get(), TEXT("createchar")))
     {
+        const int32 Index = AutoLoginOptions.FindCharacter(Characters);
+        if (Index == INDEX_NONE)
+        {
+            StopAutoLogin(TEXT("Requested character not found, or this account has no characters."));
+            return;
+        }
+        bAutoLoginActive = false; // One automatic entry per launch, including list refreshes.
         UE_LOG(LogWowLogin, Log, TEXT("Autologin: entering world with '%s' (GUID %lld)"),
-            *Characters[0].Name, Characters[0].Guid);
-        HandleCharacterSelected(Characters[0].Guid);
+            *Characters[Index].Name, Characters[Index].Guid);
+        HandleCharacterSelected(Characters[Index].Guid);
         return;
     }
 
@@ -230,6 +273,11 @@ void AWowLoginController::OnCharacterList(const TArray<FWowCharacterInfo>& Chara
 
 void AWowLoginController::OnError(const FString& Msg)
 {
+    if (AutoLoginOptions.bEnabled && bAutoLoginSubmitted && !bWorldEntryComplete)
+    {
+        StopAutoLogin(Msg);
+        return;
+    }
     UE_LOG(LogWowLogin, Error, TEXT("Connection error: %s"), *Msg);
     SetStatusText(FString::Printf(TEXT("Error: %s"), *Msg));
 }
@@ -458,6 +506,81 @@ void AWowLoginController::Tick(float DeltaTime)
     {
         TryFinalizeGroundSnap();
     }
+    UpdateWorldCapture();
+}
+
+void AWowLoginController::StopAutoLogin(const FString& Message)
+{
+    bAutoLoginActive = false;
+    bAutoLoginSubmitted = false;
+    SetStatusText(FString::Printf(TEXT("Autologin stopped: %s"), *Message));
+    UE_LOG(LogWowLogin, Error, TEXT("Autologin stopped: %s"), *Message);
+    // Verification runs fail explicitly instead of waiting forever at a login screen.
+    if (bQuitAfterWorldScreenshot)
+    {
+        // The Windows game loop can return zero after a graceful platform exit.
+        // Verification failures need an explicit nonzero process status.
+        if (GLog) GLog->FlushThreadedLogs();
+        FPlatformMisc::RequestExitWithStatus(true, 1);
+    }
+}
+
+void AWowLoginController::UpdateWorldCapture()
+{
+    const double Now = FPlatformTime::Seconds();
+    if (AutoLoginOptions.bEnabled && bAutoLoginSubmitted && WorldReadyAt < 0.0
+        && Now - AutoLoginStartedAt > AutoLoginTimeoutSeconds)
+    {
+        StopAutoLogin(TEXT("Timed out waiting for world entry and initial terrain loading."));
+        return;
+    }
+    if (bWorldScreenshotRequested)
+    {
+        if (WorldScreenshotProcessedHandle.IsValid() && Now - WorldScreenshotRequestedAt > 15.0)
+        {
+            FScreenshotRequest::OnScreenshotRequestProcessed().Remove(WorldScreenshotProcessedHandle);
+            WorldScreenshotProcessedHandle.Reset();
+            StopAutoLogin(TEXT("Timed out waiting for the rendered world screenshot."));
+        }
+        return;
+    }
+    // Capture unfinished terrain/collision too: diagnosing it is a reason to
+    // request a world screenshot. Only the login/loading screens must be gone.
+    if (!bWorldEntryComplete || bWaitingForInitialLoad) return;
+    if (WorldReadyAt < 0.0)
+    {
+        WorldReadyAt = Now;
+        UE_LOG(LogWowLogin, Log, TEXT("World ready for capture: terrain loaded, loading screen removed (ground snap pending: %s)"),
+            bPendingGroundSnap ? TEXT("yes") : TEXT("no"));
+    }
+    if (WorldScreenshotPath.IsEmpty() || Now - WorldReadyAt < WorldScreenshotDelaySeconds) return;
+    if (!GEngine || !GEngine->GameViewport || !GEngine->GameViewport->Viewport
+        || !IFileManager::Get().MakeDirectory(*FPaths::GetPath(WorldScreenshotPath), true))
+    {
+        StopAutoLogin(TEXT("World screenshot requires a rendered viewport and a writable output directory."));
+        bWorldScreenshotRequested = true;
+        return;
+    }
+    bWorldScreenshotRequested = true;
+    WorldScreenshotRequestedAt = Now;
+    WorldScreenshotProcessedHandle = FScreenshotRequest::OnScreenshotRequestProcessed().AddUObject(
+        this, &AWowLoginController::OnWorldScreenshotProcessed);
+    UE_LOG(LogWowLogin, Log, TEXT("Requesting world screenshot: %s"), *WorldScreenshotPath);
+    FScreenshotRequest::RequestScreenshot(WorldScreenshotPath, true, false);
+}
+
+void AWowLoginController::OnWorldScreenshotProcessed()
+{
+    FScreenshotRequest::OnScreenshotRequestProcessed().Remove(WorldScreenshotProcessedHandle);
+    WorldScreenshotProcessedHandle.Reset();
+    const bool bSaved = IFileManager::Get().FileSize(*WorldScreenshotPath) > 0;
+    UE_LOG(LogWowLogin, Log, TEXT("World screenshot %s: %s"), bSaved ? TEXT("saved") : TEXT("failed"), *WorldScreenshotPath);
+    if (!bSaved)
+    {
+        StopAutoLogin(TEXT("The renderer did not save the requested world screenshot."));
+        return;
+    }
+    if (bQuitAfterWorldScreenshot) FPlatformMisc::RequestExitWithStatus(false, 0);
 }
 
 // ShowLoadingScreen() removed — use ShowLoadingScreen(uint32 MapId) instead
@@ -562,6 +685,7 @@ void AWowLoginController::FinalizeWorldEntry()
     }
 
     UE_LOG(LogWowLogin, Log, TEXT("World entry complete — player is in the world"));
+    bWorldEntryComplete = true;
 }
 
 bool AWowLoginController::TrySnapPawnToGround(APawn* Pawn, bool bLogFailure)
@@ -730,7 +854,9 @@ void AWowLoginController::ShowLoginScreen()
     UWowCredentialStore* CredStore = NewObject<UWowCredentialStore>(GetTransientPackage());
     if (CredStore->LoadCredentials())
     {
-        FWowCredential Cred = CredStore->GetDefaultCredential();
+        const TArray<FWowCredential> Credentials = CredStore->GetAllCredentials();
+        const int32 Index = AutoLoginOptions.FindCredential(Credentials);
+        const FWowCredential Cred = Credentials.IsValidIndex(Index) ? Credentials[Index] : FWowCredential();
         if (!Cred.Username.IsEmpty())
         {
             FString ServerStr = FString::Printf(TEXT("%s:%d"), *Cred.ServerAddress, Cred.AuthPort);
@@ -743,8 +869,16 @@ void AWowLoginController::ShowLoginScreen()
     InitializeCinematics();
 
     // Auto-submit if -autologin flag is set
-    if (FParse::Param(FCommandLine::Get(), TEXT("autologin")))
+    if (bAutoLoginActive && !bAutoLoginSubmitted)
     {
+        const TArray<FWowCredential> Credentials = CredStore->GetAllCredentials();
+        const int32 Index = AutoLoginOptions.FindCredential(Credentials);
+        if (!Credentials.IsValidIndex(Index) || Credentials[Index].Username.IsEmpty() || Credentials[Index].Password.IsEmpty())
+        {
+            StopAutoLogin(TEXT("Saved account not found or has no username/password. Save credentials before enabling autologin."));
+            return;
+        }
+        bAutoLoginSubmitted = true;
         UE_LOG(LogWowLogin, Log, TEXT("Autologin: auto-submitting login form"));
         LoginWidget->AutoSubmit();
     }

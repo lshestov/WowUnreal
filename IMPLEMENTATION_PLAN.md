@@ -83,6 +83,7 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 - [x] Long-lived loading screen Slate texture/brush lifetime stability (retain background resources while visible, release them before rebuilding the loading screen)
 - [x] Ground snap after terrain loads (line trace to terrain surface)
 - [x] `-autologin` flag (prefills and auto-submits through UI)
+- [x] Reliable automatic world entry with saved account/realm/character selection, bounded verification runs and a screenshot after terrain loading and loading-screen removal (Windows; verified Editor/Game packaging, four login automation tests, rendered world PNG and exit 1 for a missing realm).
 - [x] `-createchar` flag (auto-creates Human Mage, enters world)
 - [x] Single-instance lockfile (prevents dual UE launches)
 

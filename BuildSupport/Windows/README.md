@@ -59,6 +59,29 @@ override defaults; `-windowed -resx=1280 -resy=720` explicitly requests a window
 Runtime-created water, WMO liquid and WDL material slots initialize their UV
 metadata, and NPC death retains the entity until server removal.
 
+### Automatic world entry and screenshots
+
+`-autologin` submits the saved default account, selects the first realm and
+enters with the first existing character. Optional `-account="Profile Alias"`,
+`-realm="Realm Name"` and `-character=CharacterName` select specific saved
+profiles and destinations, ignoring case. Missing names stop automatic entry
+instead of falling back to another account or character. No character is
+created by this flow. Passwords stay in the local credential store.
+
+`-worldscreenshot=world.png -worldscreenshotdelay=5` captures through Unreal's
+screenshot API after initial terrain loading, player placement and removal
+of the loading screen. Pending ground collision is logged and does not block
+the screenshot, so incomplete world rendering can be diagnosed. Relative paths resolve under
+`Saved/Screenshots`. `-quitafterworldscreenshot` exits with code zero after
+saving, or a nonzero code on failure. `-autologintimeout=120` bounds the wait
+for world readiness. Without the quit flag, errors remain visible in the UI
+and manual login remains available.
+
+The local multi-client workspace provides `scripts/capture-wowunreal-world.ps1`
+to use its existing private verification profile, wait for a screenshot and
+close only the client it launched. It supplies no passwords on the command
+line and does not need Computer Use. Regular manual startup is unchanged.
+
 ## Regression tests
 
 Run each filter separately with the editor command-line executable:
@@ -71,3 +94,5 @@ Also use `WowUnreal.World.DeathPreservesEntityUntilServerDestroy` for the
 entity lifetime regression and `WowUnreal.Network` for protocol tests. These
 tests use no account credentials and do not connect to a server. NullRHI is
 appropriate for these logic tests; it does not validate world rendering.
+`WowUnreal.Login.AutoLogin` covers command-line parsing and explicit account,
+realm and character selection, including missing profiles and empty lists.
