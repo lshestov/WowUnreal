@@ -561,6 +561,16 @@ void AWowLoginController::UpdateWorldCapture()
     if (WorldReadyAt < 0.0)
     {
         WorldReadyAt = Now;
+        uint32 NpcDisplay = 0;
+        if (!WorldScreenshotPath.IsEmpty() && FParse::Value(FCommandLine::Get(), TEXT("capturenpc="), NpcDisplay))
+        {
+            auto* Gameplay = Cast<AWowGameplayController>(UGameplayStatics::GetPlayerController(this, 0));
+            if (!Gameplay || !Gameplay->ConfigureNpcCapture(NpcDisplay))
+            {
+                StopAutoLogin(TEXT("Requested NPC display is not present in the loaded world."));
+                return;
+            }
+        }
         UE_LOG(LogWowLogin, Log, TEXT("World ready for capture: terrain loaded, loading screen removed (ground snap pending: %s)"),
             bPendingGroundSnap ? TEXT("yes") : TEXT("no"));
         if (!WorldScreenshotPath.IsEmpty())
@@ -587,6 +597,15 @@ void AWowLoginController::UpdateWorldCapture()
         }
     }
     if (WorldScreenshotPath.IsEmpty() || Now - WorldReadyAt < WorldScreenshotDelaySeconds) return;
+    if (FParse::Param(FCommandLine::Get(), TEXT("capturenpcmoving")))
+    {
+        const auto* Gameplay = Cast<AWowGameplayController>(UGameplayStatics::GetPlayerController(this, 0));
+        if (!Gameplay || !Gameplay->IsNpcCaptureMoving())
+        {
+            if (Now - WorldReadyAt > 60.0) StopAutoLogin(TEXT("Requested NPC did not start moving within 60 seconds."));
+            return;
+        }
+    }
     if (!GEngine || !GEngine->GameViewport || !GEngine->GameViewport->Viewport
         || !IFileManager::Get().MakeDirectory(*FPaths::GetPath(WorldScreenshotPath), true))
     {
@@ -596,6 +615,7 @@ void AWowLoginController::UpdateWorldCapture()
     }
     bWorldScreenshotRequested = true;
     WorldScreenshotRequestedAt = Now;
+    if (auto* Gameplay = Cast<AWowGameplayController>(UGameplayStatics::GetPlayerController(this, 0))) Gameplay->LogNpcCapture();
     if (auto* Player = Cast<AWowPlayerCharacter>(UGameplayStatics::GetPlayerPawn(this, 0)))
     {
         const USkeletalMesh* Model = Player->GetMesh()->GetSkeletalMeshAsset();
@@ -627,7 +647,9 @@ void AWowLoginController::UpdateWorldCapture()
     WorldScreenshotProcessedHandle = FScreenshotRequest::OnScreenshotRequestProcessed().AddUObject(
         this, &AWowLoginController::OnWorldScreenshotProcessed);
     UE_LOG(LogWowLogin, Log, TEXT("Requesting world screenshot: %s"), *WorldScreenshotPath);
-    FScreenshotRequest::RequestScreenshot(WorldScreenshotPath, true, false);
+    uint32 NpcDisplayForCapture = 0;
+    const bool bShowUI = !FParse::Value(FCommandLine::Get(), TEXT("capturenpc="), NpcDisplayForCapture);
+    FScreenshotRequest::RequestScreenshot(WorldScreenshotPath, bShowUI, false);
 }
 
 void AWowLoginController::OnWorldScreenshotProcessed()

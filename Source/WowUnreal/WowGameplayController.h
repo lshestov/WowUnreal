@@ -73,6 +73,16 @@ public:
 
     /** Wire entity events from the packet handler (call after setting ConnectionManager) */
     void BindEntityEvents();
+    bool ConfigureNpcCapture(uint32 DisplayId);
+    void LogNpcCapture() const;
+    bool IsNpcCaptureMoving() const;
+
+private:
+    TWeakObjectPtr<AActor> NpcCaptureTarget;
+    TWeakObjectPtr<class ACameraActor> NpcCaptureCamera;
+    void UpdateNpcCaptureCamera();
+
+public:
 
     /** Initialize all managers */
     void InitializeManagers();

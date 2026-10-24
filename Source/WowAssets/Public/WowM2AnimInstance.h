@@ -17,6 +17,8 @@ public:
     int32 GetM2AnimationId() const;
     float GetM2Duration() const;
     float GetM2Time() const { return PlaybackTime; }
+    void SetM2MovementSpeed(float Speed, float ModelScale);
+    float GetM2PlayRate() const { return PlaybackRate; }
     void SampleLocalPose(TArray<FTransform>& OutPose) const;
     virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
@@ -31,6 +33,7 @@ private:
     TArray<FTransform> BlendFromPose;
     int32 TrackIndex = INDEX_NONE;
     float PlaybackTime = 0;
+    float PlaybackRate = 1;
     float BlendElapsed = 0;
     bool bLoop = true;
     static constexpr float BlendDuration = 0.12f;

@@ -121,6 +121,27 @@ the player. The workspace capture script exposes this as `-AnimationId 5`.
 Without that option, screenshots show normal gameplay animation selection.
 `AnimationCapture` logs the clip time and actual mesh bone-pose diagnostics.
 
+### NPC appearance and movement
+
+Creature displays resolve their model and all three replaceable monster skins.
+Each mesh section keeps its literal or replaceable texture. Humanoid NPCs use
+`CreatureDisplayInfoExtra.dbc` customization, baked clothing textures, equipment
+geosets and separate hair following the body's pose and transform. A fallback
+composite outfit never modifies the shared cached skin texture.
+
+NPC actor transforms are applied after creating the scene root. Server facing
+is converted once; the skeletal component supplies the model's basis rotation.
+Monster movement decodes packed offsets, full spline points, final facing and
+optional animation/parabolic payloads. Travel time is distributed by segment
+length; locomotion uses the route speed and adjusts playback for model scale.
+Full-point routes currently follow a polyline; smooth Catmull-Rom curves and
+parabolic height simulation are not implemented by this interpolation path.
+
+The workspace capture script accepts `-NpcDisplayId 3275` to frame a real
+loaded NPC without moving the player. `-NpcDisplayId 31049 -NpcMoving` waits
+for actual server-driven locomotion before capturing. NPC captures omit UI;
+the log records position error, geometry, textures and evaluated bone poses.
+
 ## Regression tests
 
 Run each filter separately with the editor command-line executable:
@@ -143,3 +164,9 @@ and camera distance, and ground tracing against asynchronously cooked terrain.
 `WowUnreal.Animation` checks nonuniform key times, looping and one-shot clocks,
 bone remapping, transitions, movement selection, controller transfer and actual
 skeletal-component evaluation through the native animation proxy.
+`WowUnreal.Npc` checks appearance record fields, server route packets and
+models from the user's existing MPQs. The model integration test requires
+`-wowdata=<client Data directory>` and uses no server account.
+Datasets without the optional `CharComponentTextureLayouts.dbc` and
+`CharComponentTextureSections.dbc` use the existing built-in atlas layout;
+the MPQ integration test reports the loader's two warnings in that case.

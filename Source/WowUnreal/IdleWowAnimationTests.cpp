@@ -30,11 +30,12 @@ bool FIdleWowRuntimeAnimations::RunTest(const FString& Parameters)
     for (auto& V : Data->Vertices) { V.BoneWeights[0] = 255; V.Normal = FVector(0, 1, 0); }
     Data->Indices = {0, 1, 2};
     Data->BoundingBox = FBox(FVector::ZeroVector, FVector(1, 1, 1));
-    for (int32 Id : {0, 4, 5, 37, 38, 39, 40, 16, 109})
+    for (int32 Id : {0, 4, 5, 25, 37, 38, 39, 40, 16, 109})
     {
         FM2AnimationData Clip;
         Clip.AnimationId = Id;
         Clip.Duration = Id == 16 ? 1 : 1000;
+        Clip.MoveSpeed = Id == 5 ? 7.0f : Id == 4 ? 2.5f : 0;
         Clip.BoneTracks.SetNum(3);
         auto& Track = Clip.BoneTracks[0];
         Track.TransTimestamps = {0, 100, 1000};
@@ -113,6 +114,16 @@ bool FIdleWowRuntimeAnimations::RunTest(const FString& Parameters)
     auto* Copied = NewObject<UWowAnimationController>(Other);
     Copied->InitializeFromController(Other->GetMesh(), Controller);
     TestTrue(TEXT("Player controller transfer preserves runtime clips"), Copied->PlayAnimationById(EWowAnimId::Run));
+    Copied->GetRuntimeInstance()->SetM2MovementSpeed(3.5f, 1.0f);
+    TestEqual(TEXT("Gait rate follows actual travel speed"), Copied->GetRuntimeInstance()->GetM2PlayRate(), 0.5f);
+    FWowMovementInfo Travel;
+    Travel.MoveFlags = WowMovementFlags::FORWARD;
+    Copied->UpdateAnimationState(Travel, true);
+    TestEqual(TEXT("A moving combat NPC runs instead of sliding in a ready stance"), Copied->GetRuntimeInstance()->GetM2AnimationId(), 5);
+    Travel.MoveFlags = 0;
+    Copied->UpdateAnimationState(Travel, true);
+    TestEqual(TEXT("Combat ready is used after stopping"), Copied->GetRuntimeInstance()->GetM2AnimationId(), 25);
+    Copied->UpdateAnimationState(Travel, false);
     TestNotEqual(TEXT("Each character owns an independent playback instance"), Copied->GetRuntimeInstance(), Instance);
     Other->SetupAnimationController(Copied);
     Other->GetCharacterMovement()->SetMovementMode(MOVE_Walking);

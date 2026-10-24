@@ -10,6 +10,7 @@
 #include "Formats/Dbc/ChrRacesDbc.h"
 #include "Formats/Dbc/CharSectionsDbc.h"
 #include "Formats/Dbc/CreatureDisplayInfoDbc.h"
+#include "Formats/Dbc/CreatureDisplayInfoExtraDbc.h"
 #include "Formats/Dbc/CreatureModelDataDbc.h"
 #include "Formats/Dbc/ItemDisplayInfoDbc.h"
 #include "Formats/Dbc/SpellDbc.h"
@@ -87,6 +88,7 @@ public:
     const FChrRacesDbc& ChrRaces() const { return ChrRacesDbc; }
     const FCharSectionsDbc& CharSections() const { return CharSectionsDbc; }
     const FCreatureDisplayInfoDbc& CreatureDisplayInfo() const { return CreatureDisplayInfoDbc; }
+    const FCreatureDisplayInfoExtraDbc& CreatureDisplayInfoExtra() const { return CreatureDisplayInfoExtraDbc; }
     const FCreatureModelDataDbc& CreatureModelData() const { return CreatureModelDataDbc; }
     const FItemDisplayInfoDbc& ItemDisplayInfo() const { return ItemDisplayInfoDbc; }
     const FSpellDbc& Spells() const { return SpellDbc; }
@@ -124,6 +126,7 @@ private:
     FChrRacesDbc ChrRacesDbc;
     FCharSectionsDbc CharSectionsDbc;
     FCreatureDisplayInfoDbc CreatureDisplayInfoDbc;
+    FCreatureDisplayInfoExtraDbc CreatureDisplayInfoExtraDbc;
     FCreatureModelDataDbc CreatureModelDataDbc;
     FItemDisplayInfoDbc ItemDisplayInfoDbc;
     FSpellDbc SpellDbc;

@@ -12,7 +12,7 @@ struct FWowSplineWaypoint
 };
 
 // Movement info for a living entity
-struct FWowMovementInfo
+struct WOWNETWORK_API FWowMovementInfo
 {
     FVector Position = FVector::ZeroVector;
     float Orientation = 0.0f;
@@ -40,7 +40,12 @@ struct FWowMovementInfo
     float SplineElapsed = 0.0f; // Time elapsed since spline started
     TArray<FWowSplineWaypoint> SplineWaypoints;
     FVector SplineStartPosition = FVector::ZeroVector;
-    uint8 SplineMoveType = 0; // 0=normal, 1=stop, 2=facing point, 3=facing angle, 4=facing target
+    uint8 SplineMoveType = 0; // 0=normal, 1=stop, 2=facing point, 3=facing target, 4=facing angle
+    FVector SplineFacingPoint = FVector::ZeroVector;
+    uint64 SplineFacingTarget = 0;
+    float SplineFacingAngle = 0;
+    float GetSplineSpeed() const;
+    void AdvanceSpline(float DeltaSeconds, const FVector* FacingTargetPosition = nullptr);
 };
 
 // Aura information for a single aura slot

@@ -151,6 +151,8 @@ void UWowAnimationController::UpdateAnimationState(const FWowMovementInfo& Movem
     {
         SetAnimationState(NewState, bOneShotFinished);
     }
+    if (RuntimeInstance && (NewState == EWowAnimState::Walking || NewState == EWowAnimState::Running))
+        RuntimeInstance->SetM2MovementSpeed(MovementInfo.GetSplineSpeed(), MeshComponent->GetComponentScale().GetAbsMax());
 }
 
 void UWowAnimationController::UpdateLocalPlayerState(ACharacter* PlayerCharacter, bool bWalking)
@@ -204,6 +206,8 @@ void UWowAnimationController::UpdateLocalPlayerState(ACharacter* PlayerCharacter
     }
     if (NewState == EWowAnimState::Jumping && FPlatformTime::Seconds() - JumpStartTime > 0.2)
         PlayAnimationById(EWowAnimId::Jump, true);
+    if (RuntimeInstance && (NewState == EWowAnimState::Walking || NewState == EWowAnimState::Running))
+        RuntimeInstance->SetM2MovementSpeed(PlayerCharacter->GetVelocity().Size2D() / 100.0f, MeshComponent->GetComponentScale().GetAbsMax());
 }
 
 // NOTE: PlayAnimationById defined at end of file (needs AnimationCache + AllAnimations)
@@ -244,11 +248,7 @@ EWowAnimState UWowAnimationController::DetermineAnimationState(const FWowMovemen
     // Check for movement
     if (IsMoving(MovementInfo))
     {
-        if (bIsInCombat)
-        {
-            return EWowAnimState::Combat;
-        }
-        else if (IsWalking(MovementInfo))
+        if (IsWalking(MovementInfo))
         {
             return EWowAnimState::Walking;
         }
@@ -259,7 +259,7 @@ EWowAnimState UWowAnimationController::DetermineAnimationState(const FWowMovemen
     }
 
     // Default idle state
-    return EWowAnimState::Idle;
+    return bIsInCombat ? EWowAnimState::Combat : EWowAnimState::Idle;
 }
 
 EWowAnimState UWowAnimationController::DetermineLocalPlayerState(ACharacter* PlayerCharacter, bool bWalking) const

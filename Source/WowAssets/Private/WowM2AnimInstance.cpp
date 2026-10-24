@@ -90,6 +90,7 @@ bool UWowM2AnimInstance::PlayM2Animation(int32 AnimationId, bool bLooping)
     BlendElapsed = 0;
     TrackIndex = Next;
     PlaybackTime = 0;
+    PlaybackRate = 1;
     bLoop = bLooping;
     return true;
 }
@@ -109,10 +110,17 @@ void UWowM2AnimInstance::NativeUpdateAnimation(float DeltaSeconds)
     Super::NativeUpdateAnimation(DeltaSeconds);
     const float Duration = GetM2Duration();
     if (Duration <= 0) return;
-    PlaybackTime += FMath::Max(0.0f, DeltaSeconds);
+    PlaybackTime += FMath::Max(0.0f, DeltaSeconds) * PlaybackRate;
     PlaybackTime = bLoop ? FMath::Fmod(PlaybackTime, Duration) : FMath::Min(PlaybackTime, Duration);
     BlendElapsed += FMath::Max(0.0f, DeltaSeconds);
     if (BlendElapsed >= BlendDuration) BlendFromPose.Reset();
+}
+
+void UWowM2AnimInstance::SetM2MovementSpeed(float Speed, float ModelScale)
+{
+    const float ClipSpeed = Model && Model->AnimationTracks.IsValidIndex(TrackIndex) ? Model->AnimationTracks[TrackIndex].MoveSpeed : 0;
+    PlaybackRate = Speed > 0 && ClipSpeed > UE_SMALL_NUMBER && ModelScale > UE_SMALL_NUMBER
+        ? FMath::Clamp(Speed / (ClipSpeed * ModelScale), 0.1f, 4.0f) : 1.0f;
 }
 
 void UWowM2AnimInstance::SampleLocalPose(TArray<FTransform>& OutPose) const

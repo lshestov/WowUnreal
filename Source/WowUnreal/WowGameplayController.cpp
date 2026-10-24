@@ -14,6 +14,10 @@
 #include "WowCharacterBuilder.h"
 #include "WowAnimationController.h"
 #include "WowM2AnimInstance.h"
+#include "Camera/CameraActor.h"
+#include "Camera/CameraComponent.h"
+#include "Engine/SkeletalMesh.h"
+#include "Rendering/SkeletalMeshRenderData.h"
 #include "WowNameplateWidget.h"
 #include "SWowCombatLog.h"
 #include "SWowChatWindow.h"
@@ -815,7 +819,7 @@ void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
 				}
 
 				float Ori = FMath::IsFinite(Entity.Movement.Orientation) ? Entity.Movement.Orientation : 0.0f;
-				float UEYaw = -90.0f - FMath::RadiansToDegrees(Ori);
+				float UEYaw = -FMath::RadiansToDegrees(Ori);
 				(*ActorPtr)->SetActorRotation(FRotator(0.0f, UEYaw, 0.0f));
 			}
 		}
@@ -992,6 +996,7 @@ void AWowGameplayController::Tick(float DeltaTime)
 	// Update character animations
 	UpdatePlayerAnimations();
 	UpdateEntityAnimations();
+	UpdateNpcCaptureCamera();
 
 	// Update cast bar progress
 	if (bIsCasting && CastBarWidget.IsValid())
@@ -1496,7 +1501,7 @@ void AWowGameplayController::SpawnEntityModel(const FWowEntity& Entity)
 	if (UEPos.ContainsNaN()) UEPos = FVector::ZeroVector;
 
 	float OriDeg = FMath::IsFinite(Entity.Movement.Orientation) ? Entity.Movement.Orientation : 0.0f;
-	FRotator Rot(0.0f, -90.0f - FMath::RadiansToDegrees(OriDeg), 0.0f);
+	FRotator Rot(0.0f, -FMath::RadiansToDegrees(OriDeg), 0.0f);
 
 	AActor* SpawnedActor = nullptr;
 
@@ -1644,108 +1649,8 @@ void AWowGameplayController::UpdateEntitySplineMovement(float DeltaTime)
 		if (!Entity.Movement.bHasActiveSpline || Entity.Movement.SplineWaypoints.Num() == 0)
 			continue;
 
-		// Update spline elapsed time
-		Entity.Movement.SplineElapsed += DeltaTime * 1000.0f; // Convert to milliseconds
-
-		// Check if spline is complete
-		if (Entity.Movement.SplineElapsed >= Entity.Movement.SplineDuration)
-		{
-			// Move to final position
-			if (Entity.Movement.SplineWaypoints.Num() > 0)
-			{
-				Entity.Movement.Position = Entity.Movement.SplineWaypoints.Last().Position;
-			}
-
-			// Calculate final orientation to face the last waypoint direction
-			if (Entity.Movement.SplineWaypoints.Num() > 1)
-			{
-				const FVector LastWP = Entity.Movement.SplineWaypoints.Last().Position;
-				const FVector SecondLastWP = Entity.Movement.SplineWaypoints[Entity.Movement.SplineWaypoints.Num() - 2].Position;
-				FVector Dir = FVector(LastWP.X - SecondLastWP.X, LastWP.Y - SecondLastWP.Y, 0.0f);
-				if (!Dir.IsNearlyZero())
-				{
-					Entity.Movement.Orientation = FMath::Atan2(Dir.Y, Dir.X);
-				}
-			}
-
-			// Clear spline
-			Entity.Movement.bHasActiveSpline = false;
-			Entity.Movement.SplineWaypoints.Empty();
-
-			UE_LOG(LogWowGameplay, Log, TEXT("Spline movement completed for entity %llu"), Entity.Guid);
-		}
-		else
-		{
-			// Interpolate along the spline
-			float Progress = Entity.Movement.SplineElapsed / float(Entity.Movement.SplineDuration);
-			Progress = FMath::Clamp(Progress, 0.0f, 1.0f);
-
-			// Simple linear interpolation between waypoints
-			if (Entity.Movement.SplineWaypoints.Num() == 1)
-			{
-				// Single waypoint: interpolate from current position to waypoint
-				Entity.Movement.Position = FMath::Lerp(
-					Entity.Movement.SplineStartPosition,
-					Entity.Movement.SplineWaypoints[0].Position,
-					Progress);
-			}
-			else if (Entity.Movement.SplineWaypoints.Num() > 1)
-			{
-				// Multiple waypoints: treat as segments
-				float TotalSegments = float(Entity.Movement.SplineWaypoints.Num());
-				float SegmentProgress = Progress * TotalSegments;
-				int32 CurrentSegment = FMath::FloorToInt32(SegmentProgress);
-				float LocalProgress = SegmentProgress - CurrentSegment;
-
-				if (CurrentSegment == 0)
-				{
-					// First segment: from start position to first waypoint
-					Entity.Movement.Position = FMath::Lerp(
-						Entity.Movement.SplineStartPosition,
-						Entity.Movement.SplineWaypoints[0].Position,
-						LocalProgress);
-				}
-				else if (CurrentSegment < Entity.Movement.SplineWaypoints.Num())
-				{
-					// Intermediate segments: from previous waypoint to current waypoint
-					Entity.Movement.Position = FMath::Lerp(
-						Entity.Movement.SplineWaypoints[CurrentSegment - 1].Position,
-						Entity.Movement.SplineWaypoints[CurrentSegment].Position,
-						LocalProgress);
-				}
-				else
-				{
-					// Final waypoint
-					Entity.Movement.Position = Entity.Movement.SplineWaypoints.Last().Position;
-				}
-			}
-
-			// Update orientation to face movement direction
-			if (Entity.Movement.SplineWaypoints.Num() > 0)
-			{
-				FVector TargetPos;
-				if (Entity.Movement.SplineWaypoints.Num() == 1)
-				{
-					TargetPos = Entity.Movement.SplineWaypoints[0].Position;
-				}
-				else
-				{
-					// Face the next waypoint
-					float TotalSegments = float(Entity.Movement.SplineWaypoints.Num());
-					float SegmentProgress = Progress * TotalSegments;
-					int32 NextSegment = FMath::CeilToInt32(SegmentProgress);
-					NextSegment = FMath::Clamp(NextSegment, 0, Entity.Movement.SplineWaypoints.Num() - 1);
-					TargetPos = Entity.Movement.SplineWaypoints[NextSegment].Position;
-				}
-
-				FVector Dir = FVector(TargetPos.X - Entity.Movement.Position.X, TargetPos.Y - Entity.Movement.Position.Y, 0.0f);
-				if (!Dir.IsNearlyZero())
-				{
-					Entity.Movement.Orientation = FMath::Atan2(Dir.Y, Dir.X);
-				}
-			}
-		}
-
+        const FWowEntity* FacingTarget = EntityManager.Find(Entity.Movement.SplineFacingTarget);
+        Entity.Movement.AdvanceSpline(DeltaTime, FacingTarget ? &FacingTarget->Movement.Position : nullptr);
 		// Update the visual actor position
 		TObjectPtr<AActor>* ActorPtr = SpawnedEntityActors.Find(Entity.Guid);
 		if (ActorPtr && *ActorPtr)
@@ -1754,7 +1659,7 @@ void AWowGameplayController::UpdateEntitySplineMovement(float DeltaTime)
 			if (UEPos.ContainsNaN()) continue; // Skip invalid positions
 			(*ActorPtr)->SetActorLocation(UEPos);
 			float Ori = FMath::IsFinite(Entity.Movement.Orientation) ? Entity.Movement.Orientation : 0.0f;
-			float UEYaw = -90.0f - FMath::RadiansToDegrees(Ori);
+			float UEYaw = -FMath::RadiansToDegrees(Ori);
 			(*ActorPtr)->SetActorRotation(FRotator(0.0f, UEYaw, 0.0f));
 		}
 	}
@@ -2534,12 +2439,18 @@ void AWowGameplayController::UpdateEntityAnimations()
 		// Clear server movement flags for NPCs — we determine movement from spline only
 		if (!Entity->IsPlayer())
 		{
-			AnimMovement.MoveFlags = 0;
+			AnimMovement.MoveFlags &= WowMovementFlags::WALK_MODE | WowMovementFlags::SWIMMING | WowMovementFlags::FLYING;
 		}
 
 		if (bIsOnSpline)
 		{
 			AnimMovement.MoveFlags |= WowMovementFlags::FORWARD;
+			if (!Entity->IsPlayer())
+			{
+				if (AnimMovement.GetSplineSpeed() <= FMath::Max(0.1f, AnimMovement.WalkSpeed) * 1.1f)
+					AnimMovement.MoveFlags |= WowMovementFlags::WALK_MODE;
+				else AnimMovement.MoveFlags &= ~WowMovementFlags::WALK_MODE;
+			}
 		}
 
 		// Don't override explicit cast/attack animations with movement updates

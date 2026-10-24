@@ -584,25 +584,27 @@ AActor* FWowCharacterBuilder::SpawnCharacter(UWorld* World, FMpqManager* Mpq, FW
 AActor* FWowCharacterBuilder::SpawnCharacterWithEquipment(UWorld* World, FMpqManager* Mpq, FWowAssetCache* Cache,
     const FCharacterParams& Params, const FVector& Location, const FRotator& Rotation)
 {
-    FString ModelPath = GetCharacterModelPath(Params.Race, Params.Gender);
+    FString ModelPath = Params.ModelPathOverride.IsEmpty() ? GetCharacterModelPath(Params.Race, Params.Gender) : Params.ModelPathOverride;
     if (ModelPath.IsEmpty()) return nullptr;
 
     UE_LOG(LogWowCharacter, Log, TEXT("Spawning equipped character: Race=%d Gender=%d Equipment=%d slots"),
         static_cast<int32>(Params.Race), static_cast<int32>(Params.Gender), Params.Equipment.Num());
 
     // Build composite texture with full customization
-    UTexture2D* CompositeTex = FWowCharacterTexture::BuildCompositeTexture(Mpq, Cache, Params.Customization);
+    UTexture2D* CompositeTex = Params.BakedTexturePath.IsEmpty() ? nullptr : LoadBlpTexture(Mpq, Cache, Params.BakedTexturePath);
+    const bool bUsingBakedTexture = CompositeTex != nullptr;
+    if (!CompositeTex) CompositeTex = FWowCharacterTexture::BuildCompositeTexture(Mpq, Cache, Params.Customization);
 
     // Apply equipment texture overlays if body equipment is specified
     UTexture2D* FinalTex = CompositeTex;
-    if (CompositeTex && (Params.BodyEquipment.ChestDisplayId > 0 || Params.BodyEquipment.PantsDisplayId > 0 ||
+    if (CompositeTex && !bUsingBakedTexture && (Params.BodyEquipment.ChestDisplayId > 0 || Params.BodyEquipment.PantsDisplayId > 0 ||
         Params.BodyEquipment.BootsDisplayId > 0 || Params.BodyEquipment.GlovesDisplayId > 0 ||
         Params.BodyEquipment.BracersDisplayId > 0 || Params.BodyEquipment.ShirtDisplayId > 0 ||
         Params.BodyEquipment.TabardDisplayId > 0 || Params.BodyEquipment.BeltDisplayId > 0))
     {
         // Get the composite texture data
         FTexture2DMipMap& Mip = CompositeTex->GetPlatformData()->Mips[0];
-        void* TextureData = Mip.BulkData.Lock(LOCK_READ_WRITE);
+        const void* TextureData = Mip.BulkData.LockReadOnly();
         if (TextureData)
         {
             uint32 TexWidth = CompositeTex->GetSizeX();
@@ -613,15 +615,20 @@ AActor* FWowCharacterBuilder::SpawnCharacterWithEquipment(UWorld* World, FMpqMan
             TArray<uint8> CompositeBuffer;
             CompositeBuffer.SetNumUninitialized(TextureSize);
             FMemory::Memcpy(CompositeBuffer.GetData(), TextureData, TextureSize);
+            Mip.BulkData.Unlock();
 
             // Apply equipment overlays
             FWowCharacterTexture::ApplyEquipmentOverlays(CompositeBuffer, TexWidth, TexHeight,
                 Params.BodyEquipment, Mpq, Cache);
 
-            // Copy modified data back to texture
-            FMemory::Memcpy(TextureData, CompositeBuffer.GetData(), TextureSize);
-            Mip.BulkData.Unlock();
-            CompositeTex->UpdateResource();
+            // Keep the cached skin atlas immutable: NPC outfits must not leak
+            // into other NPCs or the local player with the same customization.
+            FinalTex = UTexture2D::CreateTransient(TexWidth, TexHeight, CompositeTex->GetPixelFormat());
+            auto& OutputMip = FinalTex->GetPlatformData()->Mips[0];
+            void* OutputData = OutputMip.BulkData.Lock(LOCK_READ_WRITE);
+            FMemory::Memcpy(OutputData, CompositeBuffer.GetData(), TextureSize);
+            OutputMip.BulkData.Unlock();
+            FinalTex->UpdateResource();
 
             UE_LOG(LogWowCharacter, Log, TEXT("Applied equipment texture overlays to character"));
         }
@@ -629,11 +636,10 @@ AActor* FWowCharacterBuilder::SpawnCharacterWithEquipment(UWorld* World, FMpqMan
         {
             Mip.BulkData.Unlock();
         }
-        FinalTex = CompositeTex;
     }
 
     // Spawn base character with geoset visibility and equipment
-    AActor* Actor = SpawnM2Actor(World, Mpq, Cache, ModelPath, Location, Rotation, 1.0f, FinalTex, &Params.Customization, &Params.BodyEquipment);
+    AActor* Actor = SpawnM2Actor(World, Mpq, Cache, ModelPath, Location, Rotation, Params.Scale, FinalTex, &Params.Customization, &Params.BodyEquipment);
     if (!Actor) return nullptr;
 
     // Attach equipment
@@ -706,19 +712,52 @@ AActor* FWowCharacterBuilder::SpawnCreatureByDisplayId(UWorld* World, FMpqManage
         ModelPath = ModelPath.Left(ModelPath.Len() - 4) + TEXT(".m2");
     }
 
-    UTexture2D* TextureOverride = ResolveCreatureTextureOverride(Mpq, Cache, ModelPath, DisplayInfo->Texture1);
-
     float Scale = DisplayInfo->Scale * ModelData->Scale;
     UE_LOG(LogWowCharacter, Log, TEXT("Spawning creature: DisplayID=%d Model=%s Scale=%.2f"),
         DisplayId, *ModelPath, Scale);
 
-    return SpawnM2Actor(World, Mpq, Cache, ModelPath, Location, Rotation, Scale, TextureOverride);
+    if (const auto* Extra = Dbc.CreatureDisplayInfoExtra().GetById(DisplayInfo->ExtendedDisplayInfoID))
+    {
+        FCharacterParams Params;
+        Params.Race = static_cast<ERace>(Extra->Race);
+        Params.Gender = static_cast<EGender>(Extra->Gender);
+        Params.Customization = {Extra->Race, Extra->Gender, Extra->Skin, Extra->Face,
+            Extra->HairStyle, Extra->HairColor, Extra->FacialHair};
+        Params.ModelPathOverride = ModelPath;
+        Params.Scale = Scale;
+        if (!Extra->BakedTexture.IsEmpty())
+        {
+            Params.BakedTexturePath = TEXT("Textures\\BakedNpcTextures\\") + Extra->BakedTexture;
+            if (!Params.BakedTexturePath.EndsWith(TEXT(".blp"), ESearchCase::IgnoreCase)) Params.BakedTexturePath += TEXT(".blp");
+        }
+        auto& Body = Params.BodyEquipment;
+        Body.RaceId = Extra->Race; Body.Gender = Extra->Gender;
+        Body.ShirtDisplayId = Extra->ItemDisplay[2]; Body.ChestDisplayId = Extra->ItemDisplay[3];
+        Body.BeltDisplayId = Extra->ItemDisplay[4]; Body.PantsDisplayId = Extra->ItemDisplay[5];
+        Body.BootsDisplayId = Extra->ItemDisplay[6]; Body.BracersDisplayId = Extra->ItemDisplay[7];
+        Body.GlovesDisplayId = Extra->ItemDisplay[8]; Body.TabardDisplayId = Extra->ItemDisplay[9];
+        Body.CapeDisplayId = Extra->ItemDisplay[10];
+        if (Extra->ItemDisplay[0]) Params.Equipment.Add({Extra->ItemDisplay[0], FWowEquipmentManager::EAttachmentPoint::Helmet});
+        if (Extra->ItemDisplay[1])
+        {
+            Params.Equipment.Add({Extra->ItemDisplay[1], FWowEquipmentManager::EAttachmentPoint::RightShoulder});
+            Params.Equipment.Add({Extra->ItemDisplay[1], FWowEquipmentManager::EAttachmentPoint::LeftShoulder});
+        }
+        UE_LOG(LogWowCharacter, Log, TEXT("NpcAppearance: display=%u extra=%u baked=%s race=%u gender=%u"),
+            DisplayId, Extra->ID, *Params.BakedTexturePath, Extra->Race, Extra->Gender);
+        return SpawnCharacterWithEquipment(World, Mpq, Cache, Params, Location, Rotation);
+    }
+    TMap<uint32, UTexture2D*> Replacements;
+    const FString Skins[] = {DisplayInfo->Texture1, DisplayInfo->Texture2, DisplayInfo->Texture3};
+    for (int32 Skin = 0; Skin < 3; ++Skin)
+        if (auto* Texture = ResolveCreatureTextureOverride(Mpq, Cache, ModelPath, Skins[Skin])) Replacements.Add(11 + Skin, Texture);
+    return SpawnM2Actor(World, Mpq, Cache, ModelPath, Location, Rotation, Scale, nullptr, nullptr, nullptr, &Replacements);
 }
 
 AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWowAssetCache* Cache,
     const FString& ModelPath, const FVector& Location, const FRotator& Rotation, float Scale,
     UTexture2D* OverrideTexture, const FWowCharacterTexture::FCustomization* Customization,
-    const FBodyEquipment* BodyEquipment)
+    const FBodyEquipment* BodyEquipment, const TMap<uint32, UTexture2D*>* ReplacementTextures)
 {
     if (!World || !Mpq) return nullptr;
 
@@ -773,6 +812,9 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
     USceneComponent* Root = NewObject<USceneComponent>(Actor, TEXT("Root"));
     Actor->SetRootComponent(Root);
     Root->RegisterComponent();
+    // AActor had no root at SpawnActor time, so its requested transform could
+    // not be retained. Apply it after registering the actual root.
+    Actor->SetActorLocationAndRotation(Location, Rotation);
 
     if (M2Data->HasBones())
     {
@@ -867,7 +909,17 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
                 for (int32 MatIdx = 0; MatIdx < SkeletalMesh->GetMaterials().Num(); ++MatIdx)
                 {
                     UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, SkelMesh);
-                    if (SkinTexture) MID->SetTextureParameterValue(TEXT("BaseTexture"), SkinTexture);
+                    UTexture2D* SectionTexture = SkinTexture;
+                    const int32 TextureIndex = GeosetInfo.IsValidIndex(MatIdx) ? GeosetInfo[MatIdx].TextureIndex : 0;
+                    const uint32 Type = M2Data->TextureTypes.IsValidIndex(TextureIndex) ? M2Data->TextureTypes[TextureIndex] : 0;
+                    if (Type == 0 && M2Data->TexturePaths.IsValidIndex(TextureIndex) && !M2Data->TexturePaths[TextureIndex].IsEmpty())
+                        SectionTexture = LoadBlpTexture(Mpq, Cache, M2Data->TexturePaths[TextureIndex]);
+                    if (ReplacementTextures)
+                        if (UTexture2D* const* Replacement = ReplacementTextures->Find(Type)) SectionTexture = *Replacement;
+                    if (Type == 2 && BodyEquipment && BodyEquipment->CapeDisplayId)
+                        if (const auto* Cape = FDbcStore::Get().ItemDisplayInfo().GetById(BodyEquipment->CapeDisplayId))
+                            SectionTexture = ResolveCreatureTextureOverride(Mpq, Cache, TEXT("Item\\ObjectComponents\\Cape\\Cape.m2"), Cape->ModelTextures[0]);
+                    if (SectionTexture) MID->SetTextureParameterValue(TEXT("BaseTexture"), SectionTexture);
                     SkelMesh->SetMaterial(MatIdx, MID);
                 }
             }
@@ -904,9 +956,9 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
                     if (HairMesh)
                     {
                         USkeletalMeshComponent* HairComp = NewObject<USkeletalMeshComponent>(Actor, TEXT("HairMesh"));
-                        HairComp->SetupAttachment(Root);
+                        HairComp->SetupAttachment(SkelMesh);
                         HairComp->SetSkeletalMesh(HairMesh);
-                        HairComp->SetWorldScale3D(FVector(Scale));
+                        HairComp->SetRelativeTransform(FTransform::Identity);
                         HairComp->SetCastShadow(true);
                         HairComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
                         HairComp->SetLeaderPoseComponent(SkelMesh); // Follow body animations

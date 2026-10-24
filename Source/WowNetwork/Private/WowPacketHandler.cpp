@@ -1157,175 +1157,98 @@ void FWowPacketHandler::HandlePowerUpdate(FPacketReader& R)
 
 void FWowPacketHandler::HandleMonsterMove(FPacketReader& R)
 {
-    if (!R.CanRead(18)) // minimum: packed guid + new flag + position + timestamp + move type
+    if (!R.CanRead(1)) return;
+    const uint64 Guid = R.ReadPackedGuid();
+    if (!R.CanRead(18)) return;
+    R.ReadU8(); // movement flag extension, not a spline flag
+    const float X = R.ReadFloat(), Y = R.ReadFloat(), Z = R.ReadFloat();
+    const uint32 SplineId = R.ReadU32();
+    const uint8 Type = R.ReadU8();
+    FWowEntity* Entity = EntityManager.Find(Guid);
+    if (!Entity || Type > 4) return;
+    // Parse into a copy so a truncated update cannot destroy a valid route.
+    FWowMovementInfo Move = Entity->Movement;
+    Move.Position = Move.SplineStartPosition = FVector(X, Y, Z);
+    Move.SplineId = SplineId;
+    Move.SplineMoveType = Type;
+    Move.SplineElapsed = 0;
+    Move.bHasActiveSpline = false;
+    Move.SplineWaypoints.Reset();
+    Move.SplineFacingTarget = 0;
+    if (Type != 1)
     {
-        UE_LOG(LogWowPacket, Warning, TEXT("MONSTER_MOVE: packet too short"));
-        return;
-    }
-
-    uint64 TargetGuid = R.ReadPackedGuid();
-    uint8 NewIn31 = R.ReadU8(); // new in 3.1 - usually 0
-    float PosX = R.ReadFloat();
-    float PosY = R.ReadFloat();
-    float PosZ = R.ReadFloat();
-    uint32 Timestamp = R.ReadU32();
-    uint8 MoveType = R.ReadU8();
-
-    FWowEntity* Entity = EntityManager.Find(TargetGuid);
-    if (!Entity)
-    {
-        UE_LOG(LogWowPacket, Warning, TEXT("MONSTER_MOVE: entity with GUID %llu not found"), TargetGuid);
-        return;
-    }
-
-    // The packet provides the starting position of this movement segment
-    FVector PacketStartPos(PosX, PosY, PosZ);
-    Entity->Movement.SplineStartPosition = PacketStartPos;
-    Entity->Movement.Position = PacketStartPos;
-    Entity->Movement.SplineMoveType = MoveType;
-
-    uint32 PointCount = 0;
-
-    if (MoveType == 1) // Stop movement
-    {
-        // Just update position and clear any active spline
-        Entity->Movement.bHasActiveSpline = false;
-        Entity->Movement.SplineWaypoints.Empty();
-        UE_LOG(LogWowPacket, Log, TEXT("MONSTER_MOVE: STOP guid=%llu pos=(%.1f,%.1f,%.1f)"),
-            TargetGuid, PosX, PosY, PosZ);
-    }
-    else if (MoveType == 2) // Facing point
-    {
-        if (R.CanRead(12))
+        if (Type == 2)
         {
-            float FaceX = R.ReadFloat();
-            float FaceY = R.ReadFloat();
-            float FaceZ = R.ReadFloat();
-            // Calculate orientation to face the point
-            FVector FaceDir = FVector(FaceX - PosX, FaceY - PosY, 0.0f);
-            if (!FaceDir.IsNearlyZero())
+            if (!R.CanRead(12)) return;
+            const float FX = R.ReadFloat(), FY = R.ReadFloat(), FZ = R.ReadFloat();
+            Move.SplineFacingPoint = FVector(FX, FY, FZ);
+        }
+        else if (Type == 3)
+        {
+            if (!R.CanRead(8)) return;
+            Move.SplineFacingTarget = R.ReadU64();
+        }
+        else if (Type == 4)
+        {
+            if (!R.CanRead(4)) return;
+            Move.SplineFacingAngle = R.ReadFloat();
+        }
+        if (!R.CanRead(4)) return;
+        Move.SplineFlags = R.ReadU32();
+        if (Move.SplineFlags & 0x00200000) // animation transition before duration
+        {
+            if (!R.CanRead(5)) return;
+            R.ReadU8(); R.ReadU32();
+        }
+        if (!R.CanRead(4)) return;
+        Move.SplineDuration = R.ReadU32();
+        if (Move.SplineFlags & 0x00000800) // parabolic parameters after duration
+        {
+            if (!R.CanRead(8)) return;
+            R.ReadFloat(); R.ReadU32();
+        }
+        if (!R.CanRead(4)) return;
+        const uint32 Count = R.ReadU32();
+        if (Count == 0 || Count > 500 || Move.SplineDuration == 0) return;
+        if (Move.SplineFlags & (0x00002000 | 0x00040000)) // flying / Catmull-Rom: full points
+        {
+            if (!R.CanRead(Count * 12)) return;
+            for (uint32 I = 0; I < Count; ++I)
             {
-                Entity->Movement.Orientation = FMath::Atan2(FaceDir.Y, FaceDir.X);
+                const float PX = R.ReadFloat(), PY = R.ReadFloat(), PZ = R.ReadFloat();
+                Move.SplineWaypoints.Add(FWowSplineWaypoint(FVector(PX, PY, PZ)));
             }
-            UE_LOG(LogWowPacket, Log, TEXT("MONSTER_MOVE: FACE_POINT guid=%llu face=(%.1f,%.1f,%.1f)"),
-                TargetGuid, FaceX, FaceY, FaceZ);
-        }
-        Entity->Movement.bHasActiveSpline = false;
-        Entity->Movement.SplineWaypoints.Empty();
-    }
-    else if (MoveType == 3) // Facing angle
-    {
-        if (R.CanRead(4))
-        {
-            float FaceAngle = R.ReadFloat();
-            Entity->Movement.Orientation = FaceAngle;
-            UE_LOG(LogWowPacket, Log, TEXT("MONSTER_MOVE: FACE_ANGLE guid=%llu angle=%.3f"),
-                TargetGuid, FaceAngle);
-        }
-        Entity->Movement.bHasActiveSpline = false;
-        Entity->Movement.SplineWaypoints.Empty();
-    }
-    else if (MoveType == 4) // Facing target
-    {
-        if (R.CanRead(8))
-        {
-            uint64 FaceTarget = R.ReadU64();
-            UE_LOG(LogWowPacket, Log, TEXT("MONSTER_MOVE: FACE_TARGET guid=%llu target=%llu"),
-                TargetGuid, FaceTarget);
-        }
-        Entity->Movement.bHasActiveSpline = false;
-        Entity->Movement.SplineWaypoints.Empty();
-    }
-    else if (MoveType == 0) // Normal movement with spline
-    {
-        if (!R.CanRead(12))
-        {
-            UE_LOG(LogWowPacket, Warning, TEXT("MONSTER_MOVE: insufficient data for spline"));
-            return;
-        }
-
-        uint32 SplineFlags = R.ReadU32();
-        uint32 Duration = R.ReadU32();
-        PointCount = R.ReadU32();
-        if (PointCount > 500)
-        {
-            UE_LOG(LogWowPacket, Warning, TEXT("MONSTER_MOVE: excessive point count %u, capping"), PointCount);
-            PointCount = 500;
-        }
-
-        Entity->Movement.SplineFlags = SplineFlags;
-        Entity->Movement.SplineDuration = Duration;
-        Entity->Movement.SplineElapsed = 0.0f;
-        Entity->Movement.SplineWaypoints.Empty();
-
-        if (PointCount > 0 && Duration > 0)
-        {
-            // WoW 3.3.5a SMSG_MONSTER_MOVE waypoint format:
-            // First point: the DESTINATION (full float x,y,z) — this is the END of the path
-            // Remaining points: packed int32 deltas from midpoint between start and end
-            // Each packed point is (x,y,z) as int32 values
-
-            if (PointCount == 1 && R.CanRead(12))
-            {
-                // Single destination — simple path from current pos to destination
-                float DestX = R.ReadFloat();
-                float DestY = R.ReadFloat();
-                float DestZ = R.ReadFloat();
-                Entity->Movement.SplineWaypoints.Add(FWowSplineWaypoint(FVector(DestX, DestY, DestZ)));
-            }
-            else if (PointCount > 1 && R.CanRead(12))
-            {
-                // First point is full destination
-                float DestX = R.ReadFloat();
-                float DestY = R.ReadFloat();
-                float DestZ = R.ReadFloat();
-                FVector Destination(DestX, DestY, DestZ);
-
-                // Remaining points are packed int32 deltas from midpoint
-                FVector MidPoint = (FVector(PosX, PosY, PosZ) + Destination) * 0.5f;
-
-                // Read packed waypoints (intermediate points)
-                for (uint32 i = 1; i < PointCount && R.CanRead(4); ++i)
-                {
-                    uint32 Packed = R.ReadU32();
-                    // Unpack: 11 bits (x), 11 bits (y), 10 bits (z) with sign extension
-                    int32 ix = static_cast<int32>(Packed & 0x7FF);
-                    int32 iy = static_cast<int32>((Packed >> 11) & 0x7FF);
-                    int32 iz = static_cast<int32>((Packed >> 22) & 0x3FF);
-                    // Sign-extend from 11-bit / 10-bit
-                    if (ix & 0x400) ix |= ~0x7FF;
-                    if (iy & 0x400) iy |= ~0x7FF;
-                    if (iz & 0x200) iz |= ~0x3FF;
-                    float UnpackX = MidPoint.X + static_cast<float>(ix) * 0.25f;
-                    float UnpackY = MidPoint.Y + static_cast<float>(iy) * 0.25f;
-                    float UnpackZ = MidPoint.Z + static_cast<float>(iz) * 0.25f;
-                    Entity->Movement.SplineWaypoints.Add(FWowSplineWaypoint(FVector(UnpackX, UnpackY, UnpackZ)));
-                }
-
-                // Add final destination as last waypoint
-                Entity->Movement.SplineWaypoints.Add(FWowSplineWaypoint(Destination));
-            }
-
-            Entity->Movement.bHasActiveSpline = (Entity->Movement.SplineWaypoints.Num() > 0);
+            if ((Move.SplineFlags & 0x00080000) && Move.SplineWaypoints.Last().Position.IsNearlyZero())
+                Move.SplineWaypoints.Pop(); // server's ground-cycle marker
         }
         else
         {
-            Entity->Movement.bHasActiveSpline = false;
+            if (!R.CanRead(12 + (Count - 1) * 4)) return;
+            const float DX = R.ReadFloat(), DY = R.ReadFloat(), DZ = R.ReadFloat();
+            const FVector Destination(DX, DY, DZ);
+            const FVector Midpoint = (Move.SplineStartPosition + Destination) * 0.5;
+            for (uint32 I = 1; I < Count; ++I)
+            {
+                const uint32 Packed = R.ReadU32();
+                int32 PX = Packed & 0x7FF, PY = (Packed >> 11) & 0x7FF, PZ = (Packed >> 22) & 0x3FF;
+                if (PX & 0x400) PX |= ~0x7FF;
+                if (PY & 0x400) PY |= ~0x7FF;
+                if (PZ & 0x200) PZ |= ~0x3FF;
+                // Server encodes midpoint minus point, not point minus midpoint.
+                Move.SplineWaypoints.Add(FWowSplineWaypoint(Midpoint - FVector(PX, PY, PZ) * 0.25));
+            }
+            Move.SplineWaypoints.Add(FWowSplineWaypoint(Destination));
         }
-
-        UE_LOG(LogWowPacket, Log, TEXT("MONSTER_MOVE: SPLINE guid=%llu pos=(%.1f,%.1f,%.1f) duration=%ums rawPoints=%u resolvedPoints=%d flags=0x%X"),
-            TargetGuid, PosX, PosY, PosZ, Duration, PointCount, Entity->Movement.SplineWaypoints.Num(), SplineFlags);
+        if ((Move.SplineFlags & 0x00080000) && !Move.SplineWaypoints.IsEmpty()
+            && !Move.SplineWaypoints.Last().Position.Equals(Move.SplineStartPosition))
+            Move.SplineWaypoints.Add(FWowSplineWaypoint(Move.SplineStartPosition));
+        Move.bHasActiveSpline = !Move.SplineWaypoints.IsEmpty();
     }
-    else
-    {
-        UE_LOG(LogWowPacket, Warning, TEXT("MONSTER_MOVE: unknown move type %u for guid %llu"), MoveType, TargetGuid);
-        Entity->Movement.bHasActiveSpline = false;
-        Entity->Movement.SplineWaypoints.Empty();
-    }
-
+    Entity->Movement = Move;
+    UE_LOG(LogWowPacket, Verbose, TEXT("MONSTER_MOVE guid=%llu type=%u flags=0x%X duration=%u points=%d speed=%.2f"),
+        Guid, Type, Move.SplineFlags, Move.SplineDuration, Move.SplineWaypoints.Num(), Move.GetSplineSpeed());
     EntityManager.OnEntityUpdated.Broadcast(*Entity);
 }
-
 // ── SMSG_INVENTORY_CHANGE_FAILURE ─────────────────────────────────────────
 // uint8 error code
 

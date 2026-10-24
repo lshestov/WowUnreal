@@ -46,6 +46,9 @@ public:
         FWowCharacterTexture::FCustomization Customization;
         TArray<FEquipmentSlot> Equipment;
         FBodyEquipment BodyEquipment;
+        FString ModelPathOverride;
+        FString BakedTexturePath;
+        float Scale = 1.0f;
     };
 
     /** Get the M2 model path for a race/gender combo using ChrRaces.dbc */
@@ -105,5 +108,6 @@ private:
         const FString& ModelPath, const FVector& Location, const FRotator& Rotation, float Scale = 1.0f,
         UTexture2D* OverrideTexture = nullptr,
         const FWowCharacterTexture::FCustomization* Customization = nullptr,
-        const FBodyEquipment* BodyEquipment = nullptr);
+        const FBodyEquipment* BodyEquipment = nullptr,
+        const TMap<uint32, UTexture2D*>* ReplacementTextures = nullptr);
 };

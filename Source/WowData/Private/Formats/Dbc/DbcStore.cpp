@@ -210,6 +210,12 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         }
     }
 
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\CreatureDisplayInfoExtra.dbc"), Parser))
+    {
+        CreatureDisplayInfoExtraDbc.Load(Parser);
+        ++Loaded;
+    }
+
     if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\CreatureModelData.dbc"), Parser))
     {
         CreatureModelDataDbc.Load(Parser);

@@ -159,6 +159,7 @@ Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 - [x] Show player name on nameplate (from name query response)
 
 **NPC/Creature Models:**
+- [x] Packaged NPC placement, per-section skins, humanoid extra-display appearance and server-driven locomotion (verified DBC/MPQ and movement regression tests, native humanoid capture and actual server-driven wolf locomotion).
 - [x] Spawn NPC by DisplayId (already works)
 - [x] Name query: send CMSG_CREATURE_QUERY, cache creature name/title
 - [x] Show NPC name + title on nameplate
