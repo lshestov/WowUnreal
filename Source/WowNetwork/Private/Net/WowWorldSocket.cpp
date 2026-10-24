@@ -4,6 +4,7 @@
 #include "SocketSubsystem.h"
 #include "IPAddress.h"
 #include "HAL/RunnableThread.h"
+#include "Async/Async.h"
 
 #include "Crypto/OpenSSLIncludes.h"
 
@@ -41,10 +42,24 @@ FWowWorldSocket::~FWowWorldSocket()
     Disconnect();
 }
 
+void FWowWorldSocket::DispatchToGameThread(TFunction<void(FWowWorldSocket&)> Callback)
+{
+    const TWeakPtr<FWowWorldSocket, ESPMode::ThreadSafe> WeakSocket = CallbackOwner;
+    AsyncTask(ENamedThreads::GameThread, [WeakSocket, Callback = MoveTemp(Callback)]()
+    {
+        // Renderer shutdown can pump queued tasks after the connection is gone.
+        // A queued packet must never dereference a destroyed socket or manager.
+        if (const auto PinnedSocket = WeakSocket.Pin()) Callback(*PinnedSocket);
+    });
+}
+
 // ── Connect / Disconnect ───────────────────────────────────────────────────────
 
 bool FWowWorldSocket::Connect(const FString& Host, int32 Port, const FString& InAccountName, const TArray<uint8>& InSessionKey, uint32 InRealmId)
 {
+    // Cache before starting the worker: obtaining AsShared during destruction
+    // could itself fail while a final received packet is being queued.
+    CallbackOwner = AsShared();
     AccountName = InAccountName.ToUpper();
     SessionKey  = InSessionKey;
     RealmId = InRealmId;
@@ -268,9 +283,9 @@ uint32 FWowWorldSocket::Run()
                 UE_LOG(LogWowWorld, Log, TEXT("Received %s result: 0x%02X"),
                     Opcode == SMSG_CHAR_CREATE ? TEXT("SMSG_CHAR_CREATE") : TEXT("SMSG_CHAR_DELETE"), Result);
                 // Forward to game thread for UI handling
-                AsyncTask(ENamedThreads::GameThread, [this, Opcode, Payload]()
+                DispatchToGameThread([Opcode, Payload](FWowWorldSocket& Self)
                 {
-                    OnPacket.ExecuteIfBound(Opcode, Payload);
+                    Self.OnPacket.ExecuteIfBound(Opcode, Payload);
                 });
                 break;
             }
@@ -279,9 +294,9 @@ uint32 FWowWorldSocket::Run()
                 break;
             default:
                 UE_LOG(LogWowWorld, Verbose, TEXT("Recv opcode=0x%04X size=%d"), Opcode, Size);
-                AsyncTask(ENamedThreads::GameThread, [this, Opcode, Payload]()
+                DispatchToGameThread([Opcode, Payload](FWowWorldSocket& Self)
                 {
-                    OnPacket.ExecuteIfBound(Opcode, Payload);
+                    Self.OnPacket.ExecuteIfBound(Opcode, Payload);
                 });
                 break;
             }
@@ -304,7 +319,7 @@ void FWowWorldSocket::HandleAuthChallenge(const TArray<uint8>& Data)
     if (Data.Num() < 4 + 4 + 16 + 16)
     {
         UE_LOG(LogWowWorld, Error, TEXT("AUTH_CHALLENGE too short: %d bytes"), Data.Num());
-        AsyncTask(ENamedThreads::GameThread, [this]() { OnAuthResult.ExecuteIfBound(false); });
+        DispatchToGameThread([](FWowWorldSocket& Self) { Self.OnAuthResult.ExecuteIfBound(false); });
         bRunning = false;
         return;
     }
@@ -413,7 +428,7 @@ void FWowWorldSocket::HandleAuthChallenge(const TArray<uint8>& Data)
         if (!SendRawBytes(Packet.GetData(), Packet.Num()))
         {
             UE_LOG(LogWowWorld, Error, TEXT("Failed to send CMSG_AUTH_SESSION"));
-            AsyncTask(ENamedThreads::GameThread, [this]() { OnAuthResult.ExecuteIfBound(false); });
+            DispatchToGameThread([](FWowWorldSocket& Self) { Self.OnAuthResult.ExecuteIfBound(false); });
             bRunning = false;
             return;
         }
@@ -435,7 +450,7 @@ void FWowWorldSocket::HandleAuthResponse(const TArray<uint8>& Data)
     if (Data.Num() < 1)
     {
         UE_LOG(LogWowWorld, Error, TEXT("AUTH_RESPONSE too short"));
-        AsyncTask(ENamedThreads::GameThread, [this]() { OnAuthResult.ExecuteIfBound(false); });
+        DispatchToGameThread([](FWowWorldSocket& Self) { Self.OnAuthResult.ExecuteIfBound(false); });
         bRunning = false;
         return;
     }
@@ -445,12 +460,12 @@ void FWowWorldSocket::HandleAuthResponse(const TArray<uint8>& Data)
     if (Result == AUTH_OK)
     {
         UE_LOG(LogWowWorld, Log, TEXT("World authentication successful (AUTH_OK)"));
-        AsyncTask(ENamedThreads::GameThread, [this]() { OnAuthResult.ExecuteIfBound(true); });
+        DispatchToGameThread([](FWowWorldSocket& Self) { Self.OnAuthResult.ExecuteIfBound(true); });
     }
     else
     {
         UE_LOG(LogWowWorld, Error, TEXT("World authentication failed: result=0x%02X"), Result);
-        AsyncTask(ENamedThreads::GameThread, [this]() { OnAuthResult.ExecuteIfBound(false); });
+        DispatchToGameThread([](FWowWorldSocket& Self) { Self.OnAuthResult.ExecuteIfBound(false); });
     }
 }
 
@@ -586,9 +601,9 @@ void FWowWorldSocket::HandleCharEnum(const TArray<uint8>& Data)
 
     UE_LOG(LogWowWorld, Log, TEXT("Received %d characters"), Characters.Num());
 
-    AsyncTask(ENamedThreads::GameThread, [this, Characters]()
+    DispatchToGameThread([Characters](FWowWorldSocket& Self)
     {
-        OnCharacterList.ExecuteIfBound(Characters);
+        Self.OnCharacterList.ExecuteIfBound(Characters);
     });
 }
 

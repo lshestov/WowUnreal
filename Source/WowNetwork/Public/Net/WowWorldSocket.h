@@ -9,7 +9,7 @@ DECLARE_DELEGATE_OneParam(FOnWorldAuthResult, bool);
 DECLARE_DELEGATE_OneParam(FOnCharacterListReceived, const TArray<FWowCharacterInfo>&);
 DECLARE_DELEGATE_TwoParams(FOnWorldPacket, uint16 /*Opcode*/, const TArray<uint8>& /*Data*/);
 
-class WOWNETWORK_API FWowWorldSocket : public FRunnable
+class WOWNETWORK_API FWowWorldSocket : public FRunnable, public TSharedFromThis<FWowWorldSocket, ESPMode::ThreadSafe>
 {
 public:
     FWowWorldSocket();
@@ -44,6 +44,11 @@ public:
     FOnWorldPacket OnPacket;
 
 private:
+#if WITH_DEV_AUTOMATION_TESTS
+    friend class FIdleWowWorldSocketLifetimeTest;
+#endif
+    void DispatchToGameThread(TFunction<void(FWowWorldSocket&)> Callback);
+    TWeakPtr<FWowWorldSocket, ESPMode::ThreadSafe> CallbackOwner;
     void HandleAuthChallenge(const TArray<uint8>& Data);
     void HandleAuthResponse(const TArray<uint8>& Data);
     void HandleCharEnum(const TArray<uint8>& Data);

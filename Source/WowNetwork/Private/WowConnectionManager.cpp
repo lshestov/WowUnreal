@@ -103,12 +103,12 @@ void UWowConnectionManager::SelectRealm(int32 I)
     }
 
     // Create and connect world socket
-    WorldSocket = MakeShared<FWowWorldSocket>();
+    WorldSocket = MakeShared<FWowWorldSocket, ESPMode::ThreadSafe>();
     WorldSocket->OnAuthResult.BindUObject(this, &UWowConnectionManager::OnWorldAuthResult);
     WorldSocket->OnCharacterList.BindUObject(this, &UWowConnectionManager::OnWorldCharacterList);
 
     // Route unhandled server packets through the packet handler (fires on game thread)
-    WorldSocket->OnPacket.BindLambda([this](uint16 Opcode, const TArray<uint8>& Data)
+    WorldSocket->OnPacket.BindWeakLambda(this, [this](uint16 Opcode, const TArray<uint8>& Data)
     {
         // Intercept char create/delete results
         if (Opcode == WowOpcode::SMSG_CHAR_CREATE || Opcode == WowOpcode::SMSG_CHAR_DELETE)

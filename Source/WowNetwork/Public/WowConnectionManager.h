@@ -266,7 +266,7 @@ private:
     void OnWorldCharacterList(const TArray<FWowCharacterInfo>& Characters);
 
     TSharedPtr<FWowAuthSocket> AuthSocket;
-    TSharedPtr<FWowWorldSocket> WorldSocket;
+    TSharedPtr<FWowWorldSocket, ESPMode::ThreadSafe> WorldSocket;
     FString CachedAccountName;
     TArray<uint8> SessionKey;
     TArray<FWowRealmInfo> CachedRealms;
