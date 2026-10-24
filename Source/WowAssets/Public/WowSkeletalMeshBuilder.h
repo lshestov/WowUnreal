@@ -37,7 +37,7 @@ public:
 	static USkeletalMesh* CreateSkeletalMesh(const FM2Data& Data, USkeleton* Skeleton,
 		const FString& ModelName, FMpqManager* Mpq, FWowAssetCache* Cache,
 		TArray<FGeosetSectionInfo>* OutGeosetInfo = nullptr,
-		const TMap<uint16, uint16>* VisibleGeosets = nullptr);
+		const TMap<uint16, uint16>* VisibleGeosets = nullptr, bool bForceRuntimeBuild = false);
 
 	/** Build a skeletal mesh containing ONLY render passes that reference a specific texture type.
 	 *  Used to split hair (type 6) into a separate mesh from body (type 1). */

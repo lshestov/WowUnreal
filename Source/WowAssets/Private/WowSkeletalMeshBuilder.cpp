@@ -18,12 +18,108 @@
 #include "Rendering/SkeletalMeshModel.h"
 #include "Rendering/SkeletalMeshLODModel.h"
 #include "Rendering/SkeletalMeshRenderData.h"
+#include "Rendering/SkeletalMeshLODRenderData.h"
+#include "Rendering/SkinWeightVertexBuffer.h"
+#include "StaticMeshResources.h"
 // TODO: Fix UE 5.7 compatibility
 // #include "IMeshBuilderModule.h"
 #include "Interfaces/ITargetPlatform.h"
 #include "Interfaces/ITargetPlatformManagerModule.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowSkelMesh, Log, All);
+
+static bool BuildRuntimeRenderData(USkeletalMesh* Mesh, FMeshDescription& Description,
+    const FM2Data& Data, const TArray<int32>& BoneRemap)
+{
+    FSkeletalMeshAttributes Attributes(Description);
+    const auto Positions = Attributes.GetVertexPositions();
+    const auto Normals = Attributes.GetVertexInstanceNormals();
+    const auto Tangents = Attributes.GetVertexInstanceTangents();
+    const auto Signs = Attributes.GetVertexInstanceBinormalSigns();
+    const auto UVs = Attributes.GetVertexInstanceUVs();
+    TArray<FStaticMeshBuildVertex> Vertices;
+    TArray<FSkinWeightInfo> Weights;
+    TArray<uint32> Indices;
+
+    Mesh->AllocateResourceForRendering();
+    FSkeletalMeshRenderData* Render = Mesh->GetResourceForRendering();
+    Render->LODRenderData.Add(new FSkeletalMeshLODRenderData());
+    auto& Lod = Render->LODRenderData[0];
+    Lod.RenderSections.SetNum(Description.PolygonGroups().Num());
+    int32 SectionIndex = 0;
+    for (const FPolygonGroupID Group : Description.PolygonGroups().GetElementIDs())
+    {
+        auto& Section = Lod.RenderSections[SectionIndex];
+        Section.MaterialIndex = SectionIndex;
+        Section.BaseIndex = Indices.Num();
+        Section.BaseVertexIndex = Vertices.Num();
+        Section.MaxBoneInfluences = 4;
+        for (int32 Bone = 0; Bone < Mesh->GetRefSkeleton().GetNum(); ++Bone) Section.BoneMap.Add(Bone);
+        TMap<FVertexInstanceID, uint32> SectionVertices;
+        for (const FPolygonID Polygon : Description.GetPolygonGroupPolygons(Group))
+        {
+            for (const FTriangleID Triangle : Description.GetPolygonTriangles(Polygon))
+            {
+                for (const FVertexInstanceID Instance : Description.GetTriangleVertexInstances(Triangle))
+                {
+                    uint32* Existing = SectionVertices.Find(Instance);
+                    if (Existing) { Indices.Add(*Existing); continue; }
+                    const FVertexID Vertex = Description.GetVertexInstanceVertex(Instance);
+                    const FM2Vertex& Original = Data.Vertices[Vertex.GetValue()];
+                    FStaticMeshBuildVertex Built{};
+                    Built.Position = Positions[Vertex];
+                    Built.TangentX = Tangents[Instance];
+                    Built.TangentZ = Normals[Instance];
+                    Built.TangentY = FVector3f::CrossProduct(Built.TangentZ, Built.TangentX) * Signs[Instance];
+                    Built.UVs[0] = UVs.Get(Instance, 0);
+                    Built.Color = FColor::White;
+                    FSkinWeightInfo Skin{};
+                    uint32 TotalWeight = 0;
+                    for (int32 Influence = 0; Influence < 4; ++Influence)
+                    {
+                        const int32 Bone = Original.BoneIndices[Influence];
+                        Skin.InfluenceBones[Influence] = BoneRemap.IsValidIndex(Bone) ? BoneRemap[Bone] : 0;
+                        Skin.InfluenceWeights[Influence] = Original.BoneWeights[Influence] * 257u;
+                        TotalWeight += Skin.InfluenceWeights[Influence];
+                    }
+                    if (TotalWeight == 0) Skin.InfluenceWeights[0] = MAX_uint16;
+                    const uint32 Index = Vertices.Add(Built);
+                    Weights.Add(Skin);
+                    SectionVertices.Add(Instance, Index);
+                    Indices.Add(Index);
+                }
+            }
+        }
+        Section.NumTriangles = (Indices.Num() - Section.BaseIndex) / 3;
+        Section.NumVertices = Vertices.Num() - Section.BaseVertexIndex;
+        Section.DuplicatedVerticesBuffer.Init(Section.NumVertices, TMap<int32, TArray<int32>>());
+        ++SectionIndex;
+    }
+    if (Vertices.IsEmpty() || Indices.IsEmpty()) return false;
+    Lod.StaticVertexBuffers.PositionVertexBuffer.Init(Vertices, true);
+    Lod.StaticVertexBuffers.StaticMeshVertexBuffer.Init(Vertices, 1, true);
+    Lod.StaticVertexBuffers.ColorVertexBuffer.InitFromSingleColor(FColor::White, Vertices.Num());
+    Lod.SkinWeightVertexBuffer.SetNeedsCPUAccess(true);
+    Lod.SkinWeightVertexBuffer.SetMaxBoneInfluences(4);
+    Lod.SkinWeightVertexBuffer.SetUse16BitBoneIndex(Mesh->GetRefSkeleton().GetNum() > 255);
+    Lod.SkinWeightVertexBuffer.SetUse16BitBoneWeight(true);
+    Lod.SkinWeightVertexBuffer = Weights;
+    Lod.MultiSizeIndexContainer.RebuildIndexBuffer(sizeof(uint32), Indices);
+    for (int32 Bone = 0; Bone < Mesh->GetRefSkeleton().GetNum(); ++Bone)
+    {
+        Lod.ActiveBoneIndices.Add(Bone);
+        Lod.RequiredBones.Add(Bone);
+    }
+    Render->NumInlinedLODs = 1;
+    Render->NumNonOptionalLODs = 1;
+    Render->CurrentFirstLODIdx = 0;
+    Mesh->SetHasVertexColors(true);
+    Mesh->CalculateInvRefMatrices();
+    Mesh->InitResources();
+    UE_LOG(LogWowSkelMesh, Log, TEXT("Built runtime render data: %d vertices, %d triangles, %d sections"),
+        Vertices.Num(), Indices.Num() / 3, Lod.RenderSections.Num());
+    return true;
+}
 
 FName FWowSkeletalMeshBuilder::GetBoneName(int32 BoneIndex)
 {
@@ -176,7 +272,7 @@ USkeleton* FWowSkeletalMeshBuilder::CreateSkeleton(const FM2Data& Data, const FS
 USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, USkeleton* Skeleton,
 	const FString& ModelName, FMpqManager* Mpq, FWowAssetCache* Cache,
 	TArray<FGeosetSectionInfo>* OutGeosetInfo,
-	const TMap<uint16, uint16>* VisibleGeosets)
+	const TMap<uint16, uint16>* VisibleGeosets, bool bForceRuntimeBuild)
 {
 	if (!Skeleton || Data.Vertices.Num() == 0 || Data.Indices.Num() == 0)
 	{
@@ -502,6 +598,8 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 	SkelMesh->SetImportedBounds(Bounds);
 
 #if WITH_EDITOR
+	if (!bForceRuntimeBuild)
+	{
 	// UE 5.7: Use mesh description and editor build pipeline to generate runtime render data.
 	if (FSkeletalMeshLODInfo* LOD0Info = SkelMesh->GetLODInfo(0))
 	{
@@ -523,12 +621,12 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 	// Build() converts mesh description to render data and initializes GPU resources.
 	SkelMesh->CalculateInvRefMatrices();
 	SkelMesh->Build();
-#else
-	// Non-editor game targets in UE 5.7 do not expose the skeletal mesh import/build APIs.
-	// The verified runtime path uses the editor target (`UnrealEditor -game`), where the
-	// full mesh build above is available.
-	UE_LOG(LogWowSkelMesh, Warning, TEXT("Skipping skeletal mesh build for non-editor target '%s'"), *ModelName);
+	}
+	else
 #endif
+	{
+		if (!BuildRuntimeRenderData(SkelMesh, MeshDesc, Data, BoneRemapTable)) return nullptr;
+	}
 
 	UE_LOG(LogWowSkelMesh, Log, TEXT("Created skeletal mesh '%s' with %d verts, %d tris, %d bones"),
 		*ModelName, NumVerts, NumTris, NumBones);
@@ -587,6 +685,7 @@ TArray<UAnimSequence*> FWowSkeletalMeshBuilder::CreateAnimations(const FM2Data& 
 {
 	TArray<UAnimSequence*> Result;
 
+#if WITH_EDITOR
 	if (!Skeleton || !Data.HasAnimationData())
 	{
 		return Result;
@@ -702,4 +801,9 @@ TArray<UAnimSequence*> FWowSkeletalMeshBuilder::CreateAnimations(const FM2Data& 
 
 	UE_LOG(LogWowSkelMesh, Log, TEXT("Created %d animations for '%s'"), Result.Num(), *ModelName);
 	return Result;
+#else
+	// The editor animation controller cannot produce playable cooked data at
+	// runtime. Keep the valid skeletal reference pose instead of empty sequences.
+	return Result;
+#endif
 }

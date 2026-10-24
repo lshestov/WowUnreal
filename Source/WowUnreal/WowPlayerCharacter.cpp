@@ -59,6 +59,7 @@ AWowPlayerCharacter::AWowPlayerCharacter()
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(RootComponent);
 	CameraBoom->TargetArmLength = 400.0f;
+	CameraBoom->SocketOffset = FVector(0.0f, 0.0f, 50.0f);
 	CameraBoom->bUsePawnControlRotation = true;
 	CameraBoom->bDoCollisionTest = true;
 	CameraBoom->ProbeSize = 12.0f;
@@ -292,7 +293,7 @@ void AWowPlayerCharacter::ApplyLoginSpawn(const FVector& SpawnPos, float Orienta
 	// Aerial mode: used for automated verification screenshots (stable top-down view)
 	const bool bIsAutomatedCapture = FParse::Param(FCommandLine::Get(), TEXT("aerialview"));
 	const float CapsuleHalfHeight = GetCapsuleComponent() ? GetCapsuleComponent()->GetScaledCapsuleHalfHeight() : 0.0f;
-	FVector StabilizedPos = SpawnPos + FVector(0.0f, 0.0f, CapsuleHalfHeight + 50.0f);
+	FVector StabilizedPos = SpawnPos + FVector(0.0f, 0.0f, CapsuleHalfHeight);
 	const float YawDegrees = FMath::RadiansToDegrees(OrientationRadians);
 
 	if (bIsAutomatedCapture)
@@ -428,6 +429,9 @@ void AWowPlayerCharacter::SetCharacterModel(UWorld* World, FMpqManager* Mpq, FWo
 		if (MainMesh && MainMesh->GetSkeletalMeshAsset())
 		{
 			GetMesh()->SetSkeletalMesh(MainMesh->GetSkeletalMeshAsset());
+			GetMesh()->SetVisibility(true, true);
+			GetMesh()->SetHiddenInGame(false, true);
+			GetMesh()->SetOwnerNoSee(false);
 			GetMesh()->SetAnimationMode(EAnimationMode::AnimationSingleNode);
 
 			// Copy materials
@@ -675,6 +679,9 @@ void AWowPlayerCharacter::SetCharacterModelWithEquipment(UWorld* World, FMpqMana
 		if (MainMesh && MainMesh->GetSkeletalMeshAsset())
 		{
 			GetMesh()->SetSkeletalMesh(MainMesh->GetSkeletalMeshAsset());
+			GetMesh()->SetVisibility(true, true);
+			GetMesh()->SetHiddenInGame(false, true);
+			GetMesh()->SetOwnerNoSee(false);
 			GetMesh()->SetAnimationMode(EAnimationMode::AnimationSingleNode);
 
 			// Copy materials

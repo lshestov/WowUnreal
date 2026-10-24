@@ -9,6 +9,7 @@
 #include "WowWaterRenderer.h"
 #include "VT/RuntimeVirtualTexture.h"
 #include "Components/StaticMeshComponent.h"
+#include "ProceduralMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "MeshDescription.h"
@@ -61,6 +62,8 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
 
     // Collect materials per section
     TArray<UMaterialInterface*> SectionMaterials;
+    TArray<FVector> CollisionVertices;
+    TArray<int32> CollisionIndices;
     int32 SectionIndex = 0;
     int32 ChunksWithHeights = 0;
     int32 ChunksSkipped = 0;
@@ -87,6 +90,9 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
 
         // Create a polygon group for this chunk (maps to a material slot)
         FPolygonGroupID PolyGroup = MeshDesc.CreatePolygonGroup();
+        const int32 CollisionBase = CollisionVertices.Num();
+        CollisionVertices.Append(MeshData.Vertices);
+        for (int32 Index : MeshData.Indices) CollisionIndices.Add(CollisionBase + Index);
 
         // Add vertices and vertex instances for this chunk
         int32 BaseVertIndex = MeshDesc.Vertices().Num();
@@ -171,24 +177,26 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
         SM->InitResources();
         for (FStaticMaterial& Mat : SM->GetStaticMaterials()) { Mat.UVChannelData.bInitialized = true; }
 
-        // Enable complex collision (use render mesh as collision)
-        if (SM->GetBodySetup() == nullptr)
-        {
-            SM->CreateBodySetup();
-        }
-        if (UBodySetup* BodySetup = SM->GetBodySetup())
-        {
-            BodySetup->CollisionTraceFlag = CTF_UseComplexAsSimple;
-            // Runtime-built terrain needs cooked physics data for line traces and walking.
-            // Tiles load incrementally, so building per-tile physics here is acceptable.
-            BodySetup->CreatePhysicsMeshes();
-        }
+        // ProceduralMeshComponent cooks triangle collision in packaged games;
+        // transient UStaticMesh imported collision is only reliable in Editor.
+        auto* GroundCollision = NewObject<UProceduralMeshComponent>(this, TEXT("TerrainCollision"));
+        GroundCollision->SetupAttachment(RootScene);
+        GroundCollision->bUseAsyncCooking = true;
+        GroundCollision->bUseComplexAsSimpleCollision = true;
+        GroundCollision->SetCollisionObjectType(ECC_WorldStatic);
+        GroundCollision->SetCollisionResponseToAllChannels(ECR_Block);
+        GroundCollision->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        GroundCollision->SetVisibility(false);
+        GroundCollision->SetHiddenInGame(true);
+        GroundCollision->CreateMeshSection(0, CollisionVertices, CollisionIndices,
+            TArray<FVector>(), TArray<FVector2D>(), TArray<FColor>(), TArray<FProcMeshTangent>(), true);
+        GroundCollision->RegisterComponent();
 
         // Create UStaticMeshComponent and set materials on the component
         UStaticMeshComponent* MeshComp = NewObject<UStaticMeshComponent>(this, TEXT("TerrainMesh"));
         MeshComp->SetStaticMesh(SM);
         MeshComp->SetupAttachment(RootScene);
-        MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
         MeshComp->SetCollisionResponseToAllChannels(ECR_Block);
         for (int32 s = 0; s < SectionMaterials.Num(); ++s)
         {

@@ -41,6 +41,9 @@
 #include "StaticMeshResources.h"
 #include "Materials/Material.h"
 #include "UObject/UObjectIterator.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
+#include "Rendering/SkeletalMeshRenderData.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowLogin, Log, All);
 
@@ -592,6 +595,19 @@ void AWowLoginController::UpdateWorldCapture()
     }
     bWorldScreenshotRequested = true;
     WorldScreenshotRequestedAt = Now;
+    if (auto* Player = Cast<AWowPlayerCharacter>(UGameplayStatics::GetPlayerPawn(this, 0)))
+    {
+        const USkeletalMesh* Model = Player->GetMesh()->GetSkeletalMeshAsset();
+        const auto* ModelData = Model ? Model->GetResourceForRendering() : nullptr;
+        const uint32 VertexCount = ModelData && !ModelData->LODRenderData.IsEmpty()
+            ? ModelData->LODRenderData[0].GetNumVertices() : 0;
+        FVector ViewLocation; FRotator ViewRotation;
+        if (auto* PC = Cast<APlayerController>(Player->GetController())) PC->GetPlayerViewPoint(ViewLocation, ViewRotation);
+        UE_LOG(LogWowLogin, Log, TEXT("PlayerCapture: pawn=%s camera=%s modelVertices=%u hidden=%d groundPending=%d movement=%d"),
+            *Player->GetActorLocation().ToString(), *ViewLocation.ToString(), VertexCount,
+            Player->IsHidden() ? 1 : 0, bPendingGroundSnap ? 1 : 0,
+            static_cast<int32>(Player->GetCharacterMovement()->MovementMode));
+    }
     WorldScreenshotProcessedHandle = FScreenshotRequest::OnScreenshotRequestProcessed().AddUObject(
         this, &AWowLoginController::OnWorldScreenshotProcessed);
     UE_LOG(LogWowLogin, Log, TEXT("Requesting world screenshot: %s"), *WorldScreenshotPath);
@@ -684,12 +700,10 @@ void AWowLoginController::FinalizeWorldEntry()
             if (!TrySnapPawnToGround(Pawn, true))
             {
                 const FVector PawnPos = Pawn->GetActorLocation();
-                const FVector FallbackPos(PawnPos.X, PawnPos.Y, FMath::Max(PawnPos.Z + 500.0f, 5000.0f));
-                Pawn->SetActorLocation(FallbackPos, false, nullptr, ETeleportType::TeleportPhysics);
                 SuspendPawnUntilGroundReady(Pawn);
                 bPendingGroundSnap = true;
-                UE_LOG(LogWowLogin, Warning, TEXT("Ground trace unavailable at (%.0f, %.0f) — holding pawn at fallback Z=%.0f until terrain collision is ready"),
-                    PawnPos.X, PawnPos.Y, FallbackPos.Z);
+                UE_LOG(LogWowLogin, Warning, TEXT("Ground trace pending at (%.0f, %.0f) — holding server spawn Z=%.0f until collision is ready"),
+                    PawnPos.X, PawnPos.Y, PawnPos.Z);
             }
             else
             {

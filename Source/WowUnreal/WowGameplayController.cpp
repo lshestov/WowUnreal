@@ -1034,9 +1034,12 @@ void AWowGameplayController::SendMovementUpdate()
 {
 	ACharacter* Char = Cast<ACharacter>(GetPawn());
 	if (!Char || !bHasServerPosition) return;
+	if (bDeferSpawnTeleport || bHasDeferredSpawn || !Char->GetActorEnableCollision()) return;
 
 	FVector Pos = Char->GetActorLocation();
-	FVector WowPos = FWowCoordinate::UEToWow(Pos);
+	// WoW positions refer to the feet; UE's Character actor is at capsule center.
+	const FVector FeetPos = Pos - FVector(0, 0, Char->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+	FVector WowPos = FWowCoordinate::UEToWow(FeetPos);
 
 	// Convert UE yaw to WoW orientation
 	// UE yaw and WoW orientation relationship: WoW_ori = -(UE_yaw_rad)

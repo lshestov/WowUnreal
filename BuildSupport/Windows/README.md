@@ -93,6 +93,19 @@ to use its existing private verification profile, wait for a screenshot and
 close only the client it launched. It supplies no passwords on the command
 line and does not need Computer Use. Regular manual startup is unchanged.
 
+### Packaged player placement and model
+
+Terrain uses a hidden procedural mesh for asynchronous runtime collision
+cooking. World entry waits at the server position until this collision is
+ready, then snaps the capsule to the ground. Server movement coordinates
+represent the character's feet; the capsule half-height is added only for
+local placement. Repeated logins do not accumulate extra altitude.
+
+Packaged targets build M2 skeletal render buffers directly, without the
+editor import pipeline. The local character is visible from the normal
+third-person camera. Runtime animation sequence generation remains pending;
+the packaged model currently uses its skeletal reference pose.
+
 ## Regression tests
 
 Run each filter separately with the editor command-line executable:
@@ -110,3 +123,5 @@ realm and character selection, including missing profiles and empty lists.
 `WowUnreal.Rendering` checks explicit runtime mesh bindings and the cookable
 world material contracts. `WowUnreal.Network.QueuedPacketSocketLifetime`
 checks that a queued packet cannot dereference a destroyed world socket.
+`WowUnreal.Player` checks runtime skeletal render buffers, login placement
+and camera distance, and ground tracing against asynchronously cooked terrain.

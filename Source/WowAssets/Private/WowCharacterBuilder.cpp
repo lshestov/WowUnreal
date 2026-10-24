@@ -244,10 +244,10 @@ UAnimSequence* CreateReferencePoseAnimation(USkeleton* Skeleton, const FString& 
         return nullptr;
     }
 
+#if WITH_EDITOR
     UAnimSequence* AnimSeq = NewObject<UAnimSequence>();
     AnimSeq->SetSkeleton(Skeleton);
 
-#if WITH_EDITOR
     IAnimationDataController& Controller = AnimSeq->GetController();
     Controller.InitializeModel();
     Controller.OpenBracket(FText::FromString(TEXT("CreateReferencePoseAnimation")));
@@ -271,12 +271,11 @@ UAnimSequence* CreateReferencePoseAnimation(USkeleton* Skeleton, const FString& 
 
     Controller.CloseBracket();
     Controller.NotifyPopulated();
-#else
-    UE_LOG(LogWowCharacter, Warning, TEXT("Skipping reference-pose anim setup — GetController() requires editor"));
-#endif
-
     UE_LOG(LogWowCharacter, Log, TEXT("Created reference-pose animation for %s"), *ModelName);
     return AnimSeq;
+#else
+    return nullptr; // The skeletal component already evaluates its reference pose.
+#endif
 }
 
 UTexture2D* ResolveCreatureTextureOverride(FMpqManager* Mpq, FWowAssetCache* Cache,
