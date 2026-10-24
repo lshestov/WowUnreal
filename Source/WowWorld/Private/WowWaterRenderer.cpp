@@ -1,4 +1,5 @@
 #include "WowWaterRenderer.h"
+#include "WowRuntimeMeshMaterials.h"
 #include "WowWaterMaterial.h"
 #include "Formats/AdtTypes.h"
 #include "Coord/WowCoordinate.h"
@@ -75,6 +76,7 @@ static UStaticMesh* BuildLiquidStaticMesh(
 	UStaticMesh::FBuildMeshDescriptionsParams BuildParams;
 	BuildParams.bBuildSimpleCollision = false;
 	BuildParams.bFastBuild = true;
+	FWowRuntimeMeshMaterials::AssignSingle(SM, MeshDesc, Material);
 	SM->BuildFromMeshDescriptions(MeshDescs, BuildParams);
 	SM->NeverStream = true;
 	SM->InitResources();

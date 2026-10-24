@@ -35,6 +35,12 @@
 #include "Misc/Paths.h"
 #include "Misc/OutputDeviceRedirector.h"
 #include "UnrealClient.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/Texture2D.h"
+#include "StaticMeshResources.h"
+#include "Materials/Material.h"
+#include "UObject/UObjectIterator.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowLogin, Log, All);
 
@@ -72,6 +78,7 @@ void AWowLoginController::BeginPlay()
 void AWowLoginController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
     FScreenshotRequest::OnScreenshotRequestProcessed().Remove(WorldScreenshotProcessedHandle);
+    if (ConnectionManager) ConnectionManager->Disconnect();
     ClearCurrentScreen();
     if (CinematicManager)
     {
@@ -552,6 +559,28 @@ void AWowLoginController::UpdateWorldCapture()
         WorldReadyAt = Now;
         UE_LOG(LogWowLogin, Log, TEXT("World ready for capture: terrain loaded, loading screen removed (ground snap pending: %s)"),
             bPendingGroundSnap ? TEXT("yes") : TEXT("no"));
+        if (!WorldScreenshotPath.IsEmpty())
+        {
+            int32 Samples = 0;
+            TSet<FString> SampledComponents;
+            for (TObjectIterator<UStaticMeshComponent> It; It && Samples < 12; ++It)
+            {
+                if (It->GetWorld() != GetWorld() || !It->GetStaticMesh()) continue;
+                const FString Kind = It->GetName().StartsWith(TEXT("Water_")) ? TEXT("Water") : It->GetName();
+                if (SampledComponents.Contains(Kind)) continue;
+                SampledComponents.Add(Kind);
+                const auto* Render = It->GetStaticMesh()->GetRenderData();
+                if (!Render || Render->LODResources.IsEmpty() || Render->LODResources[0].Sections.IsEmpty()) continue;
+                const int32 Slot = Render->LODResources[0].Sections[0].MaterialIndex;
+                UMaterialInterface* Material = It->GetMaterial(Slot);
+                UTexture* Texture = nullptr;
+                if (Material) Material->GetTextureParameterValue(FMaterialParameterInfo(TEXT("Layer0Texture")), Texture);
+                UE_LOG(LogWowLogin, Log, TEXT("WorldMaterial: owner=%s component=%s slot=%d material=%s texture=%s complete=%d"),
+                    *GetNameSafe(It->GetOwner()), *It->GetName(), Slot, *GetNameSafe(Material), *GetNameSafe(Texture),
+                    Material && Material->GetMaterial()->IsComplete() ? 1 : 0);
+                ++Samples;
+            }
+        }
     }
     if (WorldScreenshotPath.IsEmpty() || Now - WorldReadyAt < WorldScreenshotDelaySeconds) return;
     if (!GEngine || !GEngine->GameViewport || !GEngine->GameViewport->Viewport

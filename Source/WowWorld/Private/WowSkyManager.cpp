@@ -60,10 +60,12 @@ void AWowSkyManager::BeginPlay()
 
 	// Create sky light for ambient
 	SkyLight = NewObject<USkyLightComponent>(this, TEXT("SkyLight"));
+	SkyLight->SetMobility(EComponentMobility::Movable);
+	SkyLight->bRealTimeCapture = true;
+	SkyLight->bLowerHemisphereIsBlack = false;
 	SkyLight->RegisterComponent();
 	SkyLight->AttachToComponent(GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
 	SkyLight->SetIntensity(1.0f);
-	SkyLight->bRealTimeCapture = true;
 
 	// Create height fog
 	if (bFogEnabled)
@@ -249,6 +251,12 @@ void AWowSkyManager::CreateSkydomeMesh()
 	UStaticMesh* Mesh = BuildDomeMesh(this, Verts, Indices, Colors);
 
 	// Create skydome material: unlit, two-sided, vertex color R = height blend
+    if (UMaterial* CookedSky = LoadObject<UMaterial>(nullptr, TEXT("/Game/Materials/M_WowSky")))
+    {
+        SkydomeMaterial = UMaterialInstanceDynamic::Create(CookedSky, this, TEXT("SkydomeMID"));
+    }
+    else
+    {
 #if WITH_EDITOR
 	UMaterial* BaseMat = NewObject<UMaterial>(this, TEXT("SkydomeMat_Base"));
 	BaseMat->SetShadingModel(MSM_Unlit);
@@ -324,6 +332,7 @@ void AWowSkyManager::CreateSkydomeMesh()
 		SkydomeMaterial->SetVectorParameterValue(TEXT("BaseColor"), FLinearColor(0.4f, 0.6f, 1.0f, 1.0f));
 	}
 #endif
+    }
 
 	SkydomeMesh = NewObject<UStaticMeshComponent>(this, TEXT("SkydomeComp"));
 	SkydomeMesh->SetStaticMesh(Mesh);
@@ -387,6 +396,12 @@ void AWowSkyManager::CreateCloudMesh()
 	UStaticMesh* Mesh = BuildDomeMesh(this, Verts, Indices, Colors);
 
 	// Cloud material: translucent, unlit, scrolling procedural noise
+    if (UMaterial* CookedCloud = LoadObject<UMaterial>(nullptr, TEXT("/Game/Materials/M_WowCloud")))
+    {
+        CloudMaterial = UMaterialInstanceDynamic::Create(CookedCloud, this, TEXT("CloudMID"));
+    }
+    else
+    {
 #if WITH_EDITOR
 	UMaterial* BaseMat = NewObject<UMaterial>(this, TEXT("CloudMat_Base"));
 	BaseMat->SetShadingModel(MSM_Unlit);
@@ -440,6 +455,7 @@ void AWowSkyManager::CreateCloudMesh()
 		CloudMaterial->SetScalarParameterValue(TEXT("CloudOpacity"), 0.3f);
 	}
 #endif
+    }
 
 	CloudMesh = NewObject<UStaticMeshComponent>(this, TEXT("CloudComp"));
 	CloudMesh->SetStaticMesh(Mesh);
@@ -489,6 +505,12 @@ void AWowSkyManager::CreateCelestialDiscs()
 	// Create emissive material for sun disc
 	auto MakeDiscMaterial = [this](const FName& MatName, const FLinearColor& DefaultColor) -> UMaterialInstanceDynamic*
 	{
+        if (UMaterial* CookedDisc = LoadObject<UMaterial>(nullptr, TEXT("/Game/Materials/M_WowCelestialDisc")))
+        {
+            auto* MID = UMaterialInstanceDynamic::Create(CookedDisc, this, MatName);
+            MID->SetVectorParameterValue(TEXT("DiscColor"), DefaultColor);
+            return MID;
+        }
 #if WITH_EDITOR
 		UMaterial* BaseMat = NewObject<UMaterial>(this, MatName);
 		BaseMat->SetShadingModel(MSM_Unlit);
@@ -639,6 +661,7 @@ void AWowSkyManager::Tick(float DeltaTime)
 	if (APawn* Pawn = UGameplayStatics::GetPlayerPawn(this, 0))
 	{
 		FVector CamPos = Pawn->GetActorLocation();
+		if (SkyLight) SkyLight->SetWorldLocation(CamPos);
 		if (SkydomeMesh)
 		{
 			SkydomeMesh->SetWorldLocation(CamPos);

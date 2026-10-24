@@ -1,4 +1,5 @@
 #include "WowTerrainTile.h"
+#include "WowRuntimeMeshMaterials.h"
 #include "WowTerrainMeshBuilder.h"
 #include "WowTerrainMaterial.h"
 #include "Formats/AdtTypes.h"
@@ -155,10 +156,7 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
         UStaticMesh* SM = NewObject<UStaticMesh>();
 
         // Add materials BEFORE building so sections are initialized with correct materials
-        for (UMaterialInterface* Mat : SectionMaterials)
-        {
-            SM->GetStaticMaterials().Add(FStaticMaterial(Mat));
-        }
+        FWowRuntimeMeshMaterials::Assign(SM, MeshDesc, SectionMaterials);
 
         SM->bAllowCPUAccess = true;
 

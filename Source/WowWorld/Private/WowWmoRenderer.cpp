@@ -1,4 +1,5 @@
 #include "WowWmoRenderer.h"
+#include "WowRuntimeMeshMaterials.h"
 #include "WowWaterMaterial.h"
 #include "Mpq/MpqManager.h"
 #include "WowAssetCache.h"
@@ -238,6 +239,8 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
                 }
 
                 UStaticMesh* LiqSM = NewObject<UStaticMesh>();
+                UMaterial* LiqMat = FWowWaterMaterial::GetMaterialForCategory(Category);
+                FWowRuntimeMeshMaterials::AssignSingle(LiqSM, LiqMeshDesc, LiqMat);
                 TArray<const FMeshDescription*> LiqDescs;
                 LiqDescs.Add(&LiqMeshDesc);
                 UStaticMesh::FBuildMeshDescriptionsParams LiqBuild;
@@ -248,7 +251,6 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
                 LiqSM->InitResources();
                 for (FStaticMaterial& Mat : LiqSM->GetStaticMaterials()) { Mat.UVChannelData.bInitialized = true; }
 
-                UMaterial* LiqMat = FWowWaterMaterial::GetMaterialForCategory(Category);
                 if (LiqMat)
                 {
                     if (LiqSM->GetStaticMaterials().Num() <= 0)
@@ -435,10 +437,7 @@ UStaticMesh* FWowWmoRenderer::CreateStaticMeshFromWmoGroup(
     }
 
     // Add materials to static mesh before building
-    for (UMaterialInterface* Mat : SectionMaterials)
-    {
-        SM->GetStaticMaterials().Add(FStaticMaterial(Mat));
-    }
+    FWowRuntimeMeshMaterials::Assign(SM, MeshDesc, SectionMaterials);
 
     // Build mesh
     TArray<const FMeshDescription*> MeshDescs;

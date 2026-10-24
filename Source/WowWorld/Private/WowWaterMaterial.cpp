@@ -23,6 +23,8 @@ UMaterial* FWowWaterMaterial::GetWaterMaterial()
 {
 	static UMaterial* CachedMat = nullptr;
 	if (CachedMat && CachedMat->IsValidLowLevel()) return CachedMat;
+	CachedMat = LoadObject<UMaterial>(nullptr, TEXT("/Game/Materials/M_WowWater"));
+	if (CachedMat) return CachedMat;
 
 #if WITH_EDITOR
 	CachedMat = NewObject<UMaterial>(GetTransientPackage(), TEXT("M_WowWater"));
@@ -132,6 +134,8 @@ UMaterial* FWowWaterMaterial::GetLavaMaterial()
 {
 	static UMaterial* CachedMat = nullptr;
 	if (CachedMat && CachedMat->IsValidLowLevel()) return CachedMat;
+	CachedMat = LoadObject<UMaterial>(nullptr, TEXT("/Game/Materials/M_WowLava"));
+	if (CachedMat) return CachedMat;
 
 #if WITH_EDITOR
 	CachedMat = NewObject<UMaterial>(GetTransientPackage(), TEXT("M_WowLava"));
@@ -222,6 +226,8 @@ UMaterial* FWowWaterMaterial::GetSlimeMaterial()
 {
 	static UMaterial* CachedMat = nullptr;
 	if (CachedMat && CachedMat->IsValidLowLevel()) return CachedMat;
+	CachedMat = LoadObject<UMaterial>(nullptr, TEXT("/Game/Materials/M_WowSlime"));
+	if (CachedMat) return CachedMat;
 
 #if WITH_EDITOR
 	CachedMat = NewObject<UMaterial>(GetTransientPackage(), TEXT("M_WowSlime"));

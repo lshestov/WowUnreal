@@ -1,4 +1,5 @@
 #include "WowDoodadManager.h"
+#include "WowRuntimeMeshMaterials.h"
 #include "Mpq/MpqManager.h"
 #include "WowAssetCache.h"
 #include "WowSkeletalMeshBuilder.h"
@@ -482,10 +483,7 @@ UStaticMesh* FWowDoodadManager::CreateStaticMeshFromM2(const FM2Data& Data, cons
     }
 
     // Add materials BEFORE build
-    for (UMaterialInterface* Mat : BatchMaterials)
-    {
-        StaticMesh->GetStaticMaterials().Add(FStaticMaterial(Mat));
-    }
+    FWowRuntimeMeshMaterials::Assign(StaticMesh, MeshDesc, BatchMaterials);
 
     // Build static mesh from description
     TArray<const FMeshDescription*> MeshDescs;

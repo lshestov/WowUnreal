@@ -40,6 +40,17 @@ All Windows fixes, regression tests and cooking settings live in this
 repository. No source patching or external override directory is required.
 Generated binaries and libraries are ignored by Git.
 
+Runtime mesh builders bind each polygon group's material slot by name before
+building. Editor builds can infer missing bindings, while a packaged game
+otherwise produces section material index -1 and displays the default gray
+material. `WowRuntimeMeshMaterials` keeps both build paths consistent.
+
+The tracked sky, cloud, celestial, distant-terrain and liquid material assets
+are cooked from `Content/Materials`. They can be regenerated with
+`Scripts/CreateWorldEnvironmentMaterials.py` using the editor Python commandlet
+and `-EnablePlugins=PythonScriptPlugin,EditorScriptingUtilities`. No Blizzard
+textures are embedded in these assets; ground and object BLPs remain in MPQ.
+
 ## Runtime configuration
 
 Launch the packaged `Windows/WowUnreal.exe` with
@@ -96,3 +107,6 @@ tests use no account credentials and do not connect to a server. NullRHI is
 appropriate for these logic tests; it does not validate world rendering.
 `WowUnreal.Login.AutoLogin` covers command-line parsing and explicit account,
 realm and character selection, including missing profiles and empty lists.
+`WowUnreal.Rendering` checks explicit runtime mesh bindings and the cookable
+world material contracts. `WowUnreal.Network.QueuedPacketSocketLifetime`
+checks that a queued packet cannot dereference a destroyed world socket.

@@ -32,6 +32,7 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 
 ### Terrain Rendering
 - [x] Terrain mesh building (256 chunks/tile, splatmap textures)
+- [x] Explicit cooked runtime material-slot binding for terrain/WMO/doodads/liquids, cookable environment materials and movable skylight capture (verified packaged automatic world entry, colored world screenshots, material contract tests and clean shutdown).
 - [x] Async tile streaming (camera-based load/unload with LOD)
 - [x] WDL distant terrain, LOD1 mid-distance meshes
 - [x] Runtime Virtual Textures

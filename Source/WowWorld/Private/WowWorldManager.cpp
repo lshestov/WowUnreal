@@ -1,4 +1,5 @@
 #include "WowWorldManager.h"
+#include "WowRuntimeMeshMaterials.h"
 #include "WowTerrainTile.h"
 #include "Mpq/MpqManager.h"
 #include "WowAssetCache.h"
@@ -1216,6 +1217,14 @@ void AWowWorldManager::SpawnWdlTile(int32 TX, int32 TY)
         MeshDesc.CreatePolygon(PolyGroup, TriVerts);
     }
 
+    // Simple green-brown material for distant terrain
+    UMaterial* DistantBase = LoadObject<UMaterial>(nullptr, TEXT("/Game/Materials/M_WowDistantTerrain"));
+    UMaterialInstanceDynamic* Mat = DistantBase ? UMaterialInstanceDynamic::Create(DistantBase, SM) : nullptr;
+    if (Mat)
+    {
+        Mat->SetVectorParameterValue(TEXT("BaseColor"), FLinearColor(0.3f, 0.4f, 0.2f, 1.0f));
+    }
+    FWowRuntimeMeshMaterials::AssignSingle(SM, MeshDesc, Mat);
     TArray<const FMeshDescription*> MeshDescs;
     MeshDescs.Add(&MeshDesc);
     UStaticMesh::FBuildMeshDescriptionsParams Params;
@@ -1224,21 +1233,6 @@ void AWowWorldManager::SpawnWdlTile(int32 TX, int32 TY)
     SM->BuildFromMeshDescriptions(MeshDescs, Params);
     SM->NeverStream = true;
     SM->InitResources();
-    for (FStaticMaterial& Mat : SM->GetStaticMaterials()) { Mat.UVChannelData.bInitialized = true; }
-
-    // Simple green-brown material for distant terrain
-    UMaterialInstanceDynamic* Mat = UMaterialInstanceDynamic::Create(
-        UMaterial::GetDefaultMaterial(MD_Surface), SM);
-    if (Mat)
-    {
-        Mat->SetVectorParameterValue(TEXT("BaseColor"), FLinearColor(0.3f, 0.4f, 0.2f, 1.0f));
-        if (SM->GetStaticMaterials().Num() <= 0)
-        {
-            SM->GetStaticMaterials().SetNum(1);
-        }
-        SM->GetStaticMaterials()[0].MaterialInterface = Mat;
-        SM->GetStaticMaterials()[0].UVChannelData.bInitialized = true;
-    }
 
     // Spawn actor with UStaticMeshComponent
     FActorSpawnParameters SpawnParams;
@@ -1439,10 +1433,7 @@ void AWowWorldManager::SpawnLod1Tile(int32 TX, int32 TY)
     if (TotalChunks > 0)
     {
         UStaticMesh* SM = NewObject<UStaticMesh>();
-        for (UMaterialInterface* Mat : SectionMaterials)
-        {
-            SM->GetStaticMaterials().Add(FStaticMaterial(Mat));
-        }
+        FWowRuntimeMeshMaterials::Assign(SM, MeshDesc, SectionMaterials);
         SM->bAllowCPUAccess = true;
 
         TArray<const FMeshDescription*> MeshDescs;
