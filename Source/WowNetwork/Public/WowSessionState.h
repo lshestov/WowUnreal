@@ -31,6 +31,7 @@ struct WOWNETWORK_API FWowCharacterEquipment
     UPROPERTY(BlueprintReadOnly) int32 DisplayId = 0;
     UPROPERTY(BlueprintReadOnly) uint8 InventoryType = 0;
     UPROPERTY(BlueprintReadOnly) int32 EnchantAuraId = 0;
+    UPROPERTY(BlueprintReadOnly) int32 Slot = INDEX_NONE;
 };
 
 USTRUCT(BlueprintType)
@@ -42,6 +43,11 @@ struct WOWNETWORK_API FWowCharacterInfo
     UPROPERTY(BlueprintReadOnly) uint8 Race = 0;
     UPROPERTY(BlueprintReadOnly) uint8 Class = 0;
     UPROPERTY(BlueprintReadOnly) uint8 Gender = 0;
+    UPROPERTY(BlueprintReadOnly) uint8 Skin = 0;
+    UPROPERTY(BlueprintReadOnly) uint8 Face = 0;
+    UPROPERTY(BlueprintReadOnly) uint8 HairStyle = 0;
+    UPROPERTY(BlueprintReadOnly) uint8 HairColor = 0;
+    UPROPERTY(BlueprintReadOnly) uint8 FacialHair = 0;
     UPROPERTY(BlueprintReadOnly) uint8 Level = 0;
     UPROPERTY(BlueprintReadOnly) int32 MapId = 0;
     UPROPERTY(BlueprintReadOnly) int32 ZoneId = 0;

@@ -146,6 +146,7 @@ Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 - [x] Networked player animations: read movement flags from UPDATE_OBJECT, play matching anims
 
 **Local Player Character Model:**
+- [x] Preserve equipped starter clothing and attached item models in packaged play; fix WotLK item-display columns, copied-character-record lifetime, unique shoulder components and cooked equipment materials (verified native player/Willem captures and six equipment/NPC/animation regressions, including source destruction and GC).
 - [x] Spawn local player character model using race/gender from SMSG_CHAR_ENUM
 - [x] Attach to AWowPlayerCharacter pawn (skeletal mesh on the character)
 - [x] Apply composite texture (skin + face + hair from customization)

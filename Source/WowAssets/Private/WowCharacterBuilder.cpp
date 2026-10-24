@@ -355,11 +355,6 @@ TMap<uint16, uint16> FWowCharacterBuilder::ComputeGeosetWithEquipment(
         {
             Geosets.Add(13, static_cast<uint16>(Item->GeosetGroups[2] + 1));
         }
-        // geosetGroup[3] → CG_TORSO (group 22)
-        if (Item->GeosetGroups[3] > 0)
-        {
-            Geosets.Add(22, static_cast<uint16>(Item->GeosetGroups[3] + 1));
-        }
     });
 
     // SHIRT: Also affects CG_SLEEVES

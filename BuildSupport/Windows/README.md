@@ -123,6 +123,20 @@ Without that option, screenshots show normal gameplay animation selection.
 
 ### NPC appearance and movement
 
+Equipment uses the 25-column WotLK `ItemDisplayInfo.dbc` layout: three geoset
+columns and eight clothing texture columns. Clothing regions come from those
+column indices, rather than filename suffixes. Character enumeration preserves
+appearance and inventory slot numbers; local-player setup owns its selected
+character record after the copied character list goes out of scope.
+
+Attached equipment has a unique component per item and attachment point,
+explicit runtime material-slot bindings and the cookable character material.
+Attachments use model-space positions relative to the reference bone pivot.
+Moving a temporary character model onto the player also copies its equipment;
+repeated model changes clear old parts instead of accumulating duplicates.
+Visual item meshes opt out of collision cooking; targeting remains on the
+character's collision components.
+
 Creature displays resolve their model and all three replaceable monster skins.
 Each mesh section keeps its literal or replaceable texture. Humanoid NPCs use
 `CreatureDisplayInfoExtra.dbc` customization, baked clothing textures, equipment
@@ -170,3 +184,7 @@ models from the user's existing MPQs. The model integration test requires
 Datasets without the optional `CharComponentTextureLayouts.dbc` and
 `CharComponentTextureSections.dbc` use the existing built-in atlas layout;
 the MPQ integration test reports the loader's two warnings in that case.
+`WowUnreal.Equipment` checks the WotLK item record columns, actual starter
+clothing pixels, both of Deputy Willem's shoulders, cooked material bindings
+and equipment transfer across source-actor destruction and garbage collection.
+Its integration test also requires `-wowdata=<client Data directory>`.

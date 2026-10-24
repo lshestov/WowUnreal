@@ -514,7 +514,11 @@ void FWowWorldSocket::HandleCharEnum(const TArray<uint8>& Data)
 
         // uint8 skin, face, hairStyle, hairColor, facialHair
         if (Offset + 5 > Data.Num()) break;
-        Offset += 5; // skip appearance
+        Info.Skin = Data[Offset++];
+        Info.Face = Data[Offset++];
+        Info.HairStyle = Data[Offset++];
+        Info.HairColor = Data[Offset++];
+        Info.FacialHair = Data[Offset++];
 
         // uint8 level
         if (Offset + 1 > Data.Num()) break;
@@ -566,6 +570,7 @@ void FWowWorldSocket::HandleCharEnum(const TArray<uint8>& Data)
             if (Offset + 9 > Data.Num()) break;
 
             FWowCharacterEquipment Equipment;
+            Equipment.Slot = SlotIdx;
             uint32 TempDisplayId = 0;
             uint32 TempAuraId = 0;
             FMemory::Memcpy(&TempDisplayId, &Data[Offset], 4); // uint32 displayId

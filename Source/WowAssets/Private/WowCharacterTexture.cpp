@@ -697,37 +697,11 @@ void FWowCharacterTexture::ApplyEquipmentOverlays(TArray<uint8>& Composite, uint
             *RaceGenderSuffix, Equipment.RaceId, Equipment.Gender);
     }
 
-    // Map name suffix to region index and subdirectory
-    auto DetectRegionFromName = [](const FString& Name, int32& OutRegion) -> const TCHAR* {
-        static const struct { const TCHAR* Suffix; int32 Region; const TCHAR* Subdir; } SuffixMap[] = {
-            { TEXT("_AU"), 0, TEXT("ArmUpperTexture") },
-            { TEXT("_AL"), 1, TEXT("ArmLowerTexture") },
-            { TEXT("_HA"), 2, TEXT("HandTexture") },
-            { TEXT("_TU"), 3, TEXT("TorsoUpperTexture") },
-            { TEXT("_TL"), 4, TEXT("TorsoLowerTexture") },
-            { TEXT("_LU"), 5, TEXT("LegUpperTexture") },
-            { TEXT("_LL"), 6, TEXT("LegLowerTexture") },
-            { TEXT("_FO"), 7, TEXT("FootTexture") },
-            // Also check full suffixes
-            { TEXT("_Sleeve_AU"), 0, TEXT("ArmUpperTexture") },
-            { TEXT("_Sleeve_AL"), 1, TEXT("ArmLowerTexture") },
-            { TEXT("_Chest_TU"), 3, TEXT("TorsoUpperTexture") },
-            { TEXT("_Chest_TL"), 4, TEXT("TorsoLowerTexture") },
-            { TEXT("_Pant_LU"), 5, TEXT("LegUpperTexture") },
-            { TEXT("_Pant_LL"), 6, TEXT("LegLowerTexture") },
-        };
-        for (const auto& S : SuffixMap)
-        {
-            if (Name.EndsWith(S.Suffix))
-            {
-                OutRegion = S.Region;
-                return S.Subdir;
-            }
-        }
-        OutRegion = -1;
-        return nullptr;
-    };
-
+    // WotLK's eight texture columns identify regions; filenames need not
+    // contain a particular Shirt/Chest/Pant suffix.
+    const TCHAR* RegionDirs[] = {TEXT("ArmUpperTexture"), TEXT("ArmLowerTexture"), TEXT("HandTexture"),
+        TEXT("TorsoUpperTexture"), TEXT("TorsoLowerTexture"), TEXT("LegUpperTexture"),
+        TEXT("LegLowerTexture"), TEXT("FootTexture")};
     auto ApplyItemOverlays = [&](uint32 DisplayId, const TArray<uint32>& RegionIndices) {
         if (DisplayId == 0) return;
 
@@ -740,11 +714,9 @@ void FWowCharacterTexture::ApplyEquipmentOverlays(TArray<uint8>& Composite, uint
 
             FString Name = Item->TextureOverlays[OverlayIdx];
 
-            // Detect the region from the texture name suffix
-            int32 DetectedRegion = -1;
-            const TCHAR* Subdir = DetectRegionFromName(Name, DetectedRegion);
-            if (!Subdir || DetectedRegion < 0) continue;
-
+            const int32 DetectedRegion = OverlayIdx;
+            const TCHAR* Subdir = RegionDirs[OverlayIdx];
+            if (Name.EndsWith(TEXT(".blp"), ESearchCase::IgnoreCase)) Name.LeftChopInline(4);
             // Check if this region is in the list of regions we should apply
             bool bShouldApply = false;
             for (uint32 RegionIdx : RegionIndices)
@@ -768,7 +740,7 @@ void FWowCharacterTexture::ApplyEquipmentOverlays(TArray<uint8>& Composite, uint
                 FString::Printf(TEXT("Item\\TextureComponents\\%s\\%s.blp"), Subdir, *Name),
             };
 
-            uint32 OverlayW, OverlayH;
+            uint32 OverlayW = 0, OverlayH = 0;
             TArray<uint8> OverlayPixels;
             for (const FString& TryPath : Paths)
             {

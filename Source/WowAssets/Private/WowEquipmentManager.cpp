@@ -1,5 +1,7 @@
 #include "WowEquipmentManager.h"
 #include "WowSkeletalMeshBuilder.h"
+#include "WowRuntimeMeshMaterials.h"
+#include "GameFramework/Actor.h"
 #include "WowAssetCache.h"
 #include "WowTextureFactory.h"
 #include "Mpq/MpqManager.h"
@@ -14,14 +16,12 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/SkeletalMesh.h"
+#include "PhysicsEngine/BodySetup.h"
 #include "MeshDescription.h"
 #include "StaticMeshAttributes.h"
 #include "Engine/Texture2D.h"
 #include "Materials/MaterialInstanceDynamic.h"
-#if WITH_EDITOR
-#include "Materials/MaterialExpressionTextureSampleParameter2D.h"
 #include "UObject/UObjectGlobals.h"
-#endif
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowEquip, Log, All);
 
@@ -176,44 +176,11 @@ UMaterial* GetEquipmentMaterial()
 {
     static TWeakObjectPtr<UMaterial> CachedMaterial;
     if (!CachedMaterial.IsValid())
-    {
-#if WITH_EDITOR
-        UMaterial* Material = NewObject<UMaterial>(GetTransientPackage(), TEXT("M_WowEquipmentRuntimeTransient"));
-        if (Material)
-        {
-            Material->SetShadingModel(MSM_Unlit);
-            Material->BlendMode = BLEND_Opaque;
-            Material->TwoSided = false;
-
-            UTexture2D* DefaultTexture = LoadObject<UTexture2D>(nullptr, TEXT("/Engine/EngineResources/WhiteSquareTexture"));
-            auto& Expressions = Material->GetExpressionCollection();
-
-            UMaterialExpressionTextureSampleParameter2D* TextureSampler = NewObject<UMaterialExpressionTextureSampleParameter2D>(Material);
-            TextureSampler->ParameterName = TEXT("BaseTexture");
-            TextureSampler->SamplerType = SAMPLERTYPE_Color;
-            TextureSampler->Texture = DefaultTexture;
-            Expressions.AddExpression(TextureSampler);
-
-            Material->GetEditorOnlyData()->EmissiveColor.Connect(0, TextureSampler);
-
-            bool bNeedsRecompile = false;
-            Material->SetMaterialUsage(bNeedsRecompile, MATUSAGE_SkeletalMesh);
-            Material->SetMaterialUsage(bNeedsRecompile, MATUSAGE_StaticMesh);
-            Material->PreEditChange(nullptr);
-            Material->PostEditChange();
-            Material->ForceRecompileForRendering();
-            CachedMaterial = Material;
-        }
-#endif
-
-        if (!CachedMaterial.IsValid())
-        {
-            CachedMaterial = UMaterial::GetDefaultMaterial(MD_Surface);
-        }
-    }
+        CachedMaterial = LoadObject<UMaterial>(nullptr, TEXT("/Game/Materials/M_WowCharacter.M_WowCharacter"));
+    if (!CachedMaterial.IsValid())
+        UE_LOG(LogWowEquip, Error, TEXT("Missing cookable M_WowCharacter material for equipment"));
     return CachedMaterial.Get();
 }
-
 void ApplyEquipmentMaterial(UPrimitiveComponent* Component, UTexture2D* Texture)
 {
     if (!Component || !Texture)
@@ -244,6 +211,50 @@ FName FWowEquipmentManager::GetAttachmentBoneName(const FM2Data& M2Data, EAttach
     return NAME_None;
 }
 
+FVector FWowEquipmentManager::GetAttachmentOffset(const FM2Data& M2Data, EAttachmentPoint AttachPoint)
+{
+    if (const auto* Attachment = FindAttachment(M2Data, AttachPoint))
+    {
+        if (M2Data.Bones.IsValidIndex(Attachment->Bone))
+        {
+            const FVector Offset = Attachment->Position - M2Data.Bones[Attachment->Bone].PivotPoint;
+            return FVector(Offset.Y, Offset.X, Offset.Z) * FWowCoordinate::SCALE;
+        }
+    }
+    return FVector::ZeroVector;
+}
+
+void FWowEquipmentManager::ClearEquipment(USkeletalMeshComponent* Mesh)
+{
+    if (!Mesh || !Mesh->GetOwner()) return;
+    TArray<UStaticMeshComponent*> Components;
+    Mesh->GetOwner()->GetComponents(Components);
+    for (auto* Component : Components)
+        if (Component->ComponentHasTag(TEXT("WowEquipment")) && Component->GetAttachParent() == Mesh) Component->DestroyComponent();
+}
+
+void FWowEquipmentManager::CopyEquipment(USkeletalMeshComponent* Source, USkeletalMeshComponent* Target)
+{
+    if (!Source || !Target || !Target->GetOwner()) return;
+    ClearEquipment(Target);
+    TArray<UStaticMeshComponent*> Components;
+    Source->GetOwner()->GetComponents(Components);
+    for (const auto* Part : Components)
+    {
+        if (!Part->ComponentHasTag(TEXT("WowEquipment")) || Part->GetAttachParent() != Source) continue;
+        auto* Copy = NewObject<UStaticMeshComponent>(Target->GetOwner(),
+            MakeUniqueObjectName(Target->GetOwner(), UStaticMeshComponent::StaticClass(), Part->GetFName()));
+        Copy->ComponentTags.Add(TEXT("WowEquipment"));
+        Copy->SetStaticMesh(Part->GetStaticMesh());
+        Copy->SetupAttachment(Target, Part->GetAttachSocketName());
+        Copy->SetRelativeTransform(Part->GetRelativeTransform());
+        Copy->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        Copy->SetCastShadow(Part->CastShadow);
+        for (int32 Slot = 0; Slot < Part->GetNumMaterials(); ++Slot) Copy->SetMaterial(Slot, Part->GetMaterial(Slot));
+        Copy->RegisterComponent();
+    }
+}
+
 bool FWowEquipmentManager::ResolveEquipmentPaths(FMpqManager* Mpq, uint32 ItemDisplayId, EAttachmentPoint AttachPoint,
     FString& OutModelPath, FString* OutTexturePath)
 {
@@ -269,7 +280,6 @@ bool FWowEquipmentManager::ResolveEquipmentPaths(FMpqManager* Mpq, uint32 ItemDi
     {
         ModelFile = DisplayInfo->ModelNames[1]; // Left-hand model for right shoulder
         TextureFile = DisplayInfo->ModelTextures[1];
-        if (ModelFile.IsEmpty()) ModelFile = DisplayInfo->ModelNames[0]; // Fallback
         if (TextureFile.IsEmpty()) TextureFile = DisplayInfo->ModelTextures[0];
     }
     else if (AttachPoint == EAttachmentPoint::LeftHand)
@@ -410,10 +420,14 @@ USceneComponent* FWowEquipmentManager::AttachEquipment(FMpqManager* Mpq, FWowAss
             }
 
             WeaponMesh = NewObject<UStaticMesh>();
+            WeaponMesh->CreateBodySetup();
+            WeaponMesh->GetBodySetup()->bNeverNeedsCookedCollisionData = true;
+            FWowRuntimeMeshMaterials::AssignSingle(WeaponMesh, MeshDesc, GetEquipmentMaterial());
             TArray<const FMeshDescription*> MeshDescs;
             MeshDescs.Add(&MeshDesc);
             UStaticMesh::FBuildMeshDescriptionsParams Params;
             Params.bFastBuild = true;
+            Params.bBuildSimpleCollision = false;
             WeaponMesh->BuildFromMeshDescriptions(MeshDescs, Params);
             WeaponMesh->NeverStream = true;
             WeaponMesh->InitResources();
@@ -432,16 +446,16 @@ USceneComponent* FWowEquipmentManager::AttachEquipment(FMpqManager* Mpq, FWowAss
     // Attach to character bone
     AActor* Owner = CharacterMesh->GetOwner();
     UStaticMeshComponent* WeaponComp = NewObject<UStaticMeshComponent>(Owner,
-        *FString::Printf(TEXT("Equip_%d"), ItemDisplayId));
+        MakeUniqueObjectName(Owner, UStaticMeshComponent::StaticClass(),
+            *FString::Printf(TEXT("Equip_%u_%u"), ItemDisplayId, static_cast<uint32>(AttachPoint))));
+    WeaponComp->ComponentTags.Add(TEXT("WowEquipment"));
+    WeaponComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     WeaponComp->SetStaticMesh(WeaponMesh);
     WeaponComp->SetupAttachment(CharacterMesh, BoneName);
     WeaponComp->SetCastShadow(true);
     WeaponComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-    // Attachment Position is in MODEL SPACE, not bone-relative.
-    // The bone already provides the correct animated position.
-    // Equipment attaches directly at the bone origin.
-    WeaponComp->SetRelativeLocation(FVector::ZeroVector);
+    WeaponComp->SetRelativeLocation(GetAttachmentOffset(CharacterM2, AttachPoint));
 
     WeaponComp->RegisterComponent();
 

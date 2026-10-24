@@ -2291,6 +2291,7 @@ void AWowGameplayController::SetupLocalPlayerCharacterModel(const FWowEntity& En
 	}
 
 	// Always look up cached character info (for equipment data + customization fallback)
+	FWowCharacterInfo CachedCharInfoStorage;
 	const FWowCharacterInfo* CachedCharInfo = nullptr;
 	if (ConnectionManager)
 	{
@@ -2301,7 +2302,10 @@ void AWowGameplayController::SetupLocalPlayerCharacterModel(const FWowEntity& En
 		{
 			if (static_cast<uint64>(CharInfo.Guid) == LocalGuid)
 			{
-				CachedCharInfo = &CharInfo;
+				// GetCachedCharacters returns a copy; retain an owned character
+				// after that temporary list leaves this block.
+				CachedCharInfoStorage = CharInfo;
+				CachedCharInfo = &CachedCharInfoStorage;
 				if (RaceId == 0)
 				{
 					RaceId = CharInfo.Race;
@@ -2322,8 +2326,12 @@ void AWowGameplayController::SetupLocalPlayerCharacterModel(const FWowEntity& En
 		UE_LOG(LogWowGameplay, Warning, TEXT("Using fallback race/gender for local player: Human Male"));
 	}
 
-	// TODO: Extract customization data from player entity fields (PLAYER_BYTES, etc.)
-	// For now, use default customization values
+	if (CachedCharInfo)
+	{
+		SkinColor = CachedCharInfo->Skin; Face = CachedCharInfo->Face;
+		HairStyle = CachedCharInfo->HairStyle; HairColor = CachedCharInfo->HairColor;
+		FacialHair = CachedCharInfo->FacialHair;
+	}
 
 
 	// Use equipment-aware character model if we have equipment data

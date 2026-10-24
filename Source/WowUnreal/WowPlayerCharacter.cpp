@@ -12,6 +12,7 @@
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "WowCharacterBuilder.h"
+#include "WowEquipmentManager.h"
 #include "WowCharacterTexture.h"
 #include "WowAssetCache.h"
 #include "WowSessionState.h"
@@ -348,6 +349,7 @@ void AWowPlayerCharacter::SetCharacterModel(UWorld* World, FMpqManager* Mpq, FWo
 	UE_LOG(LogWowPlayerChar, Log, TEXT("Setting character model: Race=%d Gender=%d Skin=%d Face=%d Hair=%d/%d FacialHair=%d"),
 		Race, Gender, SkinColor, Face, HairStyle, HairColor, FacialHair);
 
+	FWowEquipmentManager::ClearEquipment(GetMesh());
 	// Remove any existing skeletal mesh components (except the default one)
 	TArray<USkeletalMeshComponent*> ExistingMeshes;
 	GetComponents<USkeletalMeshComponent>(ExistingMeshes);
@@ -545,6 +547,16 @@ void AWowPlayerCharacter::SetCharacterModelWithEquipment(UWorld* World, FMpqMana
 			{
 				switch (EquipItem.InventoryType)
 				{
+				case 1:
+					Params.Equipment.Add({uint32(EquipItem.DisplayId), FWowEquipmentManager::EAttachmentPoint::Helmet});
+					break;
+				case 3:
+					Params.Equipment.Add({uint32(EquipItem.DisplayId), FWowEquipmentManager::EAttachmentPoint::RightShoulder});
+					Params.Equipment.Add({uint32(EquipItem.DisplayId), FWowEquipmentManager::EAttachmentPoint::LeftShoulder});
+					break;
+				case 16:
+					Params.BodyEquipment.CapeDisplayId = EquipItem.DisplayId;
+					break;
 				case 4:  // Shirt
 					Params.BodyEquipment.ShirtDisplayId = EquipItem.DisplayId;
 					break;
@@ -579,11 +591,13 @@ void AWowPlayerCharacter::SetCharacterModelWithEquipment(UWorld* World, FMpqMana
 				case 17: // Two-hand weapon
 				case 21: // Main hand
 				case 22: // Off hand
+				case 14: // Shield
+				case 23: // Held in off hand
 				case 26: // Ranged wand/thrown
 				{
 					FWowCharacterBuilder::FEquipmentSlot Slot;
 					Slot.ItemDisplayId = EquipItem.DisplayId;
-					Slot.AttachPoint = (EquipItem.InventoryType == 22)
+					Slot.AttachPoint = (EquipItem.Slot == 16 || EquipItem.InventoryType == 22 || EquipItem.InventoryType == 14 || EquipItem.InventoryType == 23)
 						? FWowEquipmentManager::EAttachmentPoint::LeftHand
 						: FWowEquipmentManager::EAttachmentPoint::RightHand;
 					Params.Equipment.Add(Slot);
@@ -598,6 +612,7 @@ void AWowPlayerCharacter::SetCharacterModelWithEquipment(UWorld* World, FMpqMana
 	UE_LOG(LogWowPlayerChar, Log, TEXT("Setting character model with equipment: Race=%d Gender=%d Chest=%d Pants=%d"),
 		Race, Gender, Params.BodyEquipment.ChestDisplayId, Params.BodyEquipment.PantsDisplayId);
 
+	FWowEquipmentManager::ClearEquipment(GetMesh());
 	// Remove any existing skeletal mesh components (except the default one)
 	TArray<USkeletalMeshComponent*> ExistingMeshes;
 	GetComponents<USkeletalMeshComponent>(ExistingMeshes);
@@ -618,7 +633,9 @@ void AWowPlayerCharacter::SetCharacterModelWithEquipment(UWorld* World, FMpqMana
 	// Try the full equipment version first
 	if (Params.Equipment.Num() > 0 ||
 		(Params.BodyEquipment.ChestDisplayId > 0 || Params.BodyEquipment.PantsDisplayId > 0 ||
-		 Params.BodyEquipment.BootsDisplayId > 0 || Params.BodyEquipment.GlovesDisplayId > 0))
+		 Params.BodyEquipment.BootsDisplayId > 0 || Params.BodyEquipment.GlovesDisplayId > 0 ||
+		 Params.BodyEquipment.ShirtDisplayId > 0 || Params.BodyEquipment.BracersDisplayId > 0 ||
+		 Params.BodyEquipment.BeltDisplayId > 0 || Params.BodyEquipment.TabardDisplayId > 0 || Params.BodyEquipment.CapeDisplayId > 0))
 	{
 		TempCharacterActor = FWowCharacterBuilder::SpawnCharacterWithEquipment(
 			World, Mpq, Cache, Params, TempLocation, TempRotation);
@@ -734,6 +751,8 @@ void AWowPlayerCharacter::SetCharacterModelWithEquipment(UWorld* World, FMpqMana
 			}
 		}
 	}
+
+	if (!TempMeshes.IsEmpty()) FWowEquipmentManager::CopyEquipment(TempMeshes[0], GetMesh());
 
 	// Clean up the temporary actor
 	TempCharacterActor->Destroy();
