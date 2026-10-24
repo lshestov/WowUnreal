@@ -43,6 +43,7 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 ### World Objects
 - [x] M2 doodad spawning (instanced rendering)
 - [x] WMO building rendering (per-group meshes, full rotation)
+- [x] Runtime WMO/M2 world collision and NPC support: MOPY collision faces, dedicated M2 bounds, static async collision meshes, local floor/capsule placement and budgeted visual NPC grounding (10 physics/player/NPC/animation regressions passed; native packaged screenshots verified outdoor terrain and abbey WMO support with a 2 cm foot gap, 41–59 FPS).
 - [x] Distance-based object streaming
 
 ### Sky & Atmosphere

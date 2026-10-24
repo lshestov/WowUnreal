@@ -156,6 +156,26 @@ loaded NPC without moving the player. `-NpcDisplayId 31049 -NpcMoving` waits
 for actual server-driven locomotion before capturing. NPC captures omit UI;
 the log records position error, geometry, textures and evaluated bone poses.
 
+### World collision and NPC support
+
+WMO groups retain MOPY triangle flags. Collision includes explicit collision
+faces, ordinary render faces without the detail flag, and material 255 faces.
+M2 scenery uses its dedicated bounding vertices/triangles; visible foliage and
+cloth do not become blockers. Both formats create hidden static procedural
+collision meshes with asynchronous runtime cooking, independent of the visual
+static mesh's cooked data. Incremental doodad removal destroys its collider too.
+
+NPC support probes process at most 16 entities per frame. A local downward
+trace places reference-pose feet 2 cm above terrain or architecture. This is a
+visual offset: server positions and spline routes retain their original values.
+Flying, hovering, swimming and falling entities skip this adjustment. Initial
+player placement searches nearby walkable layers with capsule clearance, so a
+floor can replace terrain beneath it without selecting a distant roof.
+
+NPC screenshots log `NpcGroundCapture` (feet, support surface and gap) and
+`NpcGroundingCost`. The captured position error can include the deliberate
+vertical support offset.
+
 ## Regression tests
 
 Run each filter separately with the editor command-line executable:
@@ -188,3 +208,7 @@ the MPQ integration test reports the loader's two warnings in that case.
 clothing pixels, both of Deputy Willem's shoulders, cooked material bindings
 and equipment transfer across source-actor destruction and garbage collection.
 Its integration test also requires `-wowdata=<client Data directory>`.
+`WowUnreal.Collision` checks asynchronous runtime floors, capsule wall sweeps,
+layer selection, WMO collision flags and collider cleanup. With `-wowdata`, it
+also parses Northshire Abbey's actual groups, traces its floor, sweeps its wall
+and checks a real crate's dedicated M2 bounding geometry.

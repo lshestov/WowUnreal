@@ -1,4 +1,6 @@
 #include "WowWmoRenderer.h"
+#include "WowWorldCollision.h"
+#include "PhysicsEngine/BodySetup.h"
 #include "WowRuntimeMeshMaterials.h"
 #include "WowWaterMaterial.h"
 #include "Mpq/MpqManager.h"
@@ -80,6 +82,7 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
     // Scale (WMOs can have scale too)
     float ScaleVal = (Placement.Scale == 0) ? 1.0f : Placement.Scale / 1024.0f;
     WmoActor->SetActorScale3D(FVector(ScaleVal));
+    RootComp->SetMobility(EComponentMobility::Static);
 
     int32 GroupsLoaded = 0;
 
@@ -101,6 +104,8 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
             continue;
         }
 
+        FWowWorldCollision::AddWmo(RootComp, *FString::Printf(TEXT("WmoCollision_%u"), GroupIdx), GroupData);
+
         // Create UStaticMesh with Nanite for this group
         UStaticMesh* GroupMesh = CreateStaticMeshFromWmoGroup(GroupData, RootData, WmoPath, GroupIdx, Mpq, Cache);
         if (!GroupMesh) continue;
@@ -108,6 +113,7 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
         FName CompName = *FString::Printf(TEXT("WmoGroup_%d"), GroupIdx);
         UStaticMeshComponent* MeshComp = NewObject<UStaticMeshComponent>(WmoActor, CompName);
         MeshComp->SetupAttachment(RootComp);
+        MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
         MeshComp->SetStaticMesh(GroupMesh);
         MeshComp->SetCastShadow(true);
         MeshComp->RegisterComponent();
@@ -298,6 +304,8 @@ UStaticMesh* FWowWmoRenderer::CreateStaticMeshFromWmoGroup(
     }
 
     UStaticMesh* SM = NewObject<UStaticMesh>();
+    SM->CreateBodySetup();
+    SM->GetBodySetup()->bNeverNeedsCookedCollisionData = true;
 
     FMeshDescription MeshDesc;
     FStaticMeshAttributes Attributes(MeshDesc);

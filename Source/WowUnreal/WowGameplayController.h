@@ -81,6 +81,11 @@ private:
     TWeakObjectPtr<AActor> NpcCaptureTarget;
     TWeakObjectPtr<class ACameraActor> NpcCaptureCamera;
     void UpdateNpcCaptureCamera();
+    void UpdateEntityGrounding();
+    TMap<uint64, float> NpcGroundOffsets;
+    TMap<uint64, float> NpcReferenceFeet;
+    int32 NpcGroundCursor = 0;
+    double NpcGroundingMilliseconds = 0;
 
 public:
 

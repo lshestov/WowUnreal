@@ -3,6 +3,7 @@
 #include "WowAnimationController.h"
 #include "WowCharacterBuilder.h"
 #include "WowM2AnimInstance.h"
+#include "WowWorldCollision.h"
 #include "Coord/WowCoordinate.h"
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
@@ -106,4 +107,12 @@ void AWowGameplayController::LogNpcCapture() const
         Textures.Num(), Animation ? Animation->GetM2AnimationId() : -1, Animation ? Animation->GetM2Time() : 0,
         Animation ? Animation->GetM2PlayRate() : 0, AnimatedBones, PoseChecksum, Entity->Movement.GetSplineSpeed());
     for (const FString& Texture : Textures) UE_LOG(LogWowNpcCapture, Log, TEXT("NpcCaptureTexture: %s"), *Texture);
+    const float FootOffset = NpcReferenceFeet.FindRef(Entity->Guid);
+    const FVector Feet = Target->GetActorLocation() + FVector(0, 0, FootOffset);
+    FHitResult Ground;
+    const bool GroundReady = FWowWorldCollision::FindFloor(GetWorld(), Feet, Target, Ground);
+    UE_LOG(LogWowNpcCapture, Log, TEXT("NpcGroundCapture: feetZ=%.3f floorZ=%.3f gap=%.3f ready=%d surface=%s"),
+        Feet.Z, GroundReady ? Ground.ImpactPoint.Z : 0, GroundReady ? Feet.Z - Ground.ImpactPoint.Z : 0,
+        GroundReady ? 1 : 0, GroundReady ? *GetNameSafe(Ground.GetComponent()) : TEXT("none"));
+    UE_LOG(LogWowNpcCapture, Log, TEXT("NpcGroundingCost: %.3f ms"), NpcGroundingMilliseconds);
 }

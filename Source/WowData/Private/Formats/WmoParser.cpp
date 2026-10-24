@@ -382,7 +382,16 @@ FWmoGroupData FWmoParser::ParseGroup(const TArray<uint8>& Data)
             break;
         }
 
-        if (ChunkMagic == WMO_MOVI)
+        if (ChunkMagic == WMO_MOPY)
+        {
+            Result.TriangleMaterials.SetNum(ChunkSize / 2);
+            for (uint32 I = 0; I < ChunkSize / 2; ++I)
+            {
+                Result.TriangleMaterials[I].Flags = Base[ChunkStart + I * 2];
+                Result.TriangleMaterials[I].Material = Base[ChunkStart + I * 2 + 1];
+            }
+        }
+        else if (ChunkMagic == WMO_MOVI)
         {
             // Triangle indices: uint16 each
             const uint32 NumIndices = ChunkSize / 2;

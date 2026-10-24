@@ -802,6 +802,7 @@ void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
 			&& !Entity.Movement.bHasActiveSpline && !DeadEntityGuids.Contains(Entity.Guid))
 		{
 			FVector UEPos = FWowCoordinate::WowToUE(Entity.Movement.Position);
+			UEPos.Z += NpcGroundOffsets.FindRef(Entity.Guid);
 			if (!UEPos.ContainsNaN())
 			{
 				// Smooth interpolation instead of teleporting
@@ -996,6 +997,7 @@ void AWowGameplayController::Tick(float DeltaTime)
 	// Update character animations
 	UpdatePlayerAnimations();
 	UpdateEntityAnimations();
+	UpdateEntityGrounding();
 	UpdateNpcCaptureCamera();
 
 	// Update cast bar progress
@@ -1454,6 +1456,8 @@ void AWowGameplayController::OnEntityDeath(uint64 Guid)
 
 void AWowGameplayController::OnEntityDestroyed(uint64 Guid)
 {
+	NpcGroundOffsets.Remove(Guid);
+	NpcReferenceFeet.Remove(Guid);
 	// If this is a dead corpse, keep it visible for looting — don't destroy yet
 	if (DeadEntityGuids.Contains(Guid))
 	{
@@ -1656,6 +1660,7 @@ void AWowGameplayController::UpdateEntitySplineMovement(float DeltaTime)
 		if (ActorPtr && *ActorPtr)
 		{
 			FVector UEPos = FWowCoordinate::WowToUE(Entity.Movement.Position);
+			UEPos.Z += NpcGroundOffsets.FindRef(Entity.Guid);
 			if (UEPos.ContainsNaN()) continue; // Skip invalid positions
 			(*ActorPtr)->SetActorLocation(UEPos);
 			float Ori = FMath::IsFinite(Entity.Movement.Orientation) ? Entity.Movement.Orientation : 0.0f;

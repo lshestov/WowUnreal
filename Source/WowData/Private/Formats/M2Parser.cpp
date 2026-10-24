@@ -293,6 +293,18 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
     Result.BoundingSphereRadius = Header.BoundingSphereRadius;
     Result.NumBones = Header.nBones;
 
+    // Dedicated simplified collision data, not the visible leaves/cloth mesh.
+    const float* CollisionPositions = nullptr;
+    const uint16* CollisionIndices = nullptr;
+    if (Header.nBoundingVertices <= 1000000 && Header.nBoundingTriangles <= 3000000 &&
+        SafeRead(M2Base, M2Size, Header.ofsBoundingVertices, Header.nBoundingVertices * 3, CollisionPositions) &&
+        SafeRead(M2Base, M2Size, Header.ofsBoundingTriangles, Header.nBoundingTriangles, CollisionIndices))
+    {
+        for (uint32 I = 0; I < Header.nBoundingVertices; ++I)
+            Result.CollisionVertices.Add(FVector(CollisionPositions[I * 3], CollisionPositions[I * 3 + 1], CollisionPositions[I * 3 + 2]));
+        if (Header.nBoundingTriangles) Result.CollisionIndices.Append(CollisionIndices, Header.nBoundingTriangles);
+    }
+
     // ── Read vertices ───────────────────────────────────────────────────
     const FM2VertexRaw* RawVerts = nullptr;
     if (!SafeRead(M2Base, M2Size, Header.ofsVertices, Header.nVertices, RawVerts))

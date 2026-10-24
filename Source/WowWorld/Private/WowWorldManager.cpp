@@ -1,4 +1,5 @@
 #include "WowWorldManager.h"
+#include "WowWorldCollision.h"
 #include "WowRuntimeMeshMaterials.h"
 #include "WowTerrainTile.h"
 #include "Mpq/MpqManager.h"
@@ -987,6 +988,7 @@ void AWowWorldManager::UpdateStreaming()
                 {
                     if (DoodadPair.Value)
                     {
+                        FWowWorldCollision::DestroyChildren(DoodadPair.Value);
                         DoodadPair.Value->DestroyComponent();
                         --ActiveDoodadCount;
                     }
@@ -1570,6 +1572,7 @@ void AWowWorldManager::UpdateObjectStreaming()
                     TObjectPtr<UStaticMeshComponent>* Comp = Tile->SpawnedDoodads.Find(Id);
                     if (Comp && *Comp)
                     {
+                        FWowWorldCollision::DestroyChildren(*Comp);
                         (*Comp)->DestroyComponent();
                         --ActiveDoodadCount;
                     }

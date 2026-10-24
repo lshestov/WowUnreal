@@ -41,6 +41,7 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
 
     FVector TileCenter = FWowCoordinate::TileToWorld(TX, TY);
     SetActorLocation(TileCenter);
+    RootScene->SetMobility(EComponentMobility::Static);
 
     UE_LOG(LogTerrainTile, Log, TEXT("Tile %d,%d at %s: %d textures, %d doodads, %d WMOs"),
         TX, TY, *TileCenter.ToString(), Data.TexturePaths.Num(), Data.DoodadPlacements.Num(), Data.WmoPlacements.Num());

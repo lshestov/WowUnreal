@@ -1,4 +1,6 @@
 #include "WowDoodadManager.h"
+#include "WowWorldCollision.h"
+#include "PhysicsEngine/BodySetup.h"
 #include "WowRuntimeMeshMaterials.h"
 #include "Mpq/MpqManager.h"
 #include "WowAssetCache.h"
@@ -250,7 +252,16 @@ UStaticMeshComponent* FWowDoodadManager::SpawnSingleDoodad(
     MeshComp->SetWorldRotation(FWowCoordinate::WowRotationToUE(
         Placement.Rotation.X, Placement.Rotation.Y, Placement.Rotation.Z));
     MeshComp->SetWorldScale3D(FVector(ScaleVal));
+    MeshComp->SetMobility(EComponentMobility::Static);
     MeshComp->RegisterComponent();
+
+    if (const auto Model = GetOrParseM2(M2Path, Mpq))
+    {
+        TArray<FVector> Vertices;
+        TArray<int32> Indices;
+        FWowWorldCollision::AppendM2(*Model, FTransform::Identity, Vertices, Indices);
+        FWowWorldCollision::Create(MeshComp, TEXT("DoodadCollision"), Vertices, Indices);
+    }
 
     return MeshComp;
 }
@@ -293,6 +304,8 @@ UStaticMesh* FWowDoodadManager::CreateStaticMeshFromM2(const FM2Data& Data, cons
     }
 
     UStaticMesh* StaticMesh = NewObject<UStaticMesh>();
+    StaticMesh->CreateBodySetup();
+    StaticMesh->GetBodySetup()->bNeverNeedsCookedCollisionData = true;
     StaticMesh->bAllowCPUAccess = true; // Required for HISMC instancing
 
     FMeshDescription MeshDesc;
@@ -577,11 +590,14 @@ TArray<UInstancedStaticMeshComponent*> FWowDoodadManager::SpawnDoodadsInstanced(
     }
 
     int32 TotalInstances = 0;
+    TArray<FVector> CollisionVertices;
+    TArray<int32> CollisionIndices;
 
     for (auto& Pair : GroupedPlacements)
     {
         const FString& M2Path = Pair.Key;
         const TArray<const FAdtDoodadPlacement*>& GroupPlacements = Pair.Value;
+        const auto CollisionModel = GetOrParseM2(M2Path, Mpq);
 
         // Get or create static mesh for this model
         UStaticMesh* SM = GetOrCreateStaticMesh(M2Path, Mpq, Cache);
@@ -620,6 +636,9 @@ TArray<UInstancedStaticMeshComponent*> FWowDoodadManager::SpawnDoodadsInstanced(
 
             FTransform InstanceTransform(Rot, UEPos, FVector(ScaleVal));
             ISM->AddInstance(InstanceTransform, /*bWorldSpace=*/true);
+            if (CollisionModel)
+                FWowWorldCollision::AppendM2(*CollisionModel,
+                    InstanceTransform.GetRelativeTransform(ParentActor->GetRootComponent()->GetComponentTransform()), CollisionVertices, CollisionIndices);
         }
 
         ISM->MarkRenderStateDirty();
@@ -628,6 +647,7 @@ TArray<UInstancedStaticMeshComponent*> FWowDoodadManager::SpawnDoodadsInstanced(
         TotalInstances += GroupPlacements.Num();
     }
 
+    FWowWorldCollision::Create(ParentActor->GetRootComponent(), TEXT("DoodadCollision"), CollisionVertices, CollisionIndices);
     UE_LOG(LogWowDoodad, Log, TEXT("Instanced %d doodads across %d HISMCs (%d unique models)"),
         TotalInstances, Result.Num(), GroupedPlacements.Num());
 

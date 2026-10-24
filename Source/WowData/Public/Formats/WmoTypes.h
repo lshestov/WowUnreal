@@ -49,6 +49,14 @@ struct WOWDATA_API FWmoGroupData
     TArray<FVector> Normals;
     TArray<FVector2D> TexCoords;
     TArray<uint16> Indices;
+    struct FTriangleMaterial { uint8 Flags = 0; uint8 Material = 0; };
+    TArray<FTriangleMaterial> TriangleMaterials;
+    bool HasCollision(int32 Triangle) const
+    {
+        if (!TriangleMaterials.IsValidIndex(Triangle)) return true;
+        const auto& Face = TriangleMaterials[Triangle];
+        return (Face.Flags & 0x08) || ((Face.Flags & 0x20) && !(Face.Flags & 0x04)) || Face.Material == 0xFF;
+    }
     TArray<FColor> VertexColors;
     struct FBatch { uint32 IndexStart=0; uint16 IndexCount=0; uint16 VertexStart=0; uint16 VertexEnd=0; uint8 MaterialIndex=0; };
     TArray<FBatch> Batches;

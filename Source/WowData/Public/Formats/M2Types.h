@@ -137,6 +137,8 @@ struct WOWDATA_API FM2Submesh
 
 struct WOWDATA_API FM2Data
 {
+    TArray<FVector> CollisionVertices;
+    TArray<uint16> CollisionIndices;
     TArray<FM2Vertex> Vertices;
     TArray<uint16> Indices;
     TArray<FString> TexturePaths;

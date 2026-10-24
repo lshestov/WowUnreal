@@ -9,6 +9,7 @@
 #include "WowCredentialStore.h"
 #include "WowGameplayController.h"
 #include "WowPlayerCharacter.h"
+#include "WowWorldCollision.h"
 #include "WowM2AnimInstance.h"
 // removed: now using SWowLoadingScreen.h
 #include "GameFramework/CharacterMovementComponent.h"
@@ -777,16 +778,13 @@ bool AWowLoginController::TrySnapPawnToGround(APawn* Pawn, bool bLogFailure)
     }
 
     const FVector PawnPos = Pawn->GetActorLocation();
-    const FVector TraceStart(PawnPos.X, PawnPos.Y, 500000.0f);
-    const FVector TraceEnd(PawnPos.X, PawnPos.Y, -500000.0f);
+    const ACharacter* Character = Cast<ACharacter>(Pawn);
+    const float HalfHeight = Character ? Character->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() : 88.0f;
+    const float Radius = Character ? Character->GetCapsuleComponent()->GetScaledCapsuleRadius() : 35.0f;
 
     FHitResult Hit;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(Pawn);
-    QueryParams.bTraceComplex = true;
-
     UWorld* World = GetWorld();
-    if (!World || !World->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, ECC_WorldStatic, QueryParams))
+    if (!FWowWorldCollision::FindFloor(World, PawnPos - FVector(0, 0, HalfHeight), Pawn, Hit, 200, 10000, Radius, HalfHeight))
     {
         if (bLogFailure)
         {
