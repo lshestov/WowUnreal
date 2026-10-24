@@ -16,7 +16,7 @@
 #include "Engine/SkeletalMesh.h"
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "Animation/AnimSequence.h"
-#include "Animation/AnimData/IAnimationDataController.h"
+
 #include "Animation/Skeleton.h"
 #include "GameFramework/Actor.h"
 #include "Engine/World.h"
@@ -41,7 +41,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogWowCharacter, Log, All);
 static TMap<FString, TSharedPtr<FM2Data>> CharM2Cache;
 static FCriticalSection CharCacheLock;
 static TMap<FString, TWeakObjectPtr<USkeleton>> CharSkeletonCache;
-static TMap<FString, TArray<TWeakObjectPtr<UAnimSequence>>> CharAnimCache;
+
 static TMap<FString, TArray<FGeosetSectionInfo>> CharGeosetCache;
 
 namespace
@@ -215,67 +215,6 @@ void ApplyTexturedMaterial(UPrimitiveComponent* Component, UTexture2D* Texture)
         MID->SetTextureParameterValue(TEXT("BaseTexture"), Texture);
         Component->SetMaterial(0, MID);
     }
-}
-
-int32 FindPreferredAnimationIndex(const FM2Data& Data)
-{
-    int32 FirstLooping = INDEX_NONE;
-    for (int32 Index = 0; Index < Data.AnimationTracks.Num(); ++Index)
-    {
-        const FM2AnimationData& Track = Data.AnimationTracks[Index];
-        if (Track.AnimationId == 0)
-        {
-            return Index;
-        }
-
-        if (FirstLooping == INDEX_NONE && Track.bIsLooping)
-        {
-            FirstLooping = Index;
-        }
-    }
-
-    return FirstLooping != INDEX_NONE ? FirstLooping : 0;
-}
-
-UAnimSequence* CreateReferencePoseAnimation(USkeleton* Skeleton, const FString& ModelName)
-{
-    if (!Skeleton)
-    {
-        return nullptr;
-    }
-
-#if WITH_EDITOR
-    UAnimSequence* AnimSeq = NewObject<UAnimSequence>();
-    AnimSeq->SetSkeleton(Skeleton);
-
-    IAnimationDataController& Controller = AnimSeq->GetController();
-    Controller.InitializeModel();
-    Controller.OpenBracket(FText::FromString(TEXT("CreateReferencePoseAnimation")));
-    Controller.SetFrameRate(FFrameRate(30, 1));
-    Controller.SetNumberOfFrames(1);
-
-    const FReferenceSkeleton& RefSkeleton = Skeleton->GetReferenceSkeleton();
-    const TArray<FTransform>& RefPose = RefSkeleton.GetRefBonePose();
-    for (int32 BoneIndex = 0; BoneIndex < RefSkeleton.GetNum(); ++BoneIndex)
-    {
-        const FName BoneName = RefSkeleton.GetBoneName(BoneIndex);
-        const FTransform& BoneTransform = RefPose[BoneIndex];
-
-        Controller.AddBoneCurve(BoneName);
-        Controller.SetBoneTrackKeys(
-            BoneName,
-            { FVector3f(BoneTransform.GetTranslation()) },
-            { FQuat4f(BoneTransform.GetRotation()) },
-            { FVector3f(BoneTransform.GetScale3D()) });
-    }
-
-    Controller.CloseBracket();
-    Controller.NotifyPopulated();
-    UE_LOG(LogWowCharacter, Log, TEXT("Created reference-pose animation for %s"), *ModelName);
-    return AnimSeq;
-#else
-    return nullptr; // The skeletal component already evaluates its reference pose.
-#endif
 }
 
 UTexture2D* ResolveCreatureTextureOverride(FMpqManager* Mpq, FWowAssetCache* Cache,
@@ -988,94 +927,12 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
                 }
             }
 
-            TArray<TWeakObjectPtr<UAnimSequence>> CachedAnimations;
-            bool bNeedCreateAnimations = true;
+            if (M2Data->HasAnimationData())
             {
-                FScopeLock Lock(&CharCacheLock);
-                if (TArray<TWeakObjectPtr<UAnimSequence>>* Found = CharAnimCache.Find(NormPath))
-                {
-                    CachedAnimations = *Found;
-                    bNeedCreateAnimations = Found->Num() == 0 || !(*Found)[0].IsValid();
-                }
+                UWowAnimationController* AnimController = NewObject<UWowAnimationController>(Actor, TEXT("WowAnimationController"));
+                AnimController->InitializeRuntime(SkelMesh, M2Data);
+                Actor->Tags.Add(FName(TEXT("HasWowAnimController")));
             }
-
-            if (bNeedCreateAnimations && Skeleton)
-            {
-                CachedAnimations.Reset();
-                for (UAnimSequence* Animation : FWowSkeletalMeshBuilder::CreateAnimations(*M2Data, Skeleton, ModelPath))
-                {
-                    if (Animation)
-                    {
-                        CachedAnimations.Add(Animation);
-                    }
-                }
-
-                if (CachedAnimations.Num() == 0)
-                {
-                    if (UAnimSequence* ReferencePoseAnimation = CreateReferencePoseAnimation(Skeleton, ModelPath))
-                    {
-                        CachedAnimations.Add(ReferencePoseAnimation);
-                    }
-                }
-
-                FScopeLock Lock(&CharCacheLock);
-                CharAnimCache.Add(NormPath, CachedAnimations);
-            }
-
-            // Setup animation controller for state-based animation switching
-            if (CachedAnimations.Num() > 0)
-            {
-                // Convert weak pointers to strong pointers for the animation controller
-                TArray<UAnimSequence*> Animations;
-                for (const TWeakObjectPtr<UAnimSequence>& WeakAnim : CachedAnimations)
-                {
-                    if (UAnimSequence* Anim = WeakAnim.Get())
-                    {
-                        Animations.Add(Anim);
-                    }
-                }
-
-                if (Animations.Num() > 0)
-                {
-                    // Create and initialize animation controller
-                    UWowAnimationController* AnimController = NewObject<UWowAnimationController>(Actor, TEXT("WowAnimationController"));
-                    AnimController->Initialize(SkelMesh, Animations);
-
-                    // Build animation ID map: M2 AnimationId → output animation index
-                    // CreateAnimations skips empty tracks, so we need to count which tracks
-                    // actually produced output animations
-                    TMap<int32, int32> AnimIdMap;
-                    int32 OutputIdx = 0;
-                    for (const FM2AnimationData& Track : M2Data->AnimationTracks)
-                    {
-                        if (Track.Duration == 0 || Track.BoneTracks.Num() == 0)
-                        {
-                            continue; // This track was skipped by CreateAnimations
-                        }
-                        if (OutputIdx < Animations.Num() && !AnimIdMap.Contains(Track.AnimationId))
-                        {
-                            AnimIdMap.Add(Track.AnimationId, OutputIdx);
-                        }
-                        ++OutputIdx;
-                    }
-                    AnimController->SetAnimationIdMap(AnimIdMap);
-
-                    Actor->Tags.Add(FName(TEXT("HasWowAnimController")));
-                    UE_LOG(LogWowCharacter, Log, TEXT("Created animation controller with %d animations, %d ID mappings"),
-                        Animations.Num(), AnimIdMap.Num());
-                }
-            }
-            else
-            {
-                // Fallback: use legacy single animation mode if no animations available
-                int32 AnimIndex = FindPreferredAnimationIndex(*M2Data);
-                if (CachedAnimations.IsValidIndex(AnimIndex) && CachedAnimations[AnimIndex].IsValid())
-                {
-                    SkelMesh->SetAnimationMode(EAnimationMode::AnimationSingleNode);
-                    SkelMesh->PlayAnimation(CachedAnimations[AnimIndex].Get(), true);
-                }
-            }
-
             UE_LOG(LogWowCharacter, Log, TEXT("Spawned skeletal M2 actor: %s at %s (scale=%.2f, %d bones, %d anims)"),
                 *ModelPath, *Location.ToString(), Scale, M2Data->Bones.Num(), M2Data->AnimationTracks.Num());
             return Actor;

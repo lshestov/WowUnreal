@@ -6,6 +6,8 @@
 class UAnimSequence;
 class USkeletalMeshComponent;
 struct FM2AnimationData;
+struct FM2Data;
+class UWowM2AnimInstance;
 
 /**
  * WoW M2 Animation IDs from AnimationData.dbc
@@ -158,6 +160,10 @@ public:
     UFUNCTION(BlueprintCallable)
     void Initialize(USkeletalMeshComponent* InMeshComponent, const TArray<UAnimSequence*>& Animations);
 
+    void InitializeRuntime(USkeletalMeshComponent* InMeshComponent, TSharedPtr<const FM2Data> Model);
+    void InitializeFromController(USkeletalMeshComponent* InMeshComponent, const UWowAnimationController* Source);
+    UWowM2AnimInstance* GetRuntimeInstance() const { return RuntimeInstance; }
+
     /**
      * Update animation state based on movement info and entity conditions.
      * Call this from Tick() or when movement state changes.
@@ -170,7 +176,7 @@ public:
      * Translates UE5 movement component state to WoW animation state.
      */
     UFUNCTION(BlueprintCallable)
-    void UpdateLocalPlayerState(class ACharacter* PlayerCharacter);
+    void UpdateLocalPlayerState(class ACharacter* PlayerCharacter, bool bWalking = false);
 
     /**
      * Play a specific animation by M2 animation ID.
@@ -205,7 +211,7 @@ public:
      * Check if the controller has been initialized.
      */
     UFUNCTION(BlueprintCallable, BlueprintPure)
-    bool IsInitialized() const { return MeshComponent != nullptr && AllAnimations.Num() > 0; }
+    bool IsInitialized() const { return MeshComponent != nullptr && (RuntimeInstance != nullptr || AllAnimations.Num() > 0); }
 
     /**
      * Check if a one-shot animation (attack, wound) is currently playing.
@@ -226,6 +232,10 @@ public:
     void SetAnimationIdMap(const TMap<int32, int32>& InMap);
 
 protected:
+    UPROPERTY()
+    TObjectPtr<UWowM2AnimInstance> RuntimeInstance;
+    TSharedPtr<const FM2Data> RuntimeModel;
+
     /** Target skeletal mesh component */
     UPROPERTY()
     TObjectPtr<USkeletalMeshComponent> MeshComponent;
@@ -247,11 +257,11 @@ protected:
     TObjectPtr<UAnimSequence> CurrentAnimation;
 
     /** Jump sequence tracking */
-    float JumpStartTime = 0.0f;
+    double JumpStartTime = 0.0;
     bool bInJumpSequence = false;
 
     /** One-shot animation lock — prevents state machine from overriding non-looping anims */
-    float OneShotEndTime = 0.0f;
+    double OneShotEndTime = 0.0;
     bool bPlayingOneShot = false;
 
 private:
@@ -259,13 +269,13 @@ private:
     EWowAnimState DetermineAnimationState(const struct FWowMovementInfo& MovementInfo, bool bIsInCombat, bool bIsCasting) const;
 
     /** Determine animation state from local player movement */
-    EWowAnimState DetermineLocalPlayerState(class ACharacter* PlayerCharacter) const;
+    EWowAnimState DetermineLocalPlayerState(class ACharacter* PlayerCharacter, bool bWalking) const;
 
     /** Get the best animation ID for a given state */
     EWowAnimId GetAnimationForState(EWowAnimState State) const;
 
     /** Switch to a new animation state */
-    void SetAnimationState(EWowAnimState NewState);
+    void SetAnimationState(EWowAnimState NewState, bool bForce = false);
 
     /** Check if character is moving based on movement info */
     bool IsMoving(const struct FWowMovementInfo& MovementInfo) const;

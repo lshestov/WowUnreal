@@ -103,8 +103,23 @@ local placement. Repeated logins do not accumulate extra altitude.
 
 Packaged targets build M2 skeletal render buffers directly, without the
 editor import pipeline. The local character is visible from the normal
-third-person camera. Runtime animation sequence generation remains pending;
-the packaged model currently uses its skeletal reference pose.
+third-person camera. `UWowM2AnimInstance` samples parsed M2 bone tracks directly
+in both Game and Editor. Translation and scale use the original key times;
+rotations use quaternion interpolation with the mesh's coordinate conversion.
+State changes blend over 120 ms. Worker evaluation consumes a copy of local
+transforms, with no access to the M2 cache or gameplay objects.
+
+Movement selects Stand, Walk or Run from actual velocity and the walk toggle.
+Jump takeoff, airborne/fall and landing use their M2 clips. Existing attack,
+cast and emote handlers share this playback path; one-shots return to the
+movement pose when complete. Missing clips are reported to the caller so its
+fallback chain can select an available animation.
+
+For a rendered clip inspection, add `-captureanimation=5` alongside
+`-autologin -worldscreenshot=run.png`. It previews the Run clip without moving
+the player. The workspace capture script exposes this as `-AnimationId 5`.
+Without that option, screenshots show normal gameplay animation selection.
+`AnimationCapture` logs the clip time and actual mesh bone-pose diagnostics.
 
 ## Regression tests
 
@@ -125,3 +140,6 @@ world material contracts. `WowUnreal.Network.QueuedPacketSocketLifetime`
 checks that a queued packet cannot dereference a destroyed world socket.
 `WowUnreal.Player` checks runtime skeletal render buffers, login placement
 and camera distance, and ground tracing against asynchronously cooked terrain.
+`WowUnreal.Animation` checks nonuniform key times, looping and one-shot clocks,
+bone remapping, transitions, movement selection, controller transfer and actual
+skeletal-component evaluation through the native animation proxy.

@@ -1,4 +1,5 @@
 #include "WowAnimationController.h"
+#include "WowM2AnimInstance.h"
 #include "Animation/AnimSequence.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/Character.h"
@@ -12,9 +13,45 @@ UWowAnimationController::UWowAnimationController()
 {
 }
 
+void UWowAnimationController::InitializeRuntime(USkeletalMeshComponent* InMeshComponent, TSharedPtr<const FM2Data> Model)
+{
+    MeshComponent = InMeshComponent;
+    RuntimeModel = MoveTemp(Model);
+    RuntimeInstance = nullptr;
+    AllAnimations.Reset();
+    AnimationCache.Reset();
+    CurrentAnimation = nullptr;
+    CurrentState = EWowAnimState::Idle;
+    bPlayingOneShot = false;
+    if (!MeshComponent || !RuntimeModel || !RuntimeModel->HasAnimationData()) return;
+    MeshComponent->SetAnimInstanceClass(UWowM2AnimInstance::StaticClass());
+    RuntimeInstance = Cast<UWowM2AnimInstance>(MeshComponent->GetAnimInstance());
+    if (!RuntimeInstance) return;
+    RuntimeInstance->InitializeModel(RuntimeModel);
+    UE_LOG(LogWowAnim, Log, TEXT("Runtime M2 controller: %d clips, initial AnimID=%d"),
+        RuntimeModel->AnimationTracks.Num(), RuntimeInstance->GetM2AnimationId());
+}
+
+void UWowAnimationController::InitializeFromController(USkeletalMeshComponent* InMeshComponent, const UWowAnimationController* Source)
+{
+    if (!Source) return;
+    if (Source->RuntimeModel)
+    {
+        InitializeRuntime(InMeshComponent, Source->RuntimeModel);
+        return;
+    }
+    TArray<UAnimSequence*> Animations;
+    for (const auto& Animation : Source->AllAnimations) Animations.Add(Animation.Get());
+    Initialize(InMeshComponent, Animations);
+    AnimationCache = Source->AnimationCache;
+    PlayAnimationById(EWowAnimId::Stand);
+}
+
 void UWowAnimationController::Initialize(USkeletalMeshComponent* InMeshComponent, const TArray<UAnimSequence*>& Animations)
 {
     MeshComponent = InMeshComponent;
+    RuntimeInstance = nullptr;
+    RuntimeModel.Reset();
     AnimationCache.Empty();
 
     if (!MeshComponent)
@@ -81,6 +118,7 @@ void UWowAnimationController::UpdateAnimationState(const FWowMovementInfo& Movem
     {
         return;
     }
+    const bool bOneShotFinished = bPlayingOneShot;
     bPlayingOneShot = false;
 
     EWowAnimState NewState = DetermineAnimationState(MovementInfo, bIsInCombat, bIsCasting);
@@ -109,13 +147,13 @@ void UWowAnimationController::UpdateAnimationState(const FWowMovementInfo& Movem
         }
     }
 
-    if (NewState != CurrentState)
+    if (NewState != CurrentState || bOneShotFinished)
     {
-        SetAnimationState(NewState);
+        SetAnimationState(NewState, bOneShotFinished);
     }
 }
 
-void UWowAnimationController::UpdateLocalPlayerState(ACharacter* PlayerCharacter)
+void UWowAnimationController::UpdateLocalPlayerState(ACharacter* PlayerCharacter, bool bWalking)
 {
     if (!IsInitialized() || !PlayerCharacter)
     {
@@ -127,9 +165,10 @@ void UWowAnimationController::UpdateLocalPlayerState(ACharacter* PlayerCharacter
     {
         return;
     }
+    const bool bOneShotFinished = bPlayingOneShot;
     bPlayingOneShot = false;
 
-    EWowAnimState NewState = DetermineLocalPlayerState(PlayerCharacter);
+    EWowAnimState NewState = DetermineLocalPlayerState(PlayerCharacter, bWalking);
 
     // Handle jump sequence for local player
     UCharacterMovementComponent* Movement = PlayerCharacter->GetCharacterMovement();
@@ -141,8 +180,8 @@ void UWowAnimationController::UpdateLocalPlayerState(ACharacter* PlayerCharacter
             {
                 // Starting a jump
                 NewState = EWowAnimState::Jumping;
+                if (!bInJumpSequence) JumpStartTime = FPlatformTime::Seconds();
                 bInJumpSequence = true;
-                JumpStartTime = FPlatformTime::Seconds();
             }
             else
             {
@@ -154,14 +193,17 @@ void UWowAnimationController::UpdateLocalPlayerState(ACharacter* PlayerCharacter
         {
             // Landed
             bInJumpSequence = false;
-            NewState = DetermineLocalPlayerState(PlayerCharacter);
+            NewState = DetermineLocalPlayerState(PlayerCharacter, bWalking);
+            if (PlayAnimationById(EWowAnimId::JumpEnd, false)) return;
         }
     }
 
-    if (NewState != CurrentState)
+    if (NewState != CurrentState || bOneShotFinished)
     {
-        SetAnimationState(NewState);
+        SetAnimationState(NewState, bOneShotFinished);
     }
+    if (NewState == EWowAnimState::Jumping && FPlatformTime::Seconds() - JumpStartTime > 0.2)
+        PlayAnimationById(EWowAnimId::Jump, true);
 }
 
 // NOTE: PlayAnimationById defined at end of file (needs AnimationCache + AllAnimations)
@@ -220,7 +262,7 @@ EWowAnimState UWowAnimationController::DetermineAnimationState(const FWowMovemen
     return EWowAnimState::Idle;
 }
 
-EWowAnimState UWowAnimationController::DetermineLocalPlayerState(ACharacter* PlayerCharacter) const
+EWowAnimState UWowAnimationController::DetermineLocalPlayerState(ACharacter* PlayerCharacter, bool bWalking) const
 {
     if (!PlayerCharacter)
     {
@@ -267,7 +309,7 @@ EWowAnimState UWowAnimationController::DetermineLocalPlayerState(ACharacter* Pla
     if (Speed > 10.0f) // Moving threshold
     {
         // Check if walking (based on character's walking flag)
-        if (Movement->GetMaxSpeed() <= Movement->MaxWalkSpeed * 1.1f) // Allow small tolerance
+        if (bWalking)
         {
             return EWowAnimState::Walking;
         }
@@ -311,9 +353,9 @@ EWowAnimId UWowAnimationController::GetAnimationForState(EWowAnimState State) co
     }
 }
 
-void UWowAnimationController::SetAnimationState(EWowAnimState NewState)
+void UWowAnimationController::SetAnimationState(EWowAnimState NewState, bool bForce)
 {
-    if (NewState == CurrentState)
+    if (NewState == CurrentState && !bForce)
     {
         return;
     }
@@ -340,6 +382,9 @@ void UWowAnimationController::SetAnimationState(EWowAnimState NewState)
 
     if (PlayAnimationById(AnimId, bShouldLoop))
     {
+        // Takeoff is a movement phase, not an uninterruptible action. It must
+        // yield to airborne/fall/landing even if the source clip is longer.
+        if (NewState == EWowAnimState::Jumping) bPlayingOneShot = false;
         UE_LOG(LogWowAnim, Log, TEXT("Animation state changed to %s (AnimID %d)"),
             *UEnum::GetValueAsString(CurrentState), static_cast<int32>(AnimId));
     }
@@ -433,6 +478,25 @@ void UWowAnimationController::SetAnimationIdMap(const TMap<int32, int32>& InMap)
 bool UWowAnimationController::PlayAnimationById(EWowAnimId AnimId, bool bLooping)
 {
     if (!MeshComponent) return false;
+
+    if (RuntimeInstance)
+    {
+        bool bStarted = RuntimeInstance->PlayM2Animation(static_cast<int32>(AnimId), bLooping);
+        if (!bStarted)
+        {
+            switch (AnimId)
+            {
+            case EWowAnimId::Run: bStarted = RuntimeInstance->PlayM2Animation(4, bLooping); break;
+            case EWowAnimId::Fall:
+            case EWowAnimId::JumpStart: bStarted = RuntimeInstance->PlayM2Animation(38, bLooping); break;
+            default: break;
+            }
+        }
+        if (!bStarted) return false;
+        bPlayingOneShot = !bLooping;
+        if (bPlayingOneShot) OneShotEndTime = FPlatformTime::Seconds() + RuntimeInstance->GetM2Duration();
+        return true;
+    }
 
     int32 Id = static_cast<int32>(AnimId);
     UAnimSequence* AnimToPlay = nullptr;

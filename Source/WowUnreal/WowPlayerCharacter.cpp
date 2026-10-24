@@ -445,35 +445,8 @@ void AWowPlayerCharacter::SetCharacterModel(UWorld* World, FMpqManager* Mpq, FWo
 			{
 				UWowAnimationController* PlayerAnimController = NewObject<UWowAnimationController>(this, TEXT("PlayerAnimationController"));
 
-				// Copy all animations from temp controller
-				TArray<UAnimSequence*> Animations;
-				for (const TObjectPtr<UAnimSequence>& Anim : TempAnimController->GetAllAnimations())
-				{
-					Animations.Add(Anim.Get());
-				}
-
-				PlayerAnimController->Initialize(GetMesh(), Animations);
-
-				// Copy the animation ID mapping
-				TMap<int32, int32> IdMap;
-				const TMap<int32, TObjectPtr<UAnimSequence>>& TempCache = TempAnimController->GetAnimationCache();
-				for (const auto& CachePair : TempCache)
-				{
-					// Find the index of this anim in AllAnimations
-					for (int32 Idx = 0; Idx < Animations.Num(); ++Idx)
-					{
-						if (Animations[Idx] == CachePair.Value.Get())
-						{
-							IdMap.Add(CachePair.Key, Idx);
-							break;
-						}
-					}
-				}
-				PlayerAnimController->SetAnimationIdMap(IdMap);
-
+				PlayerAnimController->InitializeFromController(GetMesh(), TempAnimController);
 				SetupAnimationController(PlayerAnimController);
-				UE_LOG(LogWowPlayerChar, Log, TEXT("Player animation controller: %d animations, %d ID mappings"),
-					Animations.Num(), IdMap.Num());
 			}
 			else
 			{
@@ -695,35 +668,8 @@ void AWowPlayerCharacter::SetCharacterModelWithEquipment(UWorld* World, FMpqMana
 			{
 				UWowAnimationController* PlayerAnimController = NewObject<UWowAnimationController>(this, TEXT("PlayerAnimationController"));
 
-				// Copy all animations from temp controller
-				TArray<UAnimSequence*> Animations;
-				for (const TObjectPtr<UAnimSequence>& Anim : TempAnimController->GetAllAnimations())
-				{
-					Animations.Add(Anim.Get());
-				}
-
-				PlayerAnimController->Initialize(GetMesh(), Animations);
-
-				// Copy the animation ID mapping
-				TMap<int32, int32> IdMap;
-				const TMap<int32, TObjectPtr<UAnimSequence>>& TempCache = TempAnimController->GetAnimationCache();
-				for (const auto& CachePair : TempCache)
-				{
-					// Find the index of this anim in AllAnimations
-					for (int32 Idx = 0; Idx < Animations.Num(); ++Idx)
-					{
-						if (Animations[Idx] == CachePair.Value.Get())
-						{
-							IdMap.Add(CachePair.Key, Idx);
-							break;
-						}
-					}
-				}
-				PlayerAnimController->SetAnimationIdMap(IdMap);
-
+				PlayerAnimController->InitializeFromController(GetMesh(), TempAnimController);
 				SetupAnimationController(PlayerAnimController);
-				UE_LOG(LogWowPlayerChar, Log, TEXT("Player animation controller: %d animations, %d ID mappings"),
-					Animations.Num(), IdMap.Num());
 			}
 			else
 			{

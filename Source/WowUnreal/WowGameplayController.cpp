@@ -13,6 +13,7 @@
 #include "WowAudioManager.h"
 #include "WowCharacterBuilder.h"
 #include "WowAnimationController.h"
+#include "WowM2AnimInstance.h"
 #include "WowNameplateWidget.h"
 #include "SWowCombatLog.h"
 #include "SWowChatWindow.h"
@@ -2444,6 +2445,18 @@ void AWowGameplayController::UpdatePlayerAnimations()
 		// If the player has an animation controller, update it
 		if (UWowAnimationController* AnimController = PlayerChar->AnimationController)
 		{
+			// Opt-in rendered clip verification; never move the player or change server state.
+			int32 CaptureAnimation = INDEX_NONE;
+			FString CapturePath;
+			if (FParse::Param(FCommandLine::Get(), TEXT("autologin"))
+				&& FParse::Value(FCommandLine::Get(), TEXT("worldscreenshot="), CapturePath)
+				&& FParse::Value(FCommandLine::Get(), TEXT("captureanimation="), CaptureAnimation))
+			{
+				if (auto* Runtime = AnimController->GetRuntimeInstance())
+				{
+					if (Runtime->PlayM2Animation(CaptureAnimation, true)) return;
+				}
+			}
 			// Don't override casting animations with movement animations
 			// The casting animation will be explicitly set/unset in spell handlers
 			if (!bIsCasting)
@@ -2456,7 +2469,7 @@ void AWowGameplayController::UpdatePlayerAnimations()
 				// since the core issue seems to be that AnimationID 0 is not the correct Stand animation
 				// in the character's M2 file. We'll handle this differently.
 
-				AnimController->UpdateLocalPlayerState(PlayerChar);
+				AnimController->UpdateLocalPlayerState(PlayerChar, PlayerChar->bIsWalking);
 			}
 		}
 	}

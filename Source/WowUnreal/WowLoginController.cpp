@@ -9,6 +9,7 @@
 #include "WowCredentialStore.h"
 #include "WowGameplayController.h"
 #include "WowPlayerCharacter.h"
+#include "WowM2AnimInstance.h"
 // removed: now using SWowLoadingScreen.h
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -607,6 +608,21 @@ void AWowLoginController::UpdateWorldCapture()
             *Player->GetActorLocation().ToString(), *ViewLocation.ToString(), VertexCount,
             Player->IsHidden() ? 1 : 0, bPendingGroundSnap ? 1 : 0,
             static_cast<int32>(Player->GetCharacterMovement()->MovementMode));
+        if (const auto* Animation = Cast<UWowM2AnimInstance>(Player->GetMesh()->GetAnimInstance()))
+        {
+            int32 AnimatedBones = 0;
+            double PoseChecksum = 0;
+            const auto& Pose = Player->GetMesh()->GetBoneSpaceTransforms();
+            const auto& Ref = Model->GetRefSkeleton().GetRefBonePose();
+            for (int32 Bone = 0; Bone < FMath::Min(Pose.Num(), Ref.Num()); ++Bone)
+            {
+                if (!Pose[Bone].Equals(Ref[Bone], 0.001)) ++AnimatedBones;
+                const auto& Rotation = Pose[Bone].GetRotation();
+                PoseChecksum += (Bone + 1) * (Rotation.X + 3 * Rotation.Y + 7 * Rotation.Z);
+            }
+            UE_LOG(LogWowLogin, Log, TEXT("AnimationCapture: id=%d time=%.3f duration=%.3f animatedBones=%d poseChecksum=%.6f"),
+                Animation->GetM2AnimationId(), Animation->GetM2Time(), Animation->GetM2Duration(), AnimatedBones, PoseChecksum);
+        }
     }
     WorldScreenshotProcessedHandle = FScreenshotRequest::OnScreenshotRequestProcessed().AddUObject(
         this, &AWowLoginController::OnWorldScreenshotProcessed);

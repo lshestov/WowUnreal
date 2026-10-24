@@ -141,6 +141,7 @@ Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 - [x] Emote animations: dance, wave, cheer, laugh, cry, etc. (AnimationData.dbc mapping)
 - [x] Wire SMSG_EMOTE and SMSG_TEXT_EMOTE to animation playback
 - [x] Map M2 animation IDs to UAnimSequence per-race/gender model
+- [x] Packaged M2 animation playback without editor sequence generation: timestamp sampling, quaternion interpolation, short pose blends, idle/walk/run/jump selection and existing action/emote dispatch (verified Editor/Game builds, runtime playback regression and rendered idle/walk/run/jump captures).
 - [x] Play correct animation based on entity movement flags (walking, running, falling, swimming)
 - [x] Networked player animations: read movement flags from UPDATE_OBJECT, play matching anims
 
