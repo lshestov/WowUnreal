@@ -584,7 +584,8 @@ static int L_bit_bxor(lua_State* L)
 static int L_bit_bnot(lua_State* L)
 {
     uint32 A = static_cast<uint32>(static_cast<int64>(lua_tonumber(L, 1)));
-    lua_pushnumber(L, static_cast<double>(~A));
+    const uint32 Inverted = ~A;
+    lua_pushnumber(L, static_cast<double>(Inverted));
     return 1;
 }
 static int L_bit_lshift(lua_State* L)
@@ -792,7 +793,8 @@ void WowLuaApi::RegisterGlobals(lua_State* L)
         -- UI Dropdown menu globals
         UIDROPDOWNMENU_OPEN_MENU = nil
         UIDROPDOWNMENU_INIT_MENU = nil
-        UIDROPDOWNMENU_MENU_LEVEL = 1
+        UIDROPDOWNM)LUA"
+R"LUA(ENU_MENU_LEVEL = 1
         UIDROPDOWNMENU_MENU_VALUE = nil
 
         -- Static popup globals
@@ -883,7 +885,8 @@ void WowLuaApi::RegisterGlobals(lua_State* L)
         DEATHS = DEATHS or "Deaths"
         HONOR = HONOR or "Honor"
         DAMAGE = DAMAGE or "Damage"
-        HEALING = HEALING or "Healing"
+        HE)LUA"
+R"LUA(ALING = HEALING or "Healing"
         TEAM = TEAM or "Team"
         NAME = NAME or "Name"
         SKILL = SKILL or "Skill"
@@ -956,7 +959,8 @@ void WowLuaApi::RegisterGlobals(lua_State* L)
         COMBAT_CONFIG_COLORIZE_DAMAGE_SCHOOL = COMBAT_CONFIG_COLORIZE_DAMAGE_SCHOOL or "Damage School"
         COMBAT_CONFIG_COLORIZE_ENTIRE_LINE = COMBAT_CONFIG_COLORIZE_ENTIRE_LINE or "Entire Line"
         COMBAT_CONFIG_COLORIZE_ENTIRE_LINE_BY_SOURCE = COMBAT_CONFIG_COLORIZE_ENTIRE_LINE_BY_SOURCE or "By Source"
-        COMBAT_CONFIG_COLORIZE_ENTIRE_LINE_BY_TARGET = COMBAT_CONFIG_COLORIZE_ENTIRE_LINE_BY_TARGET or "By Target"
+        COMBAT_CONFIG_COLORIZE_ENTIRE_LINE_BY_TARGET = COMBAT_CONFIG_COLORIZE_ENTIRE_LINE_BY_TARGET or "By )LUA"
+R"LUA(Target"
         COMBAT_CONFIG_HIGHLIGHT_LINE = COMBAT_CONFIG_HIGHLIGHT_LINE or "Line"
         COMBAT_CONFIG_HIGHLIGHT_ABILITY = COMBAT_CONFIG_HIGHLIGHT_ABILITY or "Ability"
         COMBAT_CONFIG_HIGHLIGHT_DAMAGE = COMBAT_CONFIG_HIGHLIGHT_DAMAGE or "Damage"
@@ -1052,7 +1056,8 @@ void WowLuaApi::RegisterGlobals(lua_State* L)
             end
         end
         function debugprofilestart() end
-        function issecure() return true end
+        function issecure() return true en)LUA"
+R"LUA(d
         function pcallaliases() end
 
         -- string.join (WoW FrameXML expects this)

@@ -146,7 +146,7 @@ static bool TableRepresentsRegion(lua_State* L, int Idx = 1)
 	luaL_checktype(L, Idx, LUA_TTABLE);
 
 	lua_getfield(L, Idx, "__objectType");
-	const bool bHasObjectType = lua_isstring(L, -1);
+	const bool bHasObjectType = (lua_isstring(L, -1) != 0);
 	lua_pop(L, 1);
 	if (bHasObjectType)
 	{
@@ -2901,7 +2901,7 @@ static int LF_SetMaxLetters(lua_State* L)
 static int LF_SetAutoFocus(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
-	bool AutoFocus = lua_toboolean(L, 2);
+	bool AutoFocus = (lua_toboolean(L, 2) != 0);
 
 	// Store in Lua table
 	lua_pushboolean(L, AutoFocus);
@@ -3290,7 +3290,7 @@ static int LF_TooltipAddLine(lua_State* L)
 	float R = static_cast<float>(luaL_optnumber(L, 3, 1.0));
 	float G = static_cast<float>(luaL_optnumber(L, 4, 1.0));
 	float B = static_cast<float>(luaL_optnumber(L, 5, 1.0));
-	bool bWrap = lua_toboolean(L, 6);
+	bool bWrap = (lua_toboolean(L, 6) != 0);
 
 	Ctx->FrameManager->TooltipAddLine(TooltipHandle, UTF8_TO_TCHAR(Text), R, G, B, bWrap);
 	return 0;

@@ -87,6 +87,7 @@ static UStaticMesh* BuildLiquidStaticMesh(
 			SM->GetStaticMaterials().SetNum(1);
 		}
 		SM->GetStaticMaterials()[0].MaterialInterface = Material;
+		SM->GetStaticMaterials()[0].UVChannelData.bInitialized = true;
 	}
 
 	return SM;

@@ -202,7 +202,7 @@ namespace
             const FMclyEntry& Layer = Layers[LayerIdx];
 
             // Seek to the layer's alpha data (offset relative to MCAL data start)
-            if (McalDataStart + Layer.OfsAlpha >= R.Size) continue;
+            if (static_cast<int64>(McalDataStart) + Layer.OfsAlpha >= R.Size) continue;
             R.Seek(McalDataStart + Layer.OfsAlpha);
 
             TArray<uint8> AlphaMap;
@@ -357,7 +357,7 @@ namespace
         const bool bDoNotFixAlpha = (Flags & MCNK_FLAG_DO_NOT_FIX_ALPHA) != 0;
 
         // ── MCVT (heights) ──────────────────────────────────────────────────
-        if (OfsHeight > 0 && McnkDataStart + OfsHeight + 8 + 145*4 <= R.Size)
+        if (OfsHeight > 0 && static_cast<int64>(McnkDataStart) + OfsHeight + 8 + 145*4 <= R.Size)
         {
             R.Seek(McnkDataStart + OfsHeight);
             uint32 SubMagic, SubSize;
@@ -374,7 +374,7 @@ namespace
         }
 
         // ── MCNR (normals) ─────────────────────────────────────────────────
-        if (OfsNormal > 0 && McnkDataStart + OfsNormal + 8 < R.Size)
+        if (OfsNormal > 0 && static_cast<int64>(McnkDataStart) + OfsNormal + 8 < R.Size)
         {
             R.Seek(McnkDataStart + OfsNormal);
             uint32 SubMagic, SubSize;
@@ -384,7 +384,7 @@ namespace
 
         // ── MCLY (texture layers) ──────────────────────────────────────────
         TArray<FMclyEntry> Layers;
-        if (OfsLayer > 0 && McnkDataStart + OfsLayer + 8 < R.Size)
+        if (OfsLayer > 0 && static_cast<int64>(McnkDataStart) + OfsLayer + 8 < R.Size)
         {
             R.Seek(McnkDataStart + OfsLayer);
             uint32 SubMagic, SubSize;
@@ -399,7 +399,7 @@ namespace
         }
 
         // ── MCAL (alpha maps) ──────────────────────────────────────────────
-        if (OfsAlpha > 0 && Layers.Num() > 1 && McnkDataStart + OfsAlpha + 8 < R.Size)
+        if (OfsAlpha > 0 && Layers.Num() > 1 && static_cast<int64>(McnkDataStart) + OfsAlpha + 8 < R.Size)
         {
             R.Seek(McnkDataStart + OfsAlpha);
             uint32 SubMagic, SubSize;
@@ -408,7 +408,7 @@ namespace
         }
 
         // ── MCCV (vertex colors, optional) ─────────────────────────────────
-        if ((Flags & MCNK_FLAG_HAS_MCCV) && OfsMCCV > 0 && McnkDataStart + OfsMCCV + 8 < R.Size)
+        if ((Flags & MCNK_FLAG_HAS_MCCV) && OfsMCCV > 0 && static_cast<int64>(McnkDataStart) + OfsMCCV + 8 < R.Size)
         {
             R.Seek(McnkDataStart + OfsMCCV);
             uint32 SubMagic, SubSize;

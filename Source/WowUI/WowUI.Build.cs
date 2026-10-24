@@ -1,28 +1,20 @@
 using UnrealBuildTool;
 using System.IO;
+
 public class WowUI : ModuleRules
 {
     public WowUI(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
         PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "UMG", "Slate", "SlateCore", "WowData", "WowAssets", "WowNetwork", "XmlParser", "InputCore" });
-        // pugixml for robust XML parsing (WoW FrameXML)
-        string PugiPath = Path.Combine(ModuleDirectory, "..", "ThirdParty", "pugixml");
-        if (Directory.Exists(PugiPath))
-        {
-            PublicIncludePaths.Add(PugiPath);
-            PrivateDefinitions.Add("HAS_PUGIXML=1");
-        }
-
-        string LuaPath = Path.Combine(ModuleDirectory, "..", "ThirdParty", "lua");
-        if (Directory.Exists(LuaPath))
-        {
-            PublicIncludePaths.Add(LuaPath);
-            string LuaLib = Path.Combine(LuaPath, "liblua.a");
-            if (File.Exists(LuaLib))
-            {
-                PublicAdditionalLibraries.Add(LuaLib);
-            }
-        }
+        string ThirdParty = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "ThirdParty"));
+        PublicIncludePaths.Add(Path.Combine(ThirdParty, "pugixml"));
+        PrivateDefinitions.Add("HAS_PUGIXML=1");
+        PublicIncludePaths.Add(Path.Combine(ThirdParty, "lua"));
+        string Library = Target.Platform == UnrealTargetPlatform.Win64
+            ? Path.Combine(ThirdParty, "Windows", "x64", "lua51.lib")
+            : Path.Combine(ThirdParty, "lua", "liblua.a");
+        if (!File.Exists(Library)) throw new BuildException("Build Lua 5.1 for the target platform; see README.md and BuildSupport/Windows/README.md.");
+        PublicAdditionalLibraries.Add(Library);
     }
 }

@@ -1280,12 +1280,12 @@ void AWowGameplayController::TryTargetUnderCursor()
 		}
 
 		// Also check if we hit a child component (capsule) of an entity actor
-		AActor* Owner = HitActor->GetOwner();
-		if (Owner)
+		AActor* HitOwner = HitActor->GetOwner();
+		if (HitOwner)
 		{
 			for (const auto& Pair : SpawnedEntityActors)
 			{
-				if (Pair.Value == Owner)
+				if (Pair.Value == HitOwner)
 				{
 					uint64 HitGuid = Pair.Key;
 					if (HitGuid != TargetGuid)
@@ -1423,13 +1423,9 @@ void AWowGameplayController::OnEntityDeath(uint64 Guid)
 		StopAutoAttack();
 	}
 
-	// Remove from entity manager after a delay (keep corpse visible for looting)
-	// The entity actor stays in SpawnedEntityActors so it can be right-clicked for loot.
-	// We remove it from the entity manager so the server can reuse the GUID.
-	if (ConnectionManager)
-	{
-		ConnectionManager->PacketHandler.EntityManager.Remove(Guid);
-	}
+	// Death is still an update to a server-owned entity. Keep it alive for the
+	// current update broadcast, later loot/flag updates and eventual resurrection.
+	// Only server destroy/out-of-range packets remove it from the entity manager.
 
 	// Auto-remove corpse after 60 seconds
 	FTimerHandle TimerHandle;

@@ -39,7 +39,7 @@ The client reads unmodified WoW MPQ archives and converts them into Unreal Engin
 | **Scripting** | Lua 5.1.5 (original WoW version) |
 | **Server Backend** | AzerothCore 3.3.5a |
 | **Primary Platform** | macOS |
-| **Secondary Platform** | Windows (planned) |
+| **Secondary Platform** | Windows x64 ([build instructions](BuildSupport/Windows/README.md)) |
 | **Data Source** | Original WoW MPQ files (user-supplied) |
 
 ### Third-Party Libraries

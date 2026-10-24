@@ -256,6 +256,7 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
                         LiqSM->GetStaticMaterials().SetNum(1);
                     }
                     LiqSM->GetStaticMaterials()[0].MaterialInterface = LiqMat;
+                    LiqSM->GetStaticMaterials()[0].UVChannelData.bInitialized = true;
                 }
 
                 FName LiqCompName = *FString::Printf(TEXT("WmoLiquid_%d"), GroupIdx);

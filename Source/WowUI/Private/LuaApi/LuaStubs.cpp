@@ -5042,14 +5042,10 @@ void WowLuaApi::RegisterStubs(lua_State* L)
 
     // Platform detection
     lua_register(L, "IsMacClient", [](lua_State* L2) -> int {
-#if PLATFORM_MAC
-        lua_pushboolean(L2, 1);
-#else
-        lua_pushboolean(L2, 0);
-#endif
+lua_pushboolean(L2, PLATFORM_MAC);
         return 1;
     });
-    lua_register(L, "IsWindowsClient", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
+    lua_register(L, "IsWindowsClient", [](lua_State* L2) -> int { lua_pushboolean(L2, PLATFORM_WINDOWS); return 1; });
     lua_register(L, "IsLinuxClient", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
 
     // CVar extended

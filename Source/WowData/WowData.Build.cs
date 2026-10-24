@@ -7,24 +7,20 @@ public class WowData : ModuleRules
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
         PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject" });
-
-        string StormLibPath = Path.Combine(ModuleDirectory, "..", "ThirdParty", "StormLib", "src");
-        string StormLibBuild = Path.Combine(ModuleDirectory, "..", "ThirdParty", "StormLib", "build");
-
-        if (Directory.Exists(StormLibPath))
+        string ThirdParty = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "ThirdParty"));
+        PrivateIncludePaths.Add(Path.Combine(ThirdParty, "StormLib", "src"));
+        PrivateDefinitions.Add("__STORMLIB_NO_STATIC_LINK__=1");
+        if (Target.Platform == UnrealTargetPlatform.Win64)
         {
-            PublicIncludePaths.Add(StormLibPath);
-            PublicDefinitions.Add("STORMLIB_NO_AUTO_LINK=1");
-
-            // Link pre-built StormLib static library
-            string LibPath = Path.Combine(StormLibBuild, "libstorm.a");
-            if (File.Exists(LibPath))
-            {
-                PublicAdditionalLibraries.Add(LibPath);
-                // StormLib depends on zlib and bzip2
-                PublicAdditionalLibraries.Add("bz2");
-                PublicAdditionalLibraries.Add("z");
-            }
+            string Library = Path.Combine(ThirdParty, "Windows", "x64", "StormLib.lib");
+            if (!File.Exists(Library)) throw new BuildException("Build StormLib for Win64; see BuildSupport/Windows/README.md.");
+            PublicAdditionalLibraries.Add(Library);
+            PublicSystemLibraries.Add("wininet.lib");
+        }
+        else
+        {
+            PublicAdditionalLibraries.Add(Path.Combine(ThirdParty, "StormLib", "build", "libstorm.a"));
+            PublicAdditionalLibraries.AddRange(new string[] { "bz2", "z" });
         }
     }
 }

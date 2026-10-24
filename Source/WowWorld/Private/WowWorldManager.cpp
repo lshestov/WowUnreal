@@ -1237,6 +1237,7 @@ void AWowWorldManager::SpawnWdlTile(int32 TX, int32 TY)
             SM->GetStaticMaterials().SetNum(1);
         }
         SM->GetStaticMaterials()[0].MaterialInterface = Mat;
+        SM->GetStaticMaterials()[0].UVChannelData.bInitialized = true;
     }
 
     // Spawn actor with UStaticMeshComponent

@@ -1375,7 +1375,7 @@ bool FPetSpellsPacketParsesActionBar::RunTest(const FString& Parameters)
     AppendValue(static_cast<uint32>(0));
 
     FPacketReader Reader(Packet);
-    Handler.HandlePetSpells(Reader);
+    Handler.HandlePacket(WowOpcode::SMSG_PET_SPELLS, Packet);
 
     TestTrue(TEXT("PET_SPELLS broadcasts pet bar updates"), bBroadcasted);
     TestEqual(TEXT("PET_SPELLS preserves pet guid"), Handler.PetActionBar.PetGuid, PetGuid);
@@ -1879,9 +1879,9 @@ bool FLuaUiUtilityGlobalsExist::RunTest(const FString& Parameters)
     lua_pushinteger(L, 1);
     const int AdvanceEntryResult = lua_pcall(L, 1, 8, 0);
     TestEqual(TEXT("CombatLogAdvanceEntry accepts a numeric delta"), AdvanceEntryResult, 0);
-    const bool bAdvanceEntryHasStringEvent = lua_isstring(L, -7);
+    const bool bAdvanceEntryHasStringEvent = (lua_isstring(L, -7) != 0);
     const FString AdvancedEventName = bAdvanceEntryHasStringEvent ? UTF8_TO_TCHAR(lua_tostring(L, -7)) : FString();
-    const bool bAdvanceEntryHasNumericSourceFlags = lua_isnumber(L, -4);
+    const bool bAdvanceEntryHasNumericSourceFlags = (lua_isnumber(L, -4) != 0);
     const int32 AdvancedSourceFlags = bAdvanceEntryHasNumericSourceFlags ? static_cast<int32>(lua_tointeger(L, -4)) : 0;
     lua_pop(L, 8);
     TestTrue(TEXT("CombatLogAdvanceEntry returns a WotLK event tuple"), bAdvanceEntryHasStringEvent);
@@ -1899,9 +1899,9 @@ bool FLuaUiUtilityGlobalsExist::RunTest(const FString& Parameters)
     lua_getglobal(L, "CombatLogGetCurrentEntry");
     const int GetCurrentEntryResult = lua_pcall(L, 0, 8, 0);
     TestEqual(TEXT("CombatLogGetCurrentEntry call succeeds"), GetCurrentEntryResult, 0);
-    const bool bCurrentEntryHasStringEvent = lua_isstring(L, -7);
+    const bool bCurrentEntryHasStringEvent = (lua_isstring(L, -7) != 0);
     const FString CurrentEntryEventName = bCurrentEntryHasStringEvent ? UTF8_TO_TCHAR(lua_tostring(L, -7)) : FString();
-    const bool bCurrentEntryHasNumericDestFlags = lua_isnumber(L, -1);
+    const bool bCurrentEntryHasNumericDestFlags = (lua_isnumber(L, -1) != 0);
     const int32 CurrentDestFlags = bCurrentEntryHasNumericDestFlags ? static_cast<int32>(lua_tointeger(L, -1)) : 0;
     lua_pop(L, 8);
     TestTrue(TEXT("CombatLogGetCurrentEntry returns a WotLK event tuple"), bCurrentEntryHasStringEvent);

@@ -172,7 +172,7 @@ void SWowLoginWidget::Construct(const FArguments& InArgs)
                                 + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 3)
                                 [
                                     SNew(STextBlock)
-                                    .Text(FText::FromString(TEXT("Server")))
+                                    .Text(FText::FromString(TEXT("Login server")))
                                     .Font(FCoreStyle::GetDefaultFontStyle("Regular", 12))
                                     .ColorAndOpacity(WowGoldDim)
                                 ]
@@ -263,6 +263,7 @@ void SWowLoginWidget::Construct(const FArguments& InArgs)
         ]
         ] // SOverlay Layer 1
     ];
+    ServerBox->SetText(FText::FromString(TEXT("127.0.0.1:3724")));
 }
 
 TSharedRef<SWidget> SWowLoginWidget::BuildExpansionTabs()
@@ -406,6 +407,7 @@ void SWowLoginWidget::SetExpansion(EWowExpansion Expansion)
 FReply SWowLoginWidget::OnLoginClicked()
 {
     FString ServerStr = ServerBox.IsValid() ? ServerBox->GetText().ToString().TrimStartAndEnd() : TEXT("127.0.0.1:3724");
+    if (ServerStr.IsEmpty()) ServerStr = TEXT("127.0.0.1:3724");
     FString User = UsernameBox.IsValid() ? UsernameBox->GetText().ToString().TrimStartAndEnd() : TEXT("");
     FString Pass = PasswordBox.IsValid() ? PasswordBox->GetText().ToString().TrimStartAndEnd() : TEXT("");
 
@@ -418,6 +420,16 @@ FReply SWowLoginWidget::OnLoginClicked()
         Port = FCString::Atoi(*ServerStr.Mid(ColonIdx + 1));
     }
 
+    if (Host.IsEmpty() || Port < 1 || Port > 65535)
+    {
+        SetStatusText(TEXT("Please enter a valid login server address and port"));
+        return FReply::Handled();
+    }
+    if ((Host == TEXT("127.0.0.1") || Host.Equals(TEXT("localhost"), ESearchCase::IgnoreCase)) && Port == 8085)
+    {
+        SetStatusText(TEXT("Use 127.0.0.1:3724 to log in. Port 8085 is the world server."));
+        return FReply::Handled();
+    }
     if (User.IsEmpty())
     {
         SetStatusText(TEXT("Please enter your account name"));

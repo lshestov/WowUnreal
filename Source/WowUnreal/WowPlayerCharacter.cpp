@@ -350,11 +350,11 @@ void AWowPlayerCharacter::SetCharacterModel(UWorld* World, FMpqManager* Mpq, FWo
 	// Remove any existing skeletal mesh components (except the default one)
 	TArray<USkeletalMeshComponent*> ExistingMeshes;
 	GetComponents<USkeletalMeshComponent>(ExistingMeshes);
-	for (USkeletalMeshComponent* Mesh : ExistingMeshes)
+	for (USkeletalMeshComponent* ExistingMesh : ExistingMeshes)
 	{
-		if (Mesh != GetMesh()) // Keep the default character mesh component
+		if (ExistingMesh != GetMesh()) // Keep the default character mesh component
 		{
-			Mesh->DestroyComponent();
+			ExistingMesh->DestroyComponent();
 		}
 	}
 
@@ -624,11 +624,11 @@ void AWowPlayerCharacter::SetCharacterModelWithEquipment(UWorld* World, FMpqMana
 	// Remove any existing skeletal mesh components (except the default one)
 	TArray<USkeletalMeshComponent*> ExistingMeshes;
 	GetComponents<USkeletalMeshComponent>(ExistingMeshes);
-	for (USkeletalMeshComponent* Mesh : ExistingMeshes)
+	for (USkeletalMeshComponent* ExistingMesh : ExistingMeshes)
 	{
-		if (Mesh != GetMesh()) // Keep the default character mesh component
+		if (ExistingMesh != GetMesh()) // Keep the default character mesh component
 		{
-			Mesh->DestroyComponent();
+			ExistingMesh->DestroyComponent();
 		}
 	}
 
