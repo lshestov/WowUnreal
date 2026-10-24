@@ -56,6 +56,7 @@ public:
 	void ToggleCharacterPanel();
 	void ShowBankWindow();
 	void HideBankWindow();
+	bool IsPointerOverWindow() const;
 
 	/** Update inventory from player entity */
 	void UpdateInventory();
@@ -76,4 +77,5 @@ private:
 	TSharedPtr<SWowBankWindow> BankWindow;
 	TSharedPtr<SWowCharacterPanel> CharacterPanel;
 	TSharedPtr<class SOverlay> UIOverlay;
+	TSharedPtr<SWidget> NativeWindowRoot;
 };

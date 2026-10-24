@@ -80,7 +80,7 @@ void SWowLootWindow::Construct(const FArguments& InArgs)
                     .Text(FText::FromString(TEXT("Loot All")))
                     .HAlign(HAlign_Center)
                     .OnClicked(this, &SWowLootWindow::OnLootAllClicked)
-                    .Visibility_Lambda([this]() { return CurrentItems.Num() > 0 ? EVisibility::Visible : EVisibility::Collapsed; })
+                    .Visibility_Lambda([this]() { return CurrentItems.Num() > 0 || CurrentGold > 0 ? EVisibility::Visible : EVisibility::Collapsed; })
                 ]
             ]
         ]
@@ -118,6 +118,7 @@ void SWowLootWindow::UpdateLoot(uint64 LootGuid, uint8 LootType, uint32 Gold, co
         .AutoHeight()
         [
             SNew(SButton)
+            .IsEnabled(Item.CanLoot())
             .OnClicked_Lambda([this, Item]() { return OnLootItemClicked(Item.Index); })
             [
                 SNew(SHorizontalBox)
@@ -146,7 +147,7 @@ void SWowLootWindow::UpdateLoot(uint64 LootGuid, uint8 LootType, uint32 Gold, co
                 .VAlign(VAlign_Center)
                 [
                     SNew(STextBlock)
-                    .Text(FText::FromString(FString::Printf(TEXT("Item %u"), Item.ItemId)))
+                    .Text(FText::FromString(Item.Name.IsEmpty()?FString::Printf(TEXT("Item %u"),Item.ItemId):Item.Name))
                     .ColorAndOpacity(QualityColor)
                 ]
 
@@ -205,18 +206,8 @@ FReply SWowLootWindow::OnLootItemClicked(int32 LootSlot)
         OnLootItem.Execute(LootSlot);
     }
 
-    // Mark item as looted in our local copy
-    for (FWowLootItem& Item : CurrentItems)
-    {
-        if (Item.Index == LootSlot)
-        {
-            Item.bLooted = true;
-            break;
-        }
-    }
-
-    // Refresh the item list
-    UpdateLoot(CurrentLootGuid, 0, CurrentGold, CurrentItems);
+    // The server acknowledges removal. Keep the slot visible on bag-full or
+    // permission errors instead of optimistically hiding an item we did not get.
 
     return FReply::Handled();
 }

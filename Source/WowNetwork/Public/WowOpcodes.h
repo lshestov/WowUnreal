@@ -121,9 +121,14 @@ namespace WowOpcode
     inline constexpr uint16 CMSG_DESTROYITEM             = 0x0111;
     inline constexpr uint16 SMSG_INVENTORY_CHANGE_FAILURE = 0x0112;
     inline constexpr uint16 CMSG_LOOT                    = 0x015D;
-    inline constexpr uint16 CMSG_LOOT_RELEASE            = 0x015E;
+    inline constexpr uint16 CMSG_LOOT_MONEY              = 0x015E;
+    inline constexpr uint16 CMSG_LOOT_RELEASE            = 0x015F;
     inline constexpr uint16 SMSG_LOOT_RESPONSE           = 0x0160;
     inline constexpr uint16 SMSG_LOOT_RELEASE_RESPONSE   = 0x0161;
+    inline constexpr uint16 SMSG_LOOT_REMOVED            = 0x0162;
+    inline constexpr uint16 SMSG_LOOT_CLEAR_MONEY        = 0x0165;
+    inline constexpr uint16 CMSG_ITEM_QUERY_SINGLE       = 0x0056;
+    inline constexpr uint16 SMSG_ITEM_QUERY_SINGLE_RESPONSE = 0x0058;
     inline constexpr uint16 SMSG_ITEM_PUSH_RESULT        = 0x0166;
 
     // Trade opcodes
@@ -178,6 +183,7 @@ namespace WowOpcode
     inline constexpr uint16 CMSG_QUESTGIVER_HELLO        = 0x0182;
     inline constexpr uint16 SMSG_QUESTGIVER_STATUS       = 0x0183;
     inline constexpr uint16 SMSG_QUESTGIVER_QUEST_LIST   = 0x0184;
+    inline constexpr uint16 CMSG_QUESTGIVER_QUERY_QUEST = 0x0186;
     inline constexpr uint16 SMSG_QUESTGIVER_QUEST_DETAILS = 0x0188;
     inline constexpr uint16 CMSG_QUESTGIVER_ACCEPT_QUEST = 0x0189;
     inline constexpr uint16 CMSG_QUESTGIVER_COMPLETE_QUEST = 0x018A;

@@ -625,6 +625,7 @@ bool SWowCharacterPanel::IsPanelVisible() const
 
 void SWowCharacterPanel::OnInventoryChanged()
 {
+    if (IsPanelVisible()) UpdateStats();
     // Update all equipment slots
     for (auto& EquipmentSlot : EquipmentSlots)
     {
@@ -652,7 +653,7 @@ void SWowCharacterPanel::UpdateStats()
     if (CharacterNameText.IsValid())
     {
         // Try to get player name from cache, fallback to "Player"
-        FString PlayerName = TEXT("Player");
+        FString PlayerName = ConnectionManager->GetCharacterName();
         if (const FString* FoundName = ConnectionManager->PacketHandler.PlayerNameCache.Find(LocalPlayer->Guid))
         {
             PlayerName = *FoundName;

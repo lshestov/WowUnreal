@@ -13,6 +13,9 @@
 #include "WowConnectionManager.h"
 #include "Widgets/SOverlay.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Widgets/Layout/SDPIScaler.h"
+#include "Engine/UserInterfaceSettings.h"
+#include "Engine/GameViewportClient.h"
 
 #if __has_include("lua.h")
 extern "C" {
@@ -113,6 +116,8 @@ void UWowUIManager::Initialize(FSubsystemCollectionBase& Collection)
 
 void UWowUIManager::Deinitialize()
 {
+	if (NativeWindowRoot.IsValid() && GEngine && GEngine->GameViewport) GEngine->GameViewport->RemoveViewportWidgetContent(NativeWindowRoot.ToSharedRef());
+	NativeWindowRoot.Reset();
 	if (LuaVM && LuaVM->GetState())
 	{
 		WowLuaApi::ClearContext(LuaVM->GetState());
@@ -356,8 +361,7 @@ void UWowUIManager::SetRootCanvas(UCanvasPanel* Canvas)
 		];
 
 		// Create character panel (left side, padded from edge)
-		// ConnectionManager is set later via SetConnectionManager, for now pass nullptr
-		CharacterPanel = SNew(SWowCharacterPanel, InventoryManager, nullptr);
+		CharacterPanel = SNew(SWowCharacterPanel, InventoryManager, ConnectionManager.Get());
 		UIOverlay->AddSlot()
 		.HAlign(HAlign_Left)
 		.VAlign(VAlign_Center)
@@ -369,7 +373,17 @@ void UWowUIManager::SetRootCanvas(UCanvasPanel* Canvas)
 		// Add the overlay to the viewport
 		if (GEngine && GEngine->GameViewport)
 		{
-			GEngine->GameViewport->AddViewportWidgetContent(UIOverlay.ToSharedRef(), 80); // Z-order above main UI
+			NativeWindowRoot=SNew(SDPIScaler).Visibility(EVisibility::SelfHitTestInvisible)
+				.DPIScale_Lambda([]()->float
+				{
+					FVector2D Viewport;
+					if (!GEngine || !GEngine->GameViewport) return 1.f;
+					GEngine->GameViewport->GetViewportSize(Viewport);
+					if (Viewport.Y<100) return 1.f;
+					const float Dpi=GetDefault<UUserInterfaceSettings>()->GetDPIScaleBasedOnSize(FIntPoint(Viewport.X,Viewport.Y));
+					return Viewport.Y/768.f/FMath::Max(Dpi,.01f);
+				})[UIOverlay.ToSharedRef()];
+			GEngine->GameViewport->AddViewportWidgetContent(NativeWindowRoot.ToSharedRef(), 80);
 		}
 
 		UE_LOG(LogWowUIManager, Log, TEXT("Created bag and character panel UI"));
@@ -408,6 +422,15 @@ void UWowUIManager::HideBankWindow()
 	{
 		BankWindow->Hide();
 	}
+}
+
+bool UWowUIManager::IsPointerOverWindow() const
+{
+    if (!FSlateApplication::IsInitialized()) return false;
+    const auto Pointer=FSlateApplication::Get().GetCursorPos();
+    for (const TSharedPtr<SWidget>& Widget : {TSharedPtr<SWidget>(BagWindow),TSharedPtr<SWidget>(CharacterPanel),TSharedPtr<SWidget>(BankWindow)})
+        if (Widget.IsValid() && Widget->GetVisibility().IsVisible() && Widget->GetCachedGeometry().IsUnderLocation(Pointer)) return true;
+    return false;
 }
 
 void UWowUIManager::UpdateInventory()

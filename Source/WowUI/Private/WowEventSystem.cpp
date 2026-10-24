@@ -266,7 +266,8 @@ void FWowEventSystem::FireEvent(const FString& EventName, const TArray<FString>&
 		// Push args
 		for (int32 Index = 0; Index < Args.Num(); ++Index)
 		{
-			if (EventName.StartsWith(TEXT("CHAT_MSG_")) && (Index == 6 || Index == 7 || Index == 10))
+            if ((EventName.StartsWith(TEXT("CHAT_MSG_")) && (Index == 6 || Index == 7 || Index == 10))
+                || ((EventName==TEXT("BAG_UPDATE") || EventName==TEXT("ACTIONBAR_SLOT_CHANGED")) && Index==0))
 				lua_pushnumber(L, FCString::Atoi(*Args[Index]));
 			else
 			{

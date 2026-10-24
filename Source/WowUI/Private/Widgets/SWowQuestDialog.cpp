@@ -15,6 +15,8 @@ void SWowQuestDialog::Construct(const FArguments& InArgs)
     OnQuestAccept = InArgs._OnQuestAccept;
     OnQuestComplete = InArgs._OnQuestComplete;
     OnQuestDecline = InArgs._OnQuestDecline;
+    OnGossipQuest = InArgs._OnGossipQuest;
+    OnGossipOption = InArgs._OnGossipOption;
 
     ChildSlot
     [
@@ -90,6 +92,33 @@ void SWowQuestDialog::CloseDialog()
     SetVisibility(EVisibility::Collapsed);
 
     UE_LOG(LogWowQuestDialog, Log, TEXT("Closed quest dialog"));
+}
+
+void SWowQuestDialog::AcceptCurrentQuest()
+{
+    if (!bIsRewardDialog && CurrentQuest.QuestId && GetVisibility()==EVisibility::Visible) OnAcceptClicked();
+}
+
+void SWowQuestDialog::CompleteCurrentQuest()
+{
+    if (bIsRewardDialog && CurrentQuest.QuestId && GetVisibility()==EVisibility::Visible) OnCompleteClicked();
+}
+
+void SWowQuestDialog::ShowGossip(const FWowGossipMenu& Menu)
+{
+    CurrentQuest=FWowQuestDetails();
+    ContentArea->ClearChildren(); RewardArea->ClearChildren(); ButtonArea->ClearChildren();
+    ContentArea->AddSlot()[SNew(STextBlock).Text(FText::FromString(Menu.Greeting.IsEmpty()?TEXT("Available quests and conversation"):Menu.Greeting)).AutoWrapText(true)];
+    for (const auto& Quest : Menu.Quests)
+        ContentArea->AddSlot().Padding(0,8)[SNew(SButton)
+            .Text(FText::FromString(FString::Printf(TEXT("%s [%d] %s"),Quest.Icon==4?TEXT("?"):TEXT("!"),Quest.Level,*Quest.Title)))
+            .OnClicked_Lambda([this,Id=Quest.Id](){OnGossipQuest.ExecuteIfBound(Id); return FReply::Handled();})];
+    for (const auto& Option : Menu.Options)
+        ContentArea->AddSlot().Padding(0,8)[SNew(SButton).Text(FText::FromString(Option.Text))
+            .IsEnabled(!Option.bCoded && Option.Money==0 && Option.Confirmation.IsEmpty())
+            .OnClicked_Lambda([this,Id=Option.Id](){OnGossipOption.ExecuteIfBound(Id); return FReply::Handled();})];
+    ButtonArea->AddSlot()[SNew(SButton).Text(FText::FromString(TEXT("Goodbye"))).OnClicked(this,&SWowQuestDialog::OnDeclineClicked)];
+    SetVisibility(EVisibility::Visible);
 }
 
 void SWowQuestDialog::RefreshContent()

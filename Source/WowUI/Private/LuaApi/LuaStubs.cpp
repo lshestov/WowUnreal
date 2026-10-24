@@ -2080,19 +2080,11 @@ static int L_IsUsableAction(lua_State* L)
                         FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
                         if (Player)
                         {
-                            // Basic resource check - for spells, check mana
-                            // Real implementation would need spell cost data from DBC
-
                             // Auto-attack doesn't require resources
                             if (ActionId != 6603)
                             {
-                                // Get current power based on class power type
-                                int32 CurrentPower = Player->GetPower(0); // Assume mana for now
-
-                                // Basic spell cost assumption (would need DBC data for accuracy)
-                                int32 EstimatedCost = 50; // Basic spell cost estimate
-
-                                if (CurrentPower < EstimatedCost)
+                                const auto* Spell=FDbcStore::Get().Spells().GetById(ActionId);
+                                if (Spell && Spell->PowerType<=6 && Player->GetPower(Spell->PowerType)<static_cast<int32>(Spell->ManaCost))
                                 {
                                     bHasResource = false;
                                     bNoMana = true;
@@ -2142,6 +2134,10 @@ static int L_IsAttackAction(lua_State* L)
 
 static int L_GetBonusBarOffset(lua_State* L)
 {
+    if (const auto* Context=WowLuaApi::GetContext(L); Context && Context->ConnectionManager)
+    {
+        lua_pushnumber(L,Context->ConnectionManager->GetBonusActionOffset()); return 1;
+    }
     const auto* Ctx = WowLuaApi::GetContext(L);
     const auto* Player = Ctx && Ctx->EntityManager ? Ctx->EntityManager->GetLocalPlayer() : nullptr;
     const uint8 Form = Player ? Player->GetFieldByte(UnitField::BYTES_2, 3) : 0;
@@ -2188,8 +2184,9 @@ static int L_GetSpellInfo(lua_State* L)
         }
 
         lua_pushnumber(L, 0);  // castTime (would need CastingTime DBC lookup)
-        lua_pushnumber(L, 0);  // minRange (would need SpellRange DBC lookup)
-        lua_pushnumber(L, 0);  // maxRange
+        const auto* Range=FDbcStore::Get().Spells().GetRange(SpellEntry->RangeIndex);
+        lua_pushnumber(L,Range?Range->Min[0]:0);
+        lua_pushnumber(L,Range?Range->Max[0]:0);
         return 6;
     }
     lua_pushnil(L);
@@ -2418,11 +2415,64 @@ static int L_IsUsableSpell(lua_State* L)
     return 2;
 }
 
+static int PushSpellRange(lua_State* L,uint32 SpellId,const FWowEntity* Target)
+{
+    const auto* Ctx=WowLuaApi::GetContext(L);
+    const auto* Player=Ctx && Ctx->EntityManager?Ctx->EntityManager->GetLocalPlayer():nullptr;
+    const auto* Spell=FDbcStore::Get().Spells().GetById(SpellId);
+    const auto* Range=Spell?FDbcStore::Get().Spells().GetRange(Spell->RangeIndex):nullptr;
+    if (!Player || !Target || !Target->IsUnit() || !Range) { lua_pushnil(L); return 1; }
+    const bool Friendly=GetUnitRelationship(Ctx,Player,Target)==EWowUnitRelationship::Friendly;
+    const float Distance=FVector::Distance(Player->Movement.Position,Target->Movement.Position);
+    const float Reach=FMath::Max(0.f,Player->GetFieldFloat(UnitField::COMBATREACH))+FMath::Max(0.f,Target->GetFieldFloat(UnitField::COMBATREACH));
+    const float Melee=FMath::Max(5.f,Reach+4.f/3.f);
+    float Minimum=Range->Min[Friendly?1:0], Maximum=Range->Max[Friendly?1:0];
+    if (SpellId==6603 || Range->Flags==1) Maximum=Melee;
+    else
+    {
+        Maximum+=Reach;
+        if (Range->Flags==2) Minimum+=Melee;
+        else if (Minimum>0) Minimum+=Reach;
+    }
+    const bool InRange=Target==Player || (Distance>=Minimum && Distance<=Maximum);
+    lua_pushnumber(L,InRange?1:0);
+    return 1;
+}
+
+static FWowEntity* ResolveRangeTarget(lua_State* L,int32 Index)
+{
+    if (!lua_isnoneornil(L,Index)) return ResolveUnit(L,Index);
+    const auto* Context=WowLuaApi::GetContext(L);
+    return Context && Context->EntityManager && Context->ConnectionManager
+        ? Context->EntityManager->Find(Context->ConnectionManager->GetTargetGuid()) : nullptr;
+}
+
+static int L_IsActionInRange(lua_State* L)
+{
+    auto* Ctx=WowLuaApi::GetContext(L);
+    const int32 Slot=SafeActionSlot(L);
+    if (!Ctx || !Ctx->ConnectionManager || !Ctx->ConnectionManager->PacketHandler.ActionButtons.IsValidIndex(Slot)) { lua_pushnil(L); return 1; }
+    const uint32 Action=Ctx->ConnectionManager->PacketHandler.ActionButtons[Slot];
+    if (!Action || (Action>>24)!=0) { lua_pushnil(L); return 1; }
+    return PushSpellRange(L,Action&0x00ffffff,ResolveRangeTarget(L,2));
+}
+
 static int L_IsSpellInRange(lua_State* L)
 {
-    // IsSpellInRange(spell, unit) → inRange
-    lua_pushboolean(L, 1);
-    return 1;
+    auto* Ctx=WowLuaApi::GetContext(L);
+    uint32 SpellId=0; int32 UnitArg=2;
+    if (lua_isnumber(L,1))
+    {
+        if (lua_gettop(L)>=3) { ResolveSpellBookSpellId(L,lua_tointeger(L,1),luaL_optstring(L,2,"spell"),SpellId); UnitArg=3; }
+        else SpellId=lua_tointeger(L,1);
+    }
+    else if (Ctx && Ctx->ConnectionManager)
+    {
+        const FString Name=UTF8_TO_TCHAR(luaL_checkstring(L,1));
+        for (const uint32 Id : Ctx->ConnectionManager->PacketHandler.KnownSpells)
+            if (const auto* Spell=FDbcStore::Get().Spells().GetById(Id); Spell && Spell->SpellName==Name) { SpellId=Id; break; }
+    }
+    return PushSpellRange(L,SpellId,ResolveRangeTarget(L,UnitArg));
 }
 
 static int L_GetSpellBookItemInfo(lua_State* L)
@@ -4750,6 +4800,14 @@ static int L_ToggleSpellBook(lua_State* L)
 
 void WowLuaApi::RegisterStubs(lua_State* L)
 {
+    lua_register(L,"UnitIsPartyLeader",[](lua_State* State)->int {
+        const auto* Context=WowLuaApi::GetContext(State);
+        const uint64 Guid=ResolveUnitGuid(State);
+        const uint64 Leader=Context && Context->ConnectionManager?Context->ConnectionManager->PacketHandler.GroupInfo.LeaderGuid:0;
+        lua_pushboolean(State,Guid && Guid==Leader); return 1;
+    });
+    lua_register(L,"IsInventoryItemLocked",[](lua_State* State)->int { lua_pushboolean(State,false); return 1; });
+    lua_register(L,"GetRepairAllCost",[](lua_State* State)->int { lua_pushnumber(State,0); lua_pushboolean(State,false); return 2; });
     lua_register(L, "PartialPlayTime", [](lua_State* State) -> int { lua_pushboolean(State, false); return 1; });
     lua_register(L, "NoPlayTime", [](lua_State* State) -> int { lua_pushboolean(State, false); return 1; });
     lua_register(L, "IsPVPTimerRunning", [](lua_State* State) -> int { lua_pushboolean(State, false); return 1; });
@@ -4896,68 +4954,7 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "IsCurrentAction", L_IsCurrentAction);
     lua_register(L, "IsUsableAction", L_IsUsableAction);
     lua_register(L, "IsAttackAction", L_IsAttackAction);
-    lua_register(L, "IsActionInRange", [](lua_State* L2) -> int {
-        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
-        int32 Slot = SafeActionSlot(L2);
-
-        if (!Ctx || !Ctx->ConnectionManager || Slot < 0 || Slot >= 144)
-        {
-            lua_pushnil(L2); // nil = no action
-            return 1;
-        }
-
-        const TArray<uint32>& ActionButtons = Ctx->ConnectionManager->PacketHandler.ActionButtons;
-        if (Slot >= ActionButtons.Num() || ActionButtons[Slot] == 0)
-        {
-            lua_pushnil(L2); // nil = no action
-            return 1;
-        }
-
-        uint32 ActionData = ActionButtons[Slot];
-        uint8 ActionType = (ActionData >> 24) & 0xFF;
-        uint32 ActionId = ActionData & 0x00FFFFFF;
-
-        if (ActionType == 0) // Spell
-        {
-            // Check if we have a target for range-dependent actions
-            int64 TargetGuid = Ctx->ConnectionManager->GetTargetGuid();
-            if (TargetGuid == 0)
-            {
-                // No target - melee actions are out of range, self-cast spells are in range
-                if (ActionId == 6603) // Auto Attack
-                {
-                    lua_pushnumber(L2, 0); // Out of range
-                    return 1;
-                }
-                else
-                {
-                    lua_pushnumber(L2, 1); // Assume self-cast spells are in range
-                    return 1;
-                }
-            }
-
-            // Basic range check - this could be improved with actual spell range data
-            if (Ctx->EntityManager)
-            {
-                FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
-                FWowEntity* Target = Ctx->EntityManager->Find(TargetGuid);
-                if (Player && Target)
-                {
-                    float Distance = FVector::Dist(Player->Movement.Position, Target->Movement.Position);
-
-                    // Basic range assumptions: melee = 5 yards, spells = 30 yards
-                    float MaxRange = (ActionId == 6603) ? 5.0f : 30.0f;
-
-                    lua_pushnumber(L2, Distance <= MaxRange ? 1 : 0);
-                    return 1;
-                }
-            }
-        }
-
-        // Default to in range for other action types
-        lua_pushnumber(L2, 1);
-        return 1;
-    });
+    lua_register(L, "IsActionInRange", L_IsActionInRange);
     lua_register(L, "GetBonusBarOffset", L_GetBonusBarOffset);
     lua_register(L, "GetCurrentActionBarPage", L_GetCurrentActionBarPage);
     lua_register(L, "GetActionBarPage", L_GetCurrentActionBarPage); // WoW 3.3.5 alias
@@ -7254,7 +7251,15 @@ lua_pushboolean(L2, PLATFORM_MAC);
     // Container/bag
     lua_register(L, "GetContainerNumFreeSlots", [](lua_State* L2) -> int {
         // Returns: numFreeSlots, bagType
-        lua_pushnumber(L2, 0);
+        const auto* Context=WowLuaApi::GetContext(L2);
+        auto* Player=Context && Context->EntityManager?Context->EntityManager->GetLocalPlayer():nullptr;
+        const int32 Bag=luaL_optinteger(L2,1,0);
+        int32 Free=0;
+        if (Player && Bag==0) for (int32 I=0; I<16; ++I) Free+=Player->GetBackpackItemGuid(I)==0;
+        else if (Player && Bag>=1 && Bag<=4)
+            if (const auto* Container=Context->EntityManager->FindContainer(Player->GetBagGuid(Bag)))
+                for (int32 I=0; I<FMath::Min(Container->GetNumSlots(),36); ++I) Free+=Container->GetItemGuidAtSlot(I)==0;
+        lua_pushnumber(L2, Free);
         lua_pushnumber(L2, 0);
         return 2;
     });

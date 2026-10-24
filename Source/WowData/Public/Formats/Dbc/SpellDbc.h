@@ -61,10 +61,14 @@ class WOWDATA_API FSpellDbc
 public:
     bool Load(const FDbcParser& Parser);
     const FSpellDbcEntry* GetById(uint32 ID) const;
+    struct FRange { float Min[2] = {}, Max[2] = {}; uint32 Flags = 0; };
+    bool LoadRanges(const FDbcParser& Parser);
+    const FRange* GetRange(uint32 ID) const { return Ranges.Find(ID); }
     const TArray<FSpellDbcEntry>& GetAll() const { return Entries; }
     int32 Num() const { return Entries.Num(); }
 
 private:
     TArray<FSpellDbcEntry> Entries;
     TMap<uint32, int32> IdIndex;
+    TMap<uint32, FRange> Ranges;
 };

@@ -145,6 +145,7 @@ FLinearColor FWowInventoryManager::GetQualityColor(uint8 Quality)
 void FWowInventoryManager::UpdateItemSlot(FWowItemSlot& Slot, uint64 ItemGuid, FWowEntityManager& EntityManager, uint8 Bag, uint8 SlotIndex)
 {
     Slot.ItemGuid = ItemGuid;
+    Slot.Name.Empty();
     Slot.Bag = Bag;
     Slot.Slot = SlotIndex;
 
@@ -164,10 +165,13 @@ void FWowInventoryManager::UpdateItemSlot(FWowItemSlot& Slot, uint64 ItemGuid, F
         // Quality is not part of update fields in this client yet, so keep a stable visible default.
         Slot.Quality = Slot.ItemEntry != 0 ? 1 : 0;
 
-        if (Slot.ItemEntry == 0)
+        if (auto* Connection=ConnectionManager.Get(); Connection && Slot.ItemEntry)
         {
-            // Fall back to a deterministic placeholder so the UI still surfaces the slot content.
-            Slot.ItemEntry = static_cast<uint32>(ItemGuid & 0xFFFFFFFFu);
+            Connection->RequestItemTemplate(Slot.ItemEntry);
+            if (const auto* Template=Connection->PacketHandler.ItemTemplates.Find(Slot.ItemEntry))
+            {
+                Slot.Name=Template->Name; Slot.Quality=Template->Quality;
+            }
         }
     }
 }

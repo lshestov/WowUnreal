@@ -10,6 +10,11 @@ DEFINE_LOG_CATEGORY_STATIC(LogWowPacket, Log, All);
 FWowPacketHandler::FWowPacketHandler()
 {
     // Register handlers
+    Handlers.Add(WowOpcode::SMSG_GOSSIP_MESSAGE, &FWowPacketHandler::HandleGossipMessage);
+    Handlers.Add(WowOpcode::SMSG_ITEM_QUERY_SINGLE_RESPONSE, &FWowPacketHandler::HandleItemQueryResponse);
+    Handlers.Add(WowOpcode::SMSG_QUESTGIVER_QUEST_LIST, &FWowPacketHandler::HandleQuestgiverQuestList);
+    Handlers.Add(WowOpcode::SMSG_LOOT_REMOVED, &FWowPacketHandler::HandleLootRemoved);
+    Handlers.Add(WowOpcode::SMSG_LOOT_CLEAR_MONEY, &FWowPacketHandler::HandleLootClearMoney);
     Handlers.Add(WowOpcode::SMSG_LOGIN_VERIFY_WORLD,      &FWowPacketHandler::HandleLoginVerifyWorld);
     Handlers.Add(WowOpcode::SMSG_UPDATE_OBJECT,            &FWowPacketHandler::HandleUpdateObject);
     Handlers.Add(WowOpcode::SMSG_COMPRESSED_UPDATE_OBJECT, &FWowPacketHandler::HandleCompressedUpdateObject);
@@ -115,9 +120,6 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(WowOpcode::SMSG_SET_PROFICIENCY,         &FWowPacketHandler::HandleSetProficiency);
     Handlers.Add(WowOpcode::SMSG_ACCOUNT_DATA_TIMES,      &FWowPacketHandler::HandleAccountDataTimes);
     Handlers.Add(WowOpcode::SMSG_PARTY_MEMBER_STATS,      &FWowPacketHandler::HandlePartyMemberStats);
-
-    // ── NPC interaction handlers ────────────────────────────────────────────
-    Handlers.Add(WowOpcode::SMSG_GOSSIP_MESSAGE,          &FWowPacketHandler::HandleGossipMessage);
 
     // ── Mail system handlers ────────────────────────────────────────────────
     Handlers.Add(WowOpcode::SMSG_SHOW_MAILBOX,            &FWowPacketHandler::HandleShowMailbox);
@@ -410,7 +412,9 @@ void FWowPacketHandler::ParseUpdateBlock(FPacketReader& R)
         }
 
         EntitiesCreated++;
+        if (Guid==EntityManager.LocalPlayerGuid) RefreshQuestLog();
         EntityManager.OnEntityCreated.Broadcast(Entity);
+        if (Entity.IsItem()) OnPlayerInventoryUpdate.Broadcast();
 
         UE_LOG(LogWowPacket, Verbose, TEXT("Created %s GUID=%llu type=%d entry=%u pos=(%.1f,%.1f,%.1f)"),
             Entity.GetEntityKindName(), Guid, ObjTypeId, Entity.Entry,
@@ -617,6 +621,8 @@ void FWowPacketHandler::ParseUpdateFields(FPacketReader& R, FWowEntity& Entity)
             }
         }
     }
+
+    if (Entity.Guid == EntityManager.LocalPlayerGuid) RefreshQuestLog();
 
     // Fire inventory update event if player inventory was updated
     if (bInventoryFieldUpdated)
@@ -1332,95 +1338,6 @@ void FWowPacketHandler::HandleInventoryChangeFailure(FPacketReader& R)
     UE_LOG(LogWowPacket, Warning, TEXT("INVENTORY_CHANGE_FAILURE: error=%d (%s)"), ErrorCode, ErrorMsg);
 }
 
-// ── SMSG_LOOT_RESPONSE ──────────────────────────────────────────────────
-// packed guid loot_guid, uint8 loot_type, uint32 gold, uint8 item_count, then for each item:
-// uint8 index, uint32 item_id, uint32 count, uint32 display_id, uint8 quality, ...
-
-void FWowPacketHandler::HandleLootResponse(FPacketReader& R)
-{
-    if (!R.CanRead(2)) return; // minimum: packed guid + loot type
-
-    uint64 LootGuid = R.ReadPackedGuid();
-
-    if (!R.CanRead(5)) return; // loot type + gold + item count
-    uint8 LootType = R.ReadU8();
-    uint32 Gold = R.ReadU32();
-    uint8 ItemCount = R.ReadU8();
-
-    TArray<FWowLootItem> Items;
-    Items.Reserve(ItemCount);
-
-    for (int32 i = 0; i < ItemCount; ++i)
-    {
-        if (!R.CanRead(22)) break; // index + item_id + count + display_id + random_suffix + random_property + slot_type
-
-        FWowLootItem Item;
-        Item.Index = R.ReadU8();
-        Item.ItemId = R.ReadU32();
-        Item.Count = R.ReadU32();
-        Item.DisplayId = R.ReadU32();
-        Item.RandomSuffix = R.ReadU32();
-        Item.RandomProperty = R.ReadU32();
-        Item.SlotType = R.ReadU8();
-        Item.bLooted = false;
-
-        Items.Add(Item);
-    }
-
-    UE_LOG(LogWowPacket, Log, TEXT("LOOT_RESPONSE: guid=%llu type=%d gold=%u items=%d"),
-           LootGuid, LootType, Gold, ItemCount);
-
-    OnLootOpened.Broadcast(LootGuid, LootType, Gold, Items);
-}
-
-// ── SMSG_LOOT_RELEASE_RESPONSE ──────────────────────────────────────────────
-// packed guid loot_guid, uint8 unknown
-
-void FWowPacketHandler::HandleLootReleaseResponse(FPacketReader& R)
-{
-    if (!R.CanRead(2)) return; // minimum: packed guid + unknown
-
-    uint64 LootGuid = R.ReadPackedGuid();
-
-    if (!R.CanRead(1)) return;
-    uint8 Unknown = R.ReadU8();
-
-    UE_LOG(LogWowPacket, Log, TEXT("LOOT_RELEASE_RESPONSE: guid=%llu (loot window closed)"), LootGuid);
-
-    OnLootClosed.Broadcast();
-}
-
-// ── SMSG_ITEM_PUSH_RESULT ──────────────────────────────────────────────────
-// packed guid target_guid, uint8 created (0=existing item, 1=new), uint8 created2,
-// uint8 bag_slot, uint32 item_slot, uint32 item_id, uint32 random_property_id,
-// uint32 random_suffix, uint32 count, uint32 charges_count, uint8 charges1, uint8 charges2,
-// uint8 charges3, uint8 charges4, uint8 charges5, uint32 duration, (optional item bonuses)
-
-void FWowPacketHandler::HandleItemPushResult(FPacketReader& R)
-{
-    if (!R.CanRead(2)) return; // minimum: packed guid + created flag
-
-    uint64 TargetGuid = R.ReadPackedGuid();
-
-    if (!R.CanRead(18)) return; // created + created2 + bag + slot + item_id + other fields
-    uint8 Created = R.ReadU8();
-    uint8 Created2 = R.ReadU8();
-    uint8 BagSlot = R.ReadU8();
-    uint32 ItemSlot = R.ReadU32();
-    uint32 ItemId = R.ReadU32();
-    uint32 RandomPropertyId = R.ReadU32();
-
-    if (!R.CanRead(8)) return; // random_suffix + count
-    uint32 RandomSuffix = R.ReadU32();
-    uint32 Count = R.ReadU32();
-
-    // Skip remaining fields for now (charges, duration, etc.)
-
-    const TCHAR* CreatedMsg = (Created == 1) ? TEXT("new") : TEXT("existing");
-    UE_LOG(LogWowPacket, Log, TEXT("ITEM_PUSH_RESULT: target=%llu %s item=%u count=%u bag=%d slot=%u"),
-           TargetGuid, CreatedMsg, ItemId, Count, BagSlot, ItemSlot);
-}
-
 // ── SMSG_LIST_INVENTORY ──────────────────────────────────────────────────────
 // packed guid vendor_guid, uint8 item_count, for each item: uint32 slot + uint32 itemid + uint32 displayid + uint32 maxcount + uint32 price + uint32 maxdurability + uint32 buycount + uint32 extendedcost
 
@@ -2021,77 +1938,6 @@ void FWowPacketHandler::HandleQuestgiverStatus(FPacketReader& R)
     UE_LOG(LogWowPacket, Log, TEXT("QUESTGIVER_STATUS: guid=%llu status=%d (%s)"), Guid, Status, StatusMsg);
 }
 
-// ── SMSG_QUESTGIVER_QUEST_DETAILS ────────────────────────────────────────
-// uint64 guid, uint32 questId, title (null-term string), details string
-
-void FWowPacketHandler::HandleQuestgiverQuestDetails(FPacketReader& R)
-{
-    if (!R.CanRead(12)) return;
-
-    uint64 Guid = R.ReadU64();
-    uint32 QuestId = R.ReadU32();
-
-    FString Title = R.ReadCString();
-    FString Details = R.ReadCString();
-    FString Objectives = R.ReadCString();
-
-    FWowQuestDetails QuestDetails;
-    QuestDetails.QuestGiverGuid = Guid;
-    QuestDetails.QuestId = QuestId;
-    QuestDetails.Title = Title;
-    QuestDetails.Details = Details;
-    QuestDetails.Objectives = Objectives;
-
-    // Parse reward items if available (simplified for now - exact structure depends on server)
-    if (R.CanRead(4))
-    {
-        QuestDetails.RewardMoney = R.ReadU32();
-    }
-    if (R.CanRead(4))
-    {
-        QuestDetails.RewardXP = R.ReadU32();
-    }
-
-    UE_LOG(LogWowPacket, Log, TEXT("QUESTGIVER_QUEST_DETAILS: guid=%llu quest=%u title=\"%s\""),
-           Guid, QuestId, *Title);
-
-    OnQuestDialog.Broadcast(QuestDetails);
-}
-
-// ── SMSG_QUESTGIVER_OFFER_REWARD ─────────────────────────────────────────
-// uint64 guid, uint32 questId, title string
-
-void FWowPacketHandler::HandleQuestgiverOfferReward(FPacketReader& R)
-{
-    if (!R.CanRead(12)) return;
-
-    uint64 Guid = R.ReadU64();
-    uint32 QuestId = R.ReadU32();
-
-    FString Title = R.ReadCString();
-
-    FWowQuestDetails QuestDetails;
-    QuestDetails.QuestGiverGuid = Guid;
-    QuestDetails.QuestId = QuestId;
-    QuestDetails.Title = Title;
-    QuestDetails.Details = TEXT("Quest complete!");
-
-    // Parse reward data if available
-    if (R.CanRead(4))
-    {
-        QuestDetails.RewardMoney = R.ReadU32();
-    }
-    if (R.CanRead(4))
-    {
-        QuestDetails.RewardXP = R.ReadU32();
-    }
-
-    UE_LOG(LogWowPacket, Log, TEXT("QUESTGIVER_OFFER_REWARD: guid=%llu quest=%u title=\"%s\""),
-           Guid, QuestId, *Title);
-
-    OnQuestRewardDialog.Broadcast(QuestDetails);
-}
-
 // ── SMSG_QUEST_UPDATE_ADD_KILL ───────────────────────────────────────────
 // uint32 questId, uint32 entry, uint32 count, uint32 required, uint64 guid
 
@@ -2136,6 +1982,7 @@ void FWowPacketHandler::HandleQuestUpdateAddKill(FPacketReader& R)
 
     UE_LOG(LogWowPacket, Log, TEXT("QUEST_UPDATE_ADD_KILL: quest=%u entry=%u count=%u/%u"),
            QuestId, Entry, Count, Required);
+    OnQuestLogChanged.Broadcast();
 }
 
 // ── SMSG_QUEST_UPDATE_COMPLETE ───────────────────────────────────────────
@@ -2159,6 +2006,7 @@ void FWowPacketHandler::HandleQuestUpdateComplete(FPacketReader& R)
 
     UE_LOG(LogWowPacket, Log, TEXT("QUEST_UPDATE_COMPLETE: quest=%u"), QuestId);
     OnQuestComplete.Broadcast(QuestId);
+    OnQuestLogChanged.Broadcast();
 }
 
 // ── SMSG_TALENTS_INFO ────────────────────────────────────────────────────
@@ -2833,65 +2681,7 @@ void FWowPacketHandler::HandlePartyMemberStats(FPacketReader& R)
 
 // ── NPC interaction handlers ────────────────────────────────────────────
 
-void FWowPacketHandler::HandleGossipMessage(FPacketReader& R)
-{
-    // SMSG_GOSSIP_MESSAGE
-    // uint64 NpcGuid, uint32 TextId, uint32 MenuId, uint32 OptionCount
-    // Then OptionCount x (uint32 OptionId, uint8 OptionIcon, uint8 OptionCoded, uint32 BoxMoney, FString Text, FString BoxText)
-    // Then uint32 QuestCount, QuestCount x (uint32 QuestId, uint32 QuestIcon, int32 QuestLevel, uint32 QuestFlags, uint8 Repeatable, FString Title)
 
-    if (!R.CanRead(20)) // 8 + 4 + 4 + 4
-    {
-        UE_LOG(LogWowPacket, Warning, TEXT("GOSSIP_MESSAGE: packet too short"));
-        return;
-    }
-
-    uint64 NpcGuid = R.ReadU64();
-    uint32 TextId = R.ReadU32();
-    uint32 MenuId = R.ReadU32();
-    uint32 OptionCount = R.ReadU32();
-
-    UE_LOG(LogWowPacket, Log, TEXT("GOSSIP_MESSAGE: NPC GUID %llu, Text %u, Menu %u, %u options"),
-           NpcGuid, TextId, MenuId, OptionCount);
-
-    // Read gossip options
-    for (uint32 i = 0; i < OptionCount && R.Remaining() > 14; ++i) // minimum: 4 + 1 + 1 + 4 + 2 nulls = 12
-    {
-        if (!R.CanRead(10)) break; // minimum for option header
-
-        uint32 OptionId = R.ReadU32();
-        uint8 OptionIcon = R.ReadU8();
-        uint8 OptionCoded = R.ReadU8();
-        uint32 BoxMoney = R.ReadU32();
-        FString OptionText = R.ReadCString();
-        FString BoxText = R.ReadCString();
-
-        UE_LOG(LogWowPacket, VeryVerbose, TEXT("  Option %u: Icon %u, Text '%s'"), OptionId, OptionIcon, *OptionText);
-    }
-
-    // Read quest options
-    if (R.CanRead(4))
-    {
-        uint32 QuestCount = R.ReadU32();
-        UE_LOG(LogWowPacket, Log, TEXT("  %u quest options"), QuestCount);
-
-        for (uint32 i = 0; i < QuestCount && R.Remaining() > 18; ++i) // minimum for quest header
-        {
-            if (!R.CanRead(17)) break; // minimum: 4 + 4 + 4 + 4 + 1
-
-            uint32 QuestId = R.ReadU32();
-            uint32 QuestIcon = R.ReadU32();
-            int32 QuestLevel = static_cast<int32>(R.ReadU32());
-            uint32 QuestFlags = R.ReadU32();
-            uint8 Repeatable = R.ReadU8();
-            FString QuestTitle = R.ReadCString();
-
-            UE_LOG(LogWowPacket, VeryVerbose, TEXT("  Quest %u: Level %d, Title '%s'"), QuestId, QuestLevel, *QuestTitle);
-        }
-    }
-
-    OnGossipMessage.Broadcast(NpcGuid, TextId, MenuId);
-}
 
 // ── Mail system handlers ────────────────────────────────────────────
 

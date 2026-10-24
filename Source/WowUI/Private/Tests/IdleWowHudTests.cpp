@@ -171,8 +171,8 @@ bool FHudMpqIcons::RunTest(const FString&)
     if (!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),DataPath)) { AddError(TEXT("Supply -wowdata=<existing Data>")); return false; }
     FMpqManager Mpq;
     if (!TestTrue(TEXT("Local MPQ opens"),Mpq.Initialize(DataPath))) return false;
-    FDbcStore::Get().LoadAll(Mpq);
-    FDbcStore::Get().LoadDeferred(Mpq);
+    if (!FDbcStore::Get().IsLoaded()) FDbcStore::Get().LoadAll(Mpq);
+    if (!FDbcStore::Get().IsDeferredLoaded()) FDbcStore::Get().LoadDeferred(Mpq);
     FHudFixture F;
     FWowAssetCache Cache;
     F.Frames.SetMpqManager(&Mpq); F.Frames.SetAssetCache(&Cache);
@@ -194,6 +194,52 @@ bool FHudMpqIcons::RunTest(const FString&)
     TestTrue(TEXT("Different spell has different image"),Image && Image->GetBrush().GetResourceObject()!=First);
     TestTrue(TEXT("Empty action clears its previous image"),F.Lua.ExecuteString(TEXT("SavedActionIcon:SetTexture(GetActionTexture(75))")));
     TestTrue(TEXT("Old spell icon is no longer drawn"),Image && !Image->GetBrush().GetResourceObject() && Image->GetRenderOpacity()==0);
+    return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGameplaySpellRange,"WowUnreal.Gameplay.SpellRangeAndResources",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FGameplaySpellRange::RunTest(const FString&)
+{
+    FString Path;
+    if (!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) { AddError(TEXT("Supply -wowdata")); return false; }
+    FMpqManager Mpq; if (!Mpq.Initialize(Path)) return false;
+    if (!FDbcStore::Get().IsLoaded()) FDbcStore::Get().LoadAll(Mpq);
+    if (!FDbcStore::Get().IsDeferredLoaded()) FDbcStore::Get().LoadDeferred(Mpq);
+    FHudFixture F;
+    TStrongObjectPtr<UWowConnectionManager> Connection(NewObject<UWowConnectionManager>());
+    auto& Entities=Connection->PacketHandler.EntityManager; Entities.LocalPlayerGuid=1;
+    auto& Player=Entities.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER);
+    Player.SetField(UnitField::BYTES_0,(1u<<24)|(1u<<8)|1u);
+    auto& Target=Entities.PromoteToTyped(2,WowTypeMask::OBJECT|WowTypeMask::UNIT);
+    FWowGroupMember Member; Member.Guid=2; Connection->PacketHandler.GroupInfo.Members.Add(Member);
+    F.Context.EntityManager=&Entities; F.Context.ConnectionManager=Connection.Get();
+    Connection->PacketHandler.KnownSpells.Append({6603,78});
+    Connection->PacketHandler.ActionButtons.SetNumZeroed(144);
+    Connection->PacketHandler.ActionButtons[72]=6603; Connection->PacketHandler.ActionButtons[73]=78;
+    Target.Movement.Position=FVector(20,0,0);
+    TestTrue(TEXT("A melee action and spell both report numeric out-of-range"),F.Lua.ExecuteString(TEXT("assert(IsActionInRange(73,'party1')==0 and IsSpellInRange('Heroic Strike','party1')==0)")));
+    Target.Movement.Position=FVector(3,0,0);
+    TestTrue(TEXT("Moving into melee range changes both APIs"),F.Lua.ExecuteString(TEXT("assert(IsActionInRange(73,'party1')==1 and IsSpellInRange('Heroic Strike','party1')==1)")));
+    TestTrue(TEXT("Missing target is unknown rather than assumed in range"),F.Lua.ExecuteString(TEXT("assert(IsSpellInRange('Heroic Strike','missing')==nil)")));
+    TestTrue(TEXT("Implicit action target does not default to the player"),F.Lua.ExecuteString(TEXT("assert(IsActionInRange(73)==nil)")));
+    const auto* Spell=FDbcStore::Get().Spells().GetById(78);
+    TestTrue(TEXT("Real spell cost and range exist"),Spell && Spell->ManaCost>0 && FDbcStore::Get().Spells().GetRange(Spell->RangeIndex));
+    if (!Spell) return false;
+    Player.SetField(UnitField::POWER1+1,0);
+    TestTrue(TEXT("Rage ability is unavailable with zero rage"),F.Lua.ExecuteString(TEXT("local usable,noPower=IsUsableAction(74); assert(not usable and noPower)")));
+    Player.SetField(UnitField::POWER1+1,Spell->ManaCost);
+    TestTrue(TEXT("Rage ability becomes usable at actual DBC cost"),F.Lua.ExecuteString(TEXT("local usable,noPower=IsUsableAction(74); assert(usable and not noPower)")));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGameplaySecureAction,"WowUnreal.Gameplay.VisibleActionClick",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FGameplaySecureAction::RunTest(const FString&)
+{
+    FHudFixture F;
+    TestTrue(TEXT("A stance button carries its live action slot"),F.Lua.ExecuteString(TEXT("PageButton=CreateFrame('CheckButton','BonusActionButton1',UIParent); PageButton:SetAttribute('type','action'); PageButton:SetAttribute('action',85)")));
+    int32 Slot=INDEX_NONE;
+    F.Frames.OnSecureActionDispatch.BindLambda([&Slot](int32 Value){Slot=Value;});
+    F.Frames.DispatchClick(F.Frames.FindFrame(TEXT("BonusActionButton1")),TEXT("LeftButton"),false);
+    TestEqual(TEXT("Mouse action uses current page, not a fixed battle slot"),Slot,84);
     return true;
 }
 #endif

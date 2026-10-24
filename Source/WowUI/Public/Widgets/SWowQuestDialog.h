@@ -10,6 +10,8 @@ class SHorizontalBox;
 DECLARE_DELEGATE_TwoParams(FOnQuestDialogAccept, uint64 /*QuestGiverGuid*/, uint32 /*QuestId*/);
 DECLARE_DELEGATE_ThreeParams(FOnQuestDialogComplete, uint64 /*QuestGiverGuid*/, uint32 /*QuestId*/, int32 /*RewardChoice*/);
 DECLARE_DELEGATE(FOnQuestDialogDecline);
+DECLARE_DELEGATE_OneParam(FOnGossipQuestSelected, uint32);
+DECLARE_DELEGATE_OneParam(FOnGossipOptionSelected, uint32);
 
 /**
  * WoW-style quest dialog widget
@@ -23,6 +25,8 @@ public:
         SLATE_EVENT(FOnQuestDialogAccept, OnQuestAccept)
         SLATE_EVENT(FOnQuestDialogComplete, OnQuestComplete)
         SLATE_EVENT(FOnQuestDialogDecline, OnQuestDecline)
+        SLATE_EVENT(FOnGossipQuestSelected, OnGossipQuest)
+        SLATE_EVENT(FOnGossipOptionSelected, OnGossipOption)
     SLATE_END_ARGS()
 
     void Construct(const FArguments& InArgs);
@@ -35,11 +39,17 @@ public:
 
     /** Hide the quest dialog */
     void CloseDialog();
+    void ShowGossip(const FWowGossipMenu& Menu);
+    void AcceptCurrentQuest();
+    void CompleteCurrentQuest();
+    uint32 GetCurrentQuestId() const { return CurrentQuest.QuestId; }
 
 private:
     FOnQuestDialogAccept OnQuestAccept;
     FOnQuestDialogComplete OnQuestComplete;
     FOnQuestDialogDecline OnQuestDecline;
+    FOnGossipQuestSelected OnGossipQuest;
+    FOnGossipOptionSelected OnGossipOption;
 
     TSharedPtr<SScrollBox> ContentArea;
     TSharedPtr<SHorizontalBox> ButtonArea;

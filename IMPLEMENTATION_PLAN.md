@@ -91,6 +91,7 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 - [x] Single-instance lockfile (prevents dual UE launches)
 
 ### Player Controller
+- [ ] Verify deliberate traversal of WMO stairs and tight passages; the direct live probe route to Marshal McBride stops at Northshire Abbey's entrance (priority 3).
 - [x] 3rd-person chase camera (spring arm, zoom, orbit)
 - [x] WASD movement, mouse look, jump, walk/run toggle, auto-run
 - [x] Swim speed, fall damage tracking
@@ -186,6 +187,7 @@ Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 - [x] Talent tree UI (read from SMSG_TALENTS_INFO)
 
 ### P3: Core Gameplay Systems
+- [x] Packaged basic gameplay cycle: selectable NPC quest menus, WotLK quest/loot packets, authoritative quest log and loot acknowledgements, visible action clicks/keys and real spell ranges. Verified 19 Gameplay/Hud/Player/Collision/Equipment tests and a 60-step rendered run: world-ray NPC selection, quest acceptance, two fights using mouse/keyboard actions, two acknowledged loots, and boots removed/re-equipped with live model updates. Native inventory windows still use prototype slot visuals; broader quests and spells remain separate work.
 - [x] Taxi/flight paths (SMSG_SHOWTAXINODES, taxi map UI, auto-fly along path)
 - [x] Loot window (SMSG_LOOT_RESPONSE → show loot UI → CMSG_AUTOSTORE_LOOT_ITEM)
 - [x] Vendor/merchant window (SMSG_LIST_INVENTORY)

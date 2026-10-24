@@ -75,6 +75,7 @@ struct FWowItem
 // Loot item information
 struct FWowLootItem
 {
+    FString Name;
     uint32 ItemId = 0;
     uint32 Count = 0;
     uint32 DisplayId = 0;
@@ -84,6 +85,7 @@ struct FWowLootItem
     uint8 Index = 0;
     uint8 SlotType = 0;
     bool bLooted = false;
+    bool CanLoot() const { return !bLooted && (SlotType==0 || SlotType==4); }
 };
 
 // Vendor item information
@@ -191,6 +193,46 @@ struct FWowQuestDetails
     TArray<FWowQuestRewardItem> ChoiceRewards;
     uint32 RewardMoney = 0;
     uint32 RewardXP = 0;
+};
+
+struct FWowGossipOption
+{
+    uint32 Id = 0;
+    uint8 Icon = 0;
+    bool bCoded = false;
+    uint32 Money = 0;
+    FString Text, Confirmation;
+};
+
+struct FWowGossipQuest
+{
+    uint32 Id = 0, Icon = 0, Flags = 0;
+    int32 Level = 0;
+    bool bRepeatable = false;
+    FString Title;
+};
+
+struct FWowGossipMenu
+{
+    uint64 Guid = 0;
+    uint32 MenuId = 0, TextId = 0;
+    FString Greeting;
+    TArray<FWowGossipOption> Options;
+    TArray<FWowGossipQuest> Quests;
+};
+
+struct FWowLootState
+{
+    uint64 Guid = 0;
+    uint8 Type = 0;
+    uint32 Gold = 0;
+    TArray<FWowLootItem> Items;
+};
+
+struct FWowItemTemplate
+{
+    uint32 Id=0, Class=0, Subclass=0, DisplayId=0, Quality=0, InventoryType=0, RequiredLevel=0;
+    FString Name;
 };
 
 // WoW 3.3.5a NPC flags — determine what interactions are available

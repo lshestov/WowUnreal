@@ -44,6 +44,12 @@ public:
 
     /** Find the local player entity */
     FWowPlayerEntity* GetLocalPlayer() { return FindPlayer(LocalPlayerGuid); }
+    const FWowPlayerEntity* GetLocalPlayer() const
+    {
+        const auto* Found=Entities.Find(LocalPlayerGuid);
+        return Found && Found->IsValid() && (*Found)->GetEntityKind()==EWowEntityKind::Player
+            ? static_cast<const FWowPlayerEntity*>(Found->Get()) : nullptr;
+    }
 
     // Events
     FOnEntityCreated OnEntityCreated;

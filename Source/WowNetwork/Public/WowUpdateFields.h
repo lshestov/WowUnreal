@@ -135,7 +135,9 @@ namespace UnitField
     inline constexpr uint16 FACTIONTEMPLATE      = BASE + 0x0031;
     inline constexpr uint16 FLAGS                = BASE + 0x0035;
     inline constexpr uint16 FLAGS_2              = BASE + 0x0036;
-    inline constexpr uint16 NPC_FLAGS            = BASE + 0x0037;
+    inline constexpr uint16 NPC_FLAGS            = BASE + 0x004C;
+    inline constexpr uint16 BOUNDINGRADIUS       = BASE + 0x003B;
+    inline constexpr uint16 COMBATREACH          = BASE + 0x003C;
     inline constexpr uint16 DISPLAYID            = BASE + 0x003D;
     inline constexpr uint16 NATIVEDISPLAYID      = BASE + 0x003E;
     inline constexpr uint16 MOUNTDISPLAYID       = BASE + 0x003F;

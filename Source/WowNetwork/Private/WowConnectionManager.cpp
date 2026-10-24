@@ -238,6 +238,10 @@ void UWowConnectionManager::DeleteCharacter(int64 Guid)
 void UWowConnectionManager::SendMovement(int32 Opcode, const FVector& Position, float Orientation, int32 MoveFlags)
 {
     if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+    if (auto* Player=PacketHandler.EntityManager.GetLocalPlayer())
+    {
+        Player->Movement.Position=Position; Player->Movement.Orientation=Orientation;
+    }
 
     // Build movement info payload:
     // packedGuid + uint32 moveFlags + uint16 moveFlags2 + uint32 timestamp
@@ -1304,17 +1308,7 @@ void UWowConnectionManager::SendQuestAccept(int64 QuestGiverGuid, int32 QuestId)
 {
     if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
 
-    TArray<uint8> Data;
-    Data.Reserve(12);
-
-    // uint64 questgiver_guid, uint32 quest_id
-    uint64 QGuid = static_cast<uint64>(QuestGiverGuid);
-    Data.SetNumUninitialized(8);
-    FMemory::Memcpy(Data.GetData(), &QGuid, 8);
-
-    uint32 QId = static_cast<uint32>(QuestId);
-    Data.SetNumUninitialized(Data.Num() + 4);
-    FMemory::Memcpy(Data.GetData() + 8, &QId, 4);
+    const auto Data=BuildQuestAcceptPacket(static_cast<uint64>(QuestGiverGuid),static_cast<uint32>(QuestId));
 
     WorldSocket->SendPacket(WowOpcode::CMSG_QUESTGIVER_ACCEPT_QUEST, Data);
     UE_LOG(LogWowNet, Log, TEXT("Accept quest %d from questgiver %lld"), QuestId, QuestGiverGuid);

@@ -2301,6 +2301,10 @@ void FWowFrameManager::DispatchClick(int64 Handle, const FString& Button, bool b
 			}
 		}
 
+		// Stance/page scripts assign the actual slot. Prefer that live value to
+		// the name fallback, which only represents the button's first page.
+		const FString LiveAction=EventSystem->GetFrameAttribute(Handle,TEXT("action"));
+		if (!LiveAction.IsEmpty()) ActionSlot=FCString::Atoi(*LiveAction);
 		if (ActionSlot > 0 && OnSecureActionDispatch.IsBound())
 		{
 			OnSecureActionDispatch.Execute(ActionSlot - 1); // Convert to 0-based

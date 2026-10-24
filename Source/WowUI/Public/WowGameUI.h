@@ -23,6 +23,7 @@ public:
     UWowGameUI();
 
     virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 
     /** Set the connection manager for sending packets */
     UFUNCTION(BlueprintCallable)
@@ -51,6 +52,15 @@ public:
 
     /** Hide quest dialog */
     void HideQuestDialog();
+    void ShowGossip(const FWowGossipMenu& Menu);
+    void SelectGossipQuest(uint32 QuestId);
+    void SelectGossipOption(uint32 OptionId);
+    void AcceptQuest();
+    void CompleteQuest();
+    void LootAll();
+    void CloseLoot();
+    uint32 GetShownQuestId() const;
+    bool IsPointerOverWindow() const;
 
     /** Show or refresh the trade window */
     void ShowTradeWindow(const FWowTradeState& TradeState);
@@ -68,6 +78,7 @@ private:
     TSharedPtr<SWowVendorWindow> VendorWindow;
     TSharedPtr<SWowQuestDialog> QuestDialog;
     TSharedPtr<SWowTradeWindow> TradeWindow;
+    TSharedPtr<SWidget> WindowRoot;
 
     // Widget callbacks
     void OnLootItem(int32 LootSlot);

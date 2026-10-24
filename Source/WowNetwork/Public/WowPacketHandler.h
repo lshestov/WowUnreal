@@ -59,6 +59,8 @@ DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnWorldStatesInit, uint32 /*MapId*/, uin
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnWorldStateUpdate, uint32 /*Field*/, uint32 /*Value*/);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnProficiencySet, uint8 /*ItemClass*/, uint32 /*ItemSubclassMask*/);
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnGossipMessage, uint64 /*NpcGuid*/, uint32 /*TextId*/, uint32 /*MenuId*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnGossipMenu, const FWowGossipMenu&);
+DECLARE_MULTICAST_DELEGATE(FOnQuestLogChanged);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnInitialSpells, const TArray<uint32>& /*SpellIds*/);
 DECLARE_MULTICAST_DELEGATE(FOnActionButtonsUpdated);
 
@@ -151,6 +153,11 @@ public:
 
     /** Quest log entries */
     TArray<FWowQuestLogEntry> QuestLog;
+    FWowGossipMenu GossipMenu;
+    FWowQuestDetails QuestDetails;
+    FWowLootState Loot;
+    TMap<uint32,FWowItemTemplate> ItemTemplates;
+    void RefreshQuestLog();
 
     /** Known talents */
     TArray<FWowTalentInfo> Talents;
@@ -265,6 +272,8 @@ public:
     FOnWorldStateUpdate OnWorldStateUpdate;
     FOnProficiencySet OnProficiencySet;
     FOnGossipMessage OnGossipMessage;
+    FOnGossipMenu OnGossipMenu;
+    FOnQuestLogChanged OnQuestLogChanged;
     FOnInitialSpells OnInitialSpells;
     FOnActionButtonsUpdated OnActionButtonsUpdated;
 
@@ -284,6 +293,10 @@ public:
     FOnOpcodeReceived OnOpcodeReceived;
 
 private:
+    void HandleItemQueryResponse(FPacketReader& R);
+    void HandleQuestgiverQuestList(FPacketReader& R);
+    void HandleLootRemoved(FPacketReader& R);
+    void HandleLootClearMoney(FPacketReader& R);
     // Handler function pointer type
     using HandlerFunc = void (FWowPacketHandler::*)(FPacketReader&);
 

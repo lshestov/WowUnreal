@@ -253,6 +253,7 @@ void FDbcStore::LoadDeferred(FMpqManager& Mpq)
         }
     }
 
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\SpellRange.dbc"), Parser)) SpellDbc.LoadRanges(Parser);
     if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\Spell.dbc"), Parser))
     {
         SpellDbc.Load(Parser);

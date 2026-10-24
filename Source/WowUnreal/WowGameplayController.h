@@ -76,9 +76,16 @@ public:
     bool ConfigureNpcCapture(uint32 DisplayId);
     void LogNpcCapture() const;
     void LogHudCapture() const;
+    void InteractWithTarget();
     bool IsNpcCaptureMoving() const;
 
 private:
+    friend struct FWowGameplayProbe;
+    TSharedPtr<struct FWowGameplayProbe> GameplayProbe;
+    bool bGameplayProbeChecked=false;
+    void TickGameplayProbe();
+    uint32 LastSentMovementFlags=0;
+    float LastSentOrientation=0;
     TWeakObjectPtr<AActor> NpcCaptureTarget;
     TWeakObjectPtr<class ACameraActor> NpcCaptureCamera;
     void UpdateNpcCaptureCamera();
@@ -249,6 +256,7 @@ private:
     void OnActionSlotEquals() { CastSpellFromSlot(11); }
 
     void CastSpellFromSlot(int32 SlotIndex);
+    void ExecuteActionSlot(int32 SlotIndex);
 
     // Name query handling
     void OnPlayerNameReceived(uint64 Guid, const FString& Name);
@@ -268,6 +276,7 @@ private:
     void OnLeftClick();
     void OnLeftClickReleased();
     void TryTargetUnderCursor();
+    void TryTargetAtScreen(float MouseX,float MouseY);
     int64 GetUiFrameUnderCursor() const;
     bool HandleUiMousePress(const FString& Button, int64& PressedFrameHandle, bool bAllowDragDrop);
     bool HandleUiMouseRelease(const FString& Button, int64& PressedFrameHandle);
@@ -277,6 +286,7 @@ private:
     void OnEntityDestroyed(uint64 Guid);
     void SpawnEntityModel(const FWowEntity& Entity);
     void SetupLocalPlayerCharacterModel(const FWowEntity& Entity);
+    TArray<uint32> LocalPlayerAppearance;
     void CacheWorldResources();
 
     // Entity movement interpolation

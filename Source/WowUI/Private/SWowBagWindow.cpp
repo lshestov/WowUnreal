@@ -142,7 +142,7 @@ TSharedPtr<SToolTip> SWowItemSlot::CreateItemTooltip(const FWowItemSlot* ItemSlo
     }
 
     // Get item display info from DBC if available (note: ItemDisplayInfo doesn't contain names)
-    FString ItemName;
+    FString ItemName=ItemSlot->Name;
     // TODO: Look up item name from Item.dbc or server query cache when available
     // For now, ItemDisplayInfo.dbc only contains display information, not names
 

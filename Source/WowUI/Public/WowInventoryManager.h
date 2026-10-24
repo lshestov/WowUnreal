@@ -13,6 +13,7 @@ struct FWowItemSlot
     uint32 ItemEntry = 0;
     uint32 StackCount = 0;
     uint8 Quality = 0; // 0=gray, 1=white, 2=green, 3=blue, 4=purple, 5=orange
+    FString Name;
     uint8 Bag = 255;   // 255 = backpack
     uint8 Slot = 0;
 

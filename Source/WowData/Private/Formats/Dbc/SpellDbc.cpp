@@ -1,5 +1,19 @@
 #include "Formats/Dbc/SpellDbc.h"
 
+bool FSpellDbc::LoadRanges(const FDbcParser& Parser)
+{
+    if (!Parser.IsValid() || Parser.GetFieldCount()<6) return false;
+    Ranges.Empty();
+    for (uint32 I=0; I<Parser.GetRecordCount(); ++I)
+    {
+        FRange Range;
+        Range.Min[0]=Parser.GetFloat(I,1); Range.Min[1]=Parser.GetFloat(I,2);
+        Range.Max[0]=Parser.GetFloat(I,3); Range.Max[1]=Parser.GetFloat(I,4); Range.Flags=Parser.GetUInt(I,5);
+        Ranges.Add(Parser.GetUInt(I,0),Range);
+    }
+    return true;
+}
+
 DEFINE_LOG_CATEGORY_STATIC(LogSpellDbc, Log, All);
 
 bool FSpellDbc::Load(const FDbcParser& Parser)

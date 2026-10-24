@@ -182,7 +182,7 @@ void AWowGameplayController::BeginPlay()
 			// Bind native secure action dispatch — emulates WoW's C++ action button handling
 			UIManager->GetFrameManager()->OnSecureActionDispatch.BindLambda([this](int32 ActionSlot)
 			{
-				CastSpellFromSlot(ActionSlot);
+				ExecuteActionSlot(ActionSlot);
 			});
 			UIManager->GetFrameManager()->OnSecureSpellDispatch.BindLambda([this](int32 SpellId)
 			{
@@ -381,6 +381,14 @@ void AWowGameplayController::BindEntityEvents()
 	});
 
 	// Bind game UI events
+	ConnectionManager->PacketHandler.OnGossipMenu.AddLambda([this](const FWowGossipMenu& Menu)
+	{
+		if (GameUI) GameUI->ShowGossip(Menu);
+	});
+	ConnectionManager->PacketHandler.OnQuestLogChanged.AddLambda([this]()
+	{
+		FireUIEvent(TEXT("QUEST_LOG_UPDATE")); UpdateQuestTracker();
+	});
 	ConnectionManager->PacketHandler.OnLootOpened.AddLambda(
 		[this](uint64 LootGuid, uint8 LootType, uint32 Gold, const TArray<FWowLootItem>& Items)
 		{
@@ -796,11 +804,7 @@ void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
 		// and set up character model if we haven't already
 		if (AWowPlayerCharacter* PlayerChar = Cast<AWowPlayerCharacter>(GetPawn()))
 		{
-			// Check if the player already has a skeletal mesh set
-			if (!PlayerChar->GetMesh()->GetSkeletalMeshAsset())
-			{
-				SetupLocalPlayerCharacterModel(Entity);
-			}
+			SetupLocalPlayerCharacterModel(Entity);
 		}
 
 		// Server position tracking (correction disabled — causes rubber-banding)
@@ -896,6 +900,7 @@ void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
 void AWowGameplayController::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+	TickGameplayProbe();
 
 	// Dispatch OnUpdate to all WoW UI frames each tick
 	if (UIManager && UIManager->GetEventSystem())
@@ -1053,17 +1058,20 @@ void AWowGameplayController::SendMovementUpdate()
 				MoveFlags |= 0x00001000; // FALLING
 		}
 
-		if (Movement->IsWalking() && Speed2D > 10.0f)
+		if (Movement->MaxWalkSpeed <= 250.0f && Speed2D > 10.0f)
 			MoveFlags |= 0x00000100; // WALK_MODE
 	}
 
 	// Always send heartbeat (even when stationary — server needs to know we're alive and where)
 	bool bPositionChanged = !Pos.Equals(LastSentPosition, 1.0f);
-	bool bFlagsChanged = (MoveFlags != 0);
+	bool bFlagsChanged = MoveFlags != LastSentMovementFlags;
+	const bool bTurned=FMath::Abs(FMath::FindDeltaAngleRadians(LastSentOrientation,WowOrientation))>.01f;
 
-	if (bPositionChanged || bFlagsChanged)
+	if (bPositionChanged || bFlagsChanged || bTurned)
 	{
 		LastSentPosition = Pos;
+		LastSentMovementFlags=MoveFlags;
+		LastSentOrientation=WowOrientation;
 		ConnectionManager->SendMovement(WowOpcode::MSG_MOVE_HEARTBEAT, WowPos, WowOrientation, MoveFlags);
 	}
 }
@@ -1182,6 +1190,7 @@ bool AWowGameplayController::HandleUiMouseRelease(const FString& Button, int64& 
 
 void AWowGameplayController::OnLeftClick()
 {
+	if ((GameUI && GameUI->IsPointerOverWindow()) || (UIManager && UIManager->IsPointerOverWindow())) return;
 	if (HandleUiMousePress(TEXT("LeftButton"), PressedLeftMouseFrameHandle, true))
 	{
 		return; // Don't target through UI
@@ -1207,6 +1216,12 @@ void AWowGameplayController::TryTargetUnderCursor()
 		UE_LOG(LogWowGameplay, Log, TEXT("TryTarget: no mouse position"));
 		return;
 	}
+	TryTargetAtScreen(MouseX,MouseY);
+}
+
+void AWowGameplayController::TryTargetAtScreen(float MouseX,float MouseY)
+{
+	if (!ConnectionManager) return;
 
 	FVector WorldLoc, WorldDir;
 	if (!DeprojectScreenPositionToWorld(MouseX, MouseY, WorldLoc, WorldDir))
@@ -1851,10 +1866,17 @@ void AWowGameplayController::OnServerAttackStop(uint64 AttackerGuid, uint64 Vict
 
 void AWowGameplayController::OnRightClick()
 {
+	if ((GameUI && GameUI->IsPointerOverWindow()) || (UIManager && UIManager->IsPointerOverWindow())) return;
 	if (HandleUiMousePress(TEXT("RightButton"), PressedRightMouseFrameHandle, false))
 	{
 		return; // Don't interact through UI
 	}
+	TryTargetUnderCursor();
+	InteractWithTarget();
+}
+
+void AWowGameplayController::InteractWithTarget()
+{
 
 	UE_LOG(LogWowGameplay, Log, TEXT("OnRightClick: TargetGuid=%llu DeadEntities=%d"), TargetGuid, DeadEntityGuids.Num());
 
@@ -2212,6 +2234,7 @@ void AWowGameplayController::InitializeManagers()
 
 void AWowGameplayController::SetupLocalPlayerCharacterModel(const FWowEntity& Entity)
 {
+	if (!ConnectionManager) return;
 	CacheWorldResources();
 	if (!CachedMpq || !CachedAssetCache)
 	{
@@ -2299,18 +2322,26 @@ void AWowGameplayController::SetupLocalPlayerCharacterModel(const FWowEntity& En
 	}
 
 
-	// Use equipment-aware character model if we have equipment data
-	if (CachedCharInfo && CachedCharInfo->Equipment.Num() > 0)
+	// Character enumeration is a login snapshot. Use current server-visible
+	// item entries so removing or replacing gear also changes the rendered model.
+	TArray<FWowCharacterEquipment> Equipment;
+	TArray<uint32> Appearance={RaceId,Gender,SkinColor,Face,HairStyle,HairColor,FacialHair};
+	bool bMetadataReady=true;
+	for (uint8 Slot=0; Slot<19; ++Slot)
 	{
-		PlayerChar->SetCharacterModelWithEquipment(World, CachedMpq, CachedAssetCache,
-			RaceId, Gender, SkinColor, Face, HairStyle, HairColor, FacialHair, &CachedCharInfo->Equipment);
+		const uint32 Entry=Entity.GetField(PlayerField::VISIBLE_ITEM_BASE+Slot*2);
+		Appearance.Add(Entry);
+		if (!Entry) continue;
+		const auto* Item=ConnectionManager->PacketHandler.ItemTemplates.Find(Entry);
+		if (!Item) { ConnectionManager->RequestItemTemplate(Entry); bMetadataReady=false; continue; }
+		FWowCharacterEquipment Gear;
+		Gear.Slot=Slot; Gear.DisplayId=Item->DisplayId; Gear.InventoryType=Item->InventoryType;
+		Equipment.Add(Gear);
 	}
-	else
-	{
-		// Fallback to simple character model without equipment
-		PlayerChar->SetCharacterModel(World, CachedMpq, CachedAssetCache,
-			RaceId, Gender, SkinColor, Face, HairStyle, HairColor, FacialHair);
-	}
+	if (!bMetadataReady || (Appearance==LocalPlayerAppearance && PlayerChar->GetMesh()->GetSkeletalMeshAsset())) return;
+	PlayerChar->SetCharacterModelWithEquipment(World,CachedMpq,CachedAssetCache,
+		RaceId,Gender,SkinColor,Face,HairStyle,HairColor,FacialHair,&Equipment);
+	LocalPlayerAppearance=MoveTemp(Appearance);
 }
 
 void AWowGameplayController::UpdatePlayerAnimations()
@@ -2888,6 +2919,7 @@ void AWowGameplayController::SetTarget(uint64 NewTargetGuid)
 {
 	uint64 OldTargetGuid = TargetGuid;
 	TargetGuid = NewTargetGuid;
+	if (ConnectionManager) ConnectionManager->SendSetSelection(static_cast<int64>(TargetGuid));
 
 	// Fire target change event
 	if (OldTargetGuid != NewTargetGuid)
@@ -2926,12 +2958,6 @@ void AWowGameplayController::SetTarget(uint64 NewTargetGuid)
 				NameplateComponent->SetWorldScale3D(FVector(1.2f, 1.2f, 1.2f));
 			}
 		}
-	}
-
-	// Send to server
-	if (ConnectionManager)
-	{
-		ConnectionManager->SendSetSelection(static_cast<int64>(TargetGuid));
 	}
 
 	// Update highlight circle
@@ -3630,6 +3656,20 @@ void AWowGameplayController::OnToggleMap()
 }
 
 void AWowGameplayController::CastSpellFromSlot(int32 SlotIndex)
+{
+	if (!ConnectionManager) return;
+	int32 AbsoluteSlot=ConnectionManager->GetVisibleActionSlot(SlotIndex);
+	if (UIManager && UIManager->GetFrameManager() && UIManager->GetEventSystem())
+	{
+		const FString Name=FString::Printf(TEXT("%s%d"),ConnectionManager->GetBonusActionOffset()>0?TEXT("BonusActionButton"):TEXT("ActionButton"),SlotIndex+1);
+		const auto Handle=UIManager->GetFrameManager()->FindFrame(Name);
+		const FString Action=UIManager->GetEventSystem()->GetFrameAttribute(Handle,TEXT("action"));
+		if (!Action.IsEmpty()) AbsoluteSlot=FCString::Atoi(*Action)-1;
+	}
+	ExecuteActionSlot(AbsoluteSlot);
+}
+
+void AWowGameplayController::ExecuteActionSlot(int32 SlotIndex)
 {
 	if (!ConnectionManager || !ConnectionManager->PacketHandler.ActionButtons.IsValidIndex(SlotIndex))
 	{
@@ -4393,9 +4433,12 @@ void AWowGameplayController::OnPlayerInventoryUpdated()
 	{
 		UIManager->UpdateInventory();
 	}
+	if (ConnectionManager)
+		if (const auto* LocalEntity=ConnectionManager->PacketHandler.EntityManager.GetLocalPlayer())
+			SetupLocalPlayerCharacterModel(*LocalEntity);
 
 	// Fire inventory events
-	FireUIEvent(TEXT("BAG_UPDATE"));
+	FireUIEvent(TEXT("BAG_UPDATE"),{TEXT("0")});
 	FireUIEvent(TEXT("PLAYER_MONEY"));
 	FireUIEvent(TEXT("PLAYER_EQUIPMENT_CHANGED"));
 	FireUIEvent(TEXT("UPDATE_INVENTORY_DURABILITY"));

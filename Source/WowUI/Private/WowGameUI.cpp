@@ -7,8 +7,29 @@
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
 #include "Widgets/Layout/SConstraintCanvas.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Widgets/Layout/SDPIScaler.h"
+#include "Engine/UserInterfaceSettings.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowGameUI, Log, All);
+
+static FWowQuestDetails FormatQuest(const FWowQuestDetails& Input,UWowConnectionManager* Connection)
+{
+    auto Quest=Input;
+    const auto* Player=Connection?Connection->PacketHandler.EntityManager.GetLocalPlayer():nullptr;
+    static const TCHAR* Classes[]={TEXT(""),TEXT("warrior"),TEXT("paladin"),TEXT("hunter"),TEXT("rogue"),TEXT("priest"),TEXT("death knight"),TEXT("shaman"),TEXT("mage"),TEXT("warlock"),TEXT(""),TEXT("druid")};
+    for (auto* Text : {&Quest.Title,&Quest.Details,&Quest.Objectives})
+    {
+        Text->ReplaceInline(TEXT("$B"),TEXT("\n"),ESearchCase::IgnoreCase);
+        if (Connection) Text->ReplaceInline(TEXT("$N"),*Connection->GetCharacterName(),ESearchCase::IgnoreCase);
+        if (Player)
+        {
+            const uint8 Class=Player->GetFieldByte(UnitField::BYTES_0,1);
+            if (Class<UE_ARRAY_COUNT(Classes)) Text->ReplaceInline(TEXT("$C"),Classes[Class],ESearchCase::IgnoreCase);
+        }
+    }
+    return Quest;
+}
 
 UWowGameUI::UWowGameUI()
 {
@@ -21,6 +42,11 @@ void UWowGameUI::BeginPlay()
     CreateWidgets();
 }
 
+void UWowGameUI::EndPlay(const EEndPlayReason::Type Reason)
+{
+    RemoveWidgetsFromViewport(); Super::EndPlay(Reason);
+}
+
 void UWowGameUI::SetConnectionManager(UWowConnectionManager* InConnectionManager)
 {
     ConnectionManager = InConnectionManager;
@@ -31,7 +57,13 @@ void UWowGameUI::ShowLootWindow(uint64 LootGuid, uint8 LootType, uint32 Gold, co
     CreateWidgets();
     if (LootWindow.IsValid())
     {
-        LootWindow->UpdateLoot(LootGuid, LootType, Gold, Items);
+        auto DisplayItems=Items;
+        if (ConnectionManager) for (auto& Item : DisplayItems)
+        {
+            ConnectionManager->RequestItemTemplate(Item.ItemId);
+            if (const auto* Template=ConnectionManager->PacketHandler.ItemTemplates.Find(Item.ItemId)) { Item.Name=Template->Name; Item.Quality=Template->Quality; }
+        }
+        LootWindow->UpdateLoot(LootGuid, LootType, Gold, DisplayItems);
         UE_LOG(LogWowGameUI, Log, TEXT("Showing loot window"));
     }
 }
@@ -78,7 +110,7 @@ void UWowGameUI::ShowQuestDialog(const FWowQuestDetails& QuestDetails)
     CreateWidgets();
     if (QuestDialog.IsValid())
     {
-        QuestDialog->ShowQuestDetails(QuestDetails);
+        QuestDialog->ShowQuestDetails(FormatQuest(QuestDetails,ConnectionManager));
         UE_LOG(LogWowGameUI, Log, TEXT("Showing quest dialog"));
     }
 }
@@ -88,7 +120,7 @@ void UWowGameUI::ShowQuestRewardDialog(const FWowQuestDetails& QuestDetails)
     CreateWidgets();
     if (QuestDialog.IsValid())
     {
-        QuestDialog->ShowQuestReward(QuestDetails);
+        QuestDialog->ShowQuestReward(FormatQuest(QuestDetails,ConnectionManager));
         UE_LOG(LogWowGameUI, Log, TEXT("Showing quest reward dialog"));
     }
 }
@@ -100,6 +132,45 @@ void UWowGameUI::HideQuestDialog()
         QuestDialog->CloseDialog();
         UE_LOG(LogWowGameUI, Log, TEXT("Hiding quest dialog"));
     }
+}
+
+void UWowGameUI::ShowGossip(const FWowGossipMenu& Menu)
+{
+    CreateWidgets(); QuestDialog->ShowGossip(Menu);
+}
+
+void UWowGameUI::SelectGossipQuest(uint32 Id)
+{
+    if (!ConnectionManager) return;
+    const auto& Menu=ConnectionManager->PacketHandler.GossipMenu;
+    const auto* Quest=Menu.Quests.FindByPredicate([Id](const auto& Q){return Q.Id==Id;});
+    if (!Quest) return;
+    if (Quest->Icon==4) ConnectionManager->SendQuestComplete(Menu.Guid,Id);
+    else ConnectionManager->SendQuestQuery(Menu.Guid,Id);
+}
+
+void UWowGameUI::SelectGossipOption(uint32 Id)
+{
+    if (!ConnectionManager) return;
+    const auto& Menu=ConnectionManager->PacketHandler.GossipMenu;
+    const auto* Option=Menu.Options.FindByPredicate([Id](const auto& O){return O.Id==Id;});
+    if (Option && !Option->bCoded && !Option->Money && Option->Confirmation.IsEmpty())
+        ConnectionManager->SendGossipSelect(Menu.Guid,Menu.MenuId,Id);
+}
+
+void UWowGameUI::AcceptQuest() { if (QuestDialog.IsValid()) QuestDialog->AcceptCurrentQuest(); }
+void UWowGameUI::CompleteQuest() { if (QuestDialog.IsValid()) QuestDialog->CompleteCurrentQuest(); }
+uint32 UWowGameUI::GetShownQuestId() const { return QuestDialog.IsValid()?QuestDialog->GetCurrentQuestId():0; }
+void UWowGameUI::LootAll() { OnLootAll(); }
+void UWowGameUI::CloseLoot() { OnCloseLoot(); HideLootWindow(); }
+
+bool UWowGameUI::IsPointerOverWindow() const
+{
+    if (!FSlateApplication::IsInitialized()) return false;
+    const auto Pointer=FSlateApplication::Get().GetCursorPos();
+    for (const TSharedPtr<SWidget>& Widget : {TSharedPtr<SWidget>(QuestDialog),TSharedPtr<SWidget>(LootWindow),TSharedPtr<SWidget>(VendorWindow),TSharedPtr<SWidget>(TradeWindow)})
+        if (Widget.IsValid() && Widget->GetVisibility().IsVisible() && Widget->GetCachedGeometry().IsUnderLocation(Pointer)) return true;
+    return false;
 }
 
 void UWowGameUI::ShowTradeWindow(const FWowTradeState& TradeState)
@@ -141,7 +212,9 @@ void UWowGameUI::CreateWidgets()
     QuestDialog = SNew(SWowQuestDialog)
         .OnQuestAccept_UObject(this, &UWowGameUI::OnQuestAccept)
         .OnQuestComplete_UObject(this, &UWowGameUI::OnQuestComplete)
-        .OnQuestDecline_UObject(this, &UWowGameUI::OnQuestDecline);
+        .OnQuestDecline_UObject(this, &UWowGameUI::OnQuestDecline)
+        .OnGossipQuest_UObject(this,&UWowGameUI::SelectGossipQuest)
+        .OnGossipOption_UObject(this,&UWowGameUI::SelectGossipOption);
 
     TradeWindow = SNew(SWowTradeWindow)
         .OnTradeAccept_UObject(this, &UWowGameUI::OnAcceptTrade)
@@ -155,71 +228,33 @@ void UWowGameUI::CreateWidgets()
 
 void UWowGameUI::AddWidgetsToViewport()
 {
-    if (!GEngine || !GEngine->GameViewport) return;
-
-    // Add widgets to viewport with proper positioning
-    GEngine->GameViewport->AddViewportWidgetContent(
-        SNew(SConstraintCanvas)
-        + SConstraintCanvas::Slot()
-        .Anchors(FAnchors(0.5f, 0.3f, 0.5f, 0.3f))
-        .Offset(FMargin(-200.0f, -150.0f, 200.0f, 150.0f))
+    if (!GEngine || !GEngine->GameViewport || WindowRoot.IsValid()) return;
+    WindowRoot=SNew(SDPIScaler)
+        .Visibility(EVisibility::SelfHitTestInvisible)
+        .DPIScale_Lambda([]()->float
+        {
+            FVector2D Viewport;
+            if (!GEngine || !GEngine->GameViewport) return 1.f;
+            GEngine->GameViewport->GetViewportSize(Viewport);
+            if (Viewport.Y<100) return 1.f;
+            const float Dpi=GetDefault<UUserInterfaceSettings>()->GetDPIScaleBasedOnSize(FIntPoint(Viewport.X,Viewport.Y));
+            return Viewport.Y/768.f/FMath::Max(Dpi,.01f);
+        })
         [
-            LootWindow.ToSharedRef()
-        ]
-    );
-
-    GEngine->GameViewport->AddViewportWidgetContent(
-        SNew(SConstraintCanvas)
-        + SConstraintCanvas::Slot()
-        .Anchors(FAnchors(0.2f, 0.2f, 0.2f, 0.2f))
-        .Offset(FMargin(-150.0f, -200.0f, 300.0f, 400.0f))
-        [
-            VendorWindow.ToSharedRef()
-        ]
-    );
-
-    GEngine->GameViewport->AddViewportWidgetContent(
-        SNew(SConstraintCanvas)
-        + SConstraintCanvas::Slot()
-        .Anchors(FAnchors(0.5f, 0.5f, 0.5f, 0.5f))
-        .Offset(FMargin(-250.0f, -200.0f, 250.0f, 200.0f))
-        [
-            QuestDialog.ToSharedRef()
-        ]
-    );
-
-    GEngine->GameViewport->AddViewportWidgetContent(
-        SNew(SConstraintCanvas)
-        + SConstraintCanvas::Slot()
-        .Anchors(FAnchors(0.5f, 0.45f, 0.5f, 0.45f))
-        .Offset(FMargin(-240.0f, -170.0f, 480.0f, 340.0f))
-        [
-            TradeWindow.ToSharedRef()
-        ]
-    );
+            SNew(SConstraintCanvas).Visibility(EVisibility::SelfHitTestInvisible)
+            +SConstraintCanvas::Slot().Anchors(FAnchors(.5f,.35f)).Alignment(FVector2D::ZeroVector).Offset(FMargin(-200,-100,400,300))[LootWindow.ToSharedRef()]
+            +SConstraintCanvas::Slot().Anchors(FAnchors(.2f,.5f)).Alignment(FVector2D::ZeroVector).Offset(FMargin(-150,-200,300,400))[VendorWindow.ToSharedRef()]
+            +SConstraintCanvas::Slot().Anchors(FAnchors(.5f,.5f)).Alignment(FVector2D::ZeroVector).Offset(FMargin(-250,-200,500,400))[QuestDialog.ToSharedRef()]
+            +SConstraintCanvas::Slot().Anchors(FAnchors(.5f,.45f)).Alignment(FVector2D::ZeroVector).Offset(FMargin(-240,-170,480,340))[TradeWindow.ToSharedRef()]
+        ];
+    GEngine->GameViewport->AddViewportWidgetContent(WindowRoot.ToSharedRef(),90);
 }
 
 void UWowGameUI::RemoveWidgetsFromViewport()
 {
-    if (GEngine && GEngine->GameViewport)
-    {
-        if (LootWindow.IsValid())
-        {
-            GEngine->GameViewport->RemoveViewportWidgetContent(LootWindow.ToSharedRef());
-        }
-        if (VendorWindow.IsValid())
-        {
-            GEngine->GameViewport->RemoveViewportWidgetContent(VendorWindow.ToSharedRef());
-        }
-        if (QuestDialog.IsValid())
-        {
-            GEngine->GameViewport->RemoveViewportWidgetContent(QuestDialog.ToSharedRef());
-        }
-        if (TradeWindow.IsValid())
-        {
-            GEngine->GameViewport->RemoveViewportWidgetContent(TradeWindow.ToSharedRef());
-        }
-    }
+    if (GEngine && GEngine->GameViewport && WindowRoot.IsValid())
+        GEngine->GameViewport->RemoveViewportWidgetContent(WindowRoot.ToSharedRef());
+    WindowRoot.Reset(); bWidgetsCreated=false;
 }
 
 void UWowGameUI::OnLootItem(int32 LootSlot)
@@ -233,11 +268,12 @@ void UWowGameUI::OnLootItem(int32 LootSlot)
 
 void UWowGameUI::OnLootAll()
 {
-    // For loot all, we would need to iterate through all available loot slots
-    // For now, just send loot for slot 0 as an example
     if (ConnectionManager)
     {
-        ConnectionManager->SendLootItem(0);
+        const auto Items=ConnectionManager->PacketHandler.Loot.Items;
+        ConnectionManager->SendLootMoney();
+        for (const auto& Item : Items)
+            if (Item.CanLoot()) ConnectionManager->SendLootItem(Item.Index);
         UE_LOG(LogWowGameUI, Log, TEXT("Loot all clicked"));
     }
 }
@@ -245,7 +281,8 @@ void UWowGameUI::OnLootAll()
 void UWowGameUI::OnCloseLoot()
 {
     UE_LOG(LogWowGameUI, Log, TEXT("Loot window closed by user"));
-    // The loot window is already hidden by the widget itself
+    if (ConnectionManager && ConnectionManager->PacketHandler.Loot.Guid)
+        ConnectionManager->SendLootRelease(ConnectionManager->PacketHandler.Loot.Guid);
 }
 
 void UWowGameUI::OnBuyItem(uint64 VendorGuid, uint32 ItemId, int32 Count)
@@ -304,7 +341,8 @@ void UWowGameUI::OnQuestAccept(uint64 QuestGiverGuid, uint32 QuestId)
 {
     if (ConnectionManager)
     {
-        ConnectionManager->SendQuestAccept(QuestGiverGuid, QuestId);
+        if (!ConnectionManager->PacketHandler.QuestLog.ContainsByPredicate([QuestId](const auto& Q){return Q.QuestId==QuestId;}))
+            ConnectionManager->SendQuestAccept(QuestGiverGuid, QuestId);
         UE_LOG(LogWowGameUI, Log, TEXT("Accepting quest %u from questgiver %llu"), QuestId, QuestGiverGuid);
     }
 }

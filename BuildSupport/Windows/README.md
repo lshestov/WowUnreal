@@ -206,6 +206,28 @@ and clearing). The MPQ case requires `-wowdata=<client Data directory>`.
 
 ### Running filters
 
+`WowUnreal.Gameplay` covers quest packet layouts (including the divider GUID),
+gossip and quest lists, solo-owner loot permissions and server acknowledgements,
+item query metadata, authoritative quest slots, action pages, secure mouse
+dispatch, spell ranges and resource costs from the local MPQ data. Supply the
+same `-wowdata` argument as the HUD tests.
+
+The local player's equipment model follows current server-visible item entries
+and queried item metadata, rather than the character-list snapshot from login.
+The live regression checks boots disappearing and returning during an ordinary
+unequip/equip round trip; inventory and equipment slot visuals remain prototypes.
+
+For live verification, Development builds accept the explicit
+`-gameplayprobe=<JSON file>` option after normal autologin. The specification
+names an existing character, an output folder and a bounded list of controller
+and UI actions. The probe waits for server state, uses normal movement and
+interaction callbacks, saves native screenshots and `probe.json`, then exits.
+It never creates a character or grants items. A failed step produces a failure
+report and screenshot. Quest and inventory steps change the selected character's
+actual server state, so use a verification character. Keep login profiles outside the repository. The local
+project launcher checks for active clients and online characters on the account
+before starting a probe.
+
 Run each filter separately with the editor command-line executable:
 
 ```powershell

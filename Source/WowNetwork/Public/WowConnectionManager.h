@@ -173,6 +173,14 @@ public:
 
     /** Send gossip/questgiver hello to initiate NPC interaction */
     UFUNCTION(BlueprintCallable) void SendGossipHello(int64 NpcGuid);
+    void SendGossipSelect(uint64 NpcGuid, uint32 MenuId, uint32 OptionId);
+    void SendQuestQuery(uint64 NpcGuid, uint32 QuestId);
+    void SendQuestComplete(uint64 NpcGuid, uint32 QuestId);
+    void SendQuestAbandon(uint32 QuestId);
+    void SendLootMoney();
+    void RequestItemTemplate(uint32 ItemId);
+    int32 GetBonusActionOffset() const;
+    int32 GetVisibleActionSlot(int32 ButtonIndex) const;
 
     /** Use an interactable gameobject such as a mailbox */
     UFUNCTION(BlueprintCallable) void SendGameObjectUse(int64 GameObjectGuid);
@@ -185,6 +193,7 @@ public:
 
     /** Send quest accept command */
     UFUNCTION(BlueprintCallable) void SendQuestAccept(int64 QuestGiverGuid, int32 QuestId);
+    static TArray<uint8> BuildQuestAcceptPacket(uint64 Guid,uint32 QuestId);
 
     /** Send quest complete/choose reward command */
     UFUNCTION(BlueprintCallable) void SendQuestChooseReward(int64 QuestGiverGuid, int32 QuestId, int32 RewardChoice = 0);
@@ -233,6 +242,7 @@ public:
     UPROPERTY(BlueprintAssignable) FOnWowError OnError;
     UPROPERTY(BlueprintAssignable) FOnCharCreateResult OnCharCreateResult;
 private:
+    TSet<uint32> RequestedItems;
     enum class ECursorPayloadType : uint8
     {
         None,
