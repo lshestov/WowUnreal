@@ -916,13 +916,14 @@ static int L_UnitHealthMax(lua_State* L)
 static int L_UnitPower(lua_State* L)
 {
     FWowEntity* Entity = ResolveUnit(L);
-    int32 PowerType = static_cast<int32>(luaL_optnumber(L, 2, 0)); // 0=mana, 1=rage, 2=focus, 3=energy, etc.
+    int32 PowerType = lua_isnoneornil(L, 2) && Entity && Entity->IsUnit()
+        ? static_cast<FWowUnitEntity*>(Entity)->GetPowerTypeId() : static_cast<int32>(luaL_optnumber(L, 2, 0));
 
     if (Entity && Entity->IsUnit())
     {
         FWowUnitEntity* Unit = static_cast<FWowUnitEntity*>(Entity);
         int32 Power = Unit->GetPower(static_cast<uint8>(PowerType));
-        UE_LOG(LogWowLuaStub, Log, TEXT("UnitPower: Entity found, PowerType=%d, Power=%d"), PowerType, Power);
+        if ((PowerType == 1 || PowerType == 6) && !lua_toboolean(L, 3)) Power /= 10;
         lua_pushnumber(L, Power);
     }
     else
@@ -936,12 +937,14 @@ static int L_UnitPower(lua_State* L)
 static int L_UnitPowerMax(lua_State* L)
 {
     FWowEntity* Entity = ResolveUnit(L);
-    int32 PowerType = static_cast<int32>(luaL_optnumber(L, 2, 0)); // 0=mana, 1=rage, 2=focus, 3=energy, etc.
+    int32 PowerType = lua_isnoneornil(L, 2) && Entity && Entity->IsUnit()
+        ? static_cast<FWowUnitEntity*>(Entity)->GetPowerTypeId() : static_cast<int32>(luaL_optnumber(L, 2, 0));
 
     if (Entity && Entity->IsUnit())
     {
         FWowUnitEntity* Unit = static_cast<FWowUnitEntity*>(Entity);
         int32 MaxPower = Unit->GetMaxPower(static_cast<uint8>(PowerType));
+        if ((PowerType == 1 || PowerType == 6) && !lua_toboolean(L, 3)) MaxPower /= 10;
         UE_LOG(LogWowLuaStub, Log, TEXT("UnitPowerMax: Entity found, PowerType=%d, MaxPower=%d"), PowerType, MaxPower);
         lua_pushnumber(L, MaxPower);
     }
@@ -2139,7 +2142,19 @@ static int L_IsAttackAction(lua_State* L)
 
 static int L_GetBonusBarOffset(lua_State* L)
 {
-    lua_pushnumber(L, 0);
+    const auto* Ctx = WowLuaApi::GetContext(L);
+    const auto* Player = Ctx && Ctx->EntityManager ? Ctx->EntityManager->GetLocalPlayer() : nullptr;
+    const uint8 Form = Player ? Player->GetFieldByte(UnitField::BYTES_2, 3) : 0;
+    int32 Offset = 0;
+    switch (Form)
+    {
+    case 1: case 17: Offset = 1; break; // Cat / battle stance
+    case 18: Offset = 2; break; // Defensive stance
+    case 5: case 8: case 19: Offset = 3; break; // Bear / dire bear / berserker
+    case 31: Offset = 4; break; // Moonkin
+    default: break;
+    }
+    lua_pushnumber(L, Offset);
     return 1;
 }
 
@@ -3372,6 +3387,34 @@ static int L_GetFramerate(lua_State* L)
 // ─── CVar system ────────────────────────────────────────────────────────────────
 static TMap<FString, FString> CVarStorage;
 
+struct FChatWindowOptions
+{
+    FString Name;
+    float FontSize = 12, Alpha = .2f;
+    FLinearColor Color = FLinearColor::Black;
+    bool Shown = false, Locked = false, Uninteractable = false;
+    int32 Dock = 0;
+    float Width = 430, Height = 120, OffsetX = 0, OffsetY = 0;
+    FString Point;
+};
+static TMap<int32,FChatWindowOptions> ChatWindowOptions;
+static FChatWindowOptions& ChatOptions(lua_State* State)
+{
+    const int32 Id=luaL_optinteger(State,1,1);
+    auto* Existing=ChatWindowOptions.Find(Id);
+    if (!Existing)
+    {
+        FChatWindowOptions Options; Options.Name=Id==2?TEXT("Combat Log"):TEXT("General");
+        Options.Shown=Id==1; Options.Dock=Id>=1 && Id<=2?Id:0;
+        return ChatWindowOptions.Add(Id,MoveTemp(Options));
+    }
+    return *Existing;
+}
+static bool ChatOptionBool(lua_State* State,int32 Index)
+{
+    return lua_isnumber(State,Index)?lua_tonumber(State,Index)!=0:lua_toboolean(State,Index)!=0;
+}
+
 static FString NormalizeCVarName(const FString& Name)
 {
     return Name.ToLower();
@@ -3381,6 +3424,7 @@ static FString GetDefaultCVarValue(const FString& Name)
 {
     static const TMap<FString, FString> ExplicitDefaults = {
         { TEXT("chatstyle"), TEXT("classic") },
+        { TEXT("playerstatustext"), TEXT("1") },
         { TEXT("conversationmode"), TEXT("inline") },
         { TEXT("showtimestamps"), TEXT("none") },
         { TEXT("locale"), TEXT("enUS") },
@@ -4706,6 +4750,13 @@ static int L_ToggleSpellBook(lua_State* L)
 
 void WowLuaApi::RegisterStubs(lua_State* L)
 {
+    lua_register(L, "PartialPlayTime", [](lua_State* State) -> int { lua_pushboolean(State, false); return 1; });
+    lua_register(L, "NoPlayTime", [](lua_State* State) -> int { lua_pushboolean(State, false); return 1; });
+    lua_register(L, "IsPVPTimerRunning", [](lua_State* State) -> int { lua_pushboolean(State, false); return 1; });
+    lua_register(L, "UnitIsVisible", [](lua_State* State) -> int { lua_pushboolean(State, ResolveUnit(State) != nullptr); return 1; });
+    lua_register(L, "UnitGroupRolesAssigned", [](lua_State* State) -> int {
+        lua_pushboolean(State, false); lua_pushboolean(State, false); lua_pushboolean(State, false); return 3;
+    });
     // Instance / group
     lua_register(L, "IsInInstance", L_IsInInstance);
     lua_register(L, "GetNumPartyMembers", L_GetNumPartyMembers);
@@ -6002,16 +6053,34 @@ lua_pushboolean(L2, PLATFORM_MAC);
     });
 
     // ── Final batch: remaining missing functions from error log ──
+    lua_register(L, "GetChatWindowMessages", ([](lua_State* State) -> int {
+        if (luaL_optinteger(State,1,1)!=1) return 0;
+        const char* Groups[]={"SYSTEM","SAY","EMOTE","YELL","WHISPER","PARTY","RAID","GUILD","OFFICER"};
+        for (const auto* Group:Groups) lua_pushstring(State,Group);
+        return UE_ARRAY_COUNT(Groups);
+    }));
+    lua_register(L, "GetChatWindowChannels", [](lua_State*) -> int { return 0; });
     lua_register(L, "FauxScrollFrame_GetOffset", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
     lua_register(L, "FauxScrollFrame_OnVerticalScroll", [](lua_State* L2) -> int { return 0; });
     lua_register(L, "FauxScrollFrame_Update", [](lua_State* L2) -> int { return 0; });
     lua_register(L, "GetChatWindowInfo", [](lua_State* L2) -> int {
-        lua_pushstring(L2, "General"); lua_pushnumber(L2, 14); lua_pushnumber(L2, 1);
-        lua_pushnumber(L2, 1); lua_pushnumber(L2, 0); lua_pushboolean(L2, 1);
-        lua_pushboolean(L2, 0); lua_pushboolean(L2, 1);
-        return 8;
+        const auto& Options=ChatOptions(L2);
+        lua_pushstring(L2,TCHAR_TO_UTF8(*Options.Name)); lua_pushnumber(L2,Options.FontSize);
+        lua_pushnumber(L2,Options.Color.R); lua_pushnumber(L2,Options.Color.G); lua_pushnumber(L2,Options.Color.B); lua_pushnumber(L2,Options.Alpha);
+        lua_pushboolean(L2,Options.Shown); lua_pushboolean(L2,Options.Locked);
+        if (Options.Dock>0) lua_pushnumber(L2,Options.Dock); else lua_pushnil(L2);
+        lua_pushboolean(L2,Options.Uninteractable);
+        return 10;
     });
-    lua_register(L, "SetChatWindowName", [](lua_State* L2) -> int { return 0; });
+    lua_register(L, "SetChatWindowName", [](lua_State* State) -> int { ChatOptions(State).Name=UTF8_TO_TCHAR(luaL_checkstring(State,2)); return 0; });
+    lua_register(L, "SetChatWindowLocked", [](lua_State* State) -> int { ChatOptions(State).Locked=ChatOptionBool(State,2); return 0; });
+    lua_register(L, "SetChatWindowUninteractable", [](lua_State* State) -> int { ChatOptions(State).Uninteractable=ChatOptionBool(State,2); return 0; });
+    lua_register(L, "SetChatWindowDocked", [](lua_State* State) -> int { ChatOptions(State).Dock=luaL_optinteger(State,2,0); return 0; });
+    lua_register(L, "SetChatWindowSize", [](lua_State* State) -> int { ChatOptions(State).FontSize=luaL_checknumber(State,2); return 0; });
+    lua_register(L, "SetChatWindowAlpha", [](lua_State* State) -> int { ChatOptions(State).Alpha=FMath::Clamp(float(luaL_checknumber(State,2)),0.f,1.f); return 0; });
+    lua_register(L, "SetChatWindowColor", [](lua_State* State) -> int {
+        ChatOptions(State).Color=FLinearColor(luaL_checknumber(State,2),luaL_checknumber(State,3),luaL_checknumber(State,4)); return 0;
+    });
     lua_register(L, "GetCVarMin", [](lua_State* L2) -> int { lua_pushstring(L2, "0"); return 1; });
     lua_register(L, "GetCVarMax", [](lua_State* L2) -> int { lua_pushstring(L2, "1"); return 1; });
     lua_register(L, "GetNetStats", [](lua_State* L2) -> int {
@@ -6798,8 +6867,7 @@ lua_pushboolean(L2, PLATFORM_MAC);
 	        return 1;
 	    });
 	    lua_register(L, "SetChatWindowShown", [](lua_State* L2) -> int {
-	        luaL_optinteger(L2, 1, 1);
-	        lua_toboolean(L2, 2);
+	        ChatOptions(L2).Shown=ChatOptionBool(L2,2);
 	        return 0;
 	    });
 	    lua_register(L, "FCFDock_GetChatFrames", [](lua_State* L2) -> int {
@@ -6838,22 +6906,25 @@ lua_pushboolean(L2, PLATFORM_MAC);
 
     // Chat window saved state (persistence)
     lua_register(L, "GetChatWindowSavedDimensions", [](lua_State* L2) -> int {
-        // Returns: width, height (WoW units)
-        lua_pushnumber(L2, 430); // default chat width
-        lua_pushnumber(L2, 120); // default chat height
+        const auto& Options=ChatOptions(L2);
+        lua_pushnumber(L2,Options.Width); lua_pushnumber(L2,Options.Height);
         return 2;
     });
     lua_register(L, "GetChatWindowSavedPosition", [](lua_State* L2) -> int {
-        // WoW 3.3.5: GetChatWindowSavedPosition(index) -> point, xOffset, yOffset, shown
-        int32 Index = static_cast<int32>(luaL_optnumber(L2, 1, 1));
-        lua_pushstring(L2, "BOTTOMLEFT"); // point
-        lua_pushnumber(L2, 32);           // xOffset
-        lua_pushnumber(L2, 215);          // yOffset
-        lua_pushboolean(L2, Index == 1 ? 1 : 0); // shown (only ChatFrame1 visible by default)
-        return 4;
+        const auto& Options=ChatOptions(L2);
+        // Offsets are normalized fractions, not pixel offsets. Without saved
+        // state, retain the XML anchor rather than moving the chat offscreen.
+        if (Options.Point.IsEmpty()) return 0;
+        lua_pushstring(L2,TCHAR_TO_UTF8(*Options.Point));
+        lua_pushnumber(L2,Options.OffsetX); lua_pushnumber(L2,Options.OffsetY); return 3;
     });
-    lua_register(L, "SetChatWindowSavedDimensions", [](lua_State* L2) -> int { return 0; });
-    lua_register(L, "SetChatWindowSavedPosition", [](lua_State* L2) -> int { return 0; });
+    lua_register(L, "SetChatWindowSavedDimensions", [](lua_State* State) -> int {
+        auto& Options=ChatOptions(State); Options.Width=luaL_checknumber(State,2); Options.Height=luaL_checknumber(State,3); return 0;
+    });
+    lua_register(L, "SetChatWindowSavedPosition", [](lua_State* State) -> int {
+        auto& Options=ChatOptions(State); Options.Point=UTF8_TO_TCHAR(luaL_checkstring(State,2));
+        Options.OffsetX=luaL_checknumber(State,3); Options.OffsetY=luaL_checknumber(State,4); return 0;
+    });
 
     // Party member lookup
     lua_register(L, "GetPartyMember", [](lua_State* L2) -> int {

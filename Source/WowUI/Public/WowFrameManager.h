@@ -112,9 +112,16 @@ public:
 
 	/** Check if a frame is currently visible */
 	bool IsFrameVisible(int64 Handle) const;
+	bool IsFrameDrawn(int64 Handle) const;
 
 	/** Set frame size and update widget */
 	void SetFrameSize(int64 Handle, float W, float H);
+	void SetFrameScale(int64 Handle, float Scale);
+	float GetFrameScale(int64 Handle) const;
+	float GetEffectiveFrameScale(int64 Handle) const;
+	FVector4 GetLayoutRect(int64 Handle);
+	void RefreshLayout();
+	void UpdateViewportLayout();
 
 	/** Set frame anchors and reposition widget */
 	void SetFrameAnchors(int64 Handle, const TArray<FWowAnchor>& NewAnchors);
@@ -174,6 +181,7 @@ public:
 
 	/** Get the current UI scale factor */
 	float GetUIScale() const { return UIScale; }
+	float GetScreenScale() const { return RawViewportScale; }
 
 	/** Debug: dump key frame layout info to log */
 	void DebugDumpLayout() const;
@@ -346,6 +354,21 @@ private:
 			: X(InX), Y(InY), W(InW), H(InH) {}
 	};
 	TMap<FString, FFrameRect> FrameRects;
+	TMap<FString, FString> RegionOwners;
+	TMap<TWeakObjectPtr<UCanvasPanel>, FString> CanvasNames;
+	struct FRegionLayout
+	{
+		TWeakObjectPtr<UWidget> Widget;
+		FString Owner;
+		TArray<FWowAnchor> Anchors;
+		float Width, Height;
+		bool bAllPoints;
+	};
+	TArray<FRegionLayout> RegionLayouts;
+	bool bLayoutDirty = false;
+	TSet<FString> ResolvingRects;
+	FVector2D LayoutViewport = FVector2D::ZeroVector;
+	FFrameRect CalculateFrameRect(const FWowFrameDef& Def);
 
 	UWidget* CreateWidgetForFrame(const FWowFrameDef& Def, int64 Handle, int64 ParentHandle = -1);
 

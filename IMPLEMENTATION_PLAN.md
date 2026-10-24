@@ -111,6 +111,7 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 - [x] ~50 Lua API functions implemented
 - [x] Frame methods (SetPoint, SetSize, Show/Hide, SetAlpha, etc.)
 - [x] UMG widget integration
+- [x] Packaged primary HUD layout and data: preserve anonymous containers, XML sizes, scaled anchors/input and region ordering; initialize live health/resource and stance actions; hide inactive menus and debug overlay (10 Hud/Player/Collision automation tests passed; native autologin screenshots verified at 1280x720 and 1920x1080).
 
 ---
 

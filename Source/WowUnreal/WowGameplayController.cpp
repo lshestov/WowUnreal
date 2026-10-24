@@ -536,6 +536,7 @@ void AWowGameplayController::OnLoginVerifyWorld(uint32 MapId, float X, float Y, 
 	FireUIEvent(TEXT("UNIT_POWER"), {TEXT("player")});
 	FireUIEvent(TEXT("PLAYER_FLAGS_CHANGED"));
 	FireUIEvent(TEXT("UPDATE_SHAPESHIFT_FORM"));
+	FireUIEvent(TEXT("UPDATE_BONUS_ACTIONBAR"));
 
 	// Schedule delayed health/mana events to ensure bars get updated with real data
 	// after the UI has had time to initialize and StatusBar widgets are created
@@ -549,6 +550,7 @@ void AWowGameplayController::OnLoginVerifyWorld(uint32 MapId, float X, float Y, 
 			FireUIEvent(TEXT("UNIT_MANA"), {TEXT("player")});
 			FireUIEvent(TEXT("UNIT_MAXMANA"), {TEXT("player")});
 			FireUIEvent(TEXT("UNIT_POWER"), {TEXT("player")});
+			FireUIEvent(TEXT("UPDATE_BONUS_ACTIONBAR"));
 			if (TargetGuid != 0)
 			{
 				FireUIEvent(TEXT("UNIT_HEALTH"), {TEXT("target")});
@@ -594,6 +596,7 @@ void AWowGameplayController::ApplyDeferredSpawn()
 	FireUIEvent(TEXT("UNIT_POWER"), {TEXT("player")});
 	FireUIEvent(TEXT("PLAYER_FLAGS_CHANGED"));
 	FireUIEvent(TEXT("UPDATE_SHAPESHIFT_FORM"));
+	FireUIEvent(TEXT("UPDATE_BONUS_ACTIONBAR"));
 }
 
 void AWowGameplayController::ApplyDeferredSpawn_Internal(const FVector& SpawnPos, float Orientation)
@@ -640,7 +643,7 @@ void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
 	if (Entity.IsUnit())
 	{
 		const FWowUnitEntity* UnitEntity = static_cast<const FWowUnitEntity*>(&Entity);
-		CurrentMana = UnitEntity->GetPower(0); // 0 = mana
+		CurrentMana = UnitEntity->GetPower(UnitEntity->GetPowerTypeId());
 	}
 	int32* OldHealthPtr = LastKnownHealth.Find(Entity.Guid);
 	int32* OldManaPtr = LastKnownMana.Find(Entity.Guid);
@@ -656,6 +659,22 @@ void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
 	// Fire UI events for health/mana changes
 	if (Entity.Guid == LocalGuid)
 	{
+		if (Entity.IsUnit())
+		{
+			const auto& Unit = static_cast<const FWowUnitEntity&>(Entity);
+			const int32 PowerType = Unit.GetPowerTypeId(), Form = Unit.GetFieldByte(UnitField::BYTES_2, 3);
+			if (PowerType != LastHudPowerType || ManaChanged)
+			{
+				LastHudPowerType = PowerType;
+				FireUIEvent(TEXT("UNIT_DISPLAYPOWER"), {TEXT("player")});
+			}
+			if (Form != LastHudForm)
+			{
+				LastHudForm = Form;
+				FireUIEvent(TEXT("UPDATE_BONUS_ACTIONBAR"));
+				FireUIEvent(TEXT("UPDATE_SHAPESHIFT_FORM"));
+			}
+		}
 		// Keep re-firing all unit events on every entity update until MaxHealth is valid.
 		// Entity fields arrive across multiple SMSG_UPDATE_OBJECT packets; health/mana
 		// fields may not be present in the first update.
@@ -893,74 +912,15 @@ void AWowGameplayController::Tick(float DeltaTime)
 			UIManager->GetFrameManager()->UpdateMouseHover(MX, MY);
 		}
 
+		UIManager->GetFrameManager()->UpdateViewportLayout();
+
 		// Poll EditBox/Slider for value changes and dispatch Lua events
 		UIManager->GetFrameManager()->TickWidgetEvents();
 
 		// Update cooldown overlay animations
 		UIManager->GetFrameManager()->TickCooldowns();
 
-		// Delayed re-fire of health/mana events — entity data may arrive after UI initializes.
-		// Fire once, 5 seconds after first entity data arrives.
-		if (!bDelayedHealthUpdateFired && ConnectionManager &&
-			ConnectionManager->PacketHandler.EntityManager.Num() > 0)
-		{
-			static float DelayAccumulator = 0.0f;
-			DelayAccumulator += DeltaTime;
-			if (DelayAccumulator > 5.0f)
-			{
-				bDelayedHealthUpdateFired = true;
-				UE_LOG(LogWowGameplay, Log, TEXT("Firing delayed health/mana re-init (entities=%d)"),
-					ConnectionManager->PacketHandler.EntityManager.Num());
-				FireUIEvent(TEXT("UNIT_HEALTH"), {TEXT("player")});
-				FireUIEvent(TEXT("UNIT_MAXHEALTH"), {TEXT("player")});
-				FireUIEvent(TEXT("UNIT_MANA"), {TEXT("player")});
-				FireUIEvent(TEXT("UNIT_MAXMANA"), {TEXT("player")});
-				FireUIEvent(TEXT("UNIT_POWER"), {TEXT("player")});
-				FireUIEvent(TEXT("UNIT_LEVEL"), {TEXT("player")});
-				FireUIEvent(TEXT("PLAYER_FLAGS_CHANGED"));
 
-				// Direct C++ health bar update — bypass FrameXML Lua in case it doesn't call SetValue
-				if (UIManager && UIManager->GetFrameManager())
-				{
-					FWowEntity* PlayerEntity = ConnectionManager->PacketHandler.EntityManager.Find(
-						ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid);
-					if (PlayerEntity)
-					{
-						int32 HP = PlayerEntity->GetHealth();
-						int32 MaxHP = PlayerEntity->GetMaxHealth();
-						auto* FM = UIManager->GetFrameManager();
-
-						// Update PlayerFrameHealthBar directly
-						int64 HBHandle = FM->FindFrame(TEXT("PlayerFrameHealthBar"));
-						UProgressBar* HB = HBHandle >= 0 ? FM->GetStatusBarWidget(HBHandle) : nullptr;
-						if (HB && MaxHP > 0)
-						{
-							HB->SetPercent(static_cast<float>(HP) / static_cast<float>(MaxHP));
-							HB->SetFillColorAndOpacity(FLinearColor(0.0f, 1.0f, 0.0f)); // Green
-							UE_LOG(LogWowGameplay, Log, TEXT("Direct health bar update: %d/%d = %.1f%%"),
-								HP, MaxHP, 100.0f * HP / MaxHP);
-						}
-
-						// Update PlayerFrameManaBar directly
-						if (PlayerEntity->IsUnit())
-						{
-							const FWowUnitEntity* UnitEnt = static_cast<const FWowUnitEntity*>(PlayerEntity);
-							int32 Power = UnitEnt->GetPower(0);
-							int32 MaxPower = UnitEnt->GetMaxPower(0);
-							int64 MBHandle = FM->FindFrame(TEXT("PlayerFrameManaBar"));
-							UProgressBar* MB = MBHandle >= 0 ? FM->GetStatusBarWidget(MBHandle) : nullptr;
-							if (MB && MaxPower > 0)
-							{
-								MB->SetPercent(static_cast<float>(Power) / static_cast<float>(MaxPower));
-								MB->SetFillColorAndOpacity(FLinearColor(0.0f, 0.0f, 1.0f)); // Blue
-								UE_LOG(LogWowGameplay, Log, TEXT("Direct mana bar update: %d/%d = %.1f%%"),
-									Power, MaxPower, 100.0f * Power / MaxPower);
-							}
-						}
-					}
-				}
-			}
-		}
 	}
 
 	// Update tooltip manager
@@ -3910,32 +3870,8 @@ void AWowGameplayController::OnChatMessage(uint8 Type, uint32 Language, uint64 S
 		AddCombatMessage(Message, FLinearColor::White);
 	}
 
-	// Fire appropriate chat events based on message type
-	switch (Type)
-	{
-		case 0: // CHAT_MSG_SAY
-			FireUIEvent(TEXT("CHAT_MSG_SAY"));
-			break;
-		case 1: // CHAT_MSG_PARTY
-			FireUIEvent(TEXT("CHAT_MSG_PARTY"));
-			break;
-		case 2: // CHAT_MSG_RAID
-			FireUIEvent(TEXT("CHAT_MSG_RAID"));
-			break;
-		case 3: // CHAT_MSG_GUILD
-			FireUIEvent(TEXT("CHAT_MSG_GUILD"));
-			break;
-		case 6: // CHAT_MSG_YELL
-			FireUIEvent(TEXT("CHAT_MSG_YELL"));
-			break;
-		case 7: // CHAT_MSG_WHISPER
-			FireUIEvent(TEXT("CHAT_MSG_WHISPER"));
-			break;
-		default:
-			// Fire generic chat event for other types
-			FireUIEvent(TEXT("CHAT_MSG_SAY"));
-			break;
-	}
+    if (UIManager && UIManager->GetEventSystem())
+        UIManager->GetEventSystem()->FireChatMessage(Type, Language, SenderGuid, SenderName, Message, Channel);
 }
 
 void AWowGameplayController::OnEmote(uint64 EntityGuid, uint32 EmoteId)
@@ -4555,6 +4491,7 @@ void AWowGameplayController::OnActionButtonsUpdated()
 		FireUIEvent(TEXT("ACTIONBAR_SLOT_CHANGED"), {FString::Printf(TEXT("%d"), SlotIndex + 1)});
 	}
 	FireUIEvent(TEXT("ACTIONBAR_UPDATE_STATE"));
+	FireUIEvent(TEXT("UPDATE_BONUS_ACTIONBAR"));
 }
 
 void AWowGameplayController::OnPetBarUpdated(const FWowPetActionBarState& PetActionBar)

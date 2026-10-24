@@ -178,6 +178,34 @@ vertical support offset.
 
 ## Regression tests
 
+### Primary game interface
+
+FrameXML containers without public names have private layout identities, so
+their children remain attached. Both `<Size x="..." y="..."/>` and nested
+`AbsDimension` sizes are supported. Unanchored frames have no screen rectangle;
+inactive menu controls therefore do not appear in the center of the viewport.
+The layout resolver handles parent scale, cross-frame/region anchors, axis
+stretching, viewport changes and the matching mouse hit rectangles. Anonymous
+groups preserve the ordering of text above sibling status-bar fills.
+
+The player frame uses its normal Lua initialization and server events for health
+and the active power type, including rage/runic power display units. World entry
+refreshes the stance action page after deferred spawning; saved action slots
+remain unchanged. Empty action textures clear their previous image. Chat window
+initialization supplies numeric dock positions and applies its background color
+through the normal update event. Saved chat positions use normalized offsets;
+received chat messages supply their typed WotLK event and arguments.
+Hidden font strings and hidden-parent update
+handlers follow visibility. The world debug overlay is opt-in with
+`-worlddebughud`, leaving the player frame unobstructed during ordinary play.
+
+`WowUnreal.Hud` tests anonymous nesting, direct XML sizes, frame ordering, numeric
+SetPoint overloads, scale and input alignment, health events, rage and stance
+selection, chat API values and real spell icons from MPQ (including replacement
+and clearing). The MPQ case requires `-wowdata=<client Data directory>`.
+
+### Running filters
+
 Run each filter separately with the editor command-line executable:
 
 ```powershell

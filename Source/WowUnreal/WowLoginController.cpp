@@ -616,7 +616,11 @@ void AWowLoginController::UpdateWorldCapture()
     }
     bWorldScreenshotRequested = true;
     WorldScreenshotRequestedAt = Now;
-    if (auto* Gameplay = Cast<AWowGameplayController>(UGameplayStatics::GetPlayerController(this, 0))) Gameplay->LogNpcCapture();
+    if (auto* Gameplay = Cast<AWowGameplayController>(UGameplayStatics::GetPlayerController(this, 0)))
+    {
+        Gameplay->LogHudCapture();
+        Gameplay->LogNpcCapture();
+    }
     if (auto* Player = Cast<AWowPlayerCharacter>(UGameplayStatics::GetPlayerPawn(this, 0)))
     {
         const USkeletalMesh* Model = Player->GetMesh()->GetSkeletalMeshAsset();

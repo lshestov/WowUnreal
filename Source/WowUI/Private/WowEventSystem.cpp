@@ -185,6 +185,18 @@ void FWowEventSystem::UnregisterAllEvents(int64 FrameHandle)
 	}
 }
 
+void FWowEventSystem::FireChatMessage(uint8 Type, uint32 Language, uint64 SenderGuid,
+	const FString& SenderName, const FString& Message, const FString& Channel)
+{
+	static const TCHAR* Names[] = {TEXT("SYSTEM"),TEXT("SAY"),TEXT("PARTY"),TEXT("RAID"),TEXT("GUILD"),TEXT("OFFICER"),
+		TEXT("YELL"),TEXT("WHISPER"),TEXT("WHISPER_FOREIGN"),TEXT("WHISPER_INFORM"),TEXT("EMOTE"),TEXT("TEXT_EMOTE"),
+		TEXT("MONSTER_SAY"),TEXT("MONSTER_PARTY"),TEXT("MONSTER_YELL"),TEXT("MONSTER_WHISPER"),TEXT("MONSTER_EMOTE"),TEXT("CHANNEL")};
+	const FString Event = FString(TEXT("CHAT_MSG_")) + (Type < UE_ARRAY_COUNT(Names) ? Names[Type] : TEXT("SYSTEM"));
+	const FString LanguageName = Language == 7 ? TEXT("Common") : Language == 1 ? TEXT("Orcish") : TEXT("");
+	FireEvent(Event, {Message,SenderName,LanguageName,Channel,TEXT(""),TEXT(""),TEXT("0"),TEXT("0"),Channel,TEXT(""),TEXT("0"),
+		FString::Printf(TEXT("0x%016llX"),SenderGuid)});
+}
+
 void FWowEventSystem::FireEvent(const FString& EventName, const TArray<FString>& Args)
 {
 	const TSet<int64>* Handles = EventRegistrations.Find(EventName);
@@ -252,10 +264,15 @@ void FWowEventSystem::FireEvent(const FString& EventName, const TArray<FString>&
 		lua_pushstring(L, UTF8Event.Get());
 
 		// Push args
-		for (const FString& Arg : Args)
+		for (int32 Index = 0; Index < Args.Num(); ++Index)
 		{
-			FTCHARToUTF8 UTF8Arg(*Arg);
-			lua_pushstring(L, UTF8Arg.Get());
+			if (EventName.StartsWith(TEXT("CHAT_MSG_")) && (Index == 6 || Index == 7 || Index == 10))
+				lua_pushnumber(L, FCString::Atoi(*Args[Index]));
+			else
+			{
+				FTCHARToUTF8 UTF8Arg(*Args[Index]);
+				lua_pushstring(L, UTF8Arg.Get());
+			}
 		}
 
 		// Call: func(self, event, arg1, arg2, ...)
@@ -401,6 +418,21 @@ void FWowEventSystem::SetFrameScript(int64 Handle, const FString& ScriptName, co
 #endif
 }
 
+FString FWowEventSystem::ResolveText(const FString& Text) const
+{
+#if HAS_LUA
+	if (LuaVM && LuaVM->GetState())
+	{
+		auto* State = LuaVM->GetState();
+		lua_getglobal(State, TCHAR_TO_UTF8(*Text));
+		const FString Result = lua_type(State, -1) == LUA_TSTRING ? UTF8_TO_TCHAR(lua_tostring(State, -1)) : Text;
+		lua_pop(State, 1);
+		return Result;
+	}
+#endif
+	return Text;
+}
+
 void FWowEventSystem::SetFrameScriptRef(int64 Handle, const FString& ScriptName, int32 LuaRef)
 {
 #if HAS_LUA
@@ -446,6 +478,15 @@ void FWowEventSystem::CreateFrameObject(int64 Handle, const FString& FrameName, 
 			FTCHARToUTF8 UTF8Name(*FrameName);
 			lua_pushstring(L, UTF8Name.Get());
 			lua_setfield(L, AbsTableIndex, "__name");
+		}
+		if (FrameManager)
+		{
+			const auto* Definition = FrameManager->GetFrameDef(Handle);
+			if (Definition && Definition->bAnonymous)
+			{
+				lua_pushnil(L);
+				lua_setfield(L, AbsTableIndex, "__name");
+			}
 		}
 
 		if (FrameID != 0)
@@ -870,6 +911,9 @@ static bool ShouldCompileOnLoadFunctionHandler(const FString& FunctionName)
 		FunctionName == TEXT("LFRBrowseFrame_OnLoad") ||
 		FunctionName == TEXT("CombatFeedback_OnLoad") ||
 		FunctionName == TEXT("TextStatusBar_OnLoad") ||
+		FunctionName == TEXT("PlayerFrame_OnLoad") ||
+		FunctionName == TEXT("BonusActionBar_OnLoad") ||
+		FunctionName == TEXT("AlternatePowerBar_OnLoad") ||
 		FunctionName == TEXT("FadingFrame_OnLoad");
 }
 
@@ -1452,7 +1496,7 @@ void FWowEventSystem::TickOnUpdate(float DeltaTime)
 		int32* ScriptRef = FrameScripts->Find(TEXT("OnUpdate"));
 		if (!ScriptRef) continue;
 
-		if (FrameManager && !FrameManager->IsFrameVisible(Handle))
+		if (FrameManager && !FrameManager->IsFrameDrawn(Handle))
 		{
 			continue;
 		}
@@ -1540,7 +1584,7 @@ FString FWowEventSystem::OpcodeToEvent(uint16 Opcode)
 	case 0x0051: return TEXT("UNIT_NAME_UPDATE");                // SMSG_NAME_QUERY_RESPONSE (correct opcode)
 
 	// Chat messages
-	case 0x0096: return TEXT("CHAT_MSG_SAY");                    // SMSG_MESSAGECHAT (filtered by type)
+	case 0x0096: return FString(); // The typed chat delegate supplies the event and payload.
 	case 0x0097: return TEXT("CHAT_MSG_WHISPER");                // SMSG_MESSAGECHAT
 	case 0x0098: return TEXT("CHAT_MSG_PARTY");                  // SMSG_MESSAGECHAT
 	case 0x0099: return TEXT("CHAT_MSG_GUILD");                  // SMSG_MESSAGECHAT

@@ -477,6 +477,7 @@ static FWowTextureElement ParseTextureNode(const FXmlNode* Node)
 static FWowFontStringElement ParseFontStringNode(const FXmlNode* Node)
 {
 	FWowFontStringElement FS;
+	FS.bHidden = Node->GetAttribute(TEXT("hidden")).Equals(TEXT("true"), ESearchCase::IgnoreCase);
 	FS.Name = Node->GetAttribute(TEXT("name"));
 	FS.ParentKey = Node->GetAttribute(TEXT("parentKey"));
 	FS.Inherits = Node->GetAttribute(TEXT("inherits"));
@@ -716,6 +717,7 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 	Def.bSetAllPoints = Node.attribute("setAllPoints").as_bool(false);
 	Def.bEnableMouse = Node.attribute("enableMouse").as_bool(false);
 	Def.bEnableKeyboard = Node.attribute("enableKeyboard").as_bool(false);
+	Def.Scale = Node.attribute("scale").as_float(1.f);
 
 	const char* Strata = Node.attribute("frameStrata").as_string("");
 	if (Strata[0]) Def.Strata = FWowFrameXmlParser::ParseStrata(UTF8_TO_TCHAR(Strata));
@@ -736,6 +738,7 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 		if (Tag == TEXT("Size"))
 		{
 			pugi::xml_node AbsDim = Child.child("AbsDimension");
+			if (!AbsDim) AbsDim = Child;
 			if (AbsDim)
 			{
 				Def.Width = AbsDim.attribute("x").as_float(0.0f);
@@ -808,6 +811,7 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 						if (TexSize)
 						{
 							pugi::xml_node TexAbsDim = TexSize.child("AbsDimension");
+							if (!TexAbsDim) TexAbsDim = TexSize;
 							if (TexAbsDim)
 							{
 								T.Width = TexAbsDim.attribute("x").as_float(0.0f);
@@ -882,6 +886,7 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 					else if (TexTag == TEXT("FontString"))
 					{
 						FWowFontStringElement FS;
+						FS.bHidden = Tex.attribute("hidden").as_bool(false);
 						FS.Name = UTF8_TO_TCHAR(Tex.attribute("name").as_string());
 						FS.ParentKey = UTF8_TO_TCHAR(Tex.attribute("parentKey").as_string());
 						FS.Text = UTF8_TO_TCHAR(Tex.attribute("text").as_string());
@@ -893,6 +898,7 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 						if (FSSize)
 						{
 							pugi::xml_node FSAbsDim = FSSize.child("AbsDimension");
+							if (!FSAbsDim) FSAbsDim = FSSize;
 							if (FSAbsDim)
 							{
 								FS.Width = FSAbsDim.attribute("x").as_float(0.0f);
@@ -1053,6 +1059,7 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 			if (ThumbSize)
 			{
 				pugi::xml_node ThumbAbsDim = ThumbSize.child("AbsDimension");
+				if (!ThumbAbsDim) ThumbAbsDim = ThumbSize;
 				if (ThumbAbsDim)
 				{
 					ThumbTexture.Width = ThumbAbsDim.attribute("x").as_float(0.0f);
@@ -1132,6 +1139,8 @@ static FWowFrameDef ParseFrameNode(const FXmlNode* Node)
 
 	FString EnableKeyboard = Node->GetAttribute(TEXT("enableKeyboard"));
 	Def.bEnableKeyboard = EnableKeyboard.Equals(TEXT("true"), ESearchCase::IgnoreCase);
+	const FString Scale = Node->GetAttribute(TEXT("scale"));
+	if (!Scale.IsEmpty()) Def.Scale = FCString::Atof(*Scale);
 
 	FString StrataStr = Node->GetAttribute(TEXT("frameStrata"));
 	if (!StrataStr.IsEmpty()) Def.Strata = FWowFrameXmlParser::ParseStrata(StrataStr);

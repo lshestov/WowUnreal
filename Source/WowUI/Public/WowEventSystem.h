@@ -15,6 +15,7 @@ public:
 	/** Set the Lua VM and frame manager for event dispatch */
 	void SetLuaVM(FWowLuaVM* InVM) { LuaVM = InVM; }
 	void SetFrameManager(FWowFrameManager* InMgr) { FrameManager = InMgr; }
+	FString ResolveText(const FString& Text) const;
 
 	/** Register a frame to receive an event */
 	void RegisterEvent(int64 FrameHandle, const FString& EventName);
@@ -27,6 +28,8 @@ public:
 
 	/** Fire an event to all registered frames, calling their OnEvent Lua handlers */
 	void FireEvent(const FString& EventName, const TArray<FString>& Args = {});
+	void FireChatMessage(uint8 Type, uint32 Language, uint64 SenderGuid,
+		const FString& SenderName, const FString& Message, const FString& Channel);
 
 	/** Compile a script handler for a frame and store the Lua function reference */
 	void SetFrameScript(int64 Handle, const FString& ScriptName, const FString& Code);

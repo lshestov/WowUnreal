@@ -604,7 +604,7 @@ static int LF_SetPoint(lua_State* L)
 		Anchor.OffsetX = static_cast<float>(luaL_optnumber(L, 5, 0));
 		Anchor.OffsetY = static_cast<float>(luaL_optnumber(L, 6, 0));
 	}
-	else if (lua_isstring(L, 3))
+	else if (lua_isstring(L, 3) && !lua_isnumber(L, 3))
 	{
 		// Could be relativeTo name or relativePoint if no frame given
 		const char* Arg3 = lua_tostring(L, 3);
@@ -647,21 +647,22 @@ static int LF_SetPoint(lua_State* L)
 	FWowFrameDef* Def = Ctx->FrameManager->GetMutableFrameDef(Handle);
 	if (Def)
 	{
+		TArray<FWowAnchor> Anchors = Def->Anchors;
 		bool bReplaced = false;
-		for (int32 i = 0; i < Def->Anchors.Num(); i++)
+		for (int32 i = 0; i < Anchors.Num(); i++)
 		{
-			if (Def->Anchors[i].Point == Anchor.Point)
+			if (Anchors[i].Point == Anchor.Point)
 			{
-				Def->Anchors[i] = Anchor;
+				Anchors[i] = Anchor;
 				bReplaced = true;
 				break;
 			}
 		}
 		if (!bReplaced)
 		{
-			Def->Anchors.Add(Anchor);
+			Anchors.Add(Anchor);
 		}
-		Ctx->FrameManager->SetFrameAnchors(Handle, Def->Anchors);
+		Ctx->FrameManager->SetFrameAnchors(Handle, Anchors);
 	}
 	return 0;
 }
@@ -688,9 +689,17 @@ static int LF_SetAllPoints(lua_State* L)
 		FWowFrameDef* Def = Ctx->FrameManager->GetMutableFrameDef(Handle);
 		if (Def)
 		{
-			Def->bSetAllPoints = true;
-			Def->Anchors.Empty();
-			Ctx->FrameManager->SetFrameAnchors(Handle, Def->Anchors);
+			FString Relative = Def->Parent;
+			if (lua_isstring(L, 2)) Relative = UTF8_TO_TCHAR(lua_tostring(L, 2));
+			else if (lua_istable(L, 2))
+			{
+				const auto* Target = Ctx->FrameManager->GetFrameDef(GetFrameHandle(L, 2));
+				if (Target) Relative = Target->Name;
+			}
+			FWowAnchor Top, Bottom;
+			Top.Point = Top.RelativePoint = EWowAnchorPoint::TOPLEFT; Top.RelativeTo = Relative;
+			Bottom.Point = Bottom.RelativePoint = EWowAnchorPoint::BOTTOMRIGHT; Bottom.RelativeTo = Relative;
+			Ctx->FrameManager->SetFrameAnchors(Handle, {Top, Bottom});
 		}
 	}
 	return 0;
@@ -750,7 +759,7 @@ static int LF_GetWidth(lua_State* L)
 		const FWowFrameDef* Def = Ctx->FrameManager->GetFrameDef(Handle);
 		if (Def)
 		{
-			lua_pushnumber(L, Def->Width);
+			lua_pushnumber(L, Ctx->FrameManager->GetLayoutRect(Handle).Z / Ctx->FrameManager->GetEffectiveFrameScale(Handle));
 			return 1;
 		}
 	}
@@ -768,7 +777,7 @@ static int LF_GetHeight(lua_State* L)
 		const FWowFrameDef* Def = Ctx->FrameManager->GetFrameDef(Handle);
 		if (Def)
 		{
-			lua_pushnumber(L, Def->Height);
+			lua_pushnumber(L, Ctx->FrameManager->GetLayoutRect(Handle).W / Ctx->FrameManager->GetEffectiveFrameScale(Handle));
 			return 1;
 		}
 	}
@@ -1090,11 +1099,30 @@ static UImage* GetTextureImage(lua_State* L, int idx)
 static int LF_TextureSetTexture(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
+	if (lua_isnumber(L, 2) && lua_isnumber(L, 3) && lua_isnumber(L, 4))
+	{
+		if (auto* Image = GetTextureImage(L, 1))
+		{
+			FSlateBrush Brush;
+			Brush.DrawAs = ESlateBrushDrawType::Box;
+			Brush.ImageSize = FVector2D(1, 1);
+			Brush.TintColor = FSlateColor(FLinearColor(lua_tonumber(L,2), lua_tonumber(L,3), lua_tonumber(L,4), luaL_optnumber(L,5,1)));
+			Image->SetBrush(Brush); Image->SetRenderOpacity(1);
+		}
+		return 0;
+	}
 	// WoW allows SetTexture(nil) to clear the texture
-	if (lua_isnil(L, 2) || lua_isnone(L, 2))
+	if (lua_isnil(L, 2) || lua_isnone(L, 2) || (lua_type(L,2)==LUA_TSTRING && lua_objlen(L,2)==0))
 	{
 		lua_pushnil(L);
 		lua_setfield(L, 1, "__texture");
+		if (auto* Image = GetTextureImage(L, 1))
+		{
+			FSlateBrush Empty;
+			Empty.DrawAs = ESlateBrushDrawType::NoDrawType;
+			Image->SetBrush(Empty);
+			Image->SetRenderOpacity(0);
+		}
 		return 0;
 	}
 	// Also handle number arg (texture ID) — convert to string
@@ -1648,6 +1676,7 @@ static int LF_CreateTexture(lua_State* L)
 		if (UCanvasPanel* ParentCanvas = Cast<UCanvasPanel>(Ctx->FrameManager->GetWidgetForHandle(ParentHandle)))
 		{
 			UImage* ImageWidget = NewObject<UImage>(ParentCanvas);
+			FSlateBrush Empty; Empty.DrawAs = ESlateBrushDrawType::NoDrawType; ImageWidget->SetBrush(Empty);
 			ImageWidget->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 			if (UCanvasPanelSlot* Slot = ParentCanvas->AddChildToCanvas(ImageWidget))
 			{
@@ -2333,22 +2362,13 @@ static void GetFrameRect(lua_State* L, float& OutLeft, float& OutBottom, float& 
 	const FWowFrameDef* Def = Ctx->FrameManager->GetFrameDef(Handle);
 	if (!Def) return;
 
-	float W = Def->Width;
-	float H = Def->Height;
-	float X = 0.f, Y = 0.f;
-
-	if (!Def->Anchors.IsEmpty())
-	{
-		X = Def->Anchors[0].OffsetX;
-		Y = Def->Anchors[0].OffsetY;
-	}
-
-	// WoW UI coordinates: origin bottom-left, Y goes up
-	// Approximate position from anchor offset
-	OutLeft = X;
-	OutBottom = -Y; // WoW Y is inverted vs UMG
-	OutRight = X + W;
-	OutTop = -Y + H;
+    const auto Rect = Ctx->FrameManager->GetLayoutRect(Handle);
+    const auto Root = Ctx->FrameManager->GetLayoutRect(Ctx->FrameManager->FindFrame(TEXT("UIParent")));
+    const float Scale = Ctx->FrameManager->GetEffectiveFrameScale(Handle);
+    OutLeft = Rect.X / Scale;
+    OutRight = (Rect.X + Rect.Z) / Scale;
+    OutTop = (Root.W - Rect.Y) / Scale;
+    OutBottom = (Root.W - Rect.Y - Rect.W) / Scale;
 }
 
 // frame:GetCenter()
@@ -2739,6 +2759,9 @@ static int LF_GetMinMaxValues(lua_State* L)
 static int LF_SetValue(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
+	lua_getfield(L, 1, "__value");
+	const bool bChanged = !lua_isnumber(L, -1) || lua_tonumber(L, -1) != lua_tonumber(L, 2);
+	lua_pop(L, 1);
 
 	// Store in Lua table
 	lua_pushvalue(L, 2);
@@ -2790,6 +2813,21 @@ static int LF_SetValue(lua_State* L)
 	else
 	{
 		UE_LOG(LogWowLuaFrame, Warning, TEXT("SetValue called but missing context or non-numeric value"));
+	}
+	if (bChanged)
+	{
+		const FString Key = FString::Printf(TEXT("__WowScript_%lld_OnValueChanged"), GetFrameHandle(L));
+		lua_getglobal(L, TCHAR_TO_UTF8(*Key));
+		if (lua_isfunction(L, -1))
+		{
+			lua_pushvalue(L, 1); lua_pushvalue(L, 2);
+			if (lua_pcall(L, 2, 0, 0) != 0)
+			{
+				UE_LOG(LogWowLuaFrame, Warning, TEXT("OnValueChanged: %hs"), lua_tostring(L, -1));
+				lua_pop(L, 1);
+			}
+		}
+		else lua_pop(L, 1);
 	}
 
 	return 0;
@@ -3136,17 +3174,19 @@ static int LF_StopMovingOrSizing(lua_State* L) { return 0; }
 // ── Fixed Frame API Methods ───────────────────────────────────────────────────────
 
 // frame:GetScale() — returns the frame's explicit scale (default 1.0)
-// For now, always return 1.0 since we don't track per-frame scale yet
+// Local frame scale; ancestors are included by GetEffectiveScale.
 static int LF_GetScale(lua_State* L)
 {
-	lua_pushnumber(L, 1.0);
+	const auto* Ctx = WowLuaApi::GetContext(L);
+	lua_pushnumber(L, Ctx && Ctx->FrameManager ? Ctx->FrameManager->GetFrameScale(GetFrameHandle(L)) : 1.f);
 	return 1;
 }
 
-// frame:SetScale(scale) — stub, would need to affect widget render transform
+// frame:SetScale(scale) updates layout, rendering and input bounds.
 static int LF_SetScale(lua_State* L)
 {
-	// TODO: Apply render transform scale to the widget
+	const auto* Ctx = WowLuaApi::GetContext(L);
+	if (Ctx && Ctx->FrameManager) Ctx->FrameManager->SetFrameScale(GetFrameHandle(L), luaL_checknumber(L, 2));
 	return 0;
 }
 
@@ -3156,7 +3196,7 @@ static int LF_GetEffectiveScale(lua_State* L)
 	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
 	if (Ctx && Ctx->FrameManager)
 	{
-		lua_pushnumber(L, Ctx->FrameManager->GetUIScale());
+		lua_pushnumber(L, Ctx->FrameManager->GetUIScale() * Ctx->FrameManager->GetEffectiveFrameScale(GetFrameHandle(L)));
 	}
 	else
 	{
@@ -3882,7 +3922,16 @@ static const luaL_Reg FrameMethods[] =
 	{"SetFont", LF_FontStringSetFont},
 	{"GetFont", LF_FontStringGetFont},
 	{"SetTextColor", LF_FontStringSetTextColor},
-	{"GetTextColor", [](lua_State* L) -> int { lua_pushnumber(L, 1); lua_pushnumber(L, 1); lua_pushnumber(L, 1); lua_pushnumber(L, 1); return 4; }},
+	{"GetTextColor", [](lua_State* L) -> int {
+		const auto* Text=GetTextBlockWidgetForTable(L);
+		const auto Color=Text?Text->GetColorAndOpacity().GetSpecifiedColor():FLinearColor::White;
+		lua_pushnumber(L,Color.R); lua_pushnumber(L,Color.G); lua_pushnumber(L,Color.B); lua_pushnumber(L,Color.A); return 4;
+	}},
+	{"GetVertexColor", [](lua_State* L) -> int {
+		const auto* Image=GetTextureImage(L,1);
+		const auto Color=Image?Image->GetColorAndOpacity():FLinearColor::White;
+		lua_pushnumber(L,Color.R); lua_pushnumber(L,Color.G); lua_pushnumber(L,Color.B); lua_pushnumber(L,Color.A); return 4;
+	}},
 
 	{nullptr, nullptr}
 };

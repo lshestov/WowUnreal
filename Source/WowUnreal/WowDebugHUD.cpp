@@ -9,6 +9,8 @@ void AWowDebugHUD::DrawHUD()
 {
     Super::DrawHUD();
 
+    if (!FParse::Param(FCommandLine::Get(), TEXT("worlddebughud"))) return;
+
     if (!Canvas) return;
 
     float Y = Margin;

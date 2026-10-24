@@ -75,6 +75,7 @@ public:
     void BindEntityEvents();
     bool ConfigureNpcCapture(uint32 DisplayId);
     void LogNpcCapture() const;
+    void LogHudCapture() const;
     bool IsNpcCaptureMoving() const;
 
 private:
@@ -187,6 +188,8 @@ private:
     // Delayed health/mana event firing (to ensure bars update after login)
     FTimerHandle DelayedHealthUpdateTimer;
     bool bDelayedHealthUpdateFired = false;
+    int32 LastHudPowerType = -1;
+    int32 LastHudForm = -1;
 
     // Server position sync
     void OnLoginVerifyWorld(uint32 MapId, float X, float Y, float Z, float Orientation);

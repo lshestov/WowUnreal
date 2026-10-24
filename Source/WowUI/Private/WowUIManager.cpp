@@ -302,6 +302,7 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 	EventSystem->FireEvent(TEXT("VARIABLES_LOADED"));
 	EventSystem->FireEvent(TEXT("PLAYER_LOGIN"));
 	EventSystem->FireEvent(TEXT("PLAYER_ENTERING_WORLD"));
+	EventSystem->FireEvent(TEXT("UPDATE_CHAT_WINDOWS"));
 
 	// Second visibility pass — catches addon frames (GMChatUI etc.) created after first SyncChildVisibility
 	if (FrameManager)

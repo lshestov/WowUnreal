@@ -64,6 +64,7 @@ struct FWowTextureElement
 /** A font string element within a layer */
 struct FWowFontStringElement
 {
+	bool bHidden = false;
 	FString Name;
 	FString ParentKey;
 	FString Inherits;
@@ -139,6 +140,7 @@ struct WOWUI_API FWowFrameDef
 	FString Parent;
 	FString Inherits; // Comma-separated template names
 	bool bVirtual = false;
+	bool bAnonymous = false; // Private layout identity; Lua GetName() remains nil.
 	bool bHidden = false;
 	bool bSetAllPoints = false;
 	bool bEnableMouse = false;
@@ -147,6 +149,7 @@ struct WOWUI_API FWowFrameDef
 	float Width = 0.f;
 	float Height = 0.f;
 
+	float Scale = 1.f;
 	EWowFrameStrata Strata = EWowFrameStrata::MEDIUM;
 	int32 FrameLevel = 0;
 	int32 FrameID = 0; // WoW XML "id" attribute
