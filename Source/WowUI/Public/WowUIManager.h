@@ -60,9 +60,21 @@ public:
 
 	/** Update inventory from player entity */
 	void UpdateInventory();
+	void SetActorResolver(TFunction<AActor*(uint64)> Resolver);
+	void TickWorldImages(UWorld* World);
+	void MapCommand(int32 Command);
+	void ProcessPendingReload();
+	void SetWorldUiVisible(bool Visible);
 
 private:
+	void InitializeCore();
+	UPROPERTY() TObjectPtr<UCanvasPanel> RootCanvas;
+	FMpqManager* LoadedMpq = nullptr;
+	FWowAssetCache* LoadedCache = nullptr;
+	bool bReloadRequested = false;
 	TUniquePtr<FWowLuaVM> LuaVM;
+	TSharedPtr<class FWowUiModelRenderer> ModelRenderer;
+	TSharedPtr<class FWowUiMapRenderer> MapRenderer;
 	TUniquePtr<FWowFrameManager> FrameManager;
 	TUniquePtr<FWowEventSystem> EventSystem;
 	TUniquePtr<FWowFontManager> FontManager;

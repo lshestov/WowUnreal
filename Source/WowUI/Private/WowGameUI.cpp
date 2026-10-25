@@ -1,4 +1,6 @@
 #include "WowGameUI.h"
+#include "WowUiText.h"
+#include "Formats/Dbc/DbcStore.h"
 #include "Widgets/SWowLootWindow.h"
 #include "Widgets/SWowTradeWindow.h"
 #include "Widgets/SWowVendorWindow.h"
@@ -15,25 +17,24 @@ DEFINE_LOG_CATEGORY_STATIC(LogWowGameUI, Log, All);
 
 static FWowQuestDetails FormatQuest(const FWowQuestDetails& Input,UWowConnectionManager* Connection)
 {
-    auto Quest=Input;
-    const auto* Player=Connection?Connection->PacketHandler.EntityManager.GetLocalPlayer():nullptr;
-    static const TCHAR* Classes[]={TEXT(""),TEXT("warrior"),TEXT("paladin"),TEXT("hunter"),TEXT("rogue"),TEXT("priest"),TEXT("death knight"),TEXT("shaman"),TEXT("mage"),TEXT("warlock"),TEXT(""),TEXT("druid")};
-    for (auto* Text : {&Quest.Title,&Quest.Details,&Quest.Objectives})
-    {
-        Text->ReplaceInline(TEXT("$B"),TEXT("\n"),ESearchCase::IgnoreCase);
-        if (Connection) Text->ReplaceInline(TEXT("$N"),*Connection->GetCharacterName(),ESearchCase::IgnoreCase);
-        if (Player)
-        {
-            const uint8 Class=Player->GetFieldByte(UnitField::BYTES_0,1);
-            if (Class<UE_ARRAY_COUNT(Classes)) Text->ReplaceInline(TEXT("$C"),Classes[Class],ESearchCase::IgnoreCase);
-        }
-    }
+    auto Quest=Input; const auto* P=Connection?Connection->PacketHandler.EntityManager.GetLocalPlayer():nullptr;
+    const auto* Race=P?FDbcStore::Get().ChrRaces().GetById(P->GetRaceId()):nullptr;
+    for(auto* Text:{&Quest.Title,&Quest.Details,&Quest.Objectives})
+        *Text=WowQuestText(*Text,Connection?Connection->GetCharacterName():FString(),P?P->GetClassId():0,Race?Race->Name:FString(),P && P->GetGenderId()==1);
     return Quest;
 }
-
 UWowGameUI::UWowGameUI()
 {
     PrimaryComponentTick.bCanEverTick = false;
+}
+
+bool UWowGameUI::CloseActiveWindow()
+{
+    if(TradeWindow.IsValid() && TradeWindow->GetVisibility().IsVisible()) { OnCancelTrade(); return true; }
+    if(VendorWindow.IsValid() && VendorWindow->GetVisibility().IsVisible()) { OnCloseVendor(); return true; }
+    if(LootWindow.IsValid() && LootWindow->GetVisibility().IsVisible()) { OnCloseLoot(); return true; }
+    if(QuestDialog.IsValid() && QuestDialog->GetVisibility().IsVisible()) { OnQuestDecline(); return true; }
+    return false;
 }
 
 void UWowGameUI::BeginPlay()

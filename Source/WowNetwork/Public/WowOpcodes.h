@@ -84,7 +84,8 @@ namespace WowOpcode
     inline constexpr uint16 SMSG_MOTD                    = 0x033D;
     inline constexpr uint16 SMSG_TIME_SYNC_REQ           = 0x0390;
     inline constexpr uint16 SMSG_POWER_UPDATE            = 0x0480;
-    inline constexpr uint16 SMSG_AURA_UPDATE             = 0x0495;
+    inline constexpr uint16 SMSG_AURA_UPDATE_ALL         = 0x0495;
+    inline constexpr uint16 SMSG_AURA_UPDATE             = 0x0496;
     inline constexpr uint16 SMSG_ATTACKERSTATEUPDATE     = 0x014A;
     inline constexpr uint16 SMSG_SPELL_FAILURE           = 0x0133;
     inline constexpr uint16 SMSG_SPELL_COOLDOWN          = 0x0130;
@@ -112,6 +113,8 @@ namespace WowOpcode
     inline constexpr uint16 SMSG_PARTY_MEMBER_STATS      = 0x007E;
 
     // Inventory system opcodes
+    inline constexpr uint16 CMSG_USE_ITEM               = 0x00AB;
+    inline constexpr uint16 CMSG_SET_TITLE              = 0x0374;
     inline constexpr uint16 CMSG_AUTOEQUIP_ITEM          = 0x010A;
     inline constexpr uint16 CMSG_AUTOSTORE_BAG_ITEM      = 0x010B;
     inline constexpr uint16 CMSG_SWAP_ITEM               = 0x010C;

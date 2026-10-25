@@ -22,6 +22,12 @@ void UWowConnectionManager::SendQuestQuery(uint64 Guid, uint32 Quest)
     SendRawPacket(WowOpcode::CMSG_QUESTGIVER_QUERY_QUEST,Data);
 }
 
+void UWowConnectionManager::RequestQuestTemplate(uint32 Id)
+{
+    if(GetState()!=EWowSessionState::WorldInGame || !Id || PacketHandler.QuestTemplates.Contains(Id) || PacketHandler.RequestedQuestTemplates.Contains(Id)) return;
+    PacketHandler.RequestedQuestTemplates.Add(Id); TArray<uint8> Data; Append(Data,Id); SendRawPacket(WowOpcode::CMSG_QUEST_QUERY,Data);
+}
+
 TArray<uint8> UWowConnectionManager::BuildQuestAcceptPacket(uint64 Guid,uint32 Quest)
 {
     TArray<uint8> Data; Append(Data,Guid); Append(Data,Quest); Append(Data,uint32(0)); return Data;

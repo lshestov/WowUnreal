@@ -174,6 +174,7 @@ namespace PlayerField
     inline constexpr uint16 BYTES_2       = BASE + 0x0006;
     inline constexpr uint16 XP            = BASE + 0x01E6;
     inline constexpr uint16 NEXT_LEVEL_XP = BASE + 0x01E7;
+    inline constexpr uint16 SKILL_INFO = BASE + 0x01E8; // 128 triples: id, rank/max, temporary/permanent bonus
     inline constexpr uint16 COINAGE       = BASE + 0x03FE;
 
     // Combat ratings (crit, hit, haste, etc.) - 25 values starting at offset from UNIT_END

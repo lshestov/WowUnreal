@@ -111,13 +111,11 @@ struct FPacketReader
     }
     FString ReadCString()
     {
-        FString Result;
-        while (Pos < Size && Data[Pos] != 0)
-        {
-            Result += static_cast<TCHAR>(Data[Pos++]);
-        }
+        const int32 Start=Pos;
+        while (Pos < Size && Data[Pos] != 0) ++Pos;
+        const FUTF8ToTCHAR Text(reinterpret_cast<const ANSICHAR*>(Data+Start),Pos-Start);
         if (Pos < Size) Pos++; // skip null
-        return Result;
+        return FString(Text.Length(),Text.Get());
     }
     void Skip(int32 Bytes) { Pos = FMath::Min(Pos + Bytes, Size); }
 
@@ -157,6 +155,8 @@ public:
     FWowQuestDetails QuestDetails;
     FWowLootState Loot;
     TMap<uint32,FWowItemTemplate> ItemTemplates;
+    TMap<uint32,FWowQuestTemplate> QuestTemplates;
+    TSet<uint32> RequestedQuestTemplates;
     void RefreshQuestLog();
 
     /** Known talents */
@@ -170,6 +170,8 @@ public:
 
     /** Spell cooldowns (SpellId -> expiry time as FPlatformTime::Seconds()) */
     TMap<uint32, double> SpellCooldowns;
+    struct FCooldownInfo { double Start=0; float Duration=0; };
+    TMap<uint32,FCooldownInfo> SpellCooldownInfo;
 
     /** Player name cache */
     TMap<uint64, FString> PlayerNameCache;
@@ -180,6 +182,12 @@ public:
 
     /** World states (field -> value) */
     TMap<uint32, uint32> WorldStates;
+    uint32 CurrentMapId=0;
+    uint32 DungeonDifficulty=0,RaidDifficulty=0;
+    struct FSavedInstance { uint32 Map=0,Difficulty=0,Reset=0; uint64 Id=0; bool Locked=false,Extended=false; };
+    TArray<FSavedInstance> SavedInstances;
+    struct FReputation { int32 Standing=0; uint8 Flags=0; };
+    TArray<FReputation> Reputations;
 
     /** ── Social System ──────────────────────────────────────────────────── */
     /** Friends list */
@@ -262,6 +270,7 @@ public:
     FOnCreatureNameReceived OnCreatureNameReceived;
     FOnPlayerInventoryUpdate OnPlayerInventoryUpdate;
     FOnUnitHealthUpdate OnUnitHealthUpdate;
+    FOnUnitHealthUpdate OnUnitAuraUpdate;
     FOnUnitPowerUpdate OnUnitPowerUpdate;
     FOnEmote OnEmote;
     FOnLevelUp OnLevelUp;
@@ -310,6 +319,8 @@ private:
     void HandleDestroyObject(FPacketReader& R);
     void HandleMovement(FPacketReader& R);
     void HandleMessageChat(FPacketReader& R);
+    void HandleGmMessageChat(FPacketReader& R);
+    void ParseMessageChat(FPacketReader& R,bool Gm);
     void HandleInitialSpells(FPacketReader& R);
     void HandleActionButtons(FPacketReader& R);
     void HandleTimeSyncReq(FPacketReader& R);
@@ -321,6 +332,8 @@ private:
     void HandleAttackStart(FPacketReader& R);
     void HandleAttackStop(FPacketReader& R);
     void HandleAuraUpdate(FPacketReader& R);
+    void HandleAuraUpdateAll(FPacketReader& R);
+    void HandleAuraRecords(FPacketReader& R,uint64 TargetGuid);
     void HandlePowerUpdate(FPacketReader& R);
     void HandleMonsterMove(FPacketReader& R);
     void HandleInventoryChangeFailure(FPacketReader& R);
@@ -331,6 +344,7 @@ private:
 
     // Quest handlers
     void HandleQuestgiverStatus(FPacketReader& R);
+    void HandleQuestQueryResponse(FPacketReader& R);
     void HandleQuestgiverQuestDetails(FPacketReader& R);
     void HandleQuestgiverOfferReward(FPacketReader& R);
     void HandleQuestUpdateAddKill(FPacketReader& R);

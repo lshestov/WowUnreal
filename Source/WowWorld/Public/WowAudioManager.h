@@ -28,6 +28,8 @@ public:
 
     /** Play a sound effect by SoundEntries.dbc ID (one-shot) */
     void PlaySoundEffect(uint32 SoundEntryId);
+    bool GetUiOption(const FString& Name,FString& Value) const;
+    bool SetUiOption(const FString& Name,const FString& Value);
 
     /** Master volume (0-1) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
@@ -40,6 +42,8 @@ public:
     /** Ambient volume (0-1) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
     float AmbienceVolume = 0.5f;
+    float EffectsVolume=1;
+    bool bSoundEnabled=true,bMusicEnabled=true,bAmbienceEnabled=true,bEffectsEnabled=true;
 
     /** Is it currently daytime? (affects music/ambience variant) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
@@ -53,7 +57,7 @@ private:
     FMpqManager* Mpq = nullptr;
 
     /** Load an audio file from MPQ into a USoundWave */
-    USoundWave* LoadSoundFromMpq(const FString& FilePath);
+    USoundWave* LoadSoundFromMpq(const FString& FilePath,bool bLoop=false);
 
     /** Get a random sound file path from a SoundEntries.dbc entry */
     FString GetSoundFilePath(uint32 SoundEntryId);
@@ -63,6 +67,7 @@ private:
 
     /** Start playing ambient sounds for the current zone */
     void UpdateAmbience();
+    void ApplyVolumes();
 
     /** Current zone/area */
     uint32 CurrentZoneId = 0;
@@ -84,7 +89,11 @@ private:
     UPROPERTY()
     TObjectPtr<UAudioComponent> AmbienceComponent;
 
-    /** Cached sound waves */
-    UPROPERTY()
-    TMap<FString, TObjectPtr<USoundWave>> SoundCache;
+    struct FDecodedSound
+    {
+        TSharedPtr<const TArray<uint8>,ESPMode::ThreadSafe> Pcm;
+        uint32 Rate=0;
+        uint16 Channels=0;
+    };
+    TMap<FString,FDecodedSound> SoundCache;
 };

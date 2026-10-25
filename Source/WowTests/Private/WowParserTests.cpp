@@ -464,6 +464,13 @@ bool FLuaUseContainerItemQueuesAutoEquip::RunTest(const FString& Parameters)
         return false;
     }
 
+    auto& Entities=Connection->PacketHandler.EntityManager; Entities.LocalPlayerGuid=1;
+    auto& Player=Entities.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER);
+    auto& Item=Entities.PromoteToTyped(2,WowTypeMask::OBJECT|WowTypeMask::ITEM); Item.Entry=3345;
+    Item.SetField(ItemField::STACK_COUNT,1); Item.SetField(ItemField::OWNER,1);
+    WowTestUtils::SetGuidField64(Player,PlayerField::PACK_SLOT_START+4,2);
+    FWowItemTemplate Template; Template.Id=3345; Template.InventoryType=1; Template.Name=TEXT("Silk Wizard Hat");
+    Connection->PacketHandler.ItemTemplates.Add(Template.Id,Template);
     FWowLuaVM LuaVM;
     TestTrue(TEXT("Lua VM initializes"), LuaVM.Initialize());
     if (!LuaVM.IsInitialized())
@@ -473,6 +480,7 @@ bool FLuaUseContainerItemQueuesAutoEquip::RunTest(const FString& Parameters)
 
     FWowLuaContext Context;
     Context.ConnectionManager = Connection;
+    Context.EntityManager = &Entities;
     WowTestUtils::SetLuaContext(LuaVM, Context);
 
     const bool bExecuted = LuaVM.ExecuteString(TEXT("UseContainerItem(0, 3)"), TEXT("LuaUseContainerItemQueuesAutoEquip"));
@@ -489,7 +497,7 @@ bool FLuaUseContainerItemQueuesAutoEquip::RunTest(const FString& Parameters)
         if (Payload.Num() == 2)
         {
             TestEqual(TEXT("Backpack bag id normalizes to 255"), Payload[0], static_cast<uint8>(255));
-            TestEqual(TEXT("Lua bag slots convert to zero-based server slots"), Payload[1], static_cast<uint8>(2));
+            TestEqual(TEXT("Lua backpack slot 3 maps to physical slot 25"), Payload[1], static_cast<uint8>(25));
         }
     }
 
@@ -634,6 +642,10 @@ bool FLuaInventoryPickupFlowsQueueEquipAndUnequipPackets::RunTest(const FString&
     WowTestUtils::SetGuidField64(*Player, PlayerField::PACK_SLOT_START, BagItemGuid);
     WowTestUtils::SetGuidField64(*Player, PlayerField::INV_SLOT_HEAD, EquippedItemGuid);
 
+    // Item metadata is server-owned; preseed it so the test observes the
+    // inventory command rather than its preceding item-query request.
+    for(uint32 Id:{6948u,5976u}) { FWowItemTemplate Item; Item.Id=Id; Item.Name=TEXT("Fixture item"); Connection->PacketHandler.ItemTemplates.Add(Id,Item); }
+
     FWowLuaVM LuaVM;
     TestTrue(TEXT("Lua VM initializes"), LuaVM.Initialize());
     if (!LuaVM.IsInitialized())
@@ -659,13 +671,8 @@ bool FLuaInventoryPickupFlowsQueueEquipAndUnequipPackets::RunTest(const FString&
     TestTrue(TEXT("Picking up a bag item then clicking equipment queues a packet"), bDequeued);
     if (bDequeued)
     {
-        TestEqual(TEXT("Bag-to-equipment flow queues CMSG_AUTOEQUIP_ITEM"), Opcode, static_cast<uint32>(WowOpcode::CMSG_AUTOEQUIP_ITEM));
-        TestEqual(TEXT("Autoequip payload stores backpack source slot"), Payload.Num(), 2);
-        if (Payload.Num() == 2)
-        {
-            TestEqual(TEXT("Backpack bag id normalizes to 255"), Payload[0], static_cast<uint8>(255));
-            TestEqual(TEXT("Backpack item source slot is zero-based"), Payload[1], static_cast<uint8>(0));
-        }
+        TestEqual(TEXT("An explicit equipment drop queues CMSG_SWAP_ITEM"),Opcode,uint32(WowOpcode::CMSG_SWAP_ITEM));
+        TestTrue(TEXT("Destination precedes physical backpack source in the WotLK packet"),Payload==TArray<uint8>({255,0,255,23}));
     }
 
     bool bIsBoolean = false;
@@ -686,14 +693,8 @@ bool FLuaInventoryPickupFlowsQueueEquipAndUnequipPackets::RunTest(const FString&
     TestTrue(TEXT("Picking up an equipped item then placing it in the backpack queues a packet"), bDequeued);
     if (bDequeued)
     {
-        TestEqual(TEXT("Equipment-to-backpack flow queues CMSG_AUTOSTORE_BAG_ITEM"), Opcode, static_cast<uint32>(WowOpcode::CMSG_AUTOSTORE_BAG_ITEM));
-        TestEqual(TEXT("Autostore payload stores source bag, source slot, and destination bag"), Payload.Num(), 3);
-        if (Payload.Num() == 3)
-        {
-            TestEqual(TEXT("Equipped items source from bag 255"), Payload[0], static_cast<uint8>(255));
-            TestEqual(TEXT("Head slot uses zero-based equipment slot 0"), Payload[1], static_cast<uint8>(0));
-            TestEqual(TEXT("PutItemInBackpack stores into backpack bag 255"), Payload[2], static_cast<uint8>(255));
-        }
+        TestEqual(TEXT("An explicit backpack drop queues CMSG_SWAP_ITEM"),Opcode,uint32(WowOpcode::CMSG_SWAP_ITEM));
+        TestTrue(TEXT("Unequip targets the first free physical backpack slot"),Payload==TArray<uint8>({255,24,255,0}));
     }
 
     const bool bCursorAfterEquipPickup = WowTestUtils::GetLuaBooleanGlobal(LuaVM.GetState(), "CURSOR_AFTER_EQUIP_PICKUP", bIsBoolean);
@@ -750,6 +751,10 @@ bool FLuaSplitContainerItemQueuesSplitPacket::RunTest(const FString& Parameters)
 
     WowTestUtils::SetGuidField64(*Player, PlayerField::PACK_SLOT_START, StackItemGuid);
 
+    // Item metadata is server-owned; preseed it so the test observes the
+    // inventory command rather than its preceding item-query request.
+    for(uint32 Id:{6948u,5976u}) { FWowItemTemplate Item; Item.Id=Id; Item.Name=TEXT("Fixture item"); Connection->PacketHandler.ItemTemplates.Add(Id,Item); }
+
     FWowLuaVM LuaVM;
     TestTrue(TEXT("Lua VM initializes"), LuaVM.Initialize());
     if (!LuaVM.IsInitialized())
@@ -780,9 +785,9 @@ bool FLuaSplitContainerItemQueuesSplitPacket::RunTest(const FString& Parameters)
         if (Payload.Num() == 8)
         {
             TestEqual(TEXT("Backpack source bag normalizes to 255"), Payload[0], static_cast<uint8>(255));
-            TestEqual(TEXT("Source slot is zero-based"), Payload[1], static_cast<uint8>(0));
+            TestEqual(TEXT("Backpack source is physical slot 23"), Payload[1], static_cast<uint8>(23));
             TestEqual(TEXT("Backpack destination bag normalizes to 255"), Payload[2], static_cast<uint8>(255));
-            TestEqual(TEXT("Destination slot is zero-based"), Payload[3], static_cast<uint8>(1));
+            TestEqual(TEXT("Backpack destination is physical slot 24"), Payload[3], static_cast<uint8>(24));
 
             uint32 Count = 0;
             FMemory::Memcpy(&Count, Payload.GetData() + 4, sizeof(Count));
@@ -845,6 +850,10 @@ bool FLuaDeleteCursorItemQueuesDestroyItem::RunTest(const FString& Parameters)
 
     WowTestUtils::SetGuidField64(*Player, PlayerField::PACK_SLOT_START, BagItemGuid);
 
+    // Item metadata is server-owned; preseed it so the test observes the
+    // inventory command rather than its preceding item-query request.
+    for(uint32 Id:{6948u,5976u}) { FWowItemTemplate Item; Item.Id=Id; Item.Name=TEXT("Fixture item"); Connection->PacketHandler.ItemTemplates.Add(Id,Item); }
+
     FWowLuaVM LuaVM;
     TestTrue(TEXT("Lua VM initializes"), LuaVM.Initialize());
     if (!LuaVM.IsInitialized())
@@ -875,7 +884,7 @@ bool FLuaDeleteCursorItemQueuesDestroyItem::RunTest(const FString& Parameters)
         if (Payload.Num() == 6)
         {
             TestEqual(TEXT("Backpack bag normalizes to 255"), Payload[0], static_cast<uint8>(255));
-            TestEqual(TEXT("Source slot is zero-based"), Payload[1], static_cast<uint8>(0));
+            TestEqual(TEXT("Backpack source is physical slot 23"), Payload[1], static_cast<uint8>(23));
             TestEqual(TEXT("Full-item delete uses count 0"), Payload[2], static_cast<uint8>(0));
         }
     }
@@ -1879,15 +1888,8 @@ bool FLuaUiUtilityGlobalsExist::RunTest(const FString& Parameters)
     lua_pushinteger(L, 1);
     const int AdvanceEntryResult = lua_pcall(L, 1, 8, 0);
     TestEqual(TEXT("CombatLogAdvanceEntry accepts a numeric delta"), AdvanceEntryResult, 0);
-    const bool bAdvanceEntryHasStringEvent = (lua_isstring(L, -7) != 0);
-    const FString AdvancedEventName = bAdvanceEntryHasStringEvent ? UTF8_TO_TCHAR(lua_tostring(L, -7)) : FString();
-    const bool bAdvanceEntryHasNumericSourceFlags = (lua_isnumber(L, -4) != 0);
-    const int32 AdvancedSourceFlags = bAdvanceEntryHasNumericSourceFlags ? static_cast<int32>(lua_tointeger(L, -4)) : 0;
-    lua_pop(L, 8);
-    TestTrue(TEXT("CombatLogAdvanceEntry returns a WotLK event tuple"), bAdvanceEntryHasStringEvent);
-    TestEqual(TEXT("CombatLogAdvanceEntry uses an empty placeholder event"), AdvancedEventName, FString());
-    TestTrue(TEXT("CombatLogAdvanceEntry returns numeric source flags"), bAdvanceEntryHasNumericSourceFlags);
-    TestEqual(TEXT("CombatLogAdvanceEntry defaults unknown source flags to COMBATLOG_OBJECT_NONE"), AdvancedSourceFlags, static_cast<int32>(0x80000000u));
+    TestTrue(TEXT("Advancing an empty combat log returns nil so FrameXML terminates its loop"),lua_isnil(L,-8)!=0);
+    lua_pop(L,8);
 
     lua_getglobal(L, "CombatLogGetNumEntries");
     const int GetNumEntriesResult = lua_pcall(L, 0, 1, 0);
@@ -1899,15 +1901,8 @@ bool FLuaUiUtilityGlobalsExist::RunTest(const FString& Parameters)
     lua_getglobal(L, "CombatLogGetCurrentEntry");
     const int GetCurrentEntryResult = lua_pcall(L, 0, 8, 0);
     TestEqual(TEXT("CombatLogGetCurrentEntry call succeeds"), GetCurrentEntryResult, 0);
-    const bool bCurrentEntryHasStringEvent = (lua_isstring(L, -7) != 0);
-    const FString CurrentEntryEventName = bCurrentEntryHasStringEvent ? UTF8_TO_TCHAR(lua_tostring(L, -7)) : FString();
-    const bool bCurrentEntryHasNumericDestFlags = (lua_isnumber(L, -1) != 0);
-    const int32 CurrentDestFlags = bCurrentEntryHasNumericDestFlags ? static_cast<int32>(lua_tointeger(L, -1)) : 0;
-    lua_pop(L, 8);
-    TestTrue(TEXT("CombatLogGetCurrentEntry returns a WotLK event tuple"), bCurrentEntryHasStringEvent);
-    TestEqual(TEXT("CombatLog current-entry placeholder event is empty"), CurrentEntryEventName, FString());
-    TestTrue(TEXT("CombatLogGetCurrentEntry returns numeric destination flags"), bCurrentEntryHasNumericDestFlags);
-    TestEqual(TEXT("CombatLog current-entry defaults unknown destination flags to COMBATLOG_OBJECT_NONE"), CurrentDestFlags, static_cast<int32>(0x80000000u));
+    TestTrue(TEXT("An empty combat log has no current entry"),lua_isnil(L,-8)!=0);
+    lua_pop(L,8);
 
     lua_getglobal(L, "CombatLog_Object_IsA");
     lua_pushinteger(L, 0x00000511);

@@ -14,6 +14,7 @@
 #include "Formats/Dbc/CreatureModelDataDbc.h"
 #include "Formats/Dbc/ItemDisplayInfoDbc.h"
 #include "Formats/Dbc/SpellDbc.h"
+#include "Formats/Dbc/SpellBookDbc.h"
 #include "Formats/Dbc/SpellIconDbc.h"
 #include "Formats/Dbc/SpellVisualDbc.h"
 #include "Formats/Dbc/SpellVisualKitDbc.h"
@@ -43,6 +44,31 @@ public:
 
     bool LoadAll(FMpqManager& Mpq);
     void LoadDeferred(FMpqManager& Mpq);
+    float StatRatio(FName Table,uint32 Id) const { const auto* Values=StatRatios.Find(Table); const auto* Value=Values?Values->Find(Id):nullptr; return Value?*Value:0.f; }
+    struct FTitle { uint32 Mask=0; FString Male,Female; };
+    const FTitle* Title(uint32 Mask) const { return Titles.Find(Mask); }
+    uint32 MaxTitleIndex() const { return TitleMax; }
+    uint32 QuestXP(uint32 Level,uint32 Difficulty) const { const auto* Row=QuestXPValues.Find(Level); return Row && Row->IsValidIndex(Difficulty)?(*Row)[Difficulty]:0; }
+    int32 QuestReputation(int32 ValueId) const { const auto* Value=QuestReputationValues.Find(ValueId); return Value?*Value:0; }
+    const FTitle* TitleById(uint32 Id) const { const auto* Mask=TitleMasks.Find(Id); return Mask?Title(*Mask):nullptr; }
+    struct FWorldMapArea
+    {
+        uint32 Id=0,MapId=0,AreaId=0;
+        FString Name;
+        float Y1=0,Y2=0,X1=0,X2=0;
+        FVector2D Project(const FVector& Position) const { return FVector2D((Y1-Position.Y)/(Y1-Y2),(X1-Position.X)/(X1-X2)); }
+    };
+    const TArray<FWorldMapArea>& WorldMapAreas() const { return MapAreas; }
+    struct FWorldMapOverlay { uint32 MapAreaId=0,Areas[4]={}; FString Name; int32 Width=0,Height=0,X=0,Y=0; };
+    const TArray<FWorldMapOverlay>& WorldMapOverlays() const { return MapOverlays; }
+    struct WOWDATA_API FFaction
+    {
+        uint32 Id=0,Parent=0,Races[4]={},Classes[4]={}; int32 Index=-1,Base[4]={}; FString Name,Description;
+        int32 BaseFor(uint8 Race,uint8 Class) const;
+    };
+    struct FCurrency { uint32 Item=0,Category=0,Bit=0; };
+    const TArray<FFaction>& Factions() const { return UiFactions; }
+    const TArray<FCurrency>& Currencies() const { return UiCurrencies; }
 
     FMapDbc& Maps() { return MapDbc; }
     FAreaTableDbc& AreaTable() { return AreaTableDbc; }
@@ -58,6 +84,7 @@ public:
     FCreatureModelDataDbc& CreatureModelData() { return CreatureModelDataDbc; }
     FItemDisplayInfoDbc& ItemDisplayInfo() { return ItemDisplayInfoDbc; }
     FSpellDbc& Spells() { return SpellDbc; }
+    FSpellBookDbc& SpellBook() { return SpellBookDbc; }
     FSpellIconDbc& SpellIcons() { return SpellIconDbc; }
     FSpellVisualDbc& SpellVisuals() { return SpellVisualDbc; }
     FSpellVisualKitDbc& SpellVisualKits() { return SpellVisualKitDbc; }
@@ -92,6 +119,7 @@ public:
     const FCreatureModelDataDbc& CreatureModelData() const { return CreatureModelDataDbc; }
     const FItemDisplayInfoDbc& ItemDisplayInfo() const { return ItemDisplayInfoDbc; }
     const FSpellDbc& Spells() const { return SpellDbc; }
+    const FSpellBookDbc& SpellBook() const { return SpellBookDbc; }
     const FSpellIconDbc& SpellIcons() const { return SpellIconDbc; }
     const FSpellVisualDbc& SpellVisuals() const { return SpellVisualDbc; }
     const FSpellVisualKitDbc& SpellVisualKits() const { return SpellVisualKitDbc; }
@@ -130,6 +158,17 @@ private:
     FCreatureModelDataDbc CreatureModelDataDbc;
     FItemDisplayInfoDbc ItemDisplayInfoDbc;
     FSpellDbc SpellDbc;
+    FSpellBookDbc SpellBookDbc;
+    TMap<FName,TMap<uint32,float>> StatRatios;
+    TMap<uint32,FTitle> Titles;
+    TMap<uint32,uint32> TitleMasks;
+    TMap<uint32,TArray<uint32>> QuestXPValues;
+    TMap<int32,int32> QuestReputationValues;
+    TArray<FWorldMapArea> MapAreas;
+    TArray<FWorldMapOverlay> MapOverlays;
+    TArray<FFaction> UiFactions;
+    TArray<FCurrency> UiCurrencies;
+    uint32 TitleMax=0;
     FSpellIconDbc SpellIconDbc;
     FSpellVisualDbc SpellVisualDbc;
     FSpellVisualKitDbc SpellVisualKitDbc;

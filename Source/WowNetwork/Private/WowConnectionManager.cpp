@@ -8,6 +8,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogWowNet, Log, All);
 namespace
 {
     constexpr uint8 ACTION_BUTTON_TYPE_SPELL = 0x00;
+    constexpr uint8 ACTION_BUTTON_TYPE_ITEM = 0x80;
     constexpr uint32 AUTO_ATTACK_SPELL_ID = 6603;
 }
 
@@ -84,6 +85,7 @@ void UWowConnectionManager::SelectRealm(int32 I)
     }
 
     const FWowRealmInfo& Realm = CachedRealms[I];
+    CurrentRealmName=Realm.Name;
     UE_LOG(LogWowNet, Log, TEXT("Selected realm: %s id=%u (%s:%d)"), *Realm.Name, Realm.RealmId, *Realm.Address, Realm.Port);
 
     if (SessionKey.Num() == 0)
@@ -111,6 +113,22 @@ void UWowConnectionManager::SelectRealm(int32 I)
     WorldSocket->OnPacket.BindWeakLambda(this, [this](uint16 Opcode, const TArray<uint8>& Data)
     {
         // Intercept char create/delete results
+        if(Opcode==0x004C && Data.Num()>=5)
+        {
+            FPacketReader Reader(Data); const uint32 Reason=Reader.ReadU32(); const bool Instant=Reader.ReadU8()!=0;
+            OnLogoutResponse.Broadcast(Reason,Instant); return;
+        }
+        if(Opcode==0x004D)
+        {
+            OnLogoutComplete.Broadcast();
+            TArray<uint64> Guids; PacketHandler.EntityManager.GetAll().GetKeys(Guids);
+            for(uint64 Guid:Guids) PacketHandler.EntityManager.Remove(Guid);
+            PacketHandler.EntityManager.LocalPlayerGuid=0; TargetGuid=0; CursorPayload=FCursorPayloadState();
+            PacketHandler.KnownSpells.Reset(); PacketHandler.ActionButtons.Reset(); PacketHandler.QuestLog.Reset(); PacketHandler.Talents.Reset(); PacketHandler.Reputations.Reset();
+            PacketHandler.SpellCooldowns.Reset(); PacketHandler.SpellCooldownInfo.Reset();
+            PacketHandler.GroupInfo=FWowGroupInfo(); PacketHandler.PetActionBar=FWowPetActionBarState();
+            RequestCharacterList(); return;
+        }
         if (Opcode == WowOpcode::SMSG_CHAR_CREATE || Opcode == WowOpcode::SMSG_CHAR_DELETE)
         {
             uint8 Result = Data.Num() > 0 ? Data[0] : 0xFF;
@@ -200,9 +218,11 @@ void UWowConnectionManager::EnterWorld(int64 G)
     }
 
     PacketHandler.EntityManager.LocalPlayerGuid = static_cast<uint64>(G);
+    for(const auto& Character:CachedCharacters) if(Character.Guid==G) PacketHandler.PlayerNameCache.Add(uint64(G),Character.Name);
 
     // Listen for LOGIN_VERIFY_WORLD to transition to InGame state
-    PacketHandler.OnLoginVerifyWorld.AddLambda([this](uint32 MapId, float X, float Y, float Z, float Orientation)
+    if(EnterWorldHandle.IsValid()) PacketHandler.OnLoginVerifyWorld.Remove(EnterWorldHandle);
+    EnterWorldHandle=PacketHandler.OnLoginVerifyWorld.AddLambda([this](uint32 MapId, float X, float Y, float Z, float Orientation)
     {
         UE_LOG(LogWowNet, Log, TEXT("Entered world: map=%d pos=(%.1f, %.1f, %.1f) orient=%.2f"), MapId, X, Y, Z, Orientation);
         SetState(EWowSessionState::WorldInGame);
@@ -242,35 +262,37 @@ void UWowConnectionManager::SendMovement(int32 Opcode, const FVector& Position, 
     SendMovementInfo(Opcode,Move);
 }
 
-void UWowConnectionManager::SendChatMessage(const FString& Message, int32 Type, const FString& Target, int32 Language)
+void UWowConnectionManager::RequestLogout()
 {
-    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+    if(WorldSocket && State==EWowSessionState::WorldInGame) WorldSocket->SendPacket(0x004B,{});
+}
 
-    // WoW 3.3.5a chat messages are limited to 255 bytes (UTF-8)
-    FString TruncatedMessage = Message.Left(255);
+void UWowConnectionManager::CancelLogout()
+{
+    if(WorldSocket && State==EWowSessionState::WorldInGame) WorldSocket->SendPacket(0x004E,{});
+}
 
+TArray<uint8> UWowConnectionManager::BuildChatPacket(const FString& Message,int32 Type,const FString& Target,int32 Language)
+{
     TArray<uint8> Data;
-    Data.Reserve(TruncatedMessage.Len() + 16);
+    const uint32 ChatType=Type,Lang=Language;
+    Data.Append(reinterpret_cast<const uint8*>(&ChatType),4); Data.Append(reinterpret_cast<const uint8*>(&Lang),4);
+    const auto AppendString=[&Data](const FString& Text,int32 Limit)
+    {
+        FTCHARToUTF8 Utf8(*Text); int32 Length=FMath::Min(Utf8.Length(),Limit);
+        // Do not split a UTF-8 code point at the protocol byte limit.
+        while(Length<Utf8.Length() && Length>0 && (uint8(Utf8.Get()[Length])&0xc0)==0x80) --Length;
+        Data.Append(reinterpret_cast<const uint8*>(Utf8.Get()),Length); Data.Add(0);
+    };
+    if(Type==7 || Type==17) AppendString(Target,255);
+    AppendString(Message,255); return Data;
+}
 
-    // uint32 type (SAY=1, PARTY=4, GUILD=3, YELL=5, WHISPER=6, CHANNEL=17)
-    uint32 ChatType = static_cast<uint32>(Type);
-    Data.Append(reinterpret_cast<const uint8*>(&ChatType), 4);
-
-    // uint32 language (Common=7)
-    uint32 Lang = static_cast<uint32>(Language);
-    Data.Append(reinterpret_cast<const uint8*>(&Lang), 4);
-
-    // For whispers and channels, we need the target name first, but for now keep it simple
-    // TODO: Implement proper whisper/channel target handling
-
-    // Null-terminated message string (UTF-8)
-    FTCHARToUTF8 MsgUtf8(*TruncatedMessage);
-    int32 MsgLen = FMath::Min(MsgUtf8.Length(), 255);
-    Data.Append(reinterpret_cast<const uint8*>(MsgUtf8.Get()), MsgLen);
-    Data.Add(0);
-
-    WorldSocket->SendPacket(WowOpcode::CMSG_MESSAGECHAT, Data);
-    UE_LOG(LogWowNet, Log, TEXT("Sent chat (type=%d): %s"), Type, *Message);
+void UWowConnectionManager::SendChatMessage(const FString& Message,int32 Type,const FString& Target,int32 Language)
+{
+    if(!WorldSocket || State!=EWowSessionState::WorldInGame || Message.IsEmpty() || ((Type==7 || Type==17) && Target.IsEmpty())) return;
+    WorldSocket->SendPacket(WowOpcode::CMSG_MESSAGECHAT,BuildChatPacket(Message,Type,Target,Language));
+    UE_LOG(LogWowNet, Log, TEXT("Sent chat (type=%d language=%d target=%s): %s"), Type,Language,*Target,*Message);
 }
 
 void UWowConnectionManager::SendSetSelection(int64 InTargetGuid)
@@ -400,6 +422,7 @@ void UWowConnectionManager::PickupSpellCursor(int32 SpellId, const FString& Book
     CursorPayload.Detail = BookType;
     CursorPayload.ActionType = ACTION_BUTTON_TYPE_SPELL;
     CursorPayload.SourceActionSlot = -1;
+    OnCursorChanged.Broadcast();
 }
 
 void UWowConnectionManager::PickupActionCursor(int32 SlotIndex)
@@ -420,6 +443,7 @@ void UWowConnectionManager::PickupActionCursor(int32 SlotIndex)
     CursorPayload.Detail.Empty();
     CursorPayload.ActionType = static_cast<uint8>((PackedAction >> 24) & 0xFF);
     CursorPayload.SourceActionSlot = SlotIndex;
+    OnCursorChanged.Broadcast();
 }
 
 void UWowConnectionManager::PickupBagItemCursor(uint8 SourceBag, uint8 SourceSlot, int32 ItemId, const FString& ItemLink, uint32 SplitCount)
@@ -434,6 +458,7 @@ void UWowConnectionManager::PickupBagItemCursor(uint8 SourceBag, uint8 SourceSlo
     CursorPayload.ActionType = 0;
     CursorPayload.SourceActionSlot = -1;
     CursorPayload.SplitCount = SplitCount;
+    OnCursorChanged.Broadcast();
 }
 
 void UWowConnectionManager::PickupInventoryItemCursor(uint8 InventorySlot, int32 ItemId, const FString& ItemLink)
@@ -448,11 +473,21 @@ void UWowConnectionManager::PickupInventoryItemCursor(uint8 InventorySlot, int32
     CursorPayload.ActionType = 0;
     CursorPayload.SourceActionSlot = -1;
     CursorPayload.SplitCount = 0;
+    OnCursorChanged.Broadcast();
 }
 
 void UWowConnectionManager::ClearCursorPayload()
 {
     CursorPayload = FCursorPayloadState();
+    OnCursorChanged.Broadcast();
+}
+
+bool UWowConnectionManager::DropActionCursor()
+{
+    if(CursorPayload.Type!=ECursorPayloadType::Action) return false;
+    const int32 Slot=CursorPayload.SourceActionSlot;
+    if(PacketHandler.ActionButtons.IsValidIndex(Slot)) { SendClearActionButton(Slot); PacketHandler.ActionButtons[Slot]=0; }
+    ClearCursorPayload(); BroadcastActionButtonsChanged(); return true;
 }
 
 bool UWowConnectionManager::HasCursorPayload() const
@@ -482,6 +517,11 @@ bool UWowConnectionManager::GetCursorInfo(FString& OutType, int32& OutId, FStrin
 
     if (CursorPayload.Type == ECursorPayloadType::Action)
     {
+        if(CursorPayload.SourceActionSlot<0)
+        {
+            OutType=CursorPayload.ActionType==0x80?TEXT("item"):CursorPayload.ActionType==0?TEXT("spell"):TEXT("macro");
+            OutId=CursorPayload.PrimaryId; OutDetail=CursorPayload.ActionType==0?TEXT("spell"):FString(); return true;
+        }
         OutType = TEXT("action");
         OutId = CursorPayload.SourceActionSlot + 1;
         OutDetail.Empty();
@@ -510,6 +550,7 @@ bool UWowConnectionManager::PlaceCursorIntoActionSlot(int32 SlotIndex)
     }
 
     EnsureActionButtonCapacity(SlotIndex);
+    const uint32 ReplacedAction=PacketHandler.ActionButtons[SlotIndex];
 
     if (CursorPayload.Type == ECursorPayloadType::Spell)
     {
@@ -536,9 +577,20 @@ bool UWowConnectionManager::PlaceCursorIntoActionSlot(int32 SlotIndex)
             PacketHandler.ActionButtons[CursorPayload.SourceActionSlot] = 0;
         }
     }
+    else if(CursorPayload.Type==ECursorPayloadType::Item)
+    {
+        SendSetActionButton(SlotIndex,uint32(CursorPayload.PrimaryId),ACTION_BUTTON_TYPE_ITEM);
+        PacketHandler.ActionButtons[SlotIndex]=(uint32(CursorPayload.PrimaryId)&0x00ffffffu)|(uint32(ACTION_BUTTON_TYPE_ITEM)<<24);
+    }
 
+    CursorPayload = FCursorPayloadState();
+    if(ReplacedAction)
+    {
+        CursorPayload.Type=ECursorPayloadType::Action; CursorPayload.PrimaryId=ReplacedAction&0x00ffffffu;
+        CursorPayload.ActionType=ReplacedAction>>24; CursorPayload.SourceActionSlot=-1;
+    }
+    OnCursorChanged.Broadcast();
     BroadcastActionButtonsChanged();
-    ClearCursorPayload();
     return true;
 }
 
@@ -556,8 +608,9 @@ bool UWowConnectionManager::PlaceCursorIntoContainerSlot(uint8 DestinationBag, u
         return true;
     }
 
-    const bool bStored = AutoStoreCursorItem(DestinationBag);
-    return bStored;
+    SendSwapItem(CursorPayload.SourceBag,CursorPayload.SourceSlot,DestinationBag,DestinationSlot);
+    ClearCursorPayload();
+    return true;
 }
 
 bool UWowConnectionManager::PlaceCursorIntoFirstFreeContainerSlot(uint8 DestinationBag)
@@ -579,13 +632,13 @@ bool UWowConnectionManager::PlaceCursorIntoFirstFreeContainerSlot(uint8 Destinat
         {
             if (Player->GetBackpackItemGuid(SlotIndex) == 0)
             {
-                return PlaceCursorIntoContainerSlot(255, SlotIndex);
+                return PlaceCursorIntoContainerSlot(255, SlotIndex+23);
             }
         }
         return false;
     }
 
-    const uint64 BagGuid = Player->GetBagGuid(DestinationBag);
+    const uint64 BagGuid = DestinationBag>=19 && DestinationBag<=22?Player->GetBagGuid(DestinationBag-18):0;
     if (BagGuid == 0)
     {
         return false;
@@ -721,9 +774,25 @@ bool UWowConnectionManager::UseActionSlot(int32 SlotIndex)
         return true;
 
     case EWowActionInvocationKind::ItemUse:
-        UE_LOG(LogWowNet, Log, TEXT("UseActionSlot: item use not implemented (slot=%d item=%u)"),
-            SlotIndex, Invocation.ActionId);
+    {
+        RequestItemTemplate(Invocation.ActionId);
+        const auto* T=PacketHandler.ItemTemplates.Find(Invocation.ActionId);
+        const auto* Player=PacketHandler.EntityManager.GetLocalPlayer();
+        if(!T || !Player) return false;
+        const auto Use=[&](uint64 Guid,uint8 Bag,uint8 Slot)->bool
+        {
+            const auto* Item=PacketHandler.EntityManager.FindItem(Guid);
+            if(!Item || Item->Entry!=Invocation.ActionId) return false;
+            if(T->UseSpellId) { SendUseItem(Bag,Slot,Guid,T->UseSpellId); return true; }
+            if(T->InventoryType) { SendAutoEquipItem(Bag,Slot); return true; }
+            return false;
+        };
+        for(uint8 Slot=0; Slot<19; ++Slot) if(Use(Player->GetEquipmentItemGuid(Slot),255,Slot)) return true;
+        for(uint8 Slot=0; Slot<16; ++Slot) if(Use(Player->GetBackpackItemGuid(Slot),255,Slot+23)) return true;
+        for(uint8 Bag=1; Bag<=4; ++Bag) if(const auto* Container=PacketHandler.EntityManager.FindContainer(Player->GetBagGuid(Bag)))
+            for(int32 Slot=0; Slot<Container->GetNumSlots(); ++Slot) if(Use(Container->GetItemGuidAtSlot(Slot),Bag+18,Slot)) return true;
         return false;
+    }
 
     case EWowActionInvocationKind::Macro:
         UE_LOG(LogWowNet, Log, TEXT("UseActionSlot: macro use not implemented (slot=%d macro=%u)"),
@@ -876,6 +945,31 @@ void UWowConnectionManager::SendAutoEquipItem(uint8 SourceBag, uint8 SourceSlot)
 
     WorldSocket->SendPacket(WowOpcode::CMSG_AUTOEQUIP_ITEM, Data);
     UE_LOG(LogWowNet, Log, TEXT("Auto equip item from bag=%u slot=%u"), SourceBag, SourceSlot);
+}
+
+void UWowConnectionManager::SendSwapItem(uint8 SourceBag,uint8 SourceSlot,uint8 DestinationBag,uint8 DestinationSlot)
+{
+    if(!WorldSocket.IsValid() || State!=EWowSessionState::WorldInGame) return;
+    WorldSocket->SendPacket(WowOpcode::CMSG_SWAP_ITEM,{DestinationBag,DestinationSlot,SourceBag,SourceSlot});
+}
+
+void UWowConnectionManager::SendUseItem(uint8 Bag,uint8 Slot,uint64 ItemGuid,uint32 SpellId)
+{
+    if(!WorldSocket.IsValid() || State!=EWowSessionState::WorldInGame || !ItemGuid || !SpellId) return;
+    TArray<uint8> Data={Bag,Slot,0}; // bag, slot, cast count
+    Data.Append(reinterpret_cast<const uint8*>(&SpellId),4);
+    Data.Append(reinterpret_cast<const uint8*>(&ItemGuid),8);
+    const uint32 Glyph=0,TargetMask=0; // explicit self/no target; never infer a hostile target for consumables
+    Data.Append(reinterpret_cast<const uint8*>(&Glyph),4); Data.Add(0);
+    Data.Append(reinterpret_cast<const uint8*>(&TargetMask),4);
+    WorldSocket->SendPacket(WowOpcode::CMSG_USE_ITEM,Data);
+}
+
+void UWowConnectionManager::SendSetTitle(int32 TitleIndex)
+{
+    if(!WorldSocket.IsValid() || State!=EWowSessionState::WorldInGame) return;
+    TArray<uint8> Data; Data.Append(reinterpret_cast<const uint8*>(&TitleIndex),4);
+    WorldSocket->SendPacket(WowOpcode::CMSG_SET_TITLE,Data);
 }
 
 void UWowConnectionManager::SendAutoStoreBagItem(uint8 SourceBag, uint8 SourceSlot, uint8 DestinationBag)

@@ -1,0 +1,61 @@
+# Interface status
+
+The client uses the original 3.3.5a FrameXML read from the user's MPQ files.
+Opening a Blizzard panel does not by itself establish that its underlying APIs
+are implemented. This document distinguishes the verified core from remaining
+compatibility work.
+
+## Implemented core
+
+- Player and target health, resource, auras and live model portraits; action
+  textures, item counts, cooldown swipes and spell/item tooltips.
+- Known spellbook tabs and ranks, character attributes and combat statistics,
+  skills, reputations, watched faction and character equipment preview.
+- Inventory item metadata, stack counts and durability; exact bag-slot moves,
+  equip/unequip and spell/item/action drag and drop. Action placement preserves
+  a displaced action on the cursor and never deletes a physical item.
+- Quest journal selection, objectives, formatted paragraphs, rewards and watch
+  state. Reparented text measures and scrolls with the journal; the scrollbar
+  uses the same units in Lua and native widgets.
+- UTF-8 chat, channel and recipient fields, bounded message history and input
+  focus. A native round-trip test uses an otherwise empty local realm.
+- Outdoor minimap and zone/continent map textures, player position and zoom.
+- Game menu, window close order, logout and character re-entry, ReloadUI and
+  saved per-character UI preferences. Windowed mode remains the initial mode.
+- Audio volume/toggles, window mode and resolution, gamma, texture quality,
+  VSync and frame limit. Cancel restores the tested audio settings.
+- Keyboard binding editor, save/cancel/reset and native routing, including
+  releasing a remapped key after an edit box takes focus.
+
+The UI bridge also supports anonymous frame identity, frame and region
+reparenting, font objects, positional formatting, typed wheel/scroll callbacks,
+numeric slider values, clipping, additive highlights and wrapped text geometry.
+
+## Verification
+
+The Windows Editor and packaged Development client are built from the same
+source tree. `WowUnreal.Hud`, `WowUnreal.UI`, `WowUnreal.Gameplay` and the related
+player, collision, equipment, lighting, rendering, traversal and performance
+suites currently comprise 57 passing tests. Two existing optional character
+texture-layout DBC warnings remain.
+
+Native gameplay probes exercise live server state and rendered UI at 1280x720
+and 1920x1080. Tests restore moved inventory items, temporary action slots and
+key assignments. Screenshots use `FScreenshotRequest`, with file-content and
+visual checks. Probe operations include frame click, drag, hover, wheel, Lua
+assertions, native key down/up and key-state assertions. Logic-only Editor tests
+may use NullRHI; visual checks require a rendered client.
+
+## Remaining compatibility work
+
+Full WoW UI compatibility is **not complete**. In particular:
+
+- Macro editing and execution, combat-log history and clickable chat links.
+- Complete PvP/battleground, LFG and achievement panels and protocol support.
+- World-map points of interest, indoor minimap tiles and tracking markers.
+- Legacy options without an engine-side implementation; persisting a CVar
+  does not imply that its associated rendering or gameplay feature exists.
+- MP3 music decoding. WAV playback and finite UI-sound lifetime are supported.
+
+Some unimplemented panels still log missing Lua APIs at bootstrap. They must
+not be advertised as working features or replaced by fabricated game data.

@@ -10,6 +10,15 @@ FDbcStore& FDbcStore::Get()
     return Instance;
 }
 
+int32 FDbcStore::FFaction::BaseFor(uint8 Race,uint8 Class) const
+{
+    if(Race<1 || Race>32 || Class<1 || Class>32) return 0;
+    const uint32 RaceMask=1u<<(Race-1),ClassMask=1u<<(Class-1);
+    for(int32 I=0;I<4;++I)
+        if(((Races[I]&RaceMask) || (!Races[I] && Classes[I])) && (!Classes[I] || (Classes[I]&ClassMask))) return Base[I];
+    return 0;
+}
+
 static bool TryLoadSingleDbc(FMpqManager& Mpq, const TCHAR* DbcPath, FDbcParser& OutParser)
 {
     TArray<uint8> Data;
@@ -477,6 +486,61 @@ void FDbcStore::LoadDeferred(FMpqManager& Mpq)
         }
     }
 
+    if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\SkillLine.dbc"),Parser)) SpellBookDbc.LoadSkills(Parser);
+    if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\SpellDuration.dbc"),Parser)) SpellDbc.LoadTimes(Parser,false);
+    if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\SpellCastTimes.dbc"),Parser)) SpellDbc.LoadTimes(Parser,true);
+    if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\WorldMapArea.dbc"),Parser) && Parser.GetFieldCount()>=9)
+    {
+        MapAreas.Reset();
+        for(uint32 I=0; I<Parser.GetRecordCount(); ++I)
+        {
+            FWorldMapArea Area; Area.Id=Parser.GetUInt(I,0); Area.MapId=Parser.GetUInt(I,1); Area.AreaId=Parser.GetUInt(I,2); Area.Name=Parser.GetString(I,3);
+            Area.Y1=Parser.GetFloat(I,4); Area.Y2=Parser.GetFloat(I,5); Area.X1=Parser.GetFloat(I,6); Area.X2=Parser.GetFloat(I,7);
+            if(!Area.Name.IsEmpty() && Area.X1!=Area.X2 && Area.Y1!=Area.Y2) MapAreas.Add(MoveTemp(Area));
+        }
+    }
+    if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\SkillLineAbility.dbc"),Parser)) SpellBookDbc.LoadAbilities(Parser);
+    if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\WorldMapOverlay.dbc"),Parser) && Parser.GetFieldCount()>=13)
+    {
+        MapOverlays.Reset();
+        for(uint32 I=0; I<Parser.GetRecordCount(); ++I)
+        {
+            FWorldMapOverlay O; O.MapAreaId=Parser.GetUInt(I,1); for(int32 A=0; A<4; ++A) O.Areas[A]=Parser.GetUInt(I,2+A);
+            O.Name=Parser.GetString(I,8); O.Width=Parser.GetUInt(I,9); O.Height=Parser.GetUInt(I,10); O.X=Parser.GetUInt(I,11); O.Y=Parser.GetUInt(I,12);
+            if(!O.Name.IsEmpty() && O.Width>0 && O.Width<=1024 && O.Height>0 && O.Height<=768) MapOverlays.Add(MoveTemp(O));
+        }
+    }
+    for(const TCHAR* Name:{TEXT("gtChanceToMeleeCrit"),TEXT("gtChanceToSpellCrit"),TEXT("gtOCTRegenHP"),TEXT("gtRegenHPPerSpt"),TEXT("gtRegenMPPerSpt"),TEXT("gtCombatRatings"),TEXT("gtOCTClassCombatRatingScalar")})
+        if(LoadSingleDbc(Mpq,*(FString(TEXT("DBFilesClient\\"))+Name+TEXT(".dbc")),Parser) && Parser.GetFieldCount()>=2)
+        {
+            auto& Values=StatRatios.FindOrAdd(FName(Name));
+            for(uint32 I=0; I<Parser.GetRecordCount(); ++I) Values.Add(Parser.GetUInt(I,0),Parser.GetFloat(I,1));
+        }
+    if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\CharTitles.dbc"),Parser) && Parser.GetFieldCount()>=37)
+        for(uint32 I=0; I<Parser.GetRecordCount(); ++I)
+        {
+            FTitle T; T.Male=Parser.GetString(I,2); T.Female=Parser.GetString(I,19); T.Mask=Parser.GetUInt(I,36);
+            TitleMax=FMath::Max(TitleMax,T.Mask); TitleMasks.Add(Parser.GetUInt(I,0),T.Mask); Titles.Add(T.Mask,MoveTemp(T));
+        }
+    if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\QuestXP.dbc"),Parser) && Parser.GetFieldCount()>=11)
+        for(uint32 I=0;I<Parser.GetRecordCount();++I) { auto& Values=QuestXPValues.FindOrAdd(Parser.GetUInt(I,0)); Values.Reset(); for(int32 N=1;N<=10;++N) Values.Add(Parser.GetUInt(I,N)); }
+    if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\QuestFactionReward.dbc"),Parser) && Parser.GetFieldCount()>=11)
+        for(uint32 I=0;I<Parser.GetRecordCount();++I) { const uint32 Id=Parser.GetUInt(I,0); for(int32 N=1;N<=9;++N) if(Id==1 || Id==2) QuestReputationValues.Add(Id==2?-N:N,int32(Parser.GetUInt(I,N))); }
+    if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\Faction.dbc"),Parser) && Parser.GetFieldCount()>=57)
+    {
+        UiFactions.Reset();
+        for(uint32 I=0;I<Parser.GetRecordCount();++I)
+        {
+            FFaction F; F.Id=Parser.GetUInt(I,0); F.Index=int32(Parser.GetUInt(I,1)); F.Parent=Parser.GetUInt(I,18); F.Name=Parser.GetString(I,23); F.Description=Parser.GetString(I,40);
+            for(int32 N=0;N<4;++N) { F.Races[N]=Parser.GetUInt(I,2+N); F.Classes[N]=Parser.GetUInt(I,6+N); F.Base[N]=int32(Parser.GetUInt(I,10+N)); }
+            if(F.Index>=0 && F.Index<128) UiFactions.Add(MoveTemp(F));
+        }
+    }
+    if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\CurrencyTypes.dbc"),Parser) && Parser.GetFieldCount()>=4)
+    {
+        UiCurrencies.Reset();
+        for(uint32 I=0;I<Parser.GetRecordCount();++I) { FCurrency C; C.Item=Parser.GetUInt(I,1); C.Category=Parser.GetUInt(I,2); C.Bit=Parser.GetUInt(I,3); if(C.Bit>0 && C.Bit<=64) UiCurrencies.Add(C); }
+    }
     bDeferredLoaded = true;
     UE_LOG(LogDbcStore, Log, TEXT("DbcStore: loaded %d/19 deferred DBC tables (Tier 2)"), Loaded);
 }

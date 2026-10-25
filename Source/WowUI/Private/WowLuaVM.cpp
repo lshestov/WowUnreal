@@ -208,6 +208,18 @@ void FWowLuaVM::RegisterWowApi()
 #endif
 }
 
+void FWowLuaVM::BeginCallback()
+{
+#if HAS_LUA
+    if(!L) return;
+    lua_Debug Frame;
+    if(lua_getstack(L,0,&Frame)==0)
+    {
+        lua_pushinteger(L,0); lua_setfield(L,LUA_REGISTRYINDEX,INSTRUCTION_COUNT_KEY);
+    }
+#endif
+}
+
 void FWowLuaVM::StepGarbageCollector(int32 StepSize)
 {
 #if HAS_LUA

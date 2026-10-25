@@ -4,6 +4,8 @@
 #include "WowEventSystem.h"
 #include "WowFontManager.h"
 #include "WowFrameXmlParser.h"
+#include "WowUiModelRenderer.h"
+#include "WowUiMapRenderer.h"
 #include "WowAddonLoader.h"
 #include "LuaApi/LuaApiRegistry.h"
 #include "Mpq/MpqManager.h"
@@ -16,6 +18,7 @@
 #include "Widgets/Layout/SDPIScaler.h"
 #include "Engine/UserInterfaceSettings.h"
 #include "Engine/GameViewportClient.h"
+#include "WowSavedVariables.h"
 
 #if __has_include("lua.h")
 extern "C" {
@@ -84,13 +87,17 @@ UWowUIManager::UWowUIManager()
 void UWowUIManager::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
+	InitializeCore();
+}
 
+void UWowUIManager::InitializeCore()
+{
 	// Create core UI systems
 	LuaVM = MakeUnique<FWowLuaVM>();
 	FrameManager = MakeUnique<FWowFrameManager>();
 	EventSystem = MakeUnique<FWowEventSystem>();
 	FontManager = MakeUnique<FWowFontManager>();
-	InventoryManager = MakeShareable(new FWowInventoryManager());
+	if(!InventoryManager) InventoryManager = MakeShareable(new FWowInventoryManager());
 
 	// Initialize the Lua VM
 	if (!LuaVM->Initialize())
@@ -109,13 +116,22 @@ void UWowUIManager::Initialize(FSubsystemCollectionBase& Collection)
 	UIContext = new FWowLuaContext();
 	UIContext->EventSystem = EventSystem.Get();
 	UIContext->FrameManager = FrameManager.Get();
+	UIContext->ReloadUI = [this] { bReloadRequested = true; };
 	WowLuaApi::SetContext(LuaVM->GetState(), UIContext);
+	ModelRenderer=MakeShared<FWowUiModelRenderer>(*FrameManager,*UIContext);
+	MapRenderer=MakeShared<FWowUiMapRenderer>(*FrameManager,*UIContext);
+	FrameManager->OnMapCommand=[this](int32 Command){ MapRenderer->Command(Command); };
+	FrameManager->OnPortrait=[this](const FString& Name,uint64 Guid){ ModelRenderer->Portrait(Name,Guid); };
+	FrameManager->OnUnitModel=[this](int64 Handle,uint64 Guid){ ModelRenderer->Model(Handle,Guid); };
+	FrameManager->OnModelFacing=[this](int64 Handle,float Yaw){ ModelRenderer->Facing(Handle,Yaw); };
 
 	UE_LOG(LogWowUIManager, Log, TEXT("WoW UI Manager initialized (Lua VM + FrameManager + EventSystem)"));
 }
 
 void UWowUIManager::Deinitialize()
 {
+	ModelRenderer.Reset();
+	MapRenderer.Reset();
 	if (NativeWindowRoot.IsValid() && GEngine && GEngine->GameViewport) GEngine->GameViewport->RemoveViewportWidgetContent(NativeWindowRoot.ToSharedRef());
 	NativeWindowRoot.Reset();
 	if (LuaVM && LuaVM->GetState())
@@ -146,6 +162,7 @@ void UWowUIManager::Deinitialize()
 
 void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 {
+	LoadedMpq=Mpq; LoadedCache=AssetCache;
 	if (!Mpq || !AssetCache || !LuaVM || !LuaVM->IsInitialized())
 	{
 		UE_LOG(LogWowUIManager, Error, TEXT("Cannot load UI: null MPQ/AssetCache or Lua VM not initialized"));
@@ -179,6 +196,11 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 	}
 
 	WowLuaApi::SetAddonLoaderContext(Mpq, LuaVM.Get(), FrameManager.Get(), EventSystem.Get());
+	if(ConnectionManager) FWowSavedVariables::SetIdentity(ConnectionManager->GetAccountName(),ConnectionManager->GetRealmName(),ConnectionManager->GetCharacterName());
+	FWowTocData Preferences; Preferences.SavedVariablesPerCharacter.Add(TEXT("IdleWowUIState"));
+	FWowSavedVariables::RegisterAddon(TEXT("IdleWowUI"),Preferences);
+	FWowSavedVariables::LoadForAddon(LuaVM->GetState(),TEXT("IdleWowUI"),Preferences);
+	WowLuaApi::ApplySavedUiSettings(LuaVM->GetState());
 
 	// 1. Load FrameXML (Interface/FrameXML/FrameXML.toc) — the core UI system
 	TArray<FWowXmlDirective> FrameXmlDirectives = FWowFrameXmlParser::LoadFrameXml(Mpq);
@@ -228,6 +250,28 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 			if (FontManager && !Dir.FontName.IsEmpty())
 			{
 				FontManager->RegisterFontMapping(Dir.FontName, Dir.FontInherits, static_cast<int32>(Dir.FontHeight));
+#if HAS_LUA
+                lua_State* L=LuaVM->GetState(); lua_getglobal(L,"CreateFont"); lua_pushstring(L,TCHAR_TO_UTF8(*Dir.FontName));
+                if(lua_pcall(L,1,1,0)==0)
+                {
+                    const int32 FontIndex=lua_gettop(L);
+                    if(!Dir.FontInherits.IsEmpty())
+                    {
+                        lua_getglobal(L,TCHAR_TO_UTF8(*Dir.FontInherits));
+                        if(lua_istable(L,-1)) for(const char* Key:{"__fontPath","__fontFlags","__textColorR","__textColorG","__textColorB","__textColorA"}) { lua_getfield(L,-1,Key); lua_setfield(L,FontIndex,Key); }
+                        lua_pop(L,1);
+                    }
+                    lua_pushinteger(L,FontManager->GetFontSize(Dir.FontName)); lua_setfield(L,FontIndex,"__fontSize");
+                    if(!Dir.FontFlags.IsEmpty()) { lua_pushstring(L,TCHAR_TO_UTF8(*Dir.FontFlags)); lua_setfield(L,FontIndex,"__fontFlags"); }
+                    if(Dir.FontColor.IsSet())
+                    {
+                        const auto Color=Dir.FontColor.GetValue(); const float Values[]={Color.R,Color.G,Color.B,Color.A}; const char* Keys[]={"__textColorR","__textColorG","__textColorB","__textColorA"};
+                        for(int32 I=0;I<4;++I) { lua_pushnumber(L,Values[I]); lua_setfield(L,FontIndex,Keys[I]); }
+                    }
+                }
+                else UE_LOG(LogWowUIManager,Error,TEXT("Cannot create font %s: %hs"),*Dir.FontName,lua_tostring(L,-1));
+                lua_pop(L,1);
+#endif
 				UE_LOG(LogWowUIManager, Verbose, TEXT("Registered FrameXML Font: %s"), *Dir.FontName);
 			}
 			break;
@@ -328,6 +372,7 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 
 void UWowUIManager::SetRootCanvas(UCanvasPanel* Canvas)
 {
+	RootCanvas=Canvas;
 	// First, initialize the frame manager with the canvas if provided
 	if (FrameManager && Canvas)
 	{
@@ -396,6 +441,51 @@ void UWowUIManager::ToggleBagWindow()
 	{
 		BagWindow->ToggleVisibility();
 	}
+}
+
+void UWowUIManager::SetActorResolver(TFunction<AActor*(uint64)> Resolver)
+{
+    if(UIContext) UIContext->ResolveActor=MoveTemp(Resolver);
+}
+
+void UWowUIManager::TickWorldImages(UWorld* World)
+{
+    if(ModelRenderer) ModelRenderer->Tick(World);
+    if(MapRenderer) MapRenderer->Tick(World);
+}
+
+void UWowUIManager::MapCommand(int32 Command) { if(MapRenderer) MapRenderer->Command(Command); }
+
+void UWowUIManager::ProcessPendingReload()
+{
+    if(!bReloadRequested || !bUILoaded || !RootCanvas || !LoadedMpq || !LoadedCache) return;
+    bReloadRequested=false;
+    // Recreate the VM only after its active callback has returned to the game loop.
+    FWowSavedVariables::SaveAll(LuaVM->GetState());
+    auto Resolver=UIContext->ResolveActor;
+    auto Rows=UIContext->SelectedRows;
+    auto Action=FrameManager->OnSecureActionDispatch;
+    auto Spell=FrameManager->OnSecureSpellDispatch;
+    ModelRenderer.Reset(); MapRenderer.Reset();
+    RootCanvas->ClearChildren();
+    WowLuaApi::ClearContext(LuaVM->GetState());
+    delete UIContext; UIContext=nullptr;
+    LuaVM->Shutdown(); EventSystem.Reset(); FrameManager.Reset(); FontManager.Reset(); LuaVM.Reset();
+    bUILoaded=false;
+    InitializeCore();
+    UIContext->ResolveActor=MoveTemp(Resolver); UIContext->SelectedRows=MoveTemp(Rows);
+    FrameManager->OnSecureActionDispatch=Action; FrameManager->OnSecureSpellDispatch=Spell;
+    FrameManager->Initialize(RootCanvas);
+    SetConnectionManager(ConnectionManager);
+    LoadUI(LoadedMpq,LoadedCache);
+    if(FSlateApplication::IsInitialized()) FSlateApplication::Get().SetAllUserFocusToGameViewport();
+    UE_LOG(LogWowUIManager,Log,TEXT("Interface reload completed"));
+}
+
+void UWowUIManager::SetWorldUiVisible(bool Visible)
+{
+    if(RootCanvas) RootCanvas->SetVisibility(Visible?ESlateVisibility::SelfHitTestInvisible:ESlateVisibility::Collapsed);
+    if(UIOverlay) UIOverlay->SetVisibility(Visible?EVisibility::SelfHitTestInvisible:EVisibility::Collapsed);
 }
 
 void UWowUIManager::ToggleCharacterPanel()

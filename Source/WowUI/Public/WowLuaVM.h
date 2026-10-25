@@ -17,6 +17,8 @@ public:
     void FireEvent(const FString& EventName, const TArray<FString>& Args = {});
     lua_State* GetState() const { return L; }
     bool IsInitialized() const { return L != nullptr; }
+    /** Start an independent engine callback without resetting nested Lua work. */
+    void BeginCallback();
     void StepGarbageCollector(int32 StepSize = 1024);
     void CollectGarbage();
     bool CollectGarbageIfNeeded(double PressureThreshold = 0.75);

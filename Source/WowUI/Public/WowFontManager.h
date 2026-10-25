@@ -29,6 +29,7 @@ public:
 
 	/** Register a WoW font name mapping from FrameXML */
 	void RegisterFontMapping(const FString& WowFontName, const FString& InheritsFrom, int32 DefaultSize);
+	int32 GetFontSize(const FString& Name) const { const auto* Size=DefaultSizes.Find(Name); return Size?*Size:Name.Contains(TEXT("Small"))?10:12; }
 
 	/** Check if fonts are available */
 	bool IsInitialized() const { return bInitialized; }
@@ -45,6 +46,7 @@ private:
 
 	// Font mappings from WoW font names to TTF file names
 	TMap<FString, FString> FontMappings;
+	TMap<FString,int32> DefaultSizes;
 
 	// Directory where fonts are extracted
 	FString FontsDirectory;

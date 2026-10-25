@@ -63,6 +63,7 @@ struct FAuraInfo
     uint64 CasterGuid = 0;
     uint32 DurationMs = 0;
     uint32 RemainingMs = 0;
+    double UpdatedAt = 0;
     bool bActive = false;
 };
 
@@ -237,7 +238,11 @@ struct FWowLootState
 struct FWowItemTemplate
 {
     uint32 Id=0, Class=0, Subclass=0, DisplayId=0, Quality=0, InventoryType=0, RequiredLevel=0;
-    FString Name;
+    uint32 Flags=0, SellPrice=0, ItemLevel=0, MaxStack=1, ContainerSlots=0, Armor=0, Delay=0, MaxDurability=0, BagFamily=0;
+    float DamageMin=0, DamageMax=0;
+    TArray<TPair<uint32,int32>> Stats;
+    uint32 UseSpellId=0;
+    FString Name, Description;
 };
 
 // WoW 3.3.5a NPC flags — determine what interactions are available
@@ -1039,6 +1044,20 @@ struct FWowQuestLogEntry
     uint32 QuestId = 0;
     uint32 State = 0; // 0=not complete, 1=complete, 2=failed
     TArray<FWowQuestObjective> Objectives;
+};
+
+struct FWowQuestTemplate
+{
+    uint32 Id=0,MinLevel=0,Type=0,Group=0,Flags=0,SourceItemId=0;
+    int32 Level=0,Zone=0,Money=0;
+    uint32 XPDifficulty=0,MaxLevelMoney=0,RewardSpell=0,RewardSpellCast=0,Honor=0,TitleId=0,Talents=0,ArenaPoints=0;
+    float HonorMultiplier=0;
+    TArray<FWowQuestRewardItem> Rewards,Choices;
+    uint32 RewardFactionId[5]={};
+    int32 RewardFactionValue[5]={},RewardFactionOverride[5]={};
+    FString Title,Objectives,Details,AreaDescription,CompletedText;
+    uint32 CreatureId[4]={},CreatureCount[4]={},ItemId[6]={},ItemCount[6]={};
+    FString ObjectiveText[4];
 };
 
 // Talent information

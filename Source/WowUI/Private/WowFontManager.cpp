@@ -187,7 +187,8 @@ FSlateFontInfo FWowFontManager::CreateFontFromFile(const FString& FilePath, int3
 	FSlateFontInfo FontInfo;
 
 	// Set the size first
-	FontInfo.Size = Size;
+	// WoW specifies pixel heights; Slate font sizes are typographic points.
+	FontInfo.Size = FMath::Max(1,FMath::RoundToInt(Size*.75f));
 
 	// Create a composite font with the TTF file
 	TSharedPtr<FCompositeFont> CompositeFont = MakeShared<FCompositeFont>();
@@ -252,6 +253,7 @@ void FWowFontManager::SetupFontMappings()
 
 void FWowFontManager::RegisterFontMapping(const FString& WowFontName, const FString& InheritsFrom, int32 DefaultSize)
 {
+	DefaultSizes.Add(WowFontName,DefaultSize>0?DefaultSize:GetFontSize(InheritsFrom));
 	if (!bInitialized)
 	{
 		UE_LOG(LogWowFont, Warning, TEXT("Cannot register font mapping: font manager not initialized"));

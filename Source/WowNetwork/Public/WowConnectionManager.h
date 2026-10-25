@@ -12,6 +12,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRealmList, const TArray<FWowRealm
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCharacterList, const TArray<FWowCharacterInfo>&, Characters);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnWowError, const FString&, Msg);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCharCreateResult, uint8, ResultCode);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnLogoutResponse, uint32, bool);
+DECLARE_MULTICAST_DELEGATE(FOnLogoutComplete);
+DECLARE_MULTICAST_DELEGATE(FOnWowCursorChanged);
 
 enum class EWowActionInvocationKind : uint8
 {
@@ -46,6 +49,11 @@ public:
     UFUNCTION(BlueprintCallable) void CreateCharacter(const FString& Name, uint8 Race, uint8 Class, uint8 Gender, uint8 Skin = 0, uint8 Face = 0, uint8 HairStyle = 0, uint8 HairColor = 0, uint8 FacialHair = 0);
     UFUNCTION(BlueprintCallable) void DeleteCharacter(int64 Guid);
     UFUNCTION(BlueprintCallable) void Disconnect();
+    void RequestLogout();
+    void CancelLogout();
+    FOnLogoutResponse OnLogoutResponse;
+    FOnLogoutComplete OnLogoutComplete;
+    static TArray<uint8> BuildChatPacket(const FString& Message,int32 Type,const FString& Target,int32 Language);
     UFUNCTION(BlueprintCallable) EWowSessionState GetState() const { return State; }
 
     /** Send a movement packet to the server */
@@ -75,9 +83,11 @@ public:
     void PickupBagItemCursor(uint8 SourceBag, uint8 SourceSlot, int32 ItemId, const FString& ItemLink = TEXT(""), uint32 SplitCount = 0);
     void PickupInventoryItemCursor(uint8 InventorySlot, int32 ItemId, const FString& ItemLink = TEXT(""));
     void ClearCursorPayload();
+    FOnWowCursorChanged OnCursorChanged;
     bool HasCursorPayload() const;
     bool HasCursorSpellPayload() const;
     bool HasCursorItemPayload() const;
+    bool DropActionCursor();
     bool GetCursorInfo(FString& OutType, int32& OutId, FString& OutDetail) const;
     bool PlaceCursorIntoActionSlot(int32 SlotIndex);
     bool PlaceCursorIntoContainerSlot(uint8 DestinationBag, uint8 DestinationSlot);
@@ -115,6 +125,9 @@ public:
 
     /** Auto-equip an inventory item from the specified bag/slot. */
     void SendAutoEquipItem(uint8 SourceBag, uint8 SourceSlot);
+    void SendSwapItem(uint8 SourceBag,uint8 SourceSlot,uint8 DestinationBag,uint8 DestinationSlot);
+    void SendUseItem(uint8 Bag,uint8 Slot,uint64 ItemGuid,uint32 SpellId);
+    void SendSetTitle(int32 TitleIndex);
 
     /** Auto-store an equipped or bag item into the requested destination bag. */
     void SendAutoStoreBagItem(uint8 SourceBag, uint8 SourceSlot, uint8 DestinationBag = 255);
@@ -181,6 +194,7 @@ public:
     void SendQuestAbandon(uint32 QuestId);
     void SendLootMoney();
     void RequestItemTemplate(uint32 ItemId);
+    void RequestQuestTemplate(uint32 QuestId);
     int32 GetBonusActionOffset() const;
     int32 GetVisibleActionSlot(int32 ButtonIndex) const;
 
@@ -213,6 +227,8 @@ public:
         }
         return TEXT("");
     }
+    FString GetAccountName() const { return CachedAccountName; }
+    FString GetRealmName() const { return CurrentRealmName; }
 
     /** Send a raw packet (for advanced use) */
     void SendRawPacket(uint32 Opcode, const TArray<uint8>& Data = {});
@@ -280,9 +296,11 @@ private:
     TSharedPtr<FWowAuthSocket> AuthSocket;
     TSharedPtr<FWowWorldSocket, ESPMode::ThreadSafe> WorldSocket;
     FString CachedAccountName;
+    FString CurrentRealmName;
     TArray<uint8> SessionKey;
     TArray<FWowRealmInfo> CachedRealms;
     TArray<FWowCharacterInfo> CachedCharacters;
     int64 TargetGuid = 0;
     FCursorPayloadState CursorPayload;
+    FDelegateHandle EnterWorldHandle;
 };

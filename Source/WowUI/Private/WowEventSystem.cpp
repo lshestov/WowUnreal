@@ -232,6 +232,7 @@ void FWowEventSystem::FireEvent(const FString& EventName, const TArray<FString>&
 
 	for (int32 HandleIndex = 0; HandleIndex < HandlesCopy.Num(); ++HandleIndex)
 	{
+		LuaVM->BeginCallback();
 		const int64 Handle = HandlesCopy[HandleIndex];
 		// Look up compiled OnEvent function
 		TMap<FString, int32>* FrameScripts = ScriptRefs.Find(Handle);
@@ -316,10 +317,16 @@ void FWowEventSystem::FireEvent(const FString& EventName, const TArray<FString>&
 void FWowEventSystem::SetFrameScript(int64 Handle, const FString& ScriptName, const FString& Code)
 {
 #if HAS_LUA
-	if (!LuaVM || Code.IsEmpty()) return;
+    if (!LuaVM) return;
 
 	lua_State* L = LuaVM->GetState();
 	if (!L) return;
+	if(Code.IsEmpty())
+	{
+		if(auto* Scripts=ScriptRefs.Find(Handle)) if(auto* Ref=Scripts->Find(ScriptName)) { luaL_unref(L,LUA_REGISTRYINDEX,*Ref); Scripts->Remove(ScriptName); }
+		if(ScriptName==TEXT("OnUpdate")) OnUpdateFrames.Remove(Handle);
+		const FString Key=FString::Printf(TEXT("__WowScript_%lld_%s"),Handle,*ScriptName); lua_pushnil(L); lua_setglobal(L,TCHAR_TO_UTF8(*Key)); return;
+	}
 
 	// Wrap the script code with the correct function signature for each script type.
 	// WoW scripts have different parameter names depending on their type:
@@ -349,6 +356,10 @@ void FWowEventSystem::SetFrameScript(int64 Handle, const FString& ScriptName, co
 		Params = TEXT("self, button, ...");
 	else if (ScriptName == TEXT("OnValueChanged"))
 		Params = TEXT("self, value, ...");
+	else if (ScriptName == TEXT("OnMouseWheel"))
+		Params = TEXT("self, delta, ...");
+	else if (ScriptName == TEXT("OnVerticalScroll") || ScriptName == TEXT("OnHorizontalScroll"))
+		Params = TEXT("self, offset, ...");
 	else if (ScriptName == TEXT("OnChar"))
 		Params = TEXT("self, text, ...");
 	else if (ScriptName == TEXT("OnSizeChanged"))
@@ -575,6 +586,14 @@ void FWowEventSystem::CreateFrameObject(int64 Handle, const FString& FrameName, 
 #endif
 }
 
+bool FWowEventSystem::PushFrameObject(int64 Handle)
+{
+#if HAS_LUA
+    if(LuaVM && LuaVM->GetState()) if(const auto* Ref=FrameObjectRefs.Find(Handle)) { lua_rawgeti(LuaVM->GetState(),LUA_REGISTRYINDEX,*Ref); return true; }
+#endif
+    return false;
+}
+
 void FWowEventSystem::AliasGlobalObject(const FString& ExistingName, const FString& AliasName)
 {
 #if HAS_LUA
@@ -684,10 +703,26 @@ void FWowEventSystem::RemoveFrameScripts(int64 Handle)
 #endif
 }
 
+void FWowEventSystem::ApplyRegionFont(const FString& RegionName,const FString& FontName)
+{
+#if HAS_LUA
+    if(!LuaVM || FontName.IsEmpty()) return;
+    lua_State* L=LuaVM->GetState(); const int32 Top=lua_gettop(L);
+    lua_getglobal(L,TCHAR_TO_UTF8(*RegionName));
+    if(lua_istable(L,-1))
+    {
+        lua_getfield(L,-1,"SetFontObject"); lua_pushvalue(L,-2); lua_getglobal(L,TCHAR_TO_UTF8(*FontName));
+        if(lua_pcall(L,2,0,0)!=0) UE_LOG(LogWowEvent,Warning,TEXT("Font inheritance failed: %s"),UTF8_TO_TCHAR(lua_tostring(L,-1)));
+    }
+    lua_settop(L,Top);
+#endif
+}
+
 bool FWowEventSystem::RunFrameScript(int64 Handle, const FString& ScriptName, const TArray<FString>& StringArgs)
 {
 #if HAS_LUA
 	if (!LuaVM) return false;
+	LuaVM->BeginCallback();
 	lua_State* L = LuaVM->GetState();
 	if (!L) return false;
 
@@ -716,11 +751,12 @@ bool FWowEventSystem::RunFrameScript(int64 Handle, const FString& ScriptName, co
 		lua_newtable(L);
 	}
 
-	// Push string args
+	// Preserve the numeric/boolean contracts used by FrameXML controls.
 	for (const FString& Arg : StringArgs)
 	{
-		FTCHARToUTF8 UTF8Arg(*Arg);
-		lua_pushstring(L, UTF8Arg.Get());
+		if(ScriptName==TEXT("OnMouseWheel") || ScriptName==TEXT("OnVerticalScroll") || ScriptName==TEXT("OnHorizontalScroll") || ScriptName==TEXT("OnValueChanged") || ScriptName==TEXT("OnSizeChanged") || ScriptName==TEXT("OnScrollRangeChanged")) lua_pushnumber(L,FCString::Atod(*Arg));
+		else if(ScriptName==TEXT("OnEnter") || ScriptName==TEXT("OnLeave") || ScriptName==TEXT("OnTextChanged")) lua_pushboolean(L,FCString::Atoi(*Arg)!=0);
+		else { FTCHARToUTF8 UTF8Arg(*Arg); lua_pushstring(L,UTF8Arg.Get()); }
 	}
 
 	// Call: func(self, arg1, arg2, ...)
@@ -756,6 +792,7 @@ bool FWowEventSystem::RunFrameClickScript(int64 Handle, const FString& ScriptNam
 {
 #if HAS_LUA
 	if (!LuaVM) return false;
+	LuaVM->BeginCallback();
 	lua_State* L = LuaVM->GetState();
 	if (!L) return false;
 
@@ -900,22 +937,6 @@ static FString BuildFunctionHandlerWrapper(const FString& FunctionName)
 	return FString::Printf(
 		TEXT("local fn = _G[\"%s\"]; if type(fn) == \"function\" then return fn(...) end"),
 		*EscapedName);
-}
-
-static bool ShouldCompileOnLoadFunctionHandler(const FString& FunctionName)
-{
-	// Keep this intentionally narrow. A broad function="..." implementation
-	// wakes up Blizzard bootstrap paths that currently explode our Lua heap.
-	return FunctionName == TEXT("RuneFrame_OnLoad") ||
-		FunctionName == TEXT("GMChatFrame_OnLoad") ||
-		FunctionName == TEXT("Blizzard_CombatLog_QuickButtonFrame_OnLoad") ||
-		FunctionName == TEXT("LFRBrowseFrame_OnLoad") ||
-		FunctionName == TEXT("CombatFeedback_OnLoad") ||
-		FunctionName == TEXT("TextStatusBar_OnLoad") ||
-		FunctionName == TEXT("PlayerFrame_OnLoad") ||
-		FunctionName == TEXT("BonusActionBar_OnLoad") ||
-		FunctionName == TEXT("AlternatePowerBar_OnLoad") ||
-		FunctionName == TEXT("FadingFrame_OnLoad");
 }
 
 #if HAS_LUA
@@ -1368,22 +1389,7 @@ void FWowEventSystem::CompileFrameScripts(int64 Handle, const FWowFrameDef& Def)
 		}
 		else if (!Script.File.IsEmpty())
 		{
-			if (Script.Event == TEXT("OnLoad"))
-			{
-				// Narrow support for OnLoad function="..." handlers. Broader
-				// OnLoad coverage currently triggers runaway Blizzard UI
-				// initialization and exhausts the Lua heap.
-				if (ShouldCompileOnLoadFunctionHandler(Script.File))
-				{
-					ScriptCode = BuildFunctionHandlerWrapper(Script.File);
-				}
-			}
-			else
-			{
-				// Non-OnLoad handlers with function="..." are safe to compile
-				// since they don't fire immediately during frame creation.
-				ScriptCode = BuildFunctionHandlerWrapper(Script.File);
-			}
+			ScriptCode = BuildFunctionHandlerWrapper(Script.File);
 		}
 
 		if (!ScriptCode.IsEmpty())
@@ -1429,6 +1435,7 @@ void FWowEventSystem::CompileFrameScripts(int64 Handle, const FWowFrameDef& Def)
 				lua_State* L = LuaVM ? LuaVM->GetState() : nullptr;
 				if (L)
 				{
+					LuaVM->BeginCallback();
 					RunOnLoadHandler(L, FrameManager, ScriptRefs, FrameObjectRefs, Handle, Def.Name);
 				}
 			}
@@ -1467,8 +1474,11 @@ void FWowEventSystem::EndOnLoadBatch()
 
 	for (int64 Handle : PendingHandles)
 	{
+		LuaVM->BeginCallback();
+		LuaVM->CollectGarbageIfNeeded(.60);
 		const FString FrameName = FrameManager ? FrameManager->GetFrameName(Handle) : FString();
 		RunOnLoadHandler(L, FrameManager, ScriptRefs, FrameObjectRefs, Handle, FrameName);
+		LuaVM->StepGarbageCollector();
 	}
 #endif
 }
@@ -1497,12 +1507,13 @@ void FWowEventSystem::TickOnUpdate(float DeltaTime)
 		int32* ScriptRef = FrameScripts->Find(TEXT("OnUpdate"));
 		if (!ScriptRef) continue;
 
-		if (FrameManager && !FrameManager->IsFrameDrawn(Handle))
+		if (FrameManager && !FrameManager->IsFrameHierarchyShown(Handle))
 		{
 			continue;
 		}
 
 		// Push the compiled OnUpdate function
+		LuaVM->BeginCallback();
 		lua_rawgeti(L, LUA_REGISTRYINDEX, *ScriptRef);
 		if (!lua_isfunction(L, -1))
 		{
@@ -1575,27 +1586,26 @@ FString FWowEventSystem::OpcodeToEvent(uint16 Opcode)
 	switch (Opcode)
 	{
 	// Character / login
-	case 0x0236: return TEXT("PLAYER_LOGIN");                    // SMSG_LOGIN_VERIFY_WORLD
-	case 0x006E: return TEXT("PLAYER_LEAVING_WORLD");            // SMSG_LOGOUT_COMPLETE
+	case 0x0236: return FString(); // LoadUI fires login events after FrameXML is ready.
+	case 0x004D: return FString(); // The logout transition owns PLAYER_LEAVING_WORLD.
+	case 0x02CC: return TEXT("UPDATE_INSTANCE_INFO");
+	case 0x0329: case 0x04EB: return TEXT("PLAYER_DIFFICULTY_CHANGED");
 
 	// Targeting
+	case 0x0122: case 0x0123: case 0x0124: case 0x0313: return TEXT("UPDATE_FACTION");
 	case 0x0078: return TEXT("");
 
 	// Unit updates
 	case 0x0480: return TEXT("UNIT_MANA");                       // SMSG_POWER_UPDATE (correct opcode)
-	case 0x0495: return TEXT("UNIT_AURA");                       // SMSG_AURA_UPDATE (correct opcode)
+	case 0x0495: case 0x0496: return FString(); // The aura delegate supplies the actual unit token.
 	case 0x0051: return TEXT("UNIT_NAME_UPDATE");                // SMSG_NAME_QUERY_RESPONSE (correct opcode)
 
 	// Chat messages
 	case 0x0096: return FString(); // The typed chat delegate supplies the event and payload.
-	case 0x0097: return TEXT("CHAT_MSG_WHISPER");                // SMSG_MESSAGECHAT
-	case 0x0098: return TEXT("CHAT_MSG_PARTY");                  // SMSG_MESSAGECHAT
-	case 0x0099: return TEXT("CHAT_MSG_GUILD");                  // SMSG_MESSAGECHAT
-	case 0x009A: return TEXT("CHAT_MSG_YELL");                   // SMSG_MESSAGECHAT
 
 	// Spells and actions
 	case 0x012A: return TEXT("SPELLS_CHANGED");                  // SMSG_INITIAL_SPELLS (correct opcode)
-	case 0x012B: return TEXT("LEARNED_SPELL_IN_TAB");            // SMSG_LEARNED_SPELL
+	case 0x012B: return FString(); // The learned-spell delegate refreshes the book.
 	case 0x0130: return TEXT("SPELL_UPDATE_COOLDOWN");           // SMSG_SPELL_COOLDOWN (correct opcode)
 	case 0x0129: return TEXT("ACTIONBAR_SLOT_CHANGED");          // SMSG_ACTION_BUTTONS (correct opcode)
 
@@ -1624,8 +1634,7 @@ FString FWowEventSystem::OpcodeToEvent(uint16 Opcode)
 	case 0x04D2: return TEXT("COMBAT_LOG_EVENT_UNFILTERED");     // SMSG_COMBAT_LOG_MULTIPLE
 
 	// Error / notifications
-	case 0x0060: return TEXT("UI_ERROR_MESSAGE");                // SMSG_INVENTORY_CHANGE_FAILURE (contextual)
-	case 0x0061: return TEXT("UI_INFO_MESSAGE");
+	case 0x0060: case 0x0061: return FString(); // Creature queries are not UI error messages.
 
 	// Trade / economy
 	case 0x010E: return TEXT("TRADE_SHOW");

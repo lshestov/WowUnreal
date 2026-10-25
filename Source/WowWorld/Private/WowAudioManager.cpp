@@ -4,7 +4,7 @@
 #include "Components/AudioComponent.h"
 #include "Sound/SoundWave.h"
 #include "Kismet/GameplayStatics.h"
-#include "Memory/SharedBuffer.h"
+#include "WowPcmSoundWave.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowAudio, Log, All);
 
@@ -55,14 +55,51 @@ void AWowAudioManager::Tick(float DeltaTime)
         UAudioComponent* ActiveComp = bMusicAActive ? MusicComponentA : MusicComponentB;
         UAudioComponent* FadingComp = bMusicAActive ? MusicComponentB : MusicComponentA;
 
-        if (ActiveComp) ActiveComp->SetVolumeMultiplier(FadeIn * MusicVolume * MasterVolume);
-        if (FadingComp) FadingComp->SetVolumeMultiplier(FadeOut * MusicVolume * MasterVolume);
+        const float Volume=bSoundEnabled && bMusicEnabled?MusicVolume*MasterVolume:0;
+        if (ActiveComp) ActiveComp->SetVolumeMultiplier(FadeIn * Volume);
+        if (FadingComp) FadingComp->SetVolumeMultiplier(FadeOut * Volume);
 
         if (CrossfadeProgress >= 1.0f && FadingComp)
         {
             FadingComp->Stop();
         }
     }
+}
+
+bool AWowAudioManager::GetUiOption(const FString& Name,FString& Value) const
+{
+    if(Name==TEXT("sound_mastervolume")) Value=FString::SanitizeFloat(MasterVolume);
+    else if(Name==TEXT("sound_musicvolume")) Value=FString::SanitizeFloat(MusicVolume);
+    else if(Name==TEXT("sound_ambiencevolume")) Value=FString::SanitizeFloat(AmbienceVolume);
+    else if(Name==TEXT("sound_sfxvolume")) Value=FString::SanitizeFloat(EffectsVolume);
+    else if(Name==TEXT("sound_enableall")) Value=bSoundEnabled?TEXT("1"):TEXT("0");
+    else if(Name==TEXT("sound_enablemusic")) Value=bMusicEnabled?TEXT("1"):TEXT("0");
+    else if(Name==TEXT("sound_enableambience")) Value=bAmbienceEnabled?TEXT("1"):TEXT("0");
+    else if(Name==TEXT("sound_enablesfx")) Value=bEffectsEnabled?TEXT("1"):TEXT("0");
+    else return false;
+    return true;
+}
+bool AWowAudioManager::SetUiOption(const FString& Name,const FString& Value)
+{
+    const float Volume=FMath::Clamp(FCString::Atof(*Value),0.f,1.f); const bool Enabled=Value.ToBool() || FCString::Atof(*Value)!=0;
+    if(Name==TEXT("sound_mastervolume")) MasterVolume=Volume;
+    else if(Name==TEXT("sound_musicvolume")) MusicVolume=Volume;
+    else if(Name==TEXT("sound_ambiencevolume")) AmbienceVolume=Volume;
+    else if(Name==TEXT("sound_sfxvolume")) EffectsVolume=Volume;
+    else if(Name==TEXT("sound_enableall")) bSoundEnabled=Enabled;
+    else if(Name==TEXT("sound_enablemusic")) bMusicEnabled=Enabled;
+    else if(Name==TEXT("sound_enableambience")) bAmbienceEnabled=Enabled;
+    else if(Name==TEXT("sound_enablesfx")) bEffectsEnabled=Enabled;
+    else return false;
+    ApplyVolumes(); return true;
+}
+void AWowAudioManager::ApplyVolumes()
+{
+    const float Volume=bSoundEnabled && bMusicEnabled?MusicVolume*MasterVolume:0;
+    auto* Active=bMusicAActive?MusicComponentA.Get():MusicComponentB.Get(); auto* Fading=bMusicAActive?MusicComponentB.Get():MusicComponentA.Get();
+    if(Active) Active->SetVolumeMultiplier(CrossfadeProgress*Volume);
+    if(Fading) Fading->SetVolumeMultiplier((1-CrossfadeProgress)*Volume);
+    if(AmbienceComponent) AmbienceComponent->SetVolumeMultiplier(bSoundEnabled && bAmbienceEnabled?AmbienceVolume*MasterVolume:0);
 }
 
 void AWowAudioManager::SetCurrentZone(uint32 ZoneId, uint32 AreaId)
@@ -120,7 +157,7 @@ void AWowAudioManager::UpdateMusic()
         return;
     }
 
-    USoundWave* Sound = LoadSoundFromMpq(FilePath);
+    USoundWave* Sound = LoadSoundFromMpq(FilePath,true);
     if (!Sound)
     {
         UE_LOG(LogWowAudio, Warning, TEXT("Failed to load music: %s"), *FilePath);
@@ -153,14 +190,14 @@ void AWowAudioManager::UpdateAmbience()
     FString FilePath = GetSoundFilePath(SoundId);
     if (FilePath.IsEmpty()) return;
 
-    USoundWave* Sound = LoadSoundFromMpq(FilePath);
+    USoundWave* Sound = LoadSoundFromMpq(FilePath,true);
     if (!Sound) return;
 
     if (AmbienceComponent)
     {
         AmbienceComponent->Stop();
         AmbienceComponent->SetSound(Sound);
-        AmbienceComponent->SetVolumeMultiplier(AmbienceVolume * MasterVolume);
+        AmbienceComponent->SetVolumeMultiplier(bSoundEnabled && bAmbienceEnabled?AmbienceVolume * MasterVolume:0);
         AmbienceComponent->Play();
 
         UE_LOG(LogWowAudio, Log, TEXT("Playing ambience: %s (AmbienceId %d, %s)"),
@@ -206,94 +243,56 @@ void AWowAudioManager::PlaySoundEffect(uint32 SoundEntryId)
     USoundWave* Sound = LoadSoundFromMpq(FilePath);
     if (!Sound) return;
 
-    UGameplayStatics::PlaySound2D(this, Sound, MasterVolume);
+    if(bSoundEnabled && bEffectsEnabled)
+        if(auto* Component=UGameplayStatics::SpawnSound2D(this,Sound,MasterVolume*EffectsVolume))
+        {
+            // A procedural source supplies full audio quanta, including trailing
+            // silence. Stop finite effects explicitly so silent sources cannot
+            // occupy mixer channels indefinitely.
+            FTimerHandle Handle; TWeakObjectPtr<UAudioComponent> Weak=Component;
+            GetWorldTimerManager().SetTimer(Handle,[Weak](){if(Weak.IsValid()) Weak->Stop();},Sound->Duration+.05f,false);
+        }
 }
 
-USoundWave* AWowAudioManager::LoadSoundFromMpq(const FString& FilePath)
+USoundWave* AWowAudioManager::LoadSoundFromMpq(const FString& FilePath,bool bLoop)
 {
-    if (!Mpq) return nullptr;
-
-    // Check cache
-    if (TObjectPtr<USoundWave>* Found = SoundCache.Find(FilePath))
+    if(!Mpq) return nullptr;
+    if(!SoundCache.Contains(FilePath))
     {
-        if (Found->Get()) return Found->Get();
-    }
-
-    // Read from MPQ
-    TArray<uint8> RawData;
-    if (!Mpq->ReadFile(FilePath, RawData))
-    {
-        return nullptr;
-    }
-
-    if (RawData.Num() == 0) return nullptr;
-
-    // Create USoundWave from raw audio data
-    USoundWave* SoundWave = NewObject<USoundWave>();
-    SoundWave->AddToRoot(); // Prevent GC
-
-    // Detect format from file extension
-    bool bIsWav = FilePath.EndsWith(TEXT(".wav"), ESearchCase::IgnoreCase);
-
-    if (bIsWav)
-    {
-        // WAV: parse header for PCM data
-        if (RawData.Num() < 44) return nullptr;
-
-        // WAV header parsing
-        const uint8* D = RawData.GetData();
-        uint16 NumChannels = *reinterpret_cast<const uint16*>(D + 22);
-        uint32 SampleRate = *reinterpret_cast<const uint32*>(D + 24);
-        uint16 BitsPerSample = *reinterpret_cast<const uint16*>(D + 34);
-
-        // Find 'data' chunk
-        int32 DataOffset = 12;
-        int32 DataSize = 0;
-        while (DataOffset + 8 < RawData.Num())
+        TArray<uint8> Raw;
+        if(!Mpq->ReadFile(FilePath,Raw) || Raw.Num()<44) return nullptr;
+        if(FMemory::Memcmp(Raw.GetData(),"RIFF",4) || FMemory::Memcmp(Raw.GetData()+8,"WAVE",4)) return nullptr;
+        FDecodedSound Decoded;
+        uint16 Format=0,Bits=0;
+        int32 DataOffset=0,DataSize=0;
+        for(int64 Offset=12;Offset+8<=Raw.Num();)
         {
-            uint32 ChunkId = *reinterpret_cast<const uint32*>(D + DataOffset);
-            uint32 ChunkSize = *reinterpret_cast<const uint32*>(D + DataOffset + 4);
-            if (ChunkId == 0x61746164) // 'data'
+            const auto* Chunk=Raw.GetData()+Offset; uint32 Size=0; FMemory::Memcpy(&Size,Chunk+4,4);
+            if(Offset+8+Size>Raw.Num()) return nullptr;
+            if(!FMemory::Memcmp(Chunk,"fmt ",4) && Size>=16)
             {
-                DataOffset += 8;
-                DataSize = FMath::Min(static_cast<int32>(ChunkSize), RawData.Num() - DataOffset);
-                break;
+                FMemory::Memcpy(&Format,Chunk+8,2); FMemory::Memcpy(&Decoded.Channels,Chunk+10,2);
+                FMemory::Memcpy(&Decoded.Rate,Chunk+12,4); FMemory::Memcpy(&Bits,Chunk+22,2);
             }
-            DataOffset += 8 + ChunkSize;
+            if(!FMemory::Memcmp(Chunk,"data",4)) { DataOffset=int32(Offset+8); DataSize=Size; }
+            Offset+=8+int64(Size)+(Size&1);
         }
-
-        if (DataSize == 0) return nullptr;
-
-        SoundWave->SetSampleRate(SampleRate);
-        SoundWave->NumChannels = NumChannels;
-        SoundWave->Duration = static_cast<float>(DataSize) / (SampleRate * NumChannels * (BitsPerSample / 8));
-
-        // Copy PCM data directly into sound wave's runtime buffer
-        SoundWave->RawPCMDataSize = DataSize;
-        SoundWave->RawPCMData = static_cast<uint8*>(FMemory::Malloc(DataSize));
-        FMemory::Memcpy(SoundWave->RawPCMData, D + DataOffset, DataSize);
+        if(Format!=1 || (Bits!=8 && Bits!=16) || Decoded.Channels<1 || Decoded.Channels>2 || !Decoded.Rate || !DataSize) return nullptr;
+        auto Pcm=MakeShared<TArray<uint8>,ESPMode::ThreadSafe>();
+        if(Bits==16) Pcm->Append(Raw.GetData()+DataOffset,DataSize);
+        else
+        {
+            Pcm->SetNumUninitialized(DataSize*2);
+            for(int32 I=0;I<DataSize;++I) { const int16 Sample=(int32(Raw[DataOffset+I])-128)*256; FMemory::Memcpy(Pcm->GetData()+I*2,&Sample,2); }
+        }
+        if(Pcm->Num()%(Decoded.Channels*2)) return nullptr;
+        Decoded.Pcm=Pcm; SoundCache.Add(FilePath,MoveTemp(Decoded));
     }
-    else
-    {
-        // MP3: store raw compressed data for UE to decode
-        FSharedBuffer SharedBuf = FSharedBuffer::Clone(RawData.GetData(), RawData.Num());
-
-#if 0
-        // TODO: UE 5.7 removed USoundWave::RawData - need to find correct API for setting raw compressed audio data
-        // Original code: SoundWave->RawData.UpdatePayload(SharedBuf);
-        // Attempted: SoundWave->SetImportedSoundWaveData() - doesn't exist
-        UE_LOG(LogWowAudio, Warning, TEXT("MP3 loading disabled - UE 5.7 API change needed for compressed audio"));
-#endif
-
-        SoundWave->SetSampleRate(44100);
-        SoundWave->NumChannels = 2;
-        SoundWave->Duration = 60.0f; // Estimate — corrected on decode
-        SoundWave->SoundGroup = ESoundGroup::SOUNDGROUP_Music;
-        SoundWave->bProcedural = false;
-    }
-
-    SoundCache.Add(FilePath, SoundWave);
-    UE_LOG(LogWowAudio, Log, TEXT("Loaded sound: %s (%d bytes)"), *FilePath, RawData.Num());
-
-    return SoundWave;
+    const auto& Decoded=SoundCache[FilePath];
+    auto* Wave=NewObject<UWowPcmSoundWave>(this);
+    Wave->Pcm=Decoded.Pcm; Wave->bRepeat=bLoop; Wave->SetSampleRate(Decoded.Rate); Wave->NumChannels=Decoded.Channels;
+    Wave->Duration=bLoop?INDEFINITELY_LOOPING_DURATION:float(Decoded.Pcm->Num())/(Decoded.Rate*Decoded.Channels*2);
+    Wave->SoundGroup=ESoundGroup::SOUNDGROUP_UI;
+    UE_LOG(LogWowAudio,Verbose,TEXT("Runtime PCM: %s, %d bytes, %u Hz"),*FilePath,Decoded.Pcm->Num(),Decoded.Rate);
+    return Wave;
 }

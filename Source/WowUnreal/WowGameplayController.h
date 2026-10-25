@@ -46,6 +46,8 @@ public:
 
     /** Override to catch all input regardless of input mode */
     virtual bool InputKey(const FInputKeyEventArgs& Params) override;
+    TMap<FKey,FKey> HeldBindingKeys;
+    bool bProbeSyntheticKeyboard=false;
 
     /** Connection manager for sending movement packets */
     UPROPERTY()
@@ -73,6 +75,7 @@ public:
 
     /** Wire entity events from the packet handler (call after setting ConnectionManager) */
     void BindEntityEvents();
+    void PrepareCharacterSelect();
     bool ConfigureNpcCapture(uint32 DisplayId);
     void LogNpcCapture() const;
     void LogHudCapture() const;
@@ -83,6 +86,7 @@ private:
     friend struct FWowGameplayProbe;
     TSharedPtr<struct FWowGameplayProbe> GameplayProbe;
     bool bGameplayProbeChecked=false;
+    TOptional<FVector2D> GameplayProbePointer;
     void TickGameplayProbe();
     double LastUiMilliseconds=0;
     double LastOnUpdateMilliseconds=0,LastHoverMilliseconds=0,LastLayoutMilliseconds=0,LastWidgetMilliseconds=0;
@@ -485,6 +489,8 @@ private:
     TArray<TObjectPtr<UPointLightComponent>> ActiveCastEffects;
 
     int64 PressedLeftMouseFrameHandle = -1;
+    FVector2D UiDragOrigin=FVector2D::ZeroVector;
+    bool bDraggingUi=false;
     int64 PressedRightMouseFrameHandle = -1;
 
     void SpawnCastGlowEffects(uint64 CasterGuid, uint32 SpellId);

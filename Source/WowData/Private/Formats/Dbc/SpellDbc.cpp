@@ -1,4 +1,44 @@
 #include "Formats/Dbc/SpellDbc.h"
+#include "Internationalization/Regex.h"
+
+bool FSpellDbc::LoadTimes(const FDbcParser& Parser,bool Cast)
+{
+    if(!Parser.IsValid() || Parser.GetFieldCount()<4) return false;
+    auto& Values=Cast?CastTimes:Durations; Values.Reset();
+    for(uint32 I=0; I<Parser.GetRecordCount(); ++I) Values.Add(Parser.GetUInt(I,0),int32(Parser.GetUInt(I,1))/1000.f);
+    return true;
+}
+
+FString FSpellDbc::Description(uint32 Id,int32 Level,bool Aura) const
+{
+    const auto* Spell=GetById(Id); if(!Spell) return {};
+    const FString Text=Aura && !Spell->ToolTip.IsEmpty()?Spell->ToolTip:Spell->Description;
+    FRegexMatcher Match(FRegexPattern(TEXT("\\$(?:(\\d+))?([sSmMdDtTuUxXoOrRhH])([1-3])?")),Text);
+    FString Result; int32 Previous=0;
+    while(Match.FindNext())
+    {
+        Result+=Text.Mid(Previous,Match.GetMatchBeginning()-Previous);
+        const auto* Referenced=Match.GetCaptureGroup(1).IsEmpty()?Spell:GetById(FCString::Atoi(*Match.GetCaptureGroup(1)));
+        const int32 Effect=FMath::Clamp(FCString::Atoi(*Match.GetCaptureGroup(3))-1,0,2);
+        const TCHAR Token=FChar::ToLower(Match.GetCaptureGroup(2)[0]); FString Value;
+        if(Referenced)
+        {
+            const float Points=FMath::Abs(Referenced->EffectBasePoints[Effect]+(Referenced->EffectDieSides[Effect]?1:0)+Referenced->EffectPointsPerLevel[Effect]*FMath::Max(0,FMath::Min(Level,int32(Referenced->MaxLevel?Referenced->MaxLevel:Level))-int32(Referenced->SpellLevel)));
+            if(Token=='d') { const float Seconds=Duration(Referenced->DurationIndex); Value=Seconds<0?TEXT("until cancelled"):FString::Printf(TEXT("%g %s"),Seconds>=60?Seconds/60:Seconds,Seconds>=60?TEXT("min"):TEXT("sec")); }
+            else if(Token=='s' || Token=='m') Value=FString::Printf(TEXT("%g"),Points);
+            else if(Token=='t') Value=FString::Printf(TEXT("%g"),Referenced->EffectAmplitude[Effect]/1000.f);
+            else if(Token=='u') Value=FString::FromInt(Referenced->StackAmount);
+            else if(Token=='h') Value=FString::FromInt(Referenced->RecoveryTime/1000);
+            else if(Token=='o') { const float Interval=Referenced->EffectAmplitude[Effect]/1000.f; Value=FString::Printf(TEXT("%g"),Interval>0?Points*Duration(Referenced->DurationIndex)/Interval:Points); }
+            else if(Token=='r') { const auto* Range=GetRange(Referenced->RangeIndex); Value=FString::Printf(TEXT("%g"),Range?Range->Max[0]:0); }
+        }
+        Result+=Value.IsEmpty()?Match.GetCaptureGroup(0):Value; Previous=Match.GetMatchEnding();
+    }
+    Result+=Text.Mid(Previous);
+    FRegexMatcher Plural(FRegexPattern(TEXT("\\$[lLgG]([^:;]*):([^;]*);")),Result); FString Clean; Previous=0;
+    while(Plural.FindNext()) { Clean+=Result.Mid(Previous,Plural.GetMatchBeginning()-Previous)+Plural.GetCaptureGroup(2); Previous=Plural.GetMatchEnding(); }
+    return Clean+Result.Mid(Previous);
+}
 
 bool FSpellDbc::LoadRanges(const FDbcParser& Parser)
 {
@@ -70,6 +110,9 @@ bool FSpellDbc::Load(const FDbcParser& Parser)
         {
             E.Effect[j] = Parser.GetUInt(i, 71 + j);
             E.EffectBasePoints[j] = static_cast<int32>(Parser.GetUInt(i, 80 + j));
+            E.EffectDieSides[j] = int32(Parser.GetUInt(i,74+j));
+            E.EffectPointsPerLevel[j] = Parser.GetFloat(i,77+j);
+            E.EffectAmplitude[j] = Parser.GetUInt(i,98+j);
             E.EffectImplicitTargetA[j] = Parser.GetUInt(i, 86 + j);
             E.EffectImplicitTargetB[j] = Parser.GetUInt(i, 89 + j);
             E.EffectApplyAuraName[j] = Parser.GetUInt(i, 95 + j);

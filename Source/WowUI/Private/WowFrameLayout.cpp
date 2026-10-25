@@ -21,6 +21,19 @@ bool FWowFrameManager::IsFrameDrawn(int64 Handle) const
     return true;
 }
 
+bool FWowFrameManager::IsFrameHierarchyShown(int64 Handle) const
+{
+    if(Handle<0 || !Frames.Contains(Handle)) return false;
+    for(int32 Depth=0; Handle>=0 && Depth<64; ++Depth)
+    {
+        const auto* Entry=Frames.Find(Handle);
+        if(!Entry) return Depth>0;
+        if(Entry->Def.bHidden) return false;
+        Handle=Entry->ParentHandle;
+    }
+    return true;
+}
+
 float FWowFrameManager::GetFrameScale(int64 Handle) const
 {
     const auto* Entry = Frames.Find(Handle);
@@ -66,20 +79,28 @@ FWowFrameManager::FFrameRect FWowFrameManager::CalculateFrameRect(const FWowFram
         return FVector2D(Relative.X, Relative.Y) + GetAnchorPointOffset(A.RelativePoint, Relative.W, Relative.H)
             + FVector2D(A.OffsetX, -A.OffsetY) * Scale;
     };
-    const auto& First = Def.Anchors[0];
+    int32 FirstIndex=0; double Priority=-1;
+    for(int32 I=0;I<Def.Anchors.Num();++I) { const auto P=GetAnchorPointOffset(Def.Anchors[I].Point,1,1); const double Score=FMath::Abs(P.X-.5f)+FMath::Abs(P.Y-.5f); if(Score>Priority) { FirstIndex=I; Priority=Score; } }
+    const auto& First = Def.Anchors[FirstIndex];
     const FVector2D P = Target(First), Fraction = GetAnchorPointOffset(First.Point, 1, 1);
     // Each anchor constrains an axis. LEFT/RIGHT stretches width while preserving
     // explicit height; TOPLEFT/BOTTOMRIGHT constrains both axes.
-    for (int32 I = 1; I < Def.Anchors.Num(); ++I)
+    for (int32 I = 0; I < Def.Anchors.Num(); ++I)
     {
         const FVector2D Q = Target(Def.Anchors[I]);
         const FVector2D Other = GetAnchorPointOffset(Def.Anchors[I].Point, 1, 1);
-        if (!FMath::IsNearlyEqual(Fraction.X, Other.X)) Rect.W = (Q.X - P.X) / (Other.X - Fraction.X);
-        if (!FMath::IsNearlyEqual(Fraction.Y, Other.Y)) Rect.H = (Q.Y - P.Y) / (Other.Y - Fraction.Y);
+        if (FMath::Abs(Fraction.X-Other.X)>.99f) Rect.W = (Q.X - P.X) / (Other.X - Fraction.X);
+        if (FMath::Abs(Fraction.Y-Other.Y)>.99f) Rect.H = (Q.Y - P.Y) / (Other.Y - Fraction.Y);
     }
     Rect.W = FMath::Max(0.f, Rect.W); Rect.H = FMath::Max(0.f, Rect.H);
     Rect.X = P.X - Fraction.X * Rect.W;
     Rect.Y = P.Y - Fraction.Y * Rect.H;
+    const int64 ParentHandle=FindFrame(Def.Parent);
+    if(ScrollChildHandles.FindRef(ParentHandle)==FindFrame(Def.Name) && ScrollChildHandles.Contains(ParentHandle))
+    {
+        Rect.X-=ScrollHorizontalOffsets.FindRef(ParentHandle)*Scale;
+        Rect.Y-=ScrollVerticalOffsets.FindRef(ParentHandle)*Scale;
+    }
     return Rect;
 }
 
@@ -87,7 +108,12 @@ FWowFrameManager::FFrameRect FWowFrameManager::GetFrameRect(const FString& Name)
 {
     const FString Key = Name.IsEmpty() ? TEXT("UIParent") : Name;
     if (const auto* Cached = FrameRects.Find(Key)) return *Cached;
-    if (Key == TEXT("UIParent")) return FFrameRect(0, 0, 1024, 768);
+    if (Key == TEXT("UIParent"))
+    {
+        if(LayoutViewport.X>=100) return FFrameRect(0,0,LayoutViewport.X/RawViewportScale,768);
+        if(const auto* Root=Frames.Find(FindFrame(Key)); Root && Root->Def.Width>0 && Root->Def.Height>0) return FFrameRect(0,0,Root->Def.Width,Root->Def.Height);
+        return FFrameRect(0,0,1024,768);
+    }
     if (ResolvingRects.Contains(Key)) return FFrameRect();
     ResolvingRects.Add(Key);
     FFrameRect Result;
@@ -98,9 +124,19 @@ FWowFrameManager::FFrameRect FWowFrameManager::GetFrameRect(const FString& Name)
         const auto Parent = GetFrameRect(*Owner);
         UWidget* Widget = GetNamedTexture(Key);
         if (!Widget) Widget = GetNamedFontString(Key);
+        // Frames can anchor to paragraphs whose wrapped height changed in this
+        // callback. Resolve those regions from their definitions before reading
+        // their slots, rather than using geometry from the previous frame.
+        if(Widget) for(const auto& Layout:RegionLayouts) if(Layout.Widget.Get()==Widget)
+        {
+            const float Scale=GetEffectiveFrameScale(FindFrame(*Owner));
+            ApplyElementAnchors(Widget,nullptr,Layout.Anchors,Layout.Width,Layout.Height,Layout.bAllPoints,Parent.W/Scale,Parent.H/Scale);
+            break;
+        }
         const auto* Slot = Widget ? Cast<UCanvasPanelSlot>(Widget->Slot) : nullptr;
         if (Slot)
         {
+            if(Slot->GetAutoSize()) Widget->ForceLayoutPrepass();
             const auto Anchors = Slot->GetAnchors();
             if (Anchors.Minimum != Anchors.Maximum) Result = Parent;
             else
@@ -126,6 +162,45 @@ FVector4 FWowFrameManager::GetLayoutRect(int64 Handle)
     return FVector4(Rect.X, Rect.Y, Rect.W, Rect.H);
 }
 
+FVector4 FWowFrameManager::GetRegionRect(const FString& Name)
+{
+    const auto R=GetFrameRect(Name); return FVector4(R.X,R.Y,R.W,R.H);
+}
+
+FVector2D FWowFrameManager::GetRegionSize(const FString& Name)
+{
+    if(bLayoutDirty) RefreshLayout();
+    const auto R=GetFrameRect(Name);
+    const float Scale=GetEffectiveFrameScale(FindFrame(RegionOwners.FindRef(Name)));
+    return FVector2D(R.W,R.H)/FMath::Max(Scale,.001f);
+}
+
+void FWowFrameManager::SetRegionSize(const FString& Name,float Width,float Height)
+{
+    UWidget* Widget=GetNamedTexture(Name); if(!Widget) Widget=GetNamedFontString(Name);
+    for(auto& Layout:RegionLayouts) if(Layout.Widget.Get()==Widget && Widget)
+    {
+        if(Width>=0) Layout.Width=Width; if(Height>=0) Layout.Height=Height;
+        FrameRects.Empty(); bLayoutDirty=true; return;
+    }
+}
+
+void FWowFrameManager::SetRegionPoint(const FString& Name,const FWowAnchor& Anchor,bool Clear)
+{
+    UWidget* Widget=GetNamedTexture(Name); if(!Widget) Widget=GetNamedFontString(Name);
+    for(auto& Layout:RegionLayouts) if(Layout.Widget.Get()==Widget && Widget)
+    {
+        Layout.bAllPoints=false;
+        if(Clear) Layout.Anchors.Reset();
+        else
+        {
+            if(auto* Existing=Layout.Anchors.FindByPredicate([&](const auto& A){return A.Point==Anchor.Point;})) *Existing=Anchor;
+            else Layout.Anchors.Add(Anchor);
+        }
+        FrameRects.Empty(); bLayoutDirty=true; return;
+    }
+}
+
 void FWowFrameManager::ApplyAnchors(UWidget* Widget, const FWowFrameDef& Def)
 {
     auto* Slot = Widget ? Cast<UCanvasPanelSlot>(Widget->Slot) : nullptr;
@@ -148,20 +223,25 @@ void FWowFrameManager::ApplyAnchors(UWidget* Widget, const FWowFrameDef& Def)
 void FWowFrameManager::RefreshLayout()
 {
     const auto Root = GetFrameRect(TEXT("UIParent"));
-    FrameRects.Empty();
-    FrameRects.Add(TEXT("UIParent"), Root);
     TArray<int64> Handles;
     Frames.GetKeys(Handles); Handles.Sort();
+    // Wrapped text is measured during layout. A second bounded pass places
+    // frames anchored below it using the resulting paragraph height.
+    for(int32 Pass=0;Pass<2;++Pass)
+    {
+    FrameRects.Empty(); FrameRects.Add(TEXT("UIParent"),Root);
     for (const auto Handle : Handles)
         if (const auto* Entry = Frames.Find(Handle); Entry && Entry->Widget.IsValid())
             ApplyAnchors(Entry->Widget.Get(), Entry->Def);
     for (const auto& Region : RegionLayouts)
     {
+        if(const auto* OwnerDef=GetFrameDef(FindFrame(Region.Owner)); OwnerDef && OwnerDef->Type==EWowFrameType::GameTooltip) continue;
         const auto Owner = GetFrameRect(Region.Owner);
         const float Scale = GetEffectiveFrameScale(FindFrame(Region.Owner));
         if (Region.Widget.IsValid())
             ApplyElementAnchors(Region.Widget.Get(), nullptr, Region.Anchors, Region.Width, Region.Height,
                 Region.bAllPoints, Owner.W / Scale, Owner.H / Scale);
+    }
     }
     // WoW orders frames globally. UMG nests panels, so anonymous grouping
     // canvases must carry their highest descendant level above sibling bars.
@@ -215,13 +295,28 @@ void FWowFrameManager::ApplyElementAnchors(UWidget* Widget, UCanvasPanel* Parent
     FVector2D Point(ParentWidth/2,ParentHeight/2), Fraction(.5,.5);
     if (!Anchors.IsEmpty())
     {
-        Point=Target(Anchors[0]); Fraction=GetAnchorPointOffset(Anchors[0].Point,1,1);
-        for (int32 I=1; I<Anchors.Num(); ++I)
+        int32 FirstIndex=0; double Priority=-1;
+        for(int32 I=0;I<Anchors.Num();++I) { const auto P=GetAnchorPointOffset(Anchors[I].Point,1,1); const double Score=FMath::Abs(P.X-.5f)+FMath::Abs(P.Y-.5f); if(Score>Priority) { FirstIndex=I; Priority=Score; } }
+        Point=Target(Anchors[FirstIndex]); Fraction=GetAnchorPointOffset(Anchors[FirstIndex].Point,1,1);
+        for (int32 I=0; I<Anchors.Num(); ++I)
         {
             const auto Other=GetAnchorPointOffset(Anchors[I].Point,1,1), Q=Target(Anchors[I]);
-            if (!FMath::IsNearlyEqual(Other.X,Fraction.X)) { Width=(Q.X-Point.X)/(Other.X-Fraction.X); bAutoSize=false; }
-            if (!FMath::IsNearlyEqual(Other.Y,Fraction.Y)) { Height=(Q.Y-Point.Y)/(Other.Y-Fraction.Y); bAutoSize=false; }
+            if (FMath::Abs(Other.X-Fraction.X)>.99f) { Width=(Q.X-Point.X)/(Other.X-Fraction.X); bAutoSize=false; }
+            if (FMath::Abs(Other.Y-Fraction.Y)>.99f) { Height=(Q.Y-Point.Y)/(Other.Y-Fraction.Y); bAutoSize=false; }
         }
+    }
+    if(auto* Text=Cast<UTextBlock>(Widget))
+    {
+        // A horizontal text constraint still needs its natural wrapped height.
+        // Treating an unspecified height as zero erased quest descriptions.
+        Text->SetWrapTextAt(Width>0 && Height<=0?Width*UIScale:0);
+        Text->TakeWidget()->Invalidate(EInvalidateWidgetReason::Prepass);
+        Text->ForceLayoutPrepass(); const auto Desired=Text->GetDesiredSize()/UIScale;
+        if(Width<=0) Width=Desired.X;
+        // WoW permits glyphs to extend beyond a FontString's nominal height.
+        // Give Slate its full line box so short XML labels keep their baseline.
+        Height=FMath::Max(Height,float(Desired.Y));
+        bAutoSize=false;
     }
     if (bAutoSize)
     {
@@ -245,6 +340,7 @@ void FWowFrameManager::UpdateViewportLayout()
         const float Dpi = GetDefault<UUserInterfaceSettings>()->GetDPIScaleBasedOnSize(FIntPoint(Viewport.X, Viewport.Y));
         UIScale = RawViewportScale / FMath::Max(Dpi, 0.01f);
         FrameRects.Add(TEXT("UIParent"), FFrameRect(0, 0, Viewport.X / RawViewportScale, 768));
+        if(auto* Root=Frames.Find(FindFrame(TEXT("UIParent")))) { Root->Def.Width=Viewport.X/RawViewportScale; Root->Def.Height=768; }
         bLayoutDirty = true;
     }
     if (bLayoutDirty) RefreshLayout();

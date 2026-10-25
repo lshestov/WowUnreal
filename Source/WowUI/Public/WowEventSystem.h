@@ -39,9 +39,12 @@ public:
 
 	/** Create or update a Lua table representing a frame (sets it as a named global if the frame has a name) */
 	void CreateFrameObject(int64 Handle, const FString& FrameName, int32 FrameID = 0);
+	/** Push the canonical Lua object, including unnamed frames. */
+	bool PushFrameObject(int64 Handle);
 
 	/** Create a Lua global table for a named texture/fontstring region */
 	void CreateTextureRegionGlobal(const FString& RegionName, int64 ParentHandle = -1, const FString& ObjectType = TEXT("Texture"));
+	void ApplyRegionFont(const FString& RegionName,const FString& FontName);
 
 	/** Alias an existing named Lua global object to another global name. */
 	void AliasGlobalObject(const FString& ExistingName, const FString& AliasName);
@@ -63,6 +66,7 @@ public:
 	 *  StringArgs are pushed as string arguments after self.
 	 *  Returns true if the script existed and ran. */
 	bool RunFrameScript(int64 Handle, const FString& ScriptName, const TArray<FString>& StringArgs = {});
+	bool HasFrameScript(int64 Handle,const FString& Name) const { const auto* Scripts=ScriptRefs.Find(Handle); return Scripts && Scripts->Contains(Name); }
 
 	/** Run a click-style handler with a string button arg and a real Lua boolean for `down`. */
 	bool RunFrameClickScript(int64 Handle, const FString& ScriptName, const FString& Button, bool bMouseDown);

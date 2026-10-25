@@ -1,7 +1,10 @@
+#include "WowEntity.h"
+#include "WowUiText.h"
 #include "LuaApiRegistry.h"
 #include "WowEventSystem.h"
 #include "WowFrameManager.h"
 #include "WowFrameTypes.h"
+#include "WowFontManager.h"
 #include "Components/ProgressBar.h"
 #include "Components/Button.h"
 #include "Components/Image.h"
@@ -27,8 +30,17 @@ DEFINE_LOG_CATEGORY(LogWowLuaFrame);
 
 static UImage* GetTextureImage(lua_State* L, int idx = 1);
 static int LF_SetText(lua_State* L);
+static int LF_SetFormattedText(lua_State* L)
+{
+	const int32 Args=lua_gettop(L)-1;
+	lua_getglobal(L,"string"); lua_getfield(L,-1,"format"); lua_remove(L,-2);
+	for(int32 I=2; I<=Args+1; ++I) lua_pushvalue(L,I);
+	if(lua_pcall(L,Args,1,0)!=0) return lua_error(L);
+	lua_replace(L,2); lua_settop(L,2); return LF_SetText(L);
+}
 static int LF_GetText(lua_State* L);
 static int LF_FontStringSetTextColor(lua_State* L);
+static int LF_SetFontObject(lua_State* L);
 
 // Get the frame handle from a frame table (self argument at ArgIdx)
 static int64 GetFrameHandle(lua_State* L, int ArgIdx = 1)
@@ -258,12 +270,7 @@ static int L_CreateFrame(lua_State* L)
 	// Resolve parent
 	if (lua_istable(L, 3))
 	{
-		lua_getfield(L, 3, "__name");
-		if (lua_isstring(L, -1))
-		{
-			Def.Parent = UTF8_TO_TCHAR(lua_tostring(L, -1));
-		}
-		lua_pop(L, 1);
+		if(const auto* Parent=Ctx->FrameManager->GetFrameDef(GetOptionalFrameHandle(L,3))) Def.Parent=Parent->Name;
 	}
 	else if (lua_isstring(L, 3))
 	{
@@ -273,28 +280,9 @@ static int L_CreateFrame(lua_State* L)
 	int64 Handle = Ctx->FrameManager->CreateFrame(Def);
 	if (Handle < 0) { lua_pushnil(L); return 1; }
 
-	// The frame object was created by CreateFrame -> CompileFrameScripts -> CreateFrameObject
-	// Retrieve it from the Lua global if named, or create a minimal one
-	if (Name)
-	{
-		lua_getglobal(L, Name);
-		if (!lua_istable(L, -1))
-		{
-			lua_pop(L, 1);
-			lua_pushnil(L);
-		}
-	}
-	else
-	{
-		// For unnamed frames, create a frame object now
-		Ctx->EventSystem->CreateFrameObject(Handle, FString());
-		// Retrieve from __handle lookup won't work without a ref, so we push a table
-		lua_newtable(L);
-		lua_pushinteger(L, Handle);
-		lua_setfield(L, -2, "__handle");
-		luaL_getmetatable(L, WowLuaApi::FRAME_METATABLE);
-		lua_setmetatable(L, -2);
-	}
+	// Scripts, attributes and arbitrary Lua fields must share one object. Returning
+	// a second table for unnamed frames detached callbacks from their saved state.
+	if(!Ctx->EventSystem->PushFrameObject(Handle)) lua_pushnil(L);
 	return 1;
 }
 
@@ -303,6 +291,7 @@ static int L_CreateFrame(lua_State* L)
 // frame:GetName()
 static int LF_GetName(lua_State* L)
 {
+	lua_getfield(L,1,"__anonymous"); const bool Anonymous=lua_toboolean(L,-1)!=0; lua_pop(L,1); if(Anonymous) { lua_pushnil(L); return 1; }
 	lua_getfield(L, 1, "__name");
 	if (lua_isnil(L, -1))
 	{
@@ -474,10 +463,6 @@ static int LF_Show(lua_State* L)
 	{
 		Ctx->FrameManager->SetFrameVisible(Handle, true);
 	}
-	if (Ctx && Ctx->EventSystem)
-	{
-		Ctx->EventSystem->RunFrameScript(Handle, TEXT("OnShow"));
-	}
 	return 0;
 }
 
@@ -503,10 +488,6 @@ static int LF_Hide(lua_State* L)
 	if (Ctx && Ctx->FrameManager)
 	{
 		Ctx->FrameManager->SetFrameVisible(Handle, false);
-	}
-	if (Ctx && Ctx->EventSystem)
-	{
-		Ctx->EventSystem->RunFrameScript(Handle, TEXT("OnHide"));
 	}
 	return 0;
 }
@@ -542,8 +523,15 @@ static int LF_IsShown(lua_State* L)
 // frame:IsVisible()
 static int LF_IsVisible(lua_State* L)
 {
-	// IsVisible checks both self and parent chain — for now same as IsShown
-	return LF_IsShown(L);
+	auto* C=WowLuaApi::GetContext(L);
+	if(TableRepresentsRegion(L,1))
+	{
+		LF_IsShown(L); const bool Own=lua_toboolean(L,-1)!=0; lua_pop(L,1);
+		lua_getfield(L,1,"__parentHandle"); const int64 Parent=lua_tointeger(L,-1); lua_pop(L,1);
+		lua_pushboolean(L,Own && C && C->FrameManager && C->FrameManager->IsFrameHierarchyShown(Parent));
+	}
+	else lua_pushboolean(L,C && C->FrameManager && C->FrameManager->IsFrameHierarchyShown(GetFrameHandle(L)));
+	return 1;
 }
 
 // Parse a WoW anchor point string to enum
@@ -643,6 +631,11 @@ static int LF_SetPoint(lua_State* L)
 		}
 	}
 
+	if(TableRepresentsRegion(L,1))
+	{
+		lua_getfield(L,1,"__name"); const FString Name=UTF8_TO_TCHAR(lua_tostring(L,-1)?lua_tostring(L,-1):""); lua_pop(L,1);
+		Ctx->FrameManager->SetRegionPoint(Name,Anchor); return 0;
+	}
 	// Replace existing anchor with same point, or append if new
 	FWowFrameDef* Def = Ctx->FrameManager->GetMutableFrameDef(Handle);
 	if (Def)
@@ -674,6 +667,7 @@ static int LF_ClearAllPoints(lua_State* L)
 	int64 Handle = GetFrameHandle(L);
 	if (Ctx && Ctx->FrameManager)
 	{
+		if(TableRepresentsRegion(L,1)) { lua_getfield(L,1,"__name"); Ctx->FrameManager->SetRegionPoint(UTF8_TO_TCHAR(lua_tostring(L,-1)?lua_tostring(L,-1):""),FWowAnchor(),true); lua_pop(L,1); return 0; }
 		Ctx->FrameManager->ClearFrameAnchors(Handle);
 	}
 	return 0;
@@ -714,6 +708,7 @@ static int LF_SetSize(lua_State* L)
 	{
 		float W = static_cast<float>(luaL_checknumber(L, 2));
 		float H = static_cast<float>(luaL_checknumber(L, 3));
+		if(TableRepresentsRegion(L,1)) { lua_getfield(L,1,"__name"); Ctx->FrameManager->SetRegionSize(UTF8_TO_TCHAR(lua_tostring(L,-1)?lua_tostring(L,-1):""),W,H); lua_pop(L,1); return 0; }
 		Ctx->FrameManager->SetFrameSize(Handle, W, H);
 	}
 	return 0;
@@ -727,6 +722,7 @@ static int LF_SetWidth(lua_State* L)
 	if (Ctx && Ctx->FrameManager)
 	{
 		float W = static_cast<float>(luaL_checknumber(L, 2));
+		if(TableRepresentsRegion(L,1)) { lua_getfield(L,1,"__name"); Ctx->FrameManager->SetRegionSize(UTF8_TO_TCHAR(lua_tostring(L,-1)?lua_tostring(L,-1):""),W,-1); lua_pop(L,1); return 0; }
 		const FWowFrameDef* Def = Ctx->FrameManager->GetFrameDef(Handle);
 		float H = Def ? Def->Height : 0.f;
 		Ctx->FrameManager->SetFrameSize(Handle, W, H);
@@ -742,6 +738,7 @@ static int LF_SetHeight(lua_State* L)
 	if (Ctx && Ctx->FrameManager)
 	{
 		float H = static_cast<float>(luaL_checknumber(L, 2));
+		if(TableRepresentsRegion(L,1)) { lua_getfield(L,1,"__name"); Ctx->FrameManager->SetRegionSize(UTF8_TO_TCHAR(lua_tostring(L,-1)?lua_tostring(L,-1):""),-1,H); lua_pop(L,1); return 0; }
 		const FWowFrameDef* Def = Ctx->FrameManager->GetFrameDef(Handle);
 		float W = Def ? Def->Width : 0.f;
 		Ctx->FrameManager->SetFrameSize(Handle, W, H);
@@ -756,10 +753,11 @@ static int LF_GetWidth(lua_State* L)
 	int64 Handle = GetFrameHandle(L);
 	if (Ctx && Ctx->FrameManager)
 	{
+		if(TableRepresentsRegion(L,1)) { lua_getfield(L,1,"__name"); const auto S=Ctx->FrameManager->GetRegionSize(UTF8_TO_TCHAR(lua_tostring(L,-1)?lua_tostring(L,-1):"")); lua_pop(L,1); lua_pushnumber(L,S.X); return 1; }
 		const FWowFrameDef* Def = Ctx->FrameManager->GetFrameDef(Handle);
 		if (Def)
 		{
-			lua_pushnumber(L, Ctx->FrameManager->GetLayoutRect(Handle).Z / Ctx->FrameManager->GetEffectiveFrameScale(Handle));
+			lua_pushnumber(L, Def->Anchors.IsEmpty()?Def->Width:Ctx->FrameManager->GetLayoutRect(Handle).Z / Ctx->FrameManager->GetEffectiveFrameScale(Handle));
 			return 1;
 		}
 	}
@@ -774,10 +772,11 @@ static int LF_GetHeight(lua_State* L)
 	int64 Handle = GetFrameHandle(L);
 	if (Ctx && Ctx->FrameManager)
 	{
+		if(TableRepresentsRegion(L,1)) { lua_getfield(L,1,"__name"); const auto S=Ctx->FrameManager->GetRegionSize(UTF8_TO_TCHAR(lua_tostring(L,-1)?lua_tostring(L,-1):"")); lua_pop(L,1); lua_pushnumber(L,S.Y); return 1; }
 		const FWowFrameDef* Def = Ctx->FrameManager->GetFrameDef(Handle);
 		if (Def)
 		{
-			lua_pushnumber(L, Ctx->FrameManager->GetLayoutRect(Handle).W / Ctx->FrameManager->GetEffectiveFrameScale(Handle));
+			lua_pushnumber(L, Def->Anchors.IsEmpty()?Def->Height:Ctx->FrameManager->GetLayoutRect(Handle).W / Ctx->FrameManager->GetEffectiveFrameScale(Handle));
 			return 1;
 		}
 	}
@@ -983,7 +982,15 @@ static int LF_SetClampedToScreen(lua_State* L)
 // frame:SetParent(parent)
 static int LF_SetParent(lua_State* L)
 {
-	// TODO: reparenting requires moving widget between canvases
+	auto* C=WowLuaApi::GetContext(L); if(!C || !C->FrameManager) return 0;
+	int64 Parent=-1; if(lua_istable(L,2)) Parent=GetOptionalFrameHandle(L,2); else if(lua_isstring(L,2)) Parent=C->FrameManager->FindFrame(UTF8_TO_TCHAR(lua_tostring(L,2)));
+	if(TableRepresentsRegion(L,1))
+	{
+		lua_getfield(L,1,"__name"); const FString Name=UTF8_TO_TCHAR(lua_tostring(L,-1)?lua_tostring(L,-1):""); lua_pop(L,1);
+		if(C->FrameManager->ReparentRegion(Name,Parent)) { lua_pushinteger(L,Parent); lua_setfield(L,1,"__parentHandle"); } return 0;
+	}
+	const int64 Handle=GetOptionalFrameHandle(L); if(Handle<0) return 0;
+	C->FrameManager->ReparentFrame(Handle,Parent);
 	return 0;
 }
 
@@ -991,21 +998,12 @@ static int LF_SetParent(lua_State* L)
 static int LF_GetParent(lua_State* L)
 {
 	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-	int64 Handle = GetFrameHandle(L);
+	int64 Handle = GetOptionalFrameHandle(L);
 	if (Ctx && Ctx->FrameManager)
 	{
-		int64 ParentHandle = Ctx->FrameManager->GetParentHandle(Handle);
-		if (ParentHandle >= 0)
-		{
-			FString ParentName = Ctx->FrameManager->GetFrameName(ParentHandle);
-			if (!ParentName.IsEmpty())
-			{
-				lua_getglobal(L, TCHAR_TO_UTF8(*ParentName));
-				if (lua_istable(L, -1))
-					return 1;
-				lua_pop(L, 1);
-			}
-		}
+		int64 ParentHandle=Ctx->FrameManager->GetParentHandle(Handle);
+		if(Handle<0) { lua_getfield(L,1,"__parentHandle"); ParentHandle=lua_isnumber(L,-1)?lua_tointeger(L,-1):-1; lua_pop(L,1); }
+		if(Ctx->EventSystem && Ctx->EventSystem->PushFrameObject(ParentHandle)) return 1;
 	}
 	lua_pushnil(L);
 	return 1;
@@ -1022,26 +1020,7 @@ static int LF_GetChildren(lua_State* L)
 		int Count = 0;
 		for (int64 ChildHandle : Children)
 		{
-			FString ChildName = Ctx->FrameManager->GetFrameName(ChildHandle);
-			if (!ChildName.IsEmpty())
-			{
-				// Push named children as Lua globals
-				lua_getglobal(L, TCHAR_TO_UTF8(*ChildName));
-				if (lua_istable(L, -1))
-				{
-					Count++;
-				}
-				else
-				{
-					lua_pop(L, 1);
-				}
-			}
-			else
-			{
-				// Push nil for unnamed children to match GetNumChildren count
-				lua_pushnil(L);
-				Count++;
-			}
+			if(Ctx->EventSystem && Ctx->EventSystem->PushFrameObject(ChildHandle)) ++Count;
 		}
 		return Count;
 	}
@@ -1803,7 +1782,7 @@ static int LF_FontStringSetFont(lua_State* L)
 	if (UTextBlock* TextBlock = GetTextBlockWidgetForTable(L, 1))
 	{
 		FSlateFontInfo FontInfo = TextBlock->GetFont();
-		FontInfo.Size = FMath::RoundToInt(FontSize);
+		const auto* C=WowLuaApi::GetContext(L); FontInfo.Size = FMath::Max(1,FMath::RoundToInt(FontSize*.75f*(C && C->FrameManager?C->FrameManager->GetUIScale():1)));
 		TextBlock->SetFont(FontInfo);
 	}
 
@@ -1868,102 +1847,15 @@ static int LF_FontStringGetStringWidth(lua_State* L)
 // frame:CreateFontString(name, layer, inherits)
 static int LF_CreateFontString(lua_State* L)
 {
-	lua_newtable(L);
-
-	// Store parent frame handle for FontString regions
-	int64 ParentHandle = GetFrameHandle(L);
-	lua_pushinteger(L, ParentHandle);
-	lua_setfield(L, -2, "__parentHandle");
-
-	const char* Name = luaL_optstring(L, 2, nullptr);
-	if (Name && Name[0])
-	{
-		lua_pushstring(L, Name);
-		lua_setfield(L, -2, "__name");
-	}
-
-	lua_pushstring(L, "FontString");
-	lua_setfield(L, -2, "__objectType");
-
-	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-	if (Ctx && Ctx->FrameManager)
-	{
-		if (UCanvasPanel* ParentCanvas = Cast<UCanvasPanel>(Ctx->FrameManager->GetWidgetForHandle(ParentHandle)))
-		{
-			UTextBlock* TextWidget = NewObject<UTextBlock>(ParentCanvas);
-			TextWidget->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-			if (UCanvasPanelSlot* Slot = ParentCanvas->AddChildToCanvas(TextWidget))
-			{
-				Slot->SetAnchors(FAnchors(0.f, 0.f));
-				Slot->SetAutoSize(true);
-			}
-
-			lua_pushlightuserdata(L, TextWidget);
-			lua_setfield(L, -2, "__textWidget");
-		}
-	}
-
-	// FontString methods
-	lua_pushcfunction(L, LF_FontStringSetText);
-	lua_setfield(L, -2, "SetText");
-	lua_pushcfunction(L, LF_FontStringGetText);
-	lua_setfield(L, -2, "GetText");
-	lua_pushcfunction(L, LF_FontStringSetTextColor);
-	lua_setfield(L, -2, "SetTextColor");
-	lua_pushcfunction(L, LF_FontStringSetFont); // SetFont
-	lua_setfield(L, -2, "SetFont");
-	lua_pushcfunction(L, [](lua_State* L2) -> int { return 0; }); // SetFontObject
-	lua_setfield(L, -2, "SetFontObject");
-	lua_pushcfunction(L, LF_FontStringGetFont); // GetFont
-	lua_setfield(L, -2, "GetFont");
-	lua_pushcfunction(L, [](lua_State* L2) -> int { return 0; }); // SetJustifyH
-	lua_setfield(L, -2, "SetJustifyH");
-	lua_pushcfunction(L, [](lua_State* L2) -> int { return 0; }); // SetJustifyV
-	lua_setfield(L, -2, "SetJustifyV");
-	lua_pushcfunction(L, [](lua_State* L2) -> int { return 0; }); // SetPoint
-	lua_setfield(L, -2, "SetPoint");
-	lua_pushcfunction(L, [](lua_State* L2) -> int { return 0; }); // ClearAllPoints
-	lua_setfield(L, -2, "ClearAllPoints");
-	lua_pushcfunction(L, [](lua_State* L2) -> int { return 0; }); // SetAllPoints
-	lua_setfield(L, -2, "SetAllPoints");
-	lua_pushcfunction(L, [](lua_State* L2) -> int { return 0; }); // Show
-	lua_setfield(L, -2, "Show");
-	lua_pushcfunction(L, [](lua_State* L2) -> int { return 0; }); // Hide
-	lua_setfield(L, -2, "Hide");
-	lua_pushcfunction(L, [](lua_State* L2) -> int { return 0; }); // SetAlpha
-	lua_setfield(L, -2, "SetAlpha");
-	lua_pushcfunction(L, [](lua_State* L2) -> int { return 0; }); // SetShadowOffset
-	lua_setfield(L, -2, "SetShadowOffset");
-	lua_pushcfunction(L, [](lua_State* L2) -> int { return 0; }); // SetShadowColor
-	lua_setfield(L, -2, "SetShadowColor");
-	lua_pushcfunction(L, LF_FontStringGetStringWidth); // GetStringWidth
-	lua_setfield(L, -2, "GetStringWidth");
-	lua_pushcfunction(L, [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; }); // GetStringHeight
-	lua_setfield(L, -2, "GetStringHeight");
-	lua_pushcfunction(L, [](lua_State* L2) -> int { lua_pushstring(L2, "FontString"); return 1; }); // GetObjectType
-	lua_setfield(L, -2, "GetObjectType");
-	lua_pushcfunction(L, [](lua_State* L2) -> int { return 0; }); // SetFormattedText
-	lua_setfield(L, -2, "SetFormattedText");
-	lua_pushcfunction(L, [](lua_State* L2) -> int { return 0; }); // SetWordWrap
-	lua_setfield(L, -2, "SetWordWrap");
-	lua_pushcfunction(L, [](lua_State* L2) -> int { return 0; }); // SetNonSpaceWrap
-	lua_setfield(L, -2, "SetNonSpaceWrap");
-	lua_pushcfunction(L, [](lua_State* L2) -> int { return 0; }); // SetMaxLines
-	lua_setfield(L, -2, "SetMaxLines");
-	lua_pushcfunction(L, LF_FontStringGetStringWidth); // GetTextWidth (alias for GetStringWidth)
-	lua_setfield(L, -2, "GetTextWidth");
-	lua_pushcfunction(L, LF_FontStringSetTextColor); // SetVertexColor (alias for SetTextColor for fontstrings)
-	lua_setfield(L, -2, "SetVertexColor");
-
-	if (Name && Name[0])
-	{
-		lua_pushvalue(L, -1);
-		lua_setglobal(L, Name);
-	}
-
-	return 1;
+    auto* C=WowLuaApi::GetContext(L); if(!C || !C->FrameManager) { lua_pushnil(L); return 1; }
+    const FString Name=UTF8_TO_TCHAR(luaL_optstring(L,2,"")),Inherits=UTF8_TO_TCHAR(luaL_optstring(L,4,"GameFontNormal"));
+    const FString Key=C->FrameManager->CreateFontStringRegion(GetFrameHandle(L),Name,Inherits);
+    if(Key.IsEmpty()) { lua_pushnil(L); return 1; }
+    lua_getglobal(L,TCHAR_TO_UTF8(*Key));
+    if(Name.IsEmpty()) { lua_pushboolean(L,1); lua_setfield(L,-2,"__anonymous"); }
+    lua_getfield(L,-1,"SetFontObject"); lua_pushvalue(L,-2); lua_pushstring(L,TCHAR_TO_UTF8(*Inherits)); lua_call(L,2,0);
+    return 1;
 }
-
 // Global CreateTexture(name, parent, drawLayer, inherits, subLevel) - WoW 3.3.5 API
 static int LF_CreateTextureGlobal(lua_State* L)
 {
@@ -2071,64 +1963,12 @@ static int LF_CreateTextureGlobal(lua_State* L)
 // Global CreateFont() - WoW 3.3.5 API for creating font objects
 static int LF_CreateFont(lua_State* L)
 {
-	// Create a minimal font table with required methods
-	lua_newtable(L);
-
-	// Store font name if provided (optional parameter)
-	const char* FontName = luaL_optstring(L, 1, "");
-	if (FontName && FontName[0]) {
-		lua_pushstring(L, FontName);
-		lua_setfield(L, -2, "__name");
-	}
-
-	// Font object methods - MoneyFrame.lua and similar scripts expect these
-	lua_pushcfunction(L, [](lua_State* L2) -> int {
-		// SetFont(fontFile, size, flags)
-		// Store the font properties in the table
-		if (lua_isstring(L2, 2)) {
-			lua_pushvalue(L2, 2);
-			lua_setfield(L2, 1, "__fontFile");
-		}
-		if (lua_isnumber(L2, 3)) {
-			lua_pushvalue(L2, 3);
-			lua_setfield(L2, 1, "__fontSize");
-		}
-		if (lua_isstring(L2, 4)) {
-			lua_pushvalue(L2, 4);
-			lua_setfield(L2, 1, "__fontFlags");
-		}
-		return 0;
-	});
-	lua_setfield(L, -2, "SetFont");
-
-	lua_pushcfunction(L, [](lua_State* L2) -> int {
-		// GetFont() returns fontFile, size, flags
-		lua_getfield(L2, 1, "__fontFile");
-		if (lua_isnil(L2, -1)) { lua_pop(L2, 1); lua_pushstring(L2, ""); }
-		lua_getfield(L2, 1, "__fontSize");
-		if (lua_isnil(L2, -1)) { lua_pop(L2, 1); lua_pushnumber(L2, 12); }
-		lua_getfield(L2, 1, "__fontFlags");
-		if (lua_isnil(L2, -1)) { lua_pop(L2, 1); lua_pushstring(L2, ""); }
-		return 3;
-	});
-	lua_setfield(L, -2, "GetFont");
-
-	lua_pushcfunction(L, [](lua_State* L2) -> int { return 0; }); // SetShadowOffset
-	lua_setfield(L, -2, "SetShadowOffset");
-
-	lua_pushcfunction(L, [](lua_State* L2) -> int { return 0; }); // SetShadowColor
-	lua_setfield(L, -2, "SetShadowColor");
-
-	lua_pushcfunction(L, [](lua_State* L2) -> int { return 0; }); // SetSpacing
-	lua_setfield(L, -2, "SetSpacing");
-
-	lua_pushcfunction(L, [](lua_State* L2) -> int {
-		lua_pushstring(L2, "Font");
-		return 1;
-	}); // GetObjectType
-	lua_setfield(L, -2, "GetObjectType");
-
-	return 1;
+    const FString Name=UTF8_TO_TCHAR(luaL_optstring(L,1,""));
+    lua_newtable(L); lua_pushstring(L,"Font"); lua_setfield(L,-2,"__objectType");
+    if(!Name.IsEmpty()) { lua_pushstring(L,TCHAR_TO_UTF8(*Name)); lua_setfield(L,-2,"__name"); }
+    luaL_getmetatable(L,WowLuaApi::FRAME_METATABLE); lua_setmetatable(L,-2);
+    if(!Name.IsEmpty()) { lua_pushvalue(L,-1); lua_setglobal(L,TCHAR_TO_UTF8(*Name)); }
+    return 1;
 }
 
 // frame:SetBackdrop(backdrop)
@@ -2355,14 +2195,16 @@ static int LF_HasScript(lua_State* L)
 static void GetFrameRect(lua_State* L, float& OutLeft, float& OutBottom, float& OutRight, float& OutTop)
 {
 	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-	int64 Handle = GetFrameHandle(L);
 	OutLeft = OutBottom = OutRight = OutTop = 0.f;
-
 	if (!Ctx || !Ctx->FrameManager) return;
-	const FWowFrameDef* Def = Ctx->FrameManager->GetFrameDef(Handle);
-	if (!Def) return;
-
-    const auto Rect = Ctx->FrameManager->GetLayoutRect(Handle);
+    int64 Handle=GetOptionalFrameHandle(L); FVector4 Rect;
+    if(TableRepresentsRegion(L,1))
+    {
+        lua_getfield(L,1,"__name"); const FString Name=UTF8_TO_TCHAR(lua_tostring(L,-1)?lua_tostring(L,-1):""); lua_pop(L,1);
+        Rect=Ctx->FrameManager->GetRegionRect(Name);
+        lua_getfield(L,1,"__parentHandle"); Handle=lua_tointeger(L,-1); lua_pop(L,1);
+    }
+    else { if(!Ctx->FrameManager->GetFrameDef(Handle)) return; Rect=Ctx->FrameManager->GetLayoutRect(Handle); }
     const auto Root = Ctx->FrameManager->GetLayoutRect(Ctx->FrameManager->FindFrame(TEXT("UIParent")));
     const float Scale = Ctx->FrameManager->GetEffectiveFrameScale(Handle);
     OutLeft = Rect.X / Scale;
@@ -2615,7 +2457,9 @@ static int LF_SetDisabledTexture(lua_State* L)
 static int LF_SetText(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
-	const char* Text = luaL_optstring(L, 2, ""); // WoW treats nil as empty string
+	// WoW uses lua_tolstring here: a deferred label function initially clears
+	// the string and FrameXML evaluates it during its following update pass.
+	const char* Text = lua_tostring(L,2); if(!Text) Text="";
 
 	// Store in Lua table
 	lua_pushstring(L, Text);
@@ -2638,8 +2482,12 @@ static int LF_SetText(lua_State* L)
 	// Update UMG widget for other frame types
 	if (UTextBlock* TextBlock = GetTextBlockWidgetForTable(L, 1))
 	{
-		FText TextContent = FText::FromString(UTF8_TO_TCHAR(Text));
-		TextBlock->SetText(TextContent);
+		FText TextContent = FText::FromString(WowUiPlainText(UTF8_TO_TCHAR(Text)));
+		if(!TextBlock->GetText().EqualTo(TextContent))
+		{
+			TextBlock->SetText(TextContent);
+			if(Ctx && Ctx->FrameManager) Ctx->FrameManager->InvalidateTextLayout();
+		}
 	}
 	else if (UEditableTextBox* EditBox = GetEditBoxWidgetForTable(L, 1))
 	{
@@ -2708,7 +2556,10 @@ static int LF_IsEnabled(lua_State* L)
 	return 1;
 }
 
-static int LF_Click(lua_State* L) { return 0; }
+static int LF_Click(lua_State* L)
+{
+    auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->DispatchClick(GetFrameHandle(L),UTF8_TO_TCHAR(luaL_optstring(L,2,"LeftButton")),lua_toboolean(L,3)!=0); return 0;
+}
 
 // StatusBar methods
 static int LF_SetMinMaxValues(lua_State* L)
@@ -2717,7 +2568,7 @@ static int LF_SetMinMaxValues(lua_State* L)
 	float MinValue = static_cast<float>(luaL_checknumber(L, 2));
 	float MaxValue = static_cast<float>(luaL_checknumber(L, 3));
 
-	UE_LOG(LogWowLuaFrame, Log, TEXT("SetMinMaxValues called: Min=%.1f, Max=%.1f"), MinValue, MaxValue);
+	UE_LOG(LogWowLuaFrame, Verbose, TEXT("SetMinMaxValues called: Min=%.1f, Max=%.1f"), MinValue, MaxValue);
 
 	// Store in Lua table
 	lua_pushnumber(L, MinValue);
@@ -2730,6 +2581,12 @@ static int LF_SetMinMaxValues(lua_State* L)
 	if (Ctx && Ctx->FrameManager)
 	{
 		int64 Handle = GetFrameHandle(L);
+		if (USlider* Slider = Ctx->FrameManager->GetSliderWidget(Handle))
+		{
+			Slider->SetMinValue(MinValue);
+			Slider->SetMaxValue(FMath::Max(MinValue, MaxValue));
+			Slider->SetValue(FMath::Clamp(Slider->GetValue(), MinValue, FMath::Max(MinValue, MaxValue)));
+		}
 		UProgressBar* ProgressBar = Ctx->FrameManager->GetStatusBarWidget(Handle);
 		if (ProgressBar)
 		{
@@ -2759,20 +2616,22 @@ static int LF_GetMinMaxValues(lua_State* L)
 static int LF_SetValue(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
+	float Value = static_cast<float>(luaL_checknumber(L, 2));
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	const int64 Handle = GetFrameHandle(L);
+	USlider* Slider = Ctx && Ctx->FrameManager ? Ctx->FrameManager->GetSliderWidget(Handle) : nullptr;
+	if (Slider) Value = FMath::Clamp(Value, Slider->GetMinValue(), Slider->GetMaxValue());
 	lua_getfield(L, 1, "__value");
-	const bool bChanged = !lua_isnumber(L, -1) || lua_tonumber(L, -1) != lua_tonumber(L, 2);
+	const bool bChanged = Slider ? !FMath::IsNearlyEqual(Slider->GetValue(), Value) : !lua_isnumber(L, -1) || lua_tonumber(L, -1) != Value;
 	lua_pop(L, 1);
 
 	// Store in Lua table
-	lua_pushvalue(L, 2);
+	lua_pushnumber(L, Value);
 	lua_setfield(L, 1, "__value");
 
 	// Update UMG widget
-	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-	if (Ctx && Ctx->FrameManager && lua_isnumber(L, 2))
+	if (Ctx && Ctx->FrameManager)
 	{
-		const float Value = static_cast<float>(lua_tonumber(L, 2));
-		int64 Handle = GetFrameHandle(L);
 		UProgressBar* ProgressBar = Ctx->FrameManager->GetStatusBarWidget(Handle);
 		if (ProgressBar)
 		{
@@ -2792,42 +2651,20 @@ static int LF_SetValue(lua_State* L)
 
 			ProgressBar->SetPercent(ClampedPercent);
 		}
-		else
+		else if (Slider)
 		{
-			// Try Slider widget (Sliders also use SetValue/GetValue)
-			USlider* Slider = Ctx->FrameManager->GetSliderWidget(Handle);
-			if (Slider)
-			{
-				lua_getfield(L, 1, "__minValue");
-				float MinValue = lua_isnil(L, -1) ? 0.0f : static_cast<float>(lua_tonumber(L, -1));
-				lua_pop(L, 1);
-				lua_getfield(L, 1, "__maxValue");
-				float MaxValue = lua_isnil(L, -1) ? 1.0f : static_cast<float>(lua_tonumber(L, -1));
-				lua_pop(L, 1);
-				float Range = MaxValue - MinValue;
-				float Normalized = (Range > 0.0f) ? (Value - MinValue) / Range : 0.0f;
-				Slider->SetValue(FMath::Clamp(Normalized, 0.0f, 1.0f));
-			}
+			// Keep native and Lua values in the same units. Polling a normalized
+			// thumb position as a WoW offset otherwise repeatedly divides it.
+			Ctx->FrameManager->SetSliderValue(Handle, Value);
 		}
 	}
 	else
 	{
 		UE_LOG(LogWowLuaFrame, Warning, TEXT("SetValue called but missing context or non-numeric value"));
 	}
-	if (bChanged)
+	if (bChanged && Ctx && Ctx->EventSystem)
 	{
-		const FString Key = FString::Printf(TEXT("__WowScript_%lld_OnValueChanged"), GetFrameHandle(L));
-		lua_getglobal(L, TCHAR_TO_UTF8(*Key));
-		if (lua_isfunction(L, -1))
-		{
-			lua_pushvalue(L, 1); lua_pushvalue(L, 2);
-			if (lua_pcall(L, 2, 0, 0) != 0)
-			{
-				UE_LOG(LogWowLuaFrame, Warning, TEXT("OnValueChanged: %hs"), lua_tostring(L, -1));
-				lua_pop(L, 1);
-			}
-		}
-		else lua_pop(L, 1);
+		Ctx->EventSystem->RunFrameScript(Handle, TEXT("OnValueChanged"), {FString::SanitizeFloat(Value)});
 	}
 
 	return 0;
@@ -2835,6 +2672,12 @@ static int LF_SetValue(lua_State* L)
 
 static int LF_GetValue(lua_State* L)
 {
+	if (auto* Ctx = WowLuaApi::GetContext(L); Ctx && Ctx->FrameManager)
+		if (auto* Slider = Ctx->FrameManager->GetSliderWidget(GetFrameHandle(L)))
+		{
+			lua_pushnumber(L, Slider->GetValue());
+			return 1;
+		}
 	lua_getfield(L, 1, "__value");
 	if (lua_isnil(L, -1))
 	{
@@ -2928,8 +2771,7 @@ static int LF_SetMaxLetters(lua_State* L)
 		int64 Handle = GetFrameHandle(L);
 		if (UEditableTextBox* EditBox = GetEditBoxWidgetForTable(L))
 		{
-			// UEditableTextBox doesn't have a direct max length property in UE5
-			// This would need custom implementation
+			Ctx->FrameManager->EditBoxMaxLetters.Add(Handle,FMath::Max(MaxLetters,0));
 		}
 	}
 
@@ -2956,7 +2798,7 @@ static int LF_ClearFocus(lua_State* L)
 		if (UEditableTextBox* EditBox = GetEditBoxWidgetForTable(L))
 		{
 			// Clear focus from the edit box
-			EditBox->SetUserFocus(nullptr);
+			if(FSlateApplication::IsInitialized()) FSlateApplication::Get().SetAllUserFocusToGameViewport();
 		}
 	}
 
@@ -2998,7 +2840,31 @@ static int LF_HighlightText(lua_State* L) { return 0; }
 static int LF_SetCursorPosition(lua_State* L) { return 0; }
 static int LF_SetTextInsets(lua_State* L) { return 0; }
 static int LF_SetMultiLine(lua_State* L) { return 0; }
-static int LF_SetFontObject(lua_State* L) { return 0; }
+static int LF_SetFontObject(lua_State* L)
+{
+    if(lua_isstring(L,2)) { lua_getglobal(L,lua_tostring(L,2)); lua_replace(L,2); }
+    if(!lua_istable(L,2)) return 0;
+    lua_pushvalue(L,2); lua_setfield(L,1,"__fontObject");
+    for(const char* Key:{"__fontPath","__fontSize","__fontFlags","__textColorR","__textColorG","__textColorB","__textColorA"}) { lua_getfield(L,2,Key); lua_setfield(L,1,Key); }
+    if(auto* Text=GetTextBlockWidgetForTable(L))
+    {
+        auto* C=WowLuaApi::GetContext(L); auto* Fonts=C && C->FrameManager?C->FrameManager->GetFontManager():nullptr;
+        lua_getfield(L,2,"__name"); const FString Name=UTF8_TO_TCHAR(luaL_optstring(L,-1,"GameFontNormal")); lua_pop(L,1);
+        lua_getfield(L,2,"__fontSize"); const float Size=luaL_optnumber(L,-1,Fonts?Fonts->GetFontSize(Name):12); lua_pop(L,1);
+        const float Scale=C && C->FrameManager?C->FrameManager->GetUIScale():1;
+        if(Fonts) Text->SetFont(Fonts->GetFont(Name,FMath::RoundToInt(Size*Scale)));
+        else { auto Info=Text->GetFont(); Info.Size=FMath::Max(1,FMath::RoundToInt(Size*Scale*.75f)); Text->SetFont(Info); }
+        FLinearColor Color; float* Components[]={&Color.R,&Color.G,&Color.B,&Color.A}; const char* Keys[]={"__textColorR","__textColorG","__textColorB","__textColorA"};
+        for(int32 I=0;I<4;++I) { lua_getfield(L,2,Keys[I]); *Components[I]=luaL_optnumber(L,-1,1); lua_pop(L,1); }
+        Text->SetColorAndOpacity(Color);
+    }
+    return 0;
+}
+static int LF_GetFontObject(lua_State* L)
+{
+    lua_getfield(L,1,"__fontObject"); if(lua_istable(L,-1)) return 1; lua_pop(L,1);
+    lua_getglobal(L,"GameFontNormal"); return 1;
+}
 
 // ScrollFrame methods
 static int LF_SetScrollChild(lua_State* L)
@@ -3165,7 +3031,16 @@ static int LF_Lower(lua_State* L) { return 0; }
 static int LF_SetToplevel(lua_State* L) { return 0; }
 
 // frame:RegisterForDrag
-static int LF_RegisterForDrag(lua_State* L) { return 0; }
+static int LF_RegisterForDrag(lua_State* L)
+{
+    lua_pushnil(L); lua_setfield(L,1,"__attr_drag_LeftButton"); lua_pushnil(L); lua_setfield(L,1,"__attr_drag_RightButton");
+    for(int32 I=2; I<=lua_gettop(L); ++I)
+    {
+        const FString Key=TEXT("__attr_drag_")+FString(UTF8_TO_TCHAR(luaL_checkstring(L,I)));
+        lua_pushinteger(L,1); lua_setfield(L,1,TCHAR_TO_UTF8(*Key));
+    }
+    return 0;
+}
 
 // frame:StartMoving / StopMovingOrSizing
 static int LF_StartMoving(lua_State* L) { return 0; }
@@ -3254,23 +3129,8 @@ static int LF_GetNumPoints(lua_State* L)
 // frame:GetRect() — returns left, bottom, width, height in WoW coordinates
 static int LF_GetRect(lua_State* L)
 {
-	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-	int64 Handle = GetFrameHandle(L);
-	if (Ctx && Ctx->FrameManager)
-	{
-		const FWowFrameDef* Def = Ctx->FrameManager->GetFrameDef(Handle);
-		if (Def)
-		{
-			// Returns left, bottom, width, height in WoW coordinates
-			// For simplicity, return based on frame rect
-			lua_pushnumber(L, 0); // left
-			lua_pushnumber(L, 0); // bottom
-			lua_pushnumber(L, Def->Width);
-			lua_pushnumber(L, Def->Height);
-			return 4;
-		}
-	}
-	return 0;
+	float Left,Bottom,Right,Top; GetFrameRect(L,Left,Bottom,Right,Top);
+	lua_pushnumber(L,Left); lua_pushnumber(L,Bottom); lua_pushnumber(L,Right-Left); lua_pushnumber(L,Top-Bottom); return 4;
 }
 
 // button:RegisterForClicks(...) — store explicit click edge registrations
@@ -3296,8 +3156,9 @@ static int LF_RegisterForClicks(lua_State* L)
 // scrollingmsgframe:AddMessage(text, r, g, b) — for now, just log the message
 static int LF_AddMessage(lua_State* L)
 {
-	const char* Text = luaL_checkstring(L, 2);
+	const char* Text = luaL_optstring(L, 2, "");
 	UE_LOG(LogWowLuaFrame, Log, TEXT("ScrollingMessageFrame:AddMessage: %s"), UTF8_TO_TCHAR(Text));
+	if(auto* C=WowLuaApi::GetContext(L); C && C->FrameManager) C->FrameManager->AddMessage(GetFrameHandle(L),UTF8_TO_TCHAR(Text),FLinearColor(luaL_optnumber(L,3,1),luaL_optnumber(L,4,1),luaL_optnumber(L,5,1)),luaL_optinteger(L,6,0));
 	return 0;
 }
 
@@ -3316,6 +3177,7 @@ static int LF_TooltipSetOwner(lua_State* L)
 	const char* AnchorType = luaL_optstring(L, 3, "ANCHOR_CURSOR");
 
 	Ctx->FrameManager->TooltipSetOwner(TooltipHandle, OwnerHandle, UTF8_TO_TCHAR(AnchorType));
+	lua_pushvalue(L,2); lua_setfield(L,1,"__tooltipOwner");
 	return 0;
 }
 
@@ -3520,6 +3382,16 @@ static const luaL_Reg FrameMethods[] =
 	// Core
 	{"GetName", LF_GetName},
 	{"GetObjectType", LF_GetObjectType},
+	{"IsObjectType", [](lua_State* L)->int {
+        const FString Wanted=UTF8_TO_TCHAR(luaL_checkstring(L,2)); LF_GetObjectType(L); const FString Actual=UTF8_TO_TCHAR(lua_tostring(L,-1)); lua_pop(L,1);
+        bool Match=Actual.Equals(Wanted,ESearchCase::IgnoreCase) || Wanted.Equals(TEXT("Object"),ESearchCase::IgnoreCase);
+        const bool Frame=Actual!=TEXT("Texture") && Actual!=TEXT("FontString") && Actual!=TEXT("Font");
+        Match|=Frame && (Wanted.Equals(TEXT("Frame"),ESearchCase::IgnoreCase) || Wanted.Equals(TEXT("ScriptObject"),ESearchCase::IgnoreCase));
+        Match|=Actual!=TEXT("Font") && Wanted.Equals(TEXT("Region"),ESearchCase::IgnoreCase);
+        Match|=Actual==TEXT("CheckButton") && Wanted.Equals(TEXT("Button"),ESearchCase::IgnoreCase);
+        Match|=Actual==TEXT("PlayerModel") && Wanted.Equals(TEXT("Model"),ESearchCase::IgnoreCase);
+        lua_pushboolean(L,Match); return 1;
+    }},
 	{"RegisterEvent", LF_RegisterEvent},
 	{"UnregisterEvent", LF_UnregisterEvent},
 	{"UnregisterAllEvents", LF_UnregisterAllEvents},
@@ -3619,6 +3491,9 @@ static const luaL_Reg FrameMethods[] =
 
 	// EditBox
 	{"SetMaxLetters", LF_SetMaxLetters},
+	{"SetMaxBytes", [](lua_State* L)->int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->EditBoxMaxBytes.Add(GetFrameHandle(L),FMath::Max(int32(luaL_checkinteger(L,2)),0)); return 0; }},
+	{"GetMaxBytes", [](lua_State* L)->int { auto* C=WowLuaApi::GetContext(L); lua_pushinteger(L,C && C->FrameManager?C->FrameManager->EditBoxMaxBytes.FindRef(GetFrameHandle(L)):0); return 1; }},
+	{"IgnoreDepth", [](lua_State* L)->int { return 0; }},
 	{"SetAutoFocus", LF_SetAutoFocus},
 	{"ClearFocus", LF_ClearFocus},
 	{"SetFocus", LF_SetFocus},
@@ -3632,6 +3507,7 @@ static const luaL_Reg FrameMethods[] =
 
 	// ScrollFrame
 	{"SetScrollChild", LF_SetScrollChild},
+	{"UpdateScrollChildRect", [](lua_State* L)->int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->RefreshLayout(); return 0; }},
 	{"GetScrollChild", LF_GetScrollChild},
 	{"SetVerticalScroll", LF_SetVerticalScroll},
 	{"GetVerticalScroll", LF_GetVerticalScroll},
@@ -3642,7 +3518,7 @@ static const luaL_Reg FrameMethods[] =
 	{"SetCooldown", LF_SetCooldown},
 
 	// Additional stubs to prevent OnUpdate error spam
-	{"IsOwned", [](lua_State* L) -> int { lua_pushboolean(L, 0); return 1; }},
+	{"IsOwned", [](lua_State* L) -> int { lua_getfield(L,1,"__tooltipOwner"); lua_pushboolean(L,lua_rawequal(L,-1,2)); return 1; }},
 	{"GetFontString", [](lua_State* L) -> int {
 		luaL_checktype(L, 1, LUA_TTABLE);
 		lua_getfield(L, 1, "__name");
@@ -3663,8 +3539,8 @@ static const luaL_Reg FrameMethods[] =
 		if (!lua_isnil(L, -1)) lua_setmetatable(L, -2); else lua_pop(L, 1);
 		return 1;
 	}},
-	{"SetChecked", [](lua_State* L) -> int { return 0; }},
-	{"GetChecked", [](lua_State* L) -> int { lua_pushboolean(L, 0); return 1; }},
+	{"SetChecked", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->SetChecked(GetFrameHandle(L),lua_toboolean(L,2)!=0); return 0; }},
+	{"GetChecked", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); lua_pushboolean(L,C && C->FrameManager && C->FrameManager->GetChecked(GetFrameHandle(L))); return 1; }},
 	{"SetNormalFontObject", [](lua_State* L) -> int { return 0; }},
 	{"SetHighlightFontObject", [](lua_State* L) -> int { return 0; }},
 	{"SetDisabledFontObject", [](lua_State* L) -> int { return 0; }},
@@ -3744,13 +3620,14 @@ static const luaL_Reg FrameMethods[] =
 	{"SetVertexColor", LF_SetVertexColorDispatch},
 	{"GetTextWidth", LF_FontStringGetStringWidth},
 	{"GetStringWidth", LF_FontStringGetStringWidth},
-	{"GetStringHeight", [](lua_State* L) -> int { lua_pushnumber(L, 0); return 1; }},
+	{"GetStringHeight", LF_GetHeight},
+	{"SetAlphaGradient", [](lua_State* L)->int { lua_pushboolean(L,0); return 1; }},
 	{"SetTextHeight", [](lua_State* L) -> int { return 0; }},
 	{"SetShadowOffset", [](lua_State* L) -> int { return 0; }},
 	{"SetShadowColor", [](lua_State* L) -> int { return 0; }},
 	{"SetSpacing", [](lua_State* L) -> int { return 0; }},
 	{"SetJustifyH", [](lua_State* L) -> int { return 0; }},
-	{"SetFormattedText", [](lua_State* L) -> int { return 0; }},
+	{"SetFormattedText", LF_SetFormattedText},
 	{"SetWordWrap", [](lua_State* L) -> int { return 0; }},
 	{"SetNonSpaceWrap", [](lua_State* L) -> int { return 0; }},
 	{"SetJustifyV", [](lua_State* L) -> int { return 0; }},
@@ -3768,18 +3645,25 @@ static const luaL_Reg FrameMethods[] =
 	{"IsClampedToScreen", [](lua_State* L) -> int { lua_pushboolean(L, 0); return 1; }},
 	{"SetHyperlinksEnabled", [](lua_State* L) -> int { return 0; }},
 	{"GetMaxLines", [](lua_State* L) -> int { lua_pushnumber(L, 0); return 1; }},
-	{"SetHistoryLines", [](lua_State* L) -> int { return 0; }},
-	{"SetFontObject", [](lua_State* L) -> int { return 0; }},
-	{"GetFontObject", [](lua_State* L) -> int { lua_pushnil(L); return 1; }},
+	{"SetHistoryLines", [](lua_State* L) -> int { lua_pushinteger(L,FMath::Clamp(int32(luaL_checkinteger(L,2)),0,100)); lua_setfield(L,1,"__historyLimit"); return 0; }},
+	{"AddHistoryLine", [](lua_State* L) -> int {
+		const char* Text=luaL_checkstring(L,2); lua_getfield(L,1,"__historyLimit"); const int32 Limit=lua_isnumber(L,-1)?lua_tointeger(L,-1):32; lua_pop(L,1);
+		if(!Limit || !*Text) return 0;
+		lua_getfield(L,1,"__history"); if(!lua_istable(L,-1)) { lua_pop(L,1); lua_newtable(L); lua_pushvalue(L,-1); lua_setfield(L,1,"__history"); }
+		int32 Count=lua_objlen(L,-1); if(Count>=Limit) { for(int32 I=1;I<Count;++I) { lua_rawgeti(L,-1,I+1); lua_rawseti(L,-2,I); } --Count; }
+		lua_pushstring(L,Text); lua_rawseti(L,-2,Count+1); lua_pop(L,1); return 0;
+	}},
+	{"SetFontObject", LF_SetFontObject},
+	{"GetFontObject", LF_GetFontObject},
 
 	// ScrollingMessageFrame methods
 	{"AddMessage", LF_AddMessage},
-	{"SetMaxLines", [](lua_State* L) -> int { return 0; }},
+	{"SetMaxLines", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->MessageFrames.FindOrAdd(GetFrameHandle(L)).Limit=FMath::Clamp(int32(luaL_checkinteger(L,2)),1,1000); return 0; }},
 	{"SetFading", [](lua_State* L) -> int { return 0; }},
 	{"SetFadeDuration", [](lua_State* L) -> int { return 0; }},
 	{"SetTimeVisible", [](lua_State* L) -> int { return 0; }},
 	{"SetInsertMode", [](lua_State* L) -> int { return 0; }},
-	{"Clear", [](lua_State* L) -> int { return 0; }},
+	{"Clear", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) { C->FrameManager->MessageFrames.FindOrAdd(GetFrameHandle(L)).Lines.Reset(); C->FrameManager->DrawMessages(GetFrameHandle(L)); } return 0; }},
 	{"GetVerticalScrollRange", [](lua_State* L) -> int {
 		FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
 		if (!Ctx || !Ctx->FrameManager)
@@ -3819,22 +3703,22 @@ static const luaL_Reg FrameMethods[] =
 		return 1;
 	}},
 	{"SetScrollRange", [](lua_State* L) -> int { return 0; }},
-	{"GetNumMessages", [](lua_State* L) -> int { lua_pushnumber(L, 0); return 1; }},
+	{"GetNumMessages", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); lua_pushinteger(L,C && C->FrameManager?C->FrameManager->MessageFrames.FindOrAdd(GetFrameHandle(L)).Lines.Num():0); return 1; }},
 	{"GetNumLinesDisplayed", [](lua_State* L) -> int { lua_pushnumber(L, 0); return 1; }},
 	{"AtTop", [](lua_State* L) -> int { lua_pushboolean(L, 1); return 1; }},
 	{"AtBottom", [](lua_State* L) -> int { lua_pushboolean(L, 1); return 1; }},
-	{"ScrollUp", [](lua_State* L) -> int { return 0; }},
-	{"ScrollDown", [](lua_State* L) -> int { return 0; }},
-	{"ScrollToTop", [](lua_State* L) -> int { return 0; }},
-	{"ScrollToBottom", [](lua_State* L) -> int { return 0; }},
-	{"PageUp", [](lua_State* L) -> int { return 0; }},
-	{"PageDown", [](lua_State* L) -> int { return 0; }},
+	{"ScrollUp", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->ScrollMessages(GetFrameHandle(L),1); return 0; }},
+	{"ScrollDown", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->ScrollMessages(GetFrameHandle(L),-1); return 0; }},
+	{"ScrollToTop", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->ScrollMessages(GetFrameHandle(L),10000,true); return 0; }},
+	{"ScrollToBottom", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->ScrollMessages(GetFrameHandle(L),0,true); return 0; }},
+	{"PageUp", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->ScrollMessages(GetFrameHandle(L),10); return 0; }},
+	{"PageDown", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->ScrollMessages(GetFrameHandle(L),-10); return 0; }},
 
 	// Model/Dress methods
 	{"SetModel", [](lua_State* L) -> int { return 0; }},
 	{"SetModelScale", [](lua_State* L) -> int { return 0; }},
 	{"SetPosition", [](lua_State* L) -> int { return 0; }},
-	{"SetFacing", [](lua_State* L) -> int { return 0; }},
+	{"SetFacing", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager && C->FrameManager->OnModelFacing) C->FrameManager->OnModelFacing(GetFrameHandle(L,1),luaL_checknumber(L,2)); return 0; }},
 	{"SetUnit", [](lua_State* L) -> int {
 		// Check if this is a tooltip frame
 		FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
@@ -3849,37 +3733,43 @@ static const luaL_Reg FrameMethods[] =
 				return 0;
 			}
 		}
-		// For non-tooltip frames (Model frames, etc.), do nothing for now
+		if(Ctx && Ctx->FrameManager && Ctx->FrameManager->OnUnitModel)
+		{
+			auto* Entity=WowLuaApi::ResolveUnitToken(L,2);
+			Ctx->FrameManager->OnUnitModel(GetFrameHandle(L,1),Entity?Entity->Guid:0);
+		}
 		return 0;
 	}},
 	{"SetCreature", [](lua_State* L) -> int { return 0; }},
 	{"SetCamera", [](lua_State* L) -> int { return 0; }},
 	{"RefreshUnit", [](lua_State* L) -> int { return 0; }},
 	{"SetPortraitZoom", [](lua_State* L) -> int { return 0; }},
-	{"ClearModel", [](lua_State* L) -> int { return 0; }},
+	{"ClearModel", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager && C->FrameManager->OnUnitModel) C->FrameManager->OnUnitModel(GetFrameHandle(L,1),0); return 0; }},
 	{"HasCustomBackground", [](lua_State* L) -> int { lua_pushboolean(L, 0); return 1; }},
 	{"SetCustomRace", [](lua_State* L) -> int { return 0; }},
 	{"Undress", [](lua_State* L) -> int { return 0; }},
 	{"TryOn", [](lua_State* L) -> int { return 0; }},
 
 	// Minimap methods
-	{"SetZoom", [](lua_State* L) -> int { return 0; }},
-	{"GetZoom", [](lua_State* L) -> int { lua_pushnumber(L, 0); return 1; }},
-	{"GetZoomLevels", [](lua_State* L) -> int { lua_pushnumber(L, 5); return 1; }},
+	{"SetZoom", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->MinimapZoom=FMath::Clamp(int32(luaL_checkinteger(L,2)),0,5); return 0; }},
+	{"GetZoom", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); lua_pushinteger(L,C && C->FrameManager?C->FrameManager->MinimapZoom:0); return 1; }},
+	{"SetPlayerTextureWidth", [](lua_State* L) -> int { return 0; }},
+	{"SetPlayerTextureHeight", [](lua_State* L) -> int { return 0; }},
+	{"GetZoomLevels", [](lua_State* L) -> int { lua_pushnumber(L, 6); return 1; }},
 	{"SetBlipTexture", [](lua_State* L) -> int { return 0; }},
 	{"SetStaticArrowTexture", [](lua_State* L) -> int { return 0; }},
 
 	// Tooltip methods
 	{"SetOwner", LF_TooltipSetOwner},
-	{"SetUnitBuff", [](lua_State* L) -> int { return 0; }},
-	{"SetUnitDebuff", [](lua_State* L) -> int { return 0; }},
-	{"SetUnitAura", [](lua_State* L) -> int { return 0; }},
-	{"SetInventoryItem", LF_TooltipSetItem}, // For now, use same as SetItem
-	{"SetBagItem", LF_TooltipSetItem}, // For now, use same as SetItem
-	{"SetAction", [](lua_State* L) -> int { return 0; }},
-	{"SetSpell", LF_TooltipSetSpell},
-	{"SetSpellByID", [](lua_State* L) -> int { return 0; }},
-	{"SetHyperlink", [](lua_State* L) -> int { return 0; }},
+	{"SetUnitBuff", [](lua_State* L) -> int { lua_pushstring(L,"UnitBuff"); lua_pushcclosure(L,WowLuaApi::SetAuraTooltip,1); lua_pushvalue(L,1); lua_pushvalue(L,2); lua_pushvalue(L,3); lua_pushvalue(L,4); lua_call(L,4,0); return 0; }},
+	{"SetUnitDebuff", [](lua_State* L) -> int { lua_pushstring(L,"UnitDebuff"); lua_pushcclosure(L,WowLuaApi::SetAuraTooltip,1); lua_pushvalue(L,1); lua_pushvalue(L,2); lua_pushvalue(L,3); lua_pushvalue(L,4); lua_call(L,4,0); return 0; }},
+	{"SetUnitAura", WowLuaApi::SetAuraTooltip},
+	{"SetInventoryItem", WowLuaApi::SetInventoryItemTooltip},
+	{"SetBagItem", WowLuaApi::SetBagItemTooltip},
+	{"SetAction", WowLuaApi::SetActionTooltip},
+	{"SetSpell", WowLuaApi::SetSpellTooltip},
+	{"SetSpellByID", WowLuaApi::SetSpellTooltip},
+	{"SetHyperlink", WowLuaApi::SetHyperlinkTooltip},
 	{"AddLine", LF_TooltipAddLine},
 	{"AddDoubleLine", LF_TooltipAddDoubleLine},
 	{"ClearLines", LF_TooltipClearLines},
@@ -3914,7 +3804,7 @@ static const luaL_Reg FrameMethods[] =
 	}},
 	{"GetOwner", [](lua_State* L) -> int {
 		luaL_checktype(L, 1, LUA_TTABLE);
-		lua_getfield(L, 1, "__parentHandle");
+		lua_getfield(L, 1, "__tooltipOwner");
 		return 1;
 	}},
 
@@ -3924,7 +3814,8 @@ static const luaL_Reg FrameMethods[] =
 	{"SetTextColor", LF_FontStringSetTextColor},
 	{"GetTextColor", [](lua_State* L) -> int {
 		const auto* Text=GetTextBlockWidgetForTable(L);
-		const auto Color=Text?Text->GetColorAndOpacity().GetSpecifiedColor():FLinearColor::White;
+		auto Color=Text?Text->GetColorAndOpacity().GetSpecifiedColor():FLinearColor::White;
+		if(!Text) { float* Parts[]={&Color.R,&Color.G,&Color.B,&Color.A}; const char* Keys[]={"__textColorR","__textColorG","__textColorB","__textColorA"}; for(int32 I=0;I<4;++I) { lua_getfield(L,1,Keys[I]); *Parts[I]=luaL_optnumber(L,-1,1); lua_pop(L,1); } }
 		lua_pushnumber(L,Color.R); lua_pushnumber(L,Color.G); lua_pushnumber(L,Color.B); lua_pushnumber(L,Color.A); return 4;
 	}},
 	{"GetVertexColor", [](lua_State* L) -> int {

@@ -19,6 +19,9 @@
 #include "Slate/WidgetTransform.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Engine/UserInterfaceSettings.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Formats/Dbc/DbcStore.h"
+#include "WowUiText.h"
 DEFINE_LOG_CATEGORY_STATIC(LogWowFrame, Log, All);
 
 namespace
@@ -234,9 +237,21 @@ const FWowFrameDef* FWowFrameManager::GetFrameDef(int64 Handle) const
 
 void FWowFrameManager::SetFrameVisible(int64 Handle, bool bVisible)
 {
+	if(!bVisible && FSlateApplication::IsInitialized())
+	{
+		for(const auto& Edit:EditBoxWidgets) if(Edit.Value.IsValid() && Edit.Value->HasKeyboardFocus())
+		{
+			for(int64 Parent=Edit.Key; Parent>=0; Parent=GetParentHandle(Parent)) if(Parent==Handle) { FSlateApplication::Get().SetAllUserFocusToGameViewport(); break; }
+		}
+	}
 	FFrameEntry* Entry = Frames.Find(Handle);
 	if (!Entry) return;
-
+	if(Entry->Def.bHidden==!bVisible) return;
+	TArray<int64> Descendants={Handle};
+	for(int32 I=0; I<Descendants.Num(); ++I)
+		for(const auto& Pair:Frames) if(Pair.Value.ParentHandle==Descendants[I]) Descendants.Add(Pair.Key);
+	TMap<int64,bool> WasDrawn;
+	for(const int64 Child:Descendants) WasDrawn.Add(Child,IsFrameHierarchyShown(Child));
 	Entry->Def.bHidden = !bVisible;
 
 	if (Entry->Widget.IsValid())
@@ -273,6 +288,11 @@ void FWowFrameManager::SetFrameVisible(int64 Handle, bool bVisible)
 			}
 		}
 	}
+	if(EventSystem) for(const int64 Child:Descendants)
+	{
+		const bool Drawn=IsFrameHierarchyShown(Child);
+		if(Drawn!=WasDrawn[Child]) EventSystem->RunFrameScript(Child,Drawn?TEXT("OnShow"):TEXT("OnHide"));
+	}
 }
 
 bool FWowFrameManager::IsFrameVisible(int64 Handle) const
@@ -285,6 +305,51 @@ FWowFrameDef* FWowFrameManager::GetMutableFrameDef(int64 Handle)
 {
 	FFrameEntry* Entry = Frames.Find(Handle);
 	return Entry ? &Entry->Def : nullptr;
+}
+
+bool FWowFrameManager::ReparentFrame(int64 Handle,int64 ParentHandle)
+{
+    auto* Entry=Frames.Find(Handle); if(!Entry || Handle==ParentHandle) return false;
+    for(int64 Ancestor=ParentHandle;Ancestor>=0;Ancestor=GetParentHandle(Ancestor)) if(Ancestor==Handle) return false;
+    if(Entry->ParentHandle==ParentHandle) return true;
+    auto* Canvas=ParentHandle<0?RootCanvas.Get():Cast<UCanvasPanel>(GetWidgetForHandle(ParentHandle));
+    if(!Canvas && ParentHandle==FindFrame(TEXT("UIParent"))) Canvas=RootCanvas.Get();
+    if(!Canvas || !Entry->Widget.IsValid()) return false;
+    Entry->Widget->RemoveFromParent(); auto* Slot=Canvas->AddChildToCanvas(Entry->Widget.Get());
+    if(Slot) Slot->SetZOrder(int32(Entry->Def.Strata)*1000+Entry->Def.FrameLevel);
+    Entry->ParentHandle=ParentHandle; Entry->Def.Parent=ParentHandle<0?FString():GetFrameName(ParentHandle);
+    if(const auto* Parent=Frames.Find(ParentHandle))
+    {
+        if(Entry->Def.FrameLevel<=Parent->Def.FrameLevel) SetFrameLevel(Handle,Parent->Def.FrameLevel+1);
+        if(Entry->Def.Strata<Parent->Def.Strata) SetFrameStrata(Handle,Parent->Def.Strata);
+    }
+    FrameRects.Reset(); bLayoutDirty=true; RefreshLayout(); return true;
+}
+
+bool FWowFrameManager::ReparentRegion(const FString& Name,int64 ParentHandle)
+{
+    auto* Canvas=Cast<UCanvasPanel>(GetWidgetForHandle(ParentHandle));
+    if(!Canvas && ParentHandle==FindFrame(TEXT("UIParent"))) Canvas=RootCanvas.Get();
+    UWidget* Widget=GetNamedFontString(Name); if(!Widget) Widget=GetNamedTexture(Name);
+    if(!Canvas || !Widget) return false;
+    if(Widget->GetParent()!=Canvas)
+    {
+        const auto* Previous=Cast<UCanvasPanelSlot>(Widget->Slot); const int32 Z=Previous?Previous->GetZOrder():10;
+        Widget->RemoveFromParent(); if(auto* Slot=Canvas->AddChildToCanvas(Widget)) Slot->SetZOrder(Z);
+    }
+    RegionOwners.Add(Name,GetFrameName(ParentHandle));
+    for(auto& Layout:RegionLayouts) if(Layout.Widget.Get()==Widget) Layout.Owner=GetFrameName(ParentHandle);
+    FrameRects.Reset(); bLayoutDirty=true; return true;
+}
+
+FString FWowFrameManager::CreateFontStringRegion(int64 Parent,const FString& Name,const FString& Inherits)
+{
+    auto* Canvas=Cast<UCanvasPanel>(GetWidgetForHandle(Parent)); if(!Canvas && Parent==FindFrame(TEXT("UIParent"))) Canvas=RootCanvas.Get();
+    if(!Canvas) return {};
+    FString Key=Name; if(Key.IsEmpty()) { int32 Id=RegionLayouts.Num(); do { Key=FString::Printf(TEXT("_DynamicFontString%d"),Id++); } while(NamedFontStringWidgets.Contains(Key)); }
+    FWowFrameDef Def; Def.Name=GetFrameName(Parent); const auto Rect=GetLayoutRect(Parent); Def.Width=Rect.Z; Def.Height=Rect.W;
+    FWowLayer Layer; Layer.Level=EWowDrawLayer::OVERLAY; FWowFontStringElement Text; Text.Name=Key; Text.Inherits=Inherits; Text.JustifyH=TEXT("LEFT"); Layer.FontStrings.Add(Text); Def.Layers.Add(Layer);
+    CreateLayerContent(Canvas,Def,Parent); return Key;
 }
 
 void FWowFrameManager::SetFrameSize(int64 Handle, float W, float H)
@@ -383,15 +448,13 @@ void FWowFrameManager::SetFrameLevel(int64 Handle, int32 Level)
 {
 	FFrameEntry* Entry = Frames.Find(Handle);
 	if (!Entry) return;
-
-	Entry->Def.FrameLevel = Level;
-
-	if (Entry->Widget.IsValid())
+	const int32 Delta=Level-Entry->Def.FrameLevel; if(!Delta) return;
+	TArray<int64> Descendants={Handle};
+	for(int32 I=0;I<Descendants.Num();++I) for(const auto& Pair:Frames) if(Pair.Value.ParentHandle==Descendants[I]) Descendants.Add(Pair.Key);
+	for(const int64 Child:Descendants)
 	{
-		if (UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(Entry->Widget->Slot))
-		{
-			Slot->SetZOrder(static_cast<int32>(Entry->Def.Strata) * 1000 + Level);
-		}
+		auto& E=Frames[Child]; E.Def.FrameLevel=FMath::Max(0,E.Def.FrameLevel+Delta);
+		if(E.Widget.IsValid()) if(auto* Slot=Cast<UCanvasPanelSlot>(E.Widget->Slot)) Slot->SetZOrder(int32(E.Def.Strata)*1000+E.Def.FrameLevel);
 	}
 }
 
@@ -432,6 +495,15 @@ UEditableTextBox* FWowFrameManager::GetEditBoxWidget(int64 Handle) const
 	return (Found && Found->IsValid()) ? Found->Get() : nullptr;
 }
 
+void FWowFrameManager::SetSliderValue(int64 Handle, float Value)
+{
+	if (auto* Slider = GetSliderWidget(Handle))
+	{
+		Slider->SetValue(Value);
+		SliderLastValue.Add(Handle, Slider->GetValue());
+	}
+}
+
 USlider* FWowFrameManager::GetSliderWidget(int64 Handle) const
 {
 	const TWeakObjectPtr<USlider>* Found = SliderWidgets.Find(Handle);
@@ -464,6 +536,20 @@ void FWowFrameManager::SetFrameKeyboardEnabled(int64 Handle, bool bEnabled)
 	{
 		Entry->bKeyboardEnabled = bEnabled;
 	}
+}
+
+bool FWowFrameManager::DispatchKeyboard(const FString& Key,bool bDown)
+{
+    if(!EventSystem) return false;
+    int64 Best=-1; int32 BestZ=MIN_int32;
+    for(const auto& Pair:Frames)
+    {
+        const auto& E=Pair.Value; if(!E.bKeyboardEnabled || E.Def.Type==EWowFrameType::EditBox || !IsFrameDrawn(Pair.Key)) continue;
+        if(!EventSystem->HasFrameScript(Pair.Key,bDown?TEXT("OnKeyDown"):TEXT("OnKeyUp"))) continue;
+        const int32 Z=int32(E.Def.Strata)*1000+E.Def.FrameLevel;
+        if(Z>BestZ || (Z==BestZ && Pair.Key>Best)) { Best=Pair.Key; BestZ=Z; }
+    }
+    return Best>=0 && EventSystem->RunFrameScript(Best,bDown?TEXT("OnKeyDown"):TEXT("OnKeyUp"),{Key});
 }
 
 void FWowFrameManager::SetFrameMouseWheelEnabled(int64 Handle, bool bEnabled)
@@ -614,6 +700,7 @@ void FWowFrameManager::MergeTemplate(FWowFrameDef& Target, const FWowFrameDef& T
 	if (Target.PushedTexture.IsEmpty()) { Target.PushedTexture = Template.PushedTexture; Target.PushedTextureName = Template.PushedTextureName; Target.PushedTextureParentKey = Template.PushedTextureParentKey; }
 	if (Target.HighlightTexture.IsEmpty()) { Target.HighlightTexture = Template.HighlightTexture; Target.HighlightTextureName = Template.HighlightTextureName; Target.HighlightTextureParentKey = Template.HighlightTextureParentKey; }
 	if (Target.DisabledTexture.IsEmpty()) { Target.DisabledTexture = Template.DisabledTexture; Target.DisabledTextureName = Template.DisabledTextureName; Target.DisabledTextureParentKey = Template.DisabledTextureParentKey; }
+	if(Target.CheckedTexture.IsEmpty()) Target.CheckedTexture=Template.CheckedTexture;
 	if (Target.Orientation.IsEmpty()) Target.Orientation = Template.Orientation;
 }
 
@@ -783,6 +870,10 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 					// Create slate brush with texture and UV coordinates
 					FSlateBrush SlateBrush;
 					SlateBrush.SetResourceObject(LoadedTexture);
+					if(Tex.bAdditive) if(auto* Base=LoadObject<UMaterialInterface>(nullptr,TEXT("/Game/Materials/M_WowUiAdditive.M_WowUiAdditive")))
+					{
+						auto* Material=UMaterialInstanceDynamic::Create(Base,ImgWidget); Material->SetTextureParameterValue(TEXT("Image"),LoadedTexture); SlateBrush.SetResourceObject(Material);
+					}
 					SlateBrush.DrawAs = ESlateBrushDrawType::Image;
 					float FullW = (float)LoadedTexture->GetSizeX();
 					float FullH = (float)LoadedTexture->GetSizeY();
@@ -894,9 +985,11 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 			UTextBlock* TextWidget = NewObject<UTextBlock>(Outer);
 			TextWidget->SetVisibility(FS.bHidden ? ESlateVisibility::Collapsed : ESlateVisibility::SelfHitTestInvisible);
 
-			if (!FS.Text.IsEmpty())
+			const bool IsCaption=FS.Name==Def.Name+TEXT("Text") || FS.Name==Def.Name+TEXT("NormalText") || FS.ParentKey==TEXT("normalText");
+			const FString Caption=FS.Text.IsEmpty() && IsCaption?Def.ButtonText:FS.Text;
+			if (!Caption.IsEmpty())
 			{
-				TextWidget->SetText(FText::FromString(EventSystem ? EventSystem->ResolveText(FS.Text) : FS.Text));
+				TextWidget->SetText(FText::FromString(EventSystem ? EventSystem->ResolveText(Caption) : Caption));
 			}
 
 			// Apply color
@@ -909,14 +1002,14 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 				// Try to get the font based on inheritance or use default
 				FString FontName = FS.Inherits.IsEmpty() ? TEXT("GameFontNormal") : FS.Inherits;
 				// Scale font size with UI scale for proper sizing
-				int32 ScaledFontSize = FMath::RoundToInt(FS.FontHeight * UIScale);
+				int32 ScaledFontSize = FMath::RoundToInt((FS.FontHeight>0?FS.FontHeight:FontManager->GetFontSize(FontName)) * UIScale);
 				FontInfo = FontManager->GetFont(FontName, ScaledFontSize);
 			}
 			else
 			{
 				// Fallback to default UE font (also scale the size)
 				FontInfo = TextWidget->GetFont();
-				FontInfo.Size = FMath::RoundToInt(FS.FontHeight * UIScale);
+				FontInfo.Size = FMath::Max(1,FMath::RoundToInt((FS.FontHeight>0?FS.FontHeight:12) * UIScale*.75f));
 			}
 			TextWidget->SetFont(FontInfo);
 
@@ -946,13 +1039,16 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 					EventSystem->CreateTextureRegionGlobal(FS.Name, OwnerHandle, TEXT("FontString"));
 				}
 				NamedFontStringWidgets.Add(FS.Name, TextWidget);
+				if(EventSystem && !FS.Inherits.IsEmpty()) EventSystem->ApplyRegionFont(FS.Name,FS.Inherits);
+				if(FS.FontHeight>0) TextWidget->SetFont(FontInfo);
+				if(FS.bHasColor) TextWidget->SetColorAndOpacity(FS.Color);
 				// Warn if fontstring name still contains unresolved $parent
 				if (FS.Name.Contains(TEXT("$parent")))
 				{
 					UE_LOG(LogWowFrame, Warning, TEXT("  UNRESOLVED $parent in fontstring: %s (frame: %s)"), *FS.Name, *Def.Name);
 				}
 
-				if (!Def.Name.IsEmpty() && FS.Name == (Def.Name + TEXT("Text")))
+				if (!Def.Name.IsEmpty() && (FS.Name == (Def.Name + TEXT("Text")) || FS.Name == (Def.Name + TEXT("NormalText")) || FS.ParentKey==TEXT("normalText")))
 				{
 					PrimaryTextWidgets.Add(OwnerHandle, TextWidget);
 				}
@@ -1150,21 +1246,27 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 			AddFillChild(Button, -100, ESlateVisibility::HitTestInvisible);
 			ButtonWidgets.Add(Handle, Button);
 
-			if (!Def.ButtonText.IsEmpty())
+			bool HasCaptionRegion=false;
+			for(const auto& Layer:Def.Layers) for(const auto& Text:Layer.FontStrings) HasCaptionRegion|=Text.Name==Def.Name+TEXT("Text") || Text.Name==Def.Name+TEXT("NormalText") || Text.ParentKey==TEXT("text") || Text.ParentKey==TEXT("normalText");
+			if (!HasCaptionRegion)
 			{
 				UTextBlock* ButtonText = NewObject<UTextBlock>(ContainerWidget);
-				ButtonText->SetText(FText::FromString(Def.ButtonText));
+				ButtonText->SetText(FText::FromString(EventSystem?EventSystem->ResolveText(Def.ButtonText):Def.ButtonText));
 				ButtonText->SetJustification(ETextJustify::Center);
-				FSlateFontInfo FontInfo = ButtonText->GetFont();
-				FontInfo.Size = FMath::RoundToInt(12.f * UIScale);
+				ButtonText->SetColorAndOpacity(FLinearColor(1,.82f,0));
+				FSlateFontInfo FontInfo = FontManager?FontManager->GetDefaultFont(FMath::RoundToInt(12.f*UIScale)):ButtonText->GetFont();
+				if(!FontManager) FontInfo.Size=FMath::Max(1,FMath::RoundToInt(9.f*UIScale));
 				ButtonText->SetFont(FontInfo);
 				AddFillChild(ButtonText, 250, ESlateVisibility::HitTestInvisible);
+				if(auto* TextSlot=Cast<UCanvasPanelSlot>(ButtonText->Slot)) { TextSlot->SetAnchors(FAnchors(.5f,.5f)); TextSlot->SetAlignment(FVector2D(.5f,.5f)); TextSlot->SetPosition(FVector2D::ZeroVector); TextSlot->SetAutoSize(true); }
 				PrimaryTextWidgets.Add(Handle, ButtonText);
 
 				if (!Def.Name.IsEmpty())
 				{
 					const FString ButtonTextName = Def.Name + TEXT("Text");
 					NamedFontStringWidgets.Add(ButtonTextName, ButtonText);
+					RegionOwners.Add(ButtonTextName,Def.Name);
+					RegionLayouts.Add({ButtonText,Def.Name,{{EWowAnchorPoint::CENTER,TEXT(""),EWowAnchorPoint::CENTER,0,0}},0,0,false});
 					if (EventSystem)
 					{
 						EventSystem->CreateTextureRegionGlobal(ButtonTextName, Handle, TEXT("FontString"));
@@ -1380,6 +1482,7 @@ void FWowFrameManager::ResolveParentReferences(FWowFrameDef& Def, const FString&
 		// Resolve in texture elements
 		for (FWowTextureElement& Texture : Layer.Textures)
 		{
+			if(Texture.Name.IsEmpty() && !Texture.ParentKey.IsEmpty()) { FString Suffix=Texture.ParentKey; Suffix[0]=FChar::ToUpper(Suffix[0]); Texture.Name=FrameName+Suffix; }
 			// Resolve texture name: $parentBorder → ActionButton1Border
 			if (Texture.Name.Contains(TEXT("$parent")) && !FrameName.IsEmpty())
 			{
@@ -1399,6 +1502,7 @@ void FWowFrameManager::ResolveParentReferences(FWowFrameDef& Def, const FString&
 		// Resolve in fontstring elements
 		for (FWowFontStringElement& FontString : Layer.FontStrings)
 		{
+			if(FontString.Name.IsEmpty() && !FontString.ParentKey.IsEmpty()) { FString Suffix=FontString.ParentKey; Suffix[0]=FChar::ToUpper(Suffix[0]); FontString.Name=FrameName+Suffix; }
 			// Resolve fontstring name: $parentName → PlayerFrameName
 			if (FontString.Name.Contains(TEXT("$parent")) && !FrameName.IsEmpty())
 			{
@@ -1453,6 +1557,11 @@ int64 FWowFrameManager::CreateFrame(const FWowFrameDef& Def)
 {
 	// Resolve template inheritance first
 	FWowFrameDef Resolved = ResolveInherits(Def);
+	if(Resolved.Name==TEXT("UIParent"))
+	{
+		const auto Root=GetFrameRect(TEXT("UIParent"));
+		Resolved.Width=Root.W; Resolved.Height=Root.H; Resolved.bSetAllPoints=true;
+	}
 	if (Resolved.Name.IsEmpty() && !Resolved.bVirtual)
 	{
 		Resolved.bAnonymous = true;
@@ -1480,7 +1589,7 @@ int64 FWowFrameManager::CreateFrame(const FWowFrameDef& Def)
 		Resolved.Type == EWowFrameType::Slider;
 	Entry.bKeyboardEnabled = Resolved.bEnableKeyboard ||
 		Resolved.Type == EWowFrameType::EditBox;
-	Entry.bMouseWheelEnabled = false;
+	Entry.bMouseWheelEnabled = Resolved.Scripts.ContainsByPredicate([](const FWowScriptHandler& Script){return Script.Event==TEXT("OnMouseWheel");});
 
 	// Resolve parent handle
 	if (!Resolved.Parent.IsEmpty())
@@ -1570,7 +1679,8 @@ int64 FWowFrameManager::CreateFrame(const FWowFrameDef& Def)
 		{
 			ChildWithParent.Parent = Resolved.Name;
 		}
-		CreateFrame(ChildWithParent);
+		const int64 ChildHandle=CreateFrame(ChildWithParent);
+		if(ChildWithParent.bScrollChild) SetScrollChild(Handle,ChildHandle);
 	}
 
 	// NOW compile and fire OnLoad — all children exist
@@ -1893,9 +2003,12 @@ void FWowFrameManager::SetCooldown(int64 Handle, double StartTime, float Duratio
 			{
 				UImage* Overlay = NewObject<UImage>(Container);
 				FSlateBrush DarkBrush;
-				DarkBrush.TintColor = FLinearColor(0.0f, 0.0f, 0.0f, 0.6f);
+				if(auto* Base=LoadObject<UMaterialInterface>(nullptr,TEXT("/Game/Materials/M_WowUiCooldown.M_WowUiCooldown")))
+					DarkBrush.SetResourceObject(UMaterialInstanceDynamic::Create(Base,Overlay));
+				DarkBrush.DrawAs=ESlateBrushDrawType::Image;
+				DarkBrush.TintColor = FLinearColor::White;
 				Overlay->SetBrush(DarkBrush);
-				Overlay->SetColorAndOpacity(FLinearColor(0.0f, 0.0f, 0.0f, 0.6f));
+				Overlay->SetColorAndOpacity(FLinearColor::White);
 				UCanvasPanelSlot* Slot = Container->AddChildToCanvas(Overlay);
 				if (Slot)
 				{
@@ -1940,14 +2053,12 @@ void FWowFrameManager::TickCooldowns()
 		}
 		else
 		{
-			// Update overlay alpha based on remaining time (fade out as cooldown ends)
-			float Remaining = State.Duration - static_cast<float>(Elapsed);
-			float Alpha = FMath::Clamp(Remaining / State.Duration, 0.0f, 1.0f) * 0.6f;
+			const float Progress=FMath::Clamp(float(Elapsed/State.Duration),0.f,1.f);
 			if (TWeakObjectPtr<UImage>* OverlayPtr = CooldownOverlayWidgets.Find(Handle))
 			{
 				if (OverlayPtr->IsValid())
 				{
-					(*OverlayPtr)->SetColorAndOpacity(FLinearColor(0.0f, 0.0f, 0.0f, Alpha));
+					if(auto* Material=Cast<UMaterialInstanceDynamic>((*OverlayPtr)->GetBrush().GetResourceObject())) Material->SetScalarParameterValue(TEXT("Progress"),Progress);
 				}
 			}
 		}
@@ -1956,6 +2067,70 @@ void FWowFrameManager::TickCooldowns()
 	for (int64 H : Expired)
 	{
 		CooldownStates.Remove(H);
+	}
+}
+
+void FWowFrameManager::AddMessage(int64 Handle,const FString& Text,FLinearColor Color,int32 Id)
+{
+	if(Text.IsEmpty() || !Frames.Contains(Handle)) return;
+	auto& State=MessageFrames.FindOrAdd(Handle);
+	State.Lines.Add({WowUiPlainText(Text),Color,Id});
+	if(State.Lines.Num()>State.Limit) State.Lines.RemoveAt(0,State.Lines.Num()-State.Limit);
+	if(State.Offset>0) ++State.Offset;
+	DrawMessages(Handle);
+}
+
+void FWowFrameManager::SetChecked(int64 Handle,bool Checked)
+{
+	if(Checked) CheckedFrames.Add(Handle); else CheckedFrames.Remove(Handle);
+	if(Checked && !CheckImages.Contains(Handle)) if(auto* Canvas=Cast<UCanvasPanel>(GetWidgetForHandle(Handle)))
+	{
+		auto* Image=NewObject<UImage>(Canvas); const auto* Def=GetFrameDef(Handle);
+		const FString Path=Def && !Def->CheckedTexture.IsEmpty()?Def->CheckedTexture:TEXT("Interface\\Buttons\\UI-CheckBox-Check");
+		if(auto* Texture=LoadUITexture(Path))
+		{
+			Image->SetBrushFromTexture(Texture);
+			if(auto* Base=LoadObject<UMaterialInterface>(nullptr,TEXT("/Game/Materials/M_WowUiImage.M_WowUiImage")))
+			{
+				auto* Material=UMaterialInstanceDynamic::Create(Base,Image); Material->SetTextureParameterValue(TEXT("Image"),Texture); Material->SetScalarParameterValue(TEXT("Circle"),0); Material->SetScalarParameterValue(TEXT("Additive"),1);
+				FSlateBrush Brush=Image->GetBrush(); Brush.SetResourceObject(Material); Image->SetBrush(Brush);
+			}
+		}
+		if(auto* Slot=Canvas->AddChildToCanvas(Image)) { Slot->SetAnchors(FAnchors(0,0,1,1)); Slot->SetOffsets(FMargin(0)); Slot->SetZOrder(180); }
+		CheckImages.Add(Handle,Image);
+	}
+	if(auto* Image=CheckImages.Find(Handle); Image && Image->IsValid()) (*Image)->SetVisibility(Checked?ESlateVisibility::HitTestInvisible:ESlateVisibility::Collapsed);
+}
+
+void FWowFrameManager::ScrollMessages(int64 Handle,int32 Offset,bool Absolute)
+{
+	auto& State=MessageFrames.FindOrAdd(Handle); State.Offset=FMath::Clamp(Absolute?Offset:State.Offset+Offset,0,FMath::Max(State.Lines.Num()-1,0)); DrawMessages(Handle);
+}
+
+void FWowFrameManager::DrawMessages(int64 Handle)
+{
+	auto* Canvas=Cast<UCanvasPanel>(GetWidgetForHandle(Handle)); if(!Canvas) return;
+	auto& State=MessageFrames.FindOrAdd(Handle); const auto R=GetLayoutRect(Handle);
+	const float Height=FMath::Max(float(R.W),14.f),Width=FMath::Max(float(R.Z),100.f);
+	const int32 Visible=FMath::Clamp(FMath::FloorToInt(Height/16),1,30);
+	Canvas->SetClipping(EWidgetClipping::ClipToBounds);
+	while(State.Widgets.Num()<Visible)
+	{
+		auto* Text=NewObject<UTextBlock>(Canvas); Text->SetVisibility(ESlateVisibility::HitTestInvisible);
+		Text->SetJustification(ETextJustify::Left); Text->SetAutoWrapText(true);
+		if(FontManager) Text->SetFont(FontManager->GetDefaultFont(FMath::Max(1,FMath::RoundToInt(12*UIScale))));
+		Canvas->AddChildToCanvas(Text); State.Widgets.Add(Text);
+	}
+	float Bottom=Height*UIScale;
+	for(int32 I=0; I<State.Widgets.Num(); ++I) if(auto* Text=State.Widgets[I].Get())
+	{
+		const int32 Index=State.Lines.Num()-1-State.Offset-I;
+		if(I>=Visible || Index<0 || Bottom<=0) { Text->SetVisibility(ESlateVisibility::Collapsed); continue; }
+		const auto& Line=State.Lines[Index]; Text->SetText(FText::FromString(Line.Text)); Text->SetColorAndOpacity(Line.Color); Text->SetWrapTextAt(Width*UIScale);
+		Text->ForceLayoutPrepass(); const float RowHeight=FMath::Max(16*UIScale,Text->GetDesiredSize().Y);
+		Bottom-=RowHeight;
+		if(auto* Slot=Cast<UCanvasPanelSlot>(Text->Slot)) { Slot->SetAnchors(FAnchors(0,0)); Slot->SetAlignment(FVector2D::ZeroVector); Slot->SetPosition(FVector2D(0,Bottom)); Slot->SetSize(FVector2D(Width*UIScale,RowHeight)); Slot->SetZOrder(200); }
+		Text->SetVisibility(ESlateVisibility::HitTestInvisible);
 	}
 }
 
@@ -2049,7 +2224,7 @@ int64 FWowFrameManager::HitTestFrames(float ScreenX, float ScreenY) const
     for (const auto& Pair : Frames)
     {
         const auto& Entry = Pair.Value;
-        if (!Entry.bMouseEnabled || !Entry.Widget.IsValid()) continue;
+        if ((!Entry.bMouseEnabled && !Entry.bMouseWheelEnabled) || !Entry.Widget.IsValid()) continue;
         bool Visible = true;
         int64 Ancestor = Pair.Key;
         for (int32 Depth = 0; Ancestor >= 0 && Depth < 64; ++Depth)
@@ -2057,6 +2232,8 @@ int64 FWowFrameManager::HitTestFrames(float ScreenX, float ScreenY) const
             const auto* Parent = Frames.Find(Ancestor);
             if (!Parent) break;
             if (Parent->Def.bHidden || (Parent->Widget.IsValid() && Parent->Widget->GetVisibility() == ESlateVisibility::Collapsed)) { Visible = false; break; }
+            if(Parent->Def.Type==EWowFrameType::ScrollFrame)
+                if(const auto* Clip=FrameRects.Find(Parent->Def.Name); Clip && (X<Clip->X || X>Clip->X+Clip->W || Y<Clip->Y || Y>Clip->Y+Clip->H)) { Visible=false; break; }
             Ancestor = Parent->ParentHandle;
         }
         if (!Visible) continue;
@@ -2091,7 +2268,7 @@ bool FWowFrameManager::IsMouseOverFrame(int64 Handle, float TopOffset, float Bot
 		return false;
 	}
 
-	const FVector2D CursorPos = FSlateApplication::Get().GetCursorPos();
+	const FVector2D CursorPos = LastPointerPosition;
 	const float WowX = CursorPos.X / RawViewportScale;
 	const float WowY = CursorPos.Y / RawViewportScale;
 
@@ -2104,11 +2281,26 @@ bool FWowFrameManager::IsMouseOverFrame(int64 Handle, float TopOffset, float Bot
 
 void FWowFrameManager::TickWidgetEvents()
 {
+    if(EventSystem && FPlatformTime::Seconds()>=NextScrollRangeCheck)
+    {
+        NextScrollRangeCheck=FPlatformTime::Seconds()+.1;
+        const auto Children=ScrollChildHandles;
+        for(const auto& Pair:Children) if(IsFrameDrawn(Pair.Key) && EventSystem->HasFrameScript(Pair.Key,TEXT("OnScrollRangeChanged")))
+        {
+            const float Range=GetVerticalScrollRange(Pair.Key); const auto* Previous=LastScrollRanges.Find(Pair.Key);
+            if(!Previous || !FMath::IsNearlyEqual(*Previous,Range,.5f))
+            { LastScrollRanges.Add(Pair.Key,Range); EventSystem->RunFrameScript(Pair.Key,TEXT("OnScrollRangeChanged"),{TEXT("0"),FString::SanitizeFloat(Range)}); }
+        }
+    }
 	// Poll EditBox widgets for text changes
 	for (auto& Pair : EditBoxWidgets)
 	{
 		if (!Pair.Value.IsValid()) continue;
 		FString CurrentText = Pair.Value->GetText().ToString();
+		if(const auto* Limit=EditBoxMaxLetters.Find(Pair.Key); Limit && *Limit>0 && CurrentText.Len()>*Limit) CurrentText.LeftInline(*Limit);
+		if(const auto* Limit=EditBoxMaxBytes.Find(Pair.Key); Limit && *Limit>0)
+			while(CurrentText.Len() && FTCHARToUTF8(*CurrentText).Length()>*Limit) CurrentText.LeftChopInline(1);
+		if(CurrentText!=Pair.Value->GetText().ToString()) Pair.Value->SetText(FText::FromString(CurrentText));
 		FString* LastText = EditBoxLastText.Find(Pair.Key);
 		if (!LastText)
 		{
@@ -2119,7 +2311,7 @@ void FWowFrameManager::TickWidgetEvents()
 			*LastText = CurrentText;
 			if (EventSystem)
 			{
-				EventSystem->RunFrameScript(Pair.Key, TEXT("OnTextChanged"));
+				EventSystem->RunFrameScript(Pair.Key, TEXT("OnTextChanged"),{TEXT("1")});
 			}
 		}
 	}
@@ -2151,7 +2343,7 @@ bool FWowFrameManager::DispatchEditBoxEnterPressed()
 	for (const auto& Pair : EditBoxWidgets)
 	{
 		if (!Pair.Value.IsValid()) continue;
-		if (Pair.Value->HasKeyboardFocus())
+		if (IsFrameHierarchyShown(Pair.Key) && Pair.Value->HasKeyboardFocus())
 		{
 			if (EventSystem)
 			{
@@ -2168,7 +2360,7 @@ bool FWowFrameManager::DispatchEditBoxEscapePressed()
 	for (const auto& Pair : EditBoxWidgets)
 	{
 		if (!Pair.Value.IsValid()) continue;
-		if (Pair.Value->HasKeyboardFocus())
+		if (IsFrameHierarchyShown(Pair.Key) && Pair.Value->HasKeyboardFocus())
 		{
 			if (EventSystem)
 			{
@@ -2182,6 +2374,7 @@ bool FWowFrameManager::DispatchEditBoxEscapePressed()
 
 void FWowFrameManager::UpdateMouseHover(float ScreenX, float ScreenY)
 {
+	LastPointerPosition=FVector2D(ScreenX,ScreenY);
 	int64 NewHover = HitTestFrames(ScreenX, ScreenY);
 
 	if (NewHover != HoverFrameHandle)
@@ -2208,6 +2401,27 @@ void FWowFrameManager::DispatchMouseDown(int64 Handle, const FString& Button)
 	EventSystem->RunFrameScript(Handle, TEXT("OnMouseDown"), {Button});
 }
 
+bool FWowFrameManager::DispatchDragStart(int64 Handle,const FString& Button)
+{
+    return EventSystem && EventSystem->GetFrameAttribute(Handle,TEXT("drag_")+Button)==TEXT("1") && EventSystem->RunFrameScript(Handle,TEXT("OnDragStart"),{Button});
+}
+
+void FWowFrameManager::DispatchDragStop(int64 Handle,const FString& Button)
+{
+    if(EventSystem) EventSystem->RunFrameScript(Handle,TEXT("OnDragStop"),{Button});
+}
+
+bool FWowFrameManager::DispatchMouseWheel(int64 Handle,float Delta)
+{
+    for(int32 Depth=0; Handle>=0 && Depth<64; ++Depth)
+    {
+        if(IsFrameMouseWheelEnabled(Handle) && EventSystem)
+            return EventSystem->RunFrameScript(Handle,TEXT("OnMouseWheel"),{FString::SanitizeFloat(Delta)});
+        Handle=GetParentHandle(Handle);
+    }
+    return false;
+}
+
 void FWowFrameManager::DispatchMouseUp(int64 Handle, const FString& Button)
 {
 	if (!EventSystem || Handle < 0) return;
@@ -2217,8 +2431,10 @@ void FWowFrameManager::DispatchMouseUp(int64 Handle, const FString& Button)
 void FWowFrameManager::DispatchClick(int64 Handle, const FString& Button, bool bMouseDown)
 {
 	if (!EventSystem || Handle < 0) return;
+	if(const auto* Widget=GetButtonWidget(Handle); Widget && !Widget->GetIsEnabled()) return;
 
 	const FFrameEntry* Entry = Frames.Find(Handle);
+	if(Entry && Entry->Def.Type==EWowFrameType::CheckButton && Button==TEXT("LeftButton")) SetChecked(Handle,!GetChecked(Handle));
 
 	// Native secure action dispatch — emulates WoW's C++ SecureActionButton behavior.
 	// The FrameXML OnLoad for SecureActionButtonTemplate sets type="action" via Lua,
@@ -2328,104 +2544,33 @@ bool FWowFrameManager::DispatchReceiveDrag(int64 Handle)
 
 // ── ScrollFrame Implementation ──────────────────────────────────────────────
 
-void FWowFrameManager::SetScrollChild(int64 ScrollFrameHandle, int64 ChildHandle)
+void FWowFrameManager::SetScrollChild(int64 ScrollFrameHandle,int64 ChildHandle)
 {
-	if (ScrollFrameHandle < 0 || ChildHandle < 0)
-		return;
-
-	const FFrameEntry* ScrollFrameEntry = Frames.Find(ScrollFrameHandle);
-	const FFrameEntry* ChildEntry = Frames.Find(ChildHandle);
-
-	if (!ScrollFrameEntry || !ChildEntry || ScrollFrameEntry->Def.Type != EWowFrameType::ScrollFrame)
-		return;
-
-	// Store the child relationship
-	ScrollChildHandles.Add(ScrollFrameHandle, ChildHandle);
-
-	// Ensure child is parented to the scroll frame (reparent if necessary)
-	UWidget* ScrollWidget = ScrollFrameEntry->Widget.Get();
-	UWidget* ChildWidget = ChildEntry->Widget.Get();
-
-	if (ScrollWidget && ChildWidget)
-	{
-		UCanvasPanel* ScrollCanvas = Cast<UCanvasPanel>(ScrollWidget);
-		if (ScrollCanvas && ChildWidget->GetParent() != ScrollCanvas)
-		{
-			// Remove from old parent if needed
-			if (UPanelWidget* OldParent = ChildWidget->GetParent())
-			{
-				OldParent->RemoveChild(ChildWidget);
-			}
-
-			// Add to scroll frame canvas
-			UCanvasPanelSlot* Slot = ScrollCanvas->AddChildToCanvas(ChildWidget);
-			if (Slot)
-			{
-				// Apply current scroll offset
-				float VerticalOffset = ScrollVerticalOffsets.FindRef(ScrollFrameHandle);
-				float HorizontalOffset = ScrollHorizontalOffsets.FindRef(ScrollFrameHandle);
-
-				FVector2D CurrentPos = Slot->GetPosition();
-				Slot->SetPosition(FVector2D(CurrentPos.X - HorizontalOffset * UIScale,
-											CurrentPos.Y - VerticalOffset * UIScale));
-			}
-		}
-	}
-
-	UE_LOG(LogWowFrame, Verbose, TEXT("SetScrollChild: frame %lld child %lld"), ScrollFrameHandle, ChildHandle);
+    auto* Scroll=Frames.Find(ScrollFrameHandle); auto* Child=Frames.Find(ChildHandle);
+    if(!Scroll || !Child || ScrollFrameHandle==ChildHandle || Scroll->Def.Type!=EWowFrameType::ScrollFrame) return;
+    if(!ReparentFrame(ChildHandle,ScrollFrameHandle)) return;
+    ScrollChildHandles.Add(ScrollFrameHandle,ChildHandle);
+    Child=Frames.Find(ChildHandle);
+    if(Child->Def.Anchors.IsEmpty()) { FWowAnchor A; A.Point=A.RelativePoint=EWowAnchorPoint::TOPLEFT; Child->Def.Anchors.Add(A); }
+    if(Scroll->Widget.IsValid()) Scroll->Widget->SetClipping(EWidgetClipping::ClipToBoundsAlways);
+    FrameRects.Reset(); bLayoutDirty=true;
 }
-
 int64 FWowFrameManager::GetScrollChild(int64 ScrollFrameHandle) const
 {
 	if (ScrollFrameHandle < 0)
 		return -1;
 
-	return ScrollChildHandles.FindRef(ScrollFrameHandle);
+	const auto* Child=ScrollChildHandles.Find(ScrollFrameHandle); return Child?*Child:-1;
 }
 
-void FWowFrameManager::SetVerticalScroll(int64 ScrollFrameHandle, float Offset)
+void FWowFrameManager::SetVerticalScroll(int64 Handle,float Offset)
 {
-	if (ScrollFrameHandle < 0)
-		return;
-
-	const FFrameEntry* ScrollFrameEntry = Frames.Find(ScrollFrameHandle);
-	if (!ScrollFrameEntry || ScrollFrameEntry->Def.Type != EWowFrameType::ScrollFrame)
-		return;
-
-	// Clamp offset to valid range
-	Offset = FMath::Max(0.0f, Offset);
-
-	float MaxScroll = GetVerticalScrollRange(ScrollFrameHandle);
-	if (MaxScroll > 0.0f)
-	{
-		Offset = FMath::Min(Offset, MaxScroll);
-	}
-
-	float OldOffset = ScrollVerticalOffsets.FindRef(ScrollFrameHandle);
-	ScrollVerticalOffsets.Add(ScrollFrameHandle, Offset);
-
-	// Update child position if child exists
-	int64 ChildHandle = GetScrollChild(ScrollFrameHandle);
-	if (ChildHandle >= 0)
-	{
-		const FFrameEntry* ChildEntry = Frames.Find(ChildHandle);
-		if (ChildEntry && ChildEntry->Widget.IsValid())
-		{
-			UWidget* ChildWidget = ChildEntry->Widget.Get();
-			if (UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(ChildWidget->Slot))
-			{
-				FVector2D CurrentPos = Slot->GetPosition();
-				// Adjust Y position by the change in scroll offset
-				float DeltaScroll = Offset - OldOffset;
-				Slot->SetPosition(FVector2D(CurrentPos.X, CurrentPos.Y - DeltaScroll * UIScale));
-			}
-		}
-	}
-
-	UE_LOG(LogWowFrame, Verbose, TEXT("SetVerticalScroll: frame %lld offset %.2f (was %.2f)"),
-		ScrollFrameHandle, Offset, OldOffset);
+    if(!FMath::IsFinite(Offset)) return;
+    const float Value=FMath::Clamp(Offset,0.f,GetVerticalScrollRange(Handle));
+    if(FMath::IsNearlyEqual(Value,ScrollVerticalOffsets.FindRef(Handle))) return;
+    ScrollVerticalOffsets.Add(Handle,Value); FrameRects.Reset(); bLayoutDirty=true;
+    if(EventSystem) EventSystem->RunFrameScript(Handle,TEXT("OnVerticalScroll"),{FString::SanitizeFloat(Value)});
 }
-
 float FWowFrameManager::GetVerticalScroll(int64 ScrollFrameHandle) const
 {
 	if (ScrollFrameHandle < 0)
@@ -2434,49 +2579,14 @@ float FWowFrameManager::GetVerticalScroll(int64 ScrollFrameHandle) const
 	return ScrollVerticalOffsets.FindRef(ScrollFrameHandle);
 }
 
-void FWowFrameManager::SetHorizontalScroll(int64 ScrollFrameHandle, float Offset)
+void FWowFrameManager::SetHorizontalScroll(int64 Handle,float Offset)
 {
-	if (ScrollFrameHandle < 0)
-		return;
-
-	const FFrameEntry* ScrollFrameEntry = Frames.Find(ScrollFrameHandle);
-	if (!ScrollFrameEntry || ScrollFrameEntry->Def.Type != EWowFrameType::ScrollFrame)
-		return;
-
-	// Clamp offset to valid range
-	Offset = FMath::Max(0.0f, Offset);
-
-	float MaxScroll = GetHorizontalScrollRange(ScrollFrameHandle);
-	if (MaxScroll > 0.0f)
-	{
-		Offset = FMath::Min(Offset, MaxScroll);
-	}
-
-	float OldOffset = ScrollHorizontalOffsets.FindRef(ScrollFrameHandle);
-	ScrollHorizontalOffsets.Add(ScrollFrameHandle, Offset);
-
-	// Update child position if child exists
-	int64 ChildHandle = GetScrollChild(ScrollFrameHandle);
-	if (ChildHandle >= 0)
-	{
-		const FFrameEntry* ChildEntry = Frames.Find(ChildHandle);
-		if (ChildEntry && ChildEntry->Widget.IsValid())
-		{
-			UWidget* ChildWidget = ChildEntry->Widget.Get();
-			if (UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(ChildWidget->Slot))
-			{
-				FVector2D CurrentPos = Slot->GetPosition();
-				// Adjust X position by the change in scroll offset
-				float DeltaScroll = Offset - OldOffset;
-				Slot->SetPosition(FVector2D(CurrentPos.X - DeltaScroll * UIScale, CurrentPos.Y));
-			}
-		}
-	}
-
-	UE_LOG(LogWowFrame, Verbose, TEXT("SetHorizontalScroll: frame %lld offset %.2f (was %.2f)"),
-		ScrollFrameHandle, Offset, OldOffset);
+    if(!FMath::IsFinite(Offset)) return;
+    const float Value=FMath::Clamp(Offset,0.f,GetHorizontalScrollRange(Handle));
+    if(FMath::IsNearlyEqual(Value,ScrollHorizontalOffsets.FindRef(Handle))) return;
+    ScrollHorizontalOffsets.Add(Handle,Value); FrameRects.Reset(); bLayoutDirty=true;
+    if(EventSystem) EventSystem->RunFrameScript(Handle,TEXT("OnHorizontalScroll"),{FString::SanitizeFloat(Value)});
 }
-
 float FWowFrameManager::GetHorizontalScroll(int64 ScrollFrameHandle) const
 {
 	if (ScrollFrameHandle < 0)
@@ -2485,48 +2595,25 @@ float FWowFrameManager::GetHorizontalScroll(int64 ScrollFrameHandle) const
 	return ScrollHorizontalOffsets.FindRef(ScrollFrameHandle);
 }
 
-float FWowFrameManager::GetVerticalScrollRange(int64 ScrollFrameHandle) const
+float FWowFrameManager::GetVerticalScrollRange(int64 Handle) const
 {
-	if (ScrollFrameHandle < 0)
-		return 0.0f;
-
-	const FFrameEntry* ScrollFrameEntry = Frames.Find(ScrollFrameHandle);
-	if (!ScrollFrameEntry || ScrollFrameEntry->Def.Type != EWowFrameType::ScrollFrame)
-		return 0.0f;
-
-	int64 ChildHandle = GetScrollChild(ScrollFrameHandle);
-	if (ChildHandle < 0)
-		return 0.0f;
-
-	const FFrameEntry* ChildEntry = Frames.Find(ChildHandle);
-	if (!ChildEntry || !ChildEntry->Widget.IsValid() || !ScrollFrameEntry->Widget.IsValid())
-		return 0.0f;
-
-	// Get frame sizes in WoW coordinates (pre-scaling)
-	float ScrollFrameHeight = ScrollFrameEntry->Def.Height;
-	float ChildHeight = ChildEntry->Def.Height;
-
-	// If frame height is 0 (auto-sized), get actual widget size
-	if (ScrollFrameHeight <= 0.0f)
-	{
-		if (UCanvasPanelSlot* ScrollSlot = Cast<UCanvasPanelSlot>(ScrollFrameEntry->Widget->Slot))
-		{
-			ScrollFrameHeight = ScrollSlot->GetSize().Y / UIScale;
-		}
-	}
-
-	if (ChildHeight <= 0.0f)
-	{
-		if (UCanvasPanelSlot* ChildSlot = Cast<UCanvasPanelSlot>(ChildEntry->Widget->Slot))
-		{
-			ChildHeight = ChildSlot->GetSize().Y / UIScale;
-		}
-	}
-
-	// Maximum scroll is the difference between child height and frame height
-	return FMath::Max(0.0f, ChildHeight - ScrollFrameHeight);
+    const auto* Scroll=Frames.Find(Handle); const int64 Child=GetScrollChild(Handle);
+    if(!Scroll || Child<0 || Scroll->Def.Type!=EWowFrameType::ScrollFrame) return 0;
+    auto* Layout=const_cast<FWowFrameManager*>(this); if(bLayoutDirty) Layout->RefreshLayout();
+    const auto ChildRect=Layout->GetLayoutRect(Child),ScrollRect=Layout->GetLayoutRect(Handle);
+    const auto Descendant=[&](int64 Owner) { for(int32 Depth=0;Owner>=0 && Depth<64;++Depth,Owner=GetParentHandle(Owner)) if(Owner==Child) return true; return false; };
+    float Bottom=ChildRect.Y+ChildRect.W;
+    for(const auto& Pair:Frames) if(Descendant(Pair.Key) && IsFrameDrawn(Pair.Key)) { const auto R=Layout->GetLayoutRect(Pair.Key); Bottom=FMath::Max(Bottom,float(R.Y+R.W)); }
+    for(const auto& Region:RegionLayouts)
+    {
+        const int64 Owner=FindFrame(Region.Owner);
+        if(!Descendant(Owner) || !IsFrameDrawn(Owner) || !Region.Widget.IsValid() || Region.Widget->GetVisibility()==ESlateVisibility::Collapsed) continue;
+        const auto* Slot=Cast<UCanvasPanelSlot>(Region.Widget->Slot); if(!Slot) continue;
+        const auto R=Layout->GetLayoutRect(Owner); const float Scale=GetEffectiveFrameScale(Owner)/UIScale;
+        Bottom=FMath::Max(Bottom,float(R.Y+(Slot->GetPosition().Y+Slot->GetSize().Y)*Scale));
+    }
+    return FMath::Max(0.f,(Bottom-ChildRect.Y-ScrollRect.W)/GetEffectiveFrameScale(Handle));
 }
-
 float FWowFrameManager::GetHorizontalScrollRange(int64 ScrollFrameHandle) const
 {
 	if (ScrollFrameHandle < 0)
@@ -2716,6 +2803,30 @@ void FWowFrameManager::TooltipUpdateDisplay(int64 TooltipHandle)
 
 	const FWowFrameDef* TooltipDef = GetFrameDef(TooltipHandle);
 	if (!TooltipDef) return;
+	const FString Prefix=TooltipDef->Name;
+	float TextY=8;
+	const auto EnsureText=[&](int32 Line,bool Right)->UTextBlock*
+	{
+		const FString Name=FString::Printf(TEXT("%sText%s%d"),*Prefix,Right?TEXT("Right"):TEXT("Left"),Line);
+		UTextBlock* Text=GetNamedFontString(Name);
+		if(!Text) if(auto* Canvas=Cast<UCanvasPanel>(GetWidgetForHandle(TooltipHandle)))
+		{
+			Text=NewObject<UTextBlock>(Canvas); Canvas->AddChildToCanvas(Text);
+			NamedFontStringWidgets.Add(Name,Text); RegionOwners.Add(Name,Prefix);
+			if(EventSystem) EventSystem->CreateTextureRegionGlobal(Name,TooltipHandle,TEXT("FontString"));
+		}
+		if(Text)
+		{
+			if(FontManager) Text->SetFont(FontManager->GetDefaultFont(FMath::Max(1,FMath::RoundToInt(12*UIScale))));
+			Text->SetJustification(Right?ETextJustify::Right:ETextJustify::Left);
+			if(auto* Slot=Cast<UCanvasPanelSlot>(Text->Slot))
+			{
+				Slot->SetAnchors(FAnchors(Right?1.f:0.f,0)); Slot->SetAlignment(FVector2D(Right?1.f:0.f,0));
+				Slot->SetPosition(FVector2D((Right?-8:8)*UIScale,TextY*UIScale)); Slot->SetAutoSize(true); Slot->SetZOrder(100);
+			}
+		}
+		return Text;
+	};
 
 	// Update FontString widgets with tooltip lines
 	int32 LineIndex = 0;
@@ -2726,14 +2837,17 @@ void FWowFrameManager::TooltipUpdateDisplay(int64 TooltipHandle)
 		LineIndex++;
 
 		// Find the FontString widget for this line
-		FString LeftFontStringName = FString::Printf(TEXT("GameTooltipTextLeft%d"), LineIndex);
-		UTextBlock* LeftTextBlock = GetNamedFontString(LeftFontStringName);
+		UTextBlock* LeftTextBlock = EnsureText(LineIndex,false);
+		if(auto* Right=GetNamedFontString(FString::Printf(TEXT("%sTextRight%d"),*Prefix,LineIndex))) Right->SetVisibility(ESlateVisibility::Collapsed);
 
 		if (LeftTextBlock)
 		{
-			LeftTextBlock->SetText(FText::FromString(Line.Text));
+			LeftTextBlock->SetText(FText::FromString(WowUiPlainText(Line.Text)));
+			LeftTextBlock->SetAutoWrapText(Line.bWrapText); LeftTextBlock->SetWrapTextAt(Line.bWrapText?300*UIScale:0);
 			LeftTextBlock->SetColorAndOpacity(FSlateColor(Line.Color));
 			LeftTextBlock->SetVisibility(ESlateVisibility::Visible);
+			LeftTextBlock->ForceLayoutPrepass();
+			TextY+=FMath::Max(14.f,float(LeftTextBlock->GetDesiredSize().Y/UIScale));
 		}
 	}
 
@@ -2743,8 +2857,7 @@ void FWowFrameManager::TooltipUpdateDisplay(int64 TooltipHandle)
 		LineIndex++;
 
 		// Left side
-		FString LeftFontStringName = FString::Printf(TEXT("GameTooltipTextLeft%d"), LineIndex);
-		UTextBlock* LeftTextBlock = GetNamedFontString(LeftFontStringName);
+		UTextBlock* LeftTextBlock = EnsureText(LineIndex,false);
 		if (LeftTextBlock)
 		{
 			LeftTextBlock->SetText(FText::FromString(DoubleLine.LeftText));
@@ -2753,27 +2866,27 @@ void FWowFrameManager::TooltipUpdateDisplay(int64 TooltipHandle)
 		}
 
 		// Right side
-		FString RightFontStringName = FString::Printf(TEXT("GameTooltipTextRight%d"), LineIndex);
-		UTextBlock* RightTextBlock = GetNamedFontString(RightFontStringName);
+		UTextBlock* RightTextBlock = EnsureText(LineIndex,true);
 		if (RightTextBlock)
 		{
 			RightTextBlock->SetText(FText::FromString(DoubleLine.RightText));
 			RightTextBlock->SetColorAndOpacity(FSlateColor(DoubleLine.RightColor));
 			RightTextBlock->SetVisibility(ESlateVisibility::Visible);
 		}
+		TextY+=14;
 	}
 
 	// Hide unused FontString widgets
 	for (int32 HideIndex = LineIndex + 1; HideIndex <= 30; HideIndex++) // WoW usually has up to 30 tooltip lines
 	{
-		FString LeftFontStringName = FString::Printf(TEXT("GameTooltipTextLeft%d"), HideIndex);
+		FString LeftFontStringName = FString::Printf(TEXT("%sTextLeft%d"),*Prefix,HideIndex);
 		UTextBlock* LeftTextBlock = GetNamedFontString(LeftFontStringName);
 		if (LeftTextBlock)
 		{
 			LeftTextBlock->SetVisibility(ESlateVisibility::Collapsed);
 		}
 
-		FString RightFontStringName = FString::Printf(TEXT("GameTooltipTextRight%d"), HideIndex);
+		FString RightFontStringName = FString::Printf(TEXT("%sTextRight%d"),*Prefix,HideIndex);
 		UTextBlock* RightTextBlock = GetNamedFontString(RightFontStringName);
 		if (RightTextBlock)
 		{
@@ -2784,14 +2897,15 @@ void FWowFrameManager::TooltipUpdateDisplay(int64 TooltipHandle)
 	// Calculate and set tooltip size based on content
 	float TooltipWidth = State->MinimumWidth;
 	float TooltipHeight = 0.f;
-	const float LineHeight = 13.f; // Approximate WoW tooltip line height
+	const float LineHeight = 14.f;
 	const float Padding = 16.f; // Padding around tooltip content
 
 	// Calculate width based on text content
 	for (const FTooltipLine& Line : State->Lines)
 	{
 		// Estimate text width (this is a simplification)
-		float EstimatedWidth = Line.Text.Len() * 7.f; // Rough estimate
+		float EstimatedWidth = WowUiPlainText(Line.Text).Len() * 6.f;
+		if(Line.bWrapText) EstimatedWidth=FMath::Min(300.f,EstimatedWidth);
 		TooltipWidth = FMath::Max(TooltipWidth, EstimatedWidth);
 	}
 
@@ -2801,11 +2915,26 @@ void FWowFrameManager::TooltipUpdateDisplay(int64 TooltipHandle)
 		TooltipWidth = FMath::Max(TooltipWidth, EstimatedWidth);
 	}
 
-	TooltipHeight = (State->GetTotalLines() * LineHeight) + Padding;
+	TooltipHeight = TextY+8;
 	TooltipWidth += Padding;
 
 	// Set the tooltip frame size
 	SetFrameSize(TooltipHandle, TooltipWidth, TooltipHeight);
+	if(State->AnchorType!=TEXT("ANCHOR_NONE"))
+	{
+		const auto Root=GetFrameRect(TEXT("UIParent")); const auto Owner=GetLayoutRect(State->OwnerHandle);
+		FVector2D P=LastPointerPosition/RawViewportScale+FVector2D(16,-TooltipHeight-12);
+		if(State->OwnerHandle>=0 && !State->AnchorType.Contains(TEXT("CURSOR")))
+		{
+			P=FVector2D(Owner.X+Owner.Z+8,Owner.Y);
+			if(State->AnchorType.Contains(TEXT("LEFT"))) P.X=Owner.X-TooltipWidth-8;
+			if(State->AnchorType==TEXT("ANCHOR_TOP")) P=FVector2D(Owner.X+(Owner.Z-TooltipWidth)*.5,Owner.Y-TooltipHeight-8);
+			if(State->AnchorType==TEXT("ANCHOR_BOTTOM")) P=FVector2D(Owner.X,Owner.Y+Owner.W+8);
+		}
+		FWowAnchor Anchor; Anchor.Point=Anchor.RelativePoint=EWowAnchorPoint::TOPLEFT; Anchor.RelativeTo=TEXT("UIParent");
+		Anchor.OffsetX=FMath::Clamp(float(P.X),4.f,FMath::Max(4.f,Root.W-TooltipWidth-4)); Anchor.OffsetY=-FMath::Clamp(float(P.Y),4.f,FMath::Max(4.f,Root.H-TooltipHeight-4));
+		SetFrameAnchors(TooltipHandle,{Anchor});
+	}
 }
 
 void FWowFrameManager::TooltipSetItem(int64 TooltipHandle, const FString& ItemLink)
@@ -2823,7 +2952,7 @@ void FWowFrameManager::TooltipSetItem(int64 TooltipHandle, const FString& ItemLi
 	TooltipAddLine(TooltipHandle, FString::Printf(TEXT("Item: %s"), *ItemLink), 1.0f, 1.0f, 1.0f, false);
 }
 
-void FWowFrameManager::TooltipSetSpell(int64 TooltipHandle, int32 SpellId)
+void FWowFrameManager::TooltipSetSpell(int64 TooltipHandle, int32 SpellId,int32 Level,bool Aura)
 {
 	FTooltipState* State = GetTooltipState(TooltipHandle);
 	if (!State) return;
@@ -2832,10 +2961,27 @@ void FWowFrameManager::TooltipSetSpell(int64 TooltipHandle, int32 SpellId)
 	State->ItemLink.Empty(); // Clear other contexts
 	State->UnitToken.Empty();
 
-	// TODO: Lookup spell data and populate tooltip
-	// For now, just add a placeholder line
 	TooltipClearLines(TooltipHandle);
-	TooltipAddLine(TooltipHandle, FString::Printf(TEXT("Spell ID: %d"), SpellId), 1.0f, 1.0f, 1.0f, false);
+	const auto& Spells=FDbcStore::Get().Spells(); const auto* Spell=Spells.GetById(SpellId);
+	if(!Spell) { SetFrameVisible(TooltipHandle,false); return; }
+	TooltipAddLine(TooltipHandle,Spell->SpellName,1,1,1,false);
+	if(!Spell->Rank.IsEmpty()) TooltipAddLine(TooltipHandle,Spell->Rank,.7f,.7f,.7f,false);
+	if(!Aura)
+	{
+		if(Spell->ManaCost || Spell->ManaCostPercentage)
+		{
+			static const TCHAR* Power[]={TEXT("Mana"),TEXT("Rage"),TEXT("Focus"),TEXT("Energy"),TEXT("Happiness"),TEXT("Runes"),TEXT("Runic Power")};
+			const FString Cost=Spell->ManaCostPercentage?FString::Printf(TEXT("%u%% of base mana"),Spell->ManaCostPercentage):FString::Printf(TEXT("%g %s"),Spell->ManaCost/(Spell->PowerType==1 || Spell->PowerType==6?10.f:1.f),Spell->PowerType<UE_ARRAY_COUNT(Power)?Power[Spell->PowerType]:TEXT(""));
+			TooltipAddLine(TooltipHandle,Cost,1,1,1,false);
+		}
+		if(const auto* Range=Spells.GetRange(Spell->RangeIndex); Range && Range->Max[0]>0) TooltipAddLine(TooltipHandle,FString::Printf(TEXT("%g yd range"),Range->Max[0]),1,1,1,false);
+		const float Cast=Spells.CastTime(Spell->CastingTimeIndex);
+		TooltipAddLine(TooltipHandle,Cast>0?FString::Printf(TEXT("%g sec cast"),Cast):TEXT("Instant"),1,1,1,false);
+		if(Spell->RecoveryTime) TooltipAddLine(TooltipHandle,FString::Printf(TEXT("%g sec cooldown"),Spell->RecoveryTime/1000.f),1,1,1,false);
+	}
+	const FString Description=Spells.Description(SpellId,Level,Aura);
+	if(!Description.IsEmpty()) TooltipAddLine(TooltipHandle,Description,1,.82f,0,true);
+	SetFrameVisible(TooltipHandle,true);
 }
 
 void FWowFrameManager::TooltipSetUnit(int64 TooltipHandle, const FString& UnitToken)

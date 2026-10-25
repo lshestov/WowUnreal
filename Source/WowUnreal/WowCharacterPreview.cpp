@@ -109,17 +109,15 @@ void AWowCharacterPreview::ShowCharacter(uint8 RaceId, uint8 GenderId)
         PositionCamera(RaceId);
 
         // Capture with a short delay to let shaders compile
-        FTimerHandle CaptureTimer;
-        GetWorldTimerManager().SetTimer(CaptureTimer, [this]()
+        GetWorldTimerManager().SetTimer(CaptureTimer, FTimerDelegate::CreateWeakLambda(this,[this]()
         {
             CaptureNow();
             // Capture again after a moment for shader compilation
-            FTimerHandle SecondCapture;
-            GetWorldTimerManager().SetTimer(SecondCapture, [this]()
+            GetWorldTimerManager().SetTimer(SecondCaptureTimer, FTimerDelegate::CreateWeakLambda(this,[this]()
             {
                 CaptureNow();
-            }, 1.0f, false);
-        }, 0.2f, false);
+            }), 1.0f, false);
+        }), 0.2f, false);
 
         UE_LOG(LogWowPreview, Log, TEXT("Spawned preview character: Race=%d Gender=%d"), RaceId, GenderId);
     }
@@ -163,6 +161,7 @@ void AWowCharacterPreview::PositionCamera(uint8 RaceId)
 
 void AWowCharacterPreview::ClearCharacter()
 {
+    if(GetWorld()) { GetWorldTimerManager().ClearTimer(CaptureTimer); GetWorldTimerManager().ClearTimer(SecondCaptureTimer); }
     if (CurrentCharacterActor && CurrentCharacterActor->IsValidLowLevel())
     {
         CurrentCharacterActor->Destroy();
@@ -172,8 +171,14 @@ void AWowCharacterPreview::ClearCharacter()
 
 void AWowCharacterPreview::CaptureNow()
 {
-    if (CaptureComponent && RenderTarget)
+    if (!IsActorBeingDestroyed() && IsValid(CaptureComponent) && IsValid(RenderTarget))
     {
         CaptureComponent->CaptureScene();
     }
+}
+
+void AWowCharacterPreview::EndPlay(const EEndPlayReason::Type Reason)
+{
+    ClearCharacter();
+    Super::EndPlay(Reason);
 }

@@ -20,6 +20,7 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(WowOpcode::SMSG_COMPRESSED_UPDATE_OBJECT, &FWowPacketHandler::HandleCompressedUpdateObject);
     Handlers.Add(WowOpcode::SMSG_DESTROY_OBJECT,           &FWowPacketHandler::HandleDestroyObject);
     Handlers.Add(WowOpcode::SMSG_MESSAGECHAT,              &FWowPacketHandler::HandleMessageChat);
+    Handlers.Add(0x03B3, &FWowPacketHandler::HandleGmMessageChat);
     Handlers.Add(WowOpcode::SMSG_INITIAL_SPELLS,           &FWowPacketHandler::HandleInitialSpells);
     Handlers.Add(WowOpcode::SMSG_ACTION_BUTTONS,           &FWowPacketHandler::HandleActionButtons);
     Handlers.Add(WowOpcode::SMSG_TIME_SYNC_REQ,            &FWowPacketHandler::HandleTimeSyncReq);
@@ -31,6 +32,7 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(WowOpcode::SMSG_ATTACKSTART,              &FWowPacketHandler::HandleAttackStart);
     Handlers.Add(WowOpcode::SMSG_ATTACKSTOP,               &FWowPacketHandler::HandleAttackStop);
     Handlers.Add(WowOpcode::SMSG_AURA_UPDATE,              &FWowPacketHandler::HandleAuraUpdate);
+    Handlers.Add(WowOpcode::SMSG_AURA_UPDATE_ALL,          &FWowPacketHandler::HandleAuraUpdateAll);
     Handlers.Add(WowOpcode::SMSG_POWER_UPDATE,             &FWowPacketHandler::HandlePowerUpdate);
     Handlers.Add(WowOpcode::SMSG_MONSTER_MOVE,             &FWowPacketHandler::HandleMonsterMove);
 
@@ -45,6 +47,7 @@ FWowPacketHandler::FWowPacketHandler()
 
     // Quest system handlers
     Handlers.Add(WowOpcode::SMSG_QUESTGIVER_STATUS,        &FWowPacketHandler::HandleQuestgiverStatus);
+    Handlers.Add(WowOpcode::SMSG_QUEST_QUERY_RESPONSE,      &FWowPacketHandler::HandleQuestQueryResponse);
     Handlers.Add(WowOpcode::SMSG_QUESTGIVER_QUEST_DETAILS, &FWowPacketHandler::HandleQuestgiverQuestDetails);
     Handlers.Add(WowOpcode::SMSG_QUESTGIVER_OFFER_REWARD,  &FWowPacketHandler::HandleQuestgiverOfferReward);
     Handlers.Add(WowOpcode::SMSG_QUEST_UPDATE_ADD_KILL,    &FWowPacketHandler::HandleQuestUpdateAddKill);
@@ -159,6 +162,37 @@ void FWowPacketHandler::HandlePacket(uint16 Opcode, const TArray<uint8>& Data)
         return;
     }
 
+    if(Opcode==0x0329 || Opcode==0x04EB)
+    {
+        FPacketReader R(Data); if(R.CanRead(4)) { auto& Difficulty=Opcode==0x0329?DungeonDifficulty:RaidDifficulty; Difficulty=R.ReadU32(); }
+    }
+    else if(Opcode==0x02CC)
+    {
+        FPacketReader R(Data); const uint32 Count=R.ReadU32();
+        if(Count<1000 && R.CanRead(Count*22)) { SavedInstances.Reset(); for(uint32 I=0;I<Count;++I) { FSavedInstance V; V.Map=R.ReadU32(); V.Difficulty=R.ReadU32(); V.Id=R.ReadU64(); V.Locked=R.ReadU8()!=0; V.Extended=R.ReadU8()!=0; V.Reset=R.ReadU32(); SavedInstances.Add(V); } }
+    }
+    else if(Opcode==0x02A9 || Opcode==0x0219 || Opcode==0x01CB || Opcode==0x02FD)
+    {
+        FPacketReader R(Data); FString Text;
+        if(Opcode==0x02A9) Text=FString::Printf(TEXT("No player named '%s' is currently playing."),*R.ReadCString());
+        else if(Opcode==0x0219) Text=TEXT("You can only whisper to members of your faction.");
+        else if(Opcode==0x01CB) Text=R.ReadCString();
+        else Text=TEXT("The server has restricted this chat message.");
+        OnChatMessage.Broadcast(0,0,0,TEXT(""),Text,TEXT(""));
+    }
+    else if(Opcode==0x0122)
+    {
+        FPacketReader R(Data); const uint32 Count=R.ReadU32();
+        if(Count<=128 && R.CanRead(Count*5)) { Reputations.SetNum(128); for(uint32 I=0;I<Count;++I) { Reputations[I].Flags=R.ReadU8(); Reputations[I].Standing=int32(R.ReadU32()); } }
+    }
+    else if(Opcode==0x0123 || Opcode==0x0313)
+    {
+        FPacketReader R(Data); if(R.CanRead(4)) { const uint32 I=R.ReadU32(); if(Reputations.IsValidIndex(I)) { if(Opcode==0x0123) Reputations[I].Flags|=1; else if(R.CanRead(1)) Reputations[I].Flags=(Reputations[I].Flags&~2)|(R.ReadU8()?2:0); } }
+    }
+    else if(Opcode==0x0124)
+    {
+        FPacketReader R(Data); if(R.CanRead(9)) { R.ReadFloat(); R.ReadU8(); const uint32 Count=R.ReadU32(); if(Count<=128 && R.CanRead(Count*8)) for(uint32 N=0;N<Count;++N) { const uint32 I=R.ReadU32(); const int32 Standing=int32(R.ReadU32()); if(Reputations.IsValidIndex(I)) Reputations[I].Standing=Standing; } }
+    }
     HandlerFunc* Found = Handlers.Find(Opcode);
     if (Found)
     {
@@ -192,7 +226,31 @@ void FWowPacketHandler::HandleLoginVerifyWorld(FPacketReader& R)
     // Clear quest log on zone change
     QuestLog.Empty();
 
+    CurrentMapId=MapId;
     OnLoginVerifyWorld.Broadcast(MapId, X, Y, Z, O);
+}
+
+void FWowPacketHandler::HandleQuestQueryResponse(FPacketReader& R)
+{
+    if(!R.CanRead(4)) return;
+    FWowQuestTemplate Q; Q.Id=R.ReadU32(); if(Q.Id&0x80000000) return;
+    if(!R.CanRead(100+80+60+16)) return;
+    R.ReadU32(); Q.Level=int32(R.ReadU32()); Q.MinLevel=R.ReadU32(); Q.Zone=int32(R.ReadU32()); Q.Type=R.ReadU32(); Q.Group=R.ReadU32();
+    R.Skip(20); Q.XPDifficulty=R.ReadU32(); Q.Money=int32(R.ReadU32());
+    Q.MaxLevelMoney=R.ReadU32(); Q.RewardSpell=R.ReadU32(); Q.RewardSpellCast=R.ReadU32(); Q.Honor=R.ReadU32(); Q.HonorMultiplier=R.ReadFloat();
+    Q.SourceItemId=R.ReadU32(); Q.Flags=R.ReadU32(); Q.TitleId=R.ReadU32(); R.ReadU32(); Q.Talents=R.ReadU32(); Q.ArenaPoints=R.ReadU32(); R.ReadU32();
+    for(int32 I=0;I<4;++I) { FWowQuestRewardItem Item; Item.ItemId=R.ReadU32(); Item.Count=R.ReadU32(); if(Item.ItemId) Q.Rewards.Add(Item); }
+    for(int32 I=0;I<6;++I) { FWowQuestRewardItem Item; Item.ItemId=R.ReadU32(); Item.Count=R.ReadU32(); if(Item.ItemId) Q.Choices.Add(Item); }
+    for(auto& Id:Q.RewardFactionId) Id=R.ReadU32();
+    for(auto& Value:Q.RewardFactionValue) Value=int32(R.ReadU32());
+    for(auto& Value:Q.RewardFactionOverride) Value=int32(R.ReadU32());
+    R.Skip(16);
+    Q.Title=R.ReadCString(); Q.Objectives=R.ReadCString(); Q.Details=R.ReadCString(); Q.AreaDescription=R.ReadCString(); Q.CompletedText=R.ReadCString();
+    if(!R.CanRead(64+48+4)) return;
+    for(int32 I=0; I<4; ++I) { Q.CreatureId[I]=R.ReadU32(); Q.CreatureCount[I]=R.ReadU32(); R.Skip(8); }
+    for(int32 I=0; I<6; ++I) { Q.ItemId[I]=R.ReadU32(); Q.ItemCount[I]=R.ReadU32(); }
+    for(int32 I=0; I<4; ++I) Q.ObjectiveText[I]=R.ReadCString();
+    QuestTemplates.Add(Q.Id,MoveTemp(Q)); OnQuestLogChanged.Broadcast();
 }
 
 // ── SMSG_UPDATE_OBJECT ───────────────────────────────────────────────────────
@@ -715,11 +773,29 @@ void FWowPacketHandler::HandleMovement(FPacketReader& R)
 
 void FWowPacketHandler::HandleMessageChat(FPacketReader& R)
 {
+    ParseMessageChat(R,false);
+}
+void FWowPacketHandler::HandleGmMessageChat(FPacketReader& R)
+{
+    ParseMessageChat(R,true);
+}
+void FWowPacketHandler::ParseMessageChat(FPacketReader& R,bool Gm)
+{
+    if(!R.CanRead(17)) return;
     uint8 Type = R.ReadU8();
     uint32 Language = R.ReadU32();
     uint64 SenderGuid = R.ReadU64();
     R.ReadU32(); // flags
 
+    FString SenderName;
+    const bool Monster=(Type>=12 && Type<=16) || Type==41 || Type==42 || Type==47;
+    const bool Foreign=Type==8;
+    const bool Battleground=Type==36 || Type==37 || Type==38;
+    if(Monster || Foreign || (Gm && !Battleground && Type!=48 && Type!=49))
+    {
+        if(!R.CanRead(4)) return; const uint32 Length=R.ReadU32(); if(!Length || Length>uint32(R.Remaining())) return;
+        SenderName=R.ReadCString();
+    }
     // Channel name for channel messages
     FString Channel;
     if (Type == 17) // CHAT_MSG_CHANNEL
@@ -728,13 +804,18 @@ void FWowPacketHandler::HandleMessageChat(FPacketReader& R)
     }
 
     uint64 TargetGuid = R.ReadU64();
+    if((Monster && TargetGuid && (TargetGuid>>48)!=0 && (TargetGuid>>48)!=0xF140) || (Battleground && TargetGuid && (TargetGuid>>48)!=0))
+    {
+        if(!R.CanRead(4)) return; const uint32 Length=R.ReadU32(); if(!Length || Length>uint32(R.Remaining())) return; R.ReadCString();
+    }
+    if(!R.CanRead(4)) return;
     uint32 MsgLen = R.ReadU32();
+    if(!MsgLen || MsgLen>uint32(R.Remaining()) || !R.CanRead(MsgLen+1) || R.Data[R.Pos+MsgLen-1]!=0) return;
     FString Message = R.ReadCString();
     uint8 ChatTag = R.ReadU8();
 
     // Get sender name from cache
-    FString SenderName;
-    if (SenderGuid != 0)
+    if (SenderName.IsEmpty() && SenderGuid != 0)
     {
         FString* CachedName = PlayerNameCache.Find(SenderGuid);
         if (CachedName)
@@ -760,6 +841,7 @@ void FWowPacketHandler::HandleInitialSpells(FPacketReader& R)
     uint16 SpellCount = R.ReadU16();
 
     KnownSpells.Empty(SpellCount);
+    SpellCooldowns.Reset(); SpellCooldownInfo.Reset();
     for (int32 i = 0; i < SpellCount; ++i)
     {
         uint32 SpellId = R.ReadU32();
@@ -774,12 +856,13 @@ void FWowPacketHandler::HandleInitialSpells(FPacketReader& R)
         R.ReadU16(); // item ID
         R.ReadU16(); // spell category
         uint32 CooldownMs = R.ReadU32();
-        R.ReadU32(); // category cooldown
+        CooldownMs=FMath::Max(CooldownMs,R.ReadU32()); // category cooldown
 
         if (CooldownMs > 0)
         {
             double ExpiryTime = FPlatformTime::Seconds() + CooldownMs / 1000.0;
             SpellCooldowns.Add(SpellId, ExpiryTime);
+            SpellCooldownInfo.Add(SpellId,{ExpiryTime-CooldownMs/1000.0,CooldownMs/1000.f});
             OnSpellCooldown.Broadcast(SpellId, CooldownMs / 1000.0f);
         }
     }
@@ -965,6 +1048,7 @@ void FWowPacketHandler::HandleSpellCooldown(FPacketReader& R)
 
     uint64 CasterGuid = R.ReadU64();
     uint8 Flags = R.ReadU8();
+    if(EntityManager.LocalPlayerGuid && CasterGuid!=EntityManager.LocalPlayerGuid) return;
 
     int32 CooldownsProcessed = 0;
     while (R.CanRead(8)) // spell id (4) + cooldown ms (4)
@@ -976,9 +1060,11 @@ void FWowPacketHandler::HandleSpellCooldown(FPacketReader& R)
         {
             double ExpiryTime = FPlatformTime::Seconds() + CooldownMs / 1000.0;
             SpellCooldowns.Add(SpellId, ExpiryTime);
+            SpellCooldownInfo.Add(SpellId,{ExpiryTime-CooldownMs/1000.0,CooldownMs/1000.f});
             OnSpellCooldown.Broadcast(SpellId, CooldownMs / 1000.0f);
             CooldownsProcessed++;
         }
+        else { SpellCooldowns.Remove(SpellId); SpellCooldownInfo.Remove(SpellId); }
     }
 
     UE_LOG(LogWowPacket, Log, TEXT("SPELL_COOLDOWN: caster=%llu flags=%u processed=%d cooldowns"),
@@ -1046,86 +1132,39 @@ void FWowPacketHandler::HandleAttackStop(FPacketReader& R)
 
 void FWowPacketHandler::HandleAuraUpdate(FPacketReader& R)
 {
-    if (!R.CanRead(2)) // minimum: packed guid + slot
-    {
-        UE_LOG(LogWowPacket, Warning, TEXT("AURA_UPDATE: packet too short"));
-        return;
-    }
-
-    uint64 TargetGuid = R.ReadPackedGuid();
-
-    FWowEntity* Entity = EntityManager.Find(TargetGuid);
-    if (!Entity)
-    {
-        UE_LOG(LogWowPacket, Warning, TEXT("AURA_UPDATE: unknown entity %llu"), TargetGuid);
-        return;
-    }
-
-    if (!R.CanRead(1)) return;
-    uint8 Slot = R.ReadU8();
-
-    if (Slot == 0xFF)
-    {
-        // End of aura updates
-        return;
-    }
-
-    if (Slot >= Entity->Auras.Num())
-    {
-        UE_LOG(LogWowPacket, Warning, TEXT("AURA_UPDATE: invalid slot %d"), Slot);
-        return;
-    }
-
-    if (!R.CanRead(4)) return;
-    uint32 SpellId = R.ReadU32();
-
-    if (SpellId == 0)
-    {
-        // Remove aura
-        Entity->Auras[Slot].bActive = false;
-        Entity->Auras[Slot].SpellId = 0;
-        UE_LOG(LogWowPacket, Verbose, TEXT("AURA_UPDATE: target=%llu slot=%d removed"), TargetGuid, Slot);
-        return;
-    }
-
-    // Add/update aura
-    if (!R.CanRead(3)) return;
-    uint8 Flags = R.ReadU8();
-    uint8 Level = R.ReadU8();
-    uint8 Charges = R.ReadU8();
-
-    FAuraInfo& Aura = Entity->Auras[Slot];
-    Aura.SpellId = SpellId;
-    Aura.Flags = Flags;
-    Aura.Level = Level;
-    Aura.Charges = Charges;
-    Aura.bActive = true;
-
-    // Check if caster GUID is present (depends on flags)
-    const uint8 AFLAG_CASTER = 0x08;
-    if (Flags & AFLAG_CASTER)
-    {
-        if (R.Remaining() > 0)
-        {
-            Aura.CasterGuid = R.ReadPackedGuid();
-        }
-    }
-
-    // Check if duration data is present (WOTLK 3.3.5a aura flags)
-    const uint8 AFLAG_DURATION = 0x20;
-    if (Flags & AFLAG_DURATION)
-    {
-        if (R.CanRead(8)) // 2x uint32
-        {
-            Aura.DurationMs = R.ReadU32();
-            Aura.RemainingMs = R.ReadU32();
-        }
-    }
-
-    UE_LOG(LogWowPacket, Log, TEXT("AURA_UPDATE: target=%llu slot=%d spell=%u"),
-        TargetGuid, Slot, SpellId);
+    if(!R.CanRead(1)) return;
+    const uint64 Guid=R.ReadPackedGuid();
+    HandleAuraRecords(R,Guid);
 }
 
+void FWowPacketHandler::HandleAuraUpdateAll(FPacketReader& R)
+{
+    if(!R.CanRead(1)) return;
+    const uint64 Guid=R.ReadPackedGuid();
+    if(auto* Entity=EntityManager.Find(Guid)) for(auto& Aura:Entity->Auras) Aura=FAuraInfo();
+    HandleAuraRecords(R,Guid);
+}
+
+void FWowPacketHandler::HandleAuraRecords(FPacketReader& R,uint64 TargetGuid)
+{
+    auto* Entity=EntityManager.Find(TargetGuid); if(!Entity) return;
+    while(R.CanRead(5))
+    {
+        const uint8 Slot=R.ReadU8(); const uint32 Id=R.ReadU32();
+        if(!Entity->Auras.IsValidIndex(Slot)) return;
+        FAuraInfo Aura; Aura.SpellId=Id;
+        if(Id)
+        {
+            if(!R.CanRead(3)) return;
+            Aura.Flags=R.ReadU8(); Aura.Level=R.ReadU8(); Aura.Charges=R.ReadU8();
+            Aura.CasterGuid=(Aura.Flags&0x08)?TargetGuid:R.ReadPackedGuid();
+            if(Aura.Flags&0x20) { if(!R.CanRead(8)) return; Aura.DurationMs=R.ReadU32(); Aura.RemainingMs=R.ReadU32(); }
+            Aura.bActive=true; Aura.UpdatedAt=FPlatformTime::Seconds();
+        }
+        Entity->Auras[Slot]=Aura;
+    }
+    OnUnitAuraUpdate.Broadcast(TargetGuid);
+}
 // ── SMSG_POWER_UPDATE ───────────────────────────────────────────────────
 // packed guid target, uint8 power type, uint32 power value
 
@@ -2246,6 +2285,7 @@ void FWowPacketHandler::HandleNewWorld(FPacketReader& R)
 
     // Broadcast map transfer
     OnMapTransfer.Broadcast(MapId, X, Y, Z, Orientation);
+    CurrentMapId=MapId;
 }
 
 // ── SMSG_NAME_QUERY_RESPONSE ─────────────────────────────────────────────────
@@ -2256,7 +2296,7 @@ void FWowPacketHandler::HandleNameQueryResponse(FPacketReader& R)
     uint64 Guid = R.ReadPackedGuid();
     uint8 Found = R.ReadU8();
 
-    if (Found)
+    if (Found==0 && R.CanRead(1))
     {
         FString Name = R.ReadCString();
         FString RealmName = R.ReadCString();
@@ -2288,7 +2328,8 @@ void FWowPacketHandler::HandleCreatureQueryResponse(FPacketReader& R)
 
     uint32 Entry = R.ReadU32();
     FString Name = R.ReadCString();
-    FString Title = R.ReadCString(); // SubName
+    for(int32 I=0;I<3;++I) R.ReadCString(); // alternate name slots
+    FString Title = R.ReadCString(); // SubName follows all four names
 
     if (!Name.IsEmpty())
     {

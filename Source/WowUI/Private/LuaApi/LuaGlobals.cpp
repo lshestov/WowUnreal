@@ -30,19 +30,34 @@ static int L_print(lua_State* L)
     return 0;
 }
 
-// ─── format(fmt, ...) — alias for string.format ────────────────────────────────
+// WoW localization uses POSIX positional arguments (e.g. %2$s), which Lua 5.1
+// does not support. Normalize the format and reorder values before formatting.
 static int L_format(lua_State* L)
 {
-    lua_getglobal(L, "string");
-    lua_getfield(L, -1, "format");
-    lua_remove(L, -2);
-    // Push all arguments
-    int n = lua_gettop(L) - 1; // -1 for the function we just pushed
-    for (int i = 1; i <= n; i++)
+    const FString Input=UTF8_TO_TCHAR(luaL_checkstring(L,1));
+    FString Output; TArray<int32> Arguments; int32 Next=2;
+    for(int32 I=0;I<Input.Len();++I)
     {
-        lua_pushvalue(L, i);
+        if(Input[I]!='%' || I+1>=Input.Len()) { Output+=Input[I]; continue; }
+        Output+=TEXT('%'); ++I;
+        if(Input[I]=='%') { Output+=TEXT('%'); continue; }
+        const int32 Start=I; int32 Position=0;
+        while(I<Input.Len() && FChar::IsDigit(Input[I])) { Position=Position*10+(Input[I]-'0'); ++I; }
+        int32 Argument=0;
+        if(I<Input.Len() && Input[I]=='$') { Argument=Position+1; ++I; }
+        else { I=Start; Argument=Next++; }
+        if(Argument<2 || Argument>lua_gettop(L)) return luaL_error(L,"format argument is missing");
+        Arguments.Add(Argument);
+        for(;I<Input.Len();++I)
+        {
+            Output+=Input[I];
+            if(FChar::IsAlpha(Input[I])) break;
+        }
     }
-    lua_call(L, n, 1);
+    lua_pushvalue(L,lua_upvalueindex(1));
+    lua_pushstring(L,TCHAR_TO_UTF8(*Output));
+    for(int32 Argument:Arguments) lua_pushvalue(L,Argument);
+    lua_call(L,Arguments.Num()+1,1);
     return 1;
 }
 
@@ -448,6 +463,7 @@ static int L_securecall(lua_State* L)
     int status = lua_pcall(L, nargs, LUA_MULTRET, 0);
     if (status != 0)
     {
+        UE_LOG(LogWowLuaApi,Error,TEXT("securecall failed: %hs"),lua_tostring(L,-1));
         lua_pop(L, 1); // pop error message
         return 0;
     }
@@ -535,6 +551,15 @@ static void RegisterMathAliases(lua_State* L)
         else
             lua_pop(L, 1);
     }
+
+    // WoW's global trigonometric API uses degrees; math.* retains Lua radians.
+    lua_pushcfunction(L,[](lua_State* S)->int { lua_pushnumber(S,FMath::Sin(FMath::DegreesToRadians(luaL_checknumber(S,1)))); return 1; }); lua_setglobal(L,"sin");
+    lua_pushcfunction(L,[](lua_State* S)->int { lua_pushnumber(S,FMath::Cos(FMath::DegreesToRadians(luaL_checknumber(S,1)))); return 1; }); lua_setglobal(L,"cos");
+    lua_pushcfunction(L,[](lua_State* S)->int { lua_pushnumber(S,FMath::Tan(FMath::DegreesToRadians(luaL_checknumber(S,1)))); return 1; }); lua_setglobal(L,"tan");
+    lua_pushcfunction(L,[](lua_State* S)->int { lua_pushnumber(S,FMath::RadiansToDegrees(FMath::Asin(luaL_checknumber(S,1)))); return 1; }); lua_setglobal(L,"asin");
+    lua_pushcfunction(L,[](lua_State* S)->int { lua_pushnumber(S,FMath::RadiansToDegrees(FMath::Acos(luaL_checknumber(S,1)))); return 1; }); lua_setglobal(L,"acos");
+    lua_pushcfunction(L,[](lua_State* S)->int { lua_pushnumber(S,FMath::RadiansToDegrees(FMath::Atan(luaL_checknumber(S,1)))); return 1; }); lua_setglobal(L,"atan");
+    lua_pushcfunction(L,[](lua_State* S)->int { lua_pushnumber(S,FMath::RadiansToDegrees(FMath::Atan2(luaL_checknumber(S,1),luaL_checknumber(S,2)))); return 1; }); lua_setglobal(L,"atan2");
 
     // Add math constants
     lua_getglobal(L, "math");
@@ -636,7 +661,8 @@ static void RegisterBitLibrary(lua_State* L)
 void WowLuaApi::RegisterGlobals(lua_State* L)
 {
     lua_register(L, "print", L_print);
-    lua_register(L, "format", L_format);
+    lua_getglobal(L,"string"); lua_getfield(L,-1,"format");
+    lua_pushcclosure(L,L_format,1); lua_pushvalue(L,-1); lua_setglobal(L,"format"); lua_setfield(L,-2,"format"); lua_pop(L,1);
     lua_register(L, "strsplit", L_strsplit);
     lua_register(L, "strtrim", L_strtrim);
     lua_register(L, "strjoin", L_strjoin);

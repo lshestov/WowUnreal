@@ -1142,63 +1142,42 @@ static int L_UnitAffectingCombat(lua_State* L)
     return 1;
 }
 
-static int L_UnitBuff(lua_State* L)
+static int PushUnitAura(lua_State* L,const char* DefaultFilter)
 {
-    // UnitBuff(unit, index) → name, rank, icon, count, debuffType, duration, expirationTime, isFromPlayer, isStealable
-    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-    FWowEntity* Entity = ResolveUnit(L);
-    int32 Index = static_cast<int32>(luaL_checknumber(L, 2)) - 1; // Convert 1-based to 0-based
-
-    if (Entity && Index >= 0 && Index < Entity->Auras.Num() && Entity->Auras[Index].bActive)
+    auto* C=WowLuaApi::GetContext(L); auto* Entity=ResolveUnit(L);
+    const bool ByName=!lua_isnumber(L,2) && lua_isstring(L,2);
+    const FString Filter=UTF8_TO_TCHAR(luaL_optstring(L,ByName?4:3,DefaultFilter));
+    const FString Name=ByName?UTF8_TO_TCHAR(lua_tostring(L,2)):TEXT("");
+    int32 Wanted=ByName?1:luaL_checkinteger(L,2);
+    const bool Harmful=Filter.Contains(TEXT("HARMFUL")) || (!Filter.Contains(TEXT("HELPFUL")) && FCStringAnsi::Strcmp(DefaultFilter,"HARMFUL")==0);
+    const bool PlayerOnly=Filter.Contains(TEXT("PLAYER"));
+    const double Now=FPlatformTime::Seconds();
+    if(Entity && Wanted>0) for(const auto& A:Entity->Auras)
     {
-        const FAuraInfo& Aura = Entity->Auras[Index];
-
-        // Look up spell info from DBC
-        if (Ctx && Aura.SpellId != 0)
-        {
-            const FSpellDbcEntry* SpellEntry = FDbcStore::Get().Spells().GetById(Aura.SpellId);
-            if (SpellEntry)
-            {
-                lua_pushstring(L, TCHAR_TO_UTF8(*SpellEntry->SpellName)); // name
-                lua_pushstring(L, TCHAR_TO_UTF8(*SpellEntry->Rank)); // rank
-                lua_pushstring(L, "Interface\\Icons\\INV_Misc_QuestionMark"); // icon (placeholder)
-                lua_pushnumber(L, Aura.Charges > 0 ? Aura.Charges : 1); // count
-                lua_pushstring(L, "Magic"); // debuffType (TODO: determine from spell data)
-                lua_pushnumber(L, 0); // duration (TODO: implement duration tracking)
-                lua_pushnumber(L, 0); // expirationTime
-                lua_pushboolean(L, Entity->IsPlayer() && Aura.CasterGuid == Entity->Guid ? 1 : 0); // isFromPlayer
-                lua_pushboolean(L, 0); // isStealable (TODO: determine from spell data)
-                return 9;
-            }
-        }
+        if(!A.bActive || !A.SpellId || bool(A.Flags&0x80)!=Harmful) continue;
+        if(PlayerOnly && (!C || !C->EntityManager || A.CasterGuid!=C->EntityManager->LocalPlayerGuid)) continue;
+        if(A.DurationMs && A.UpdatedAt+A.RemainingMs/1000.0<=Now) continue;
+        const auto* Spell=FDbcStore::Get().Spells().GetById(A.SpellId); if(!Spell) continue;
+        if(ByName && !Spell->SpellName.Equals(Name,ESearchCase::IgnoreCase)) continue;
+        if(--Wanted!=0) continue;
+        const auto* Icon=FDbcStore::Get().SpellIcons().GetById(Spell->SpellIconID);
+        lua_pushstring(L,TCHAR_TO_UTF8(*Spell->SpellName)); lua_pushstring(L,TCHAR_TO_UTF8(*Spell->Rank));
+        if(Icon) lua_pushstring(L,TCHAR_TO_UTF8(*Icon->TexturePath)); else lua_pushnil(L);
+        lua_pushinteger(L,A.Charges);
+        static const char* Dispels[]={nullptr,"Magic","Curse","Disease","Poison",nullptr,nullptr,nullptr,nullptr,"Enrage"};
+        if(Spell->Dispel<UE_ARRAY_COUNT(Dispels) && Dispels[Spell->Dispel]) lua_pushstring(L,Dispels[Spell->Dispel]); else lua_pushnil(L);
+        lua_pushnumber(L,A.DurationMs/1000.0); lua_pushnumber(L,A.DurationMs?A.UpdatedAt+A.RemainingMs/1000.0:0);
+        FString Caster;
+        if(C && C->EntityManager && A.CasterGuid==C->EntityManager->LocalPlayerGuid) Caster=TEXT("player");
+        else if(A.CasterGuid==Entity->Guid) Caster=UTF8_TO_TCHAR(lua_tostring(L,1));
+        if(Caster.IsEmpty()) lua_pushnil(L); else lua_pushstring(L,TCHAR_TO_UTF8(*Caster));
+        lua_pushboolean(L,!Harmful && !(Spell->AttributesEx4&0x40)); lua_pushboolean(L,0); lua_pushinteger(L,A.SpellId); return 11;
     }
-
-    lua_pushnil(L); // name
-    lua_pushnil(L); // rank
-    lua_pushnil(L); // icon
-    lua_pushnumber(L, 0); // count
-    lua_pushnil(L); // debuffType
-    lua_pushnumber(L, 0); // duration
-    lua_pushnumber(L, 0); // expirationTime
-    lua_pushboolean(L, 0); // isFromPlayer
-    lua_pushboolean(L, 0); // isStealable
-    return 9;
+    lua_pushnil(L); return 1;
 }
-
-static int L_UnitDebuff(lua_State* L)
-{
-    // UnitDebuff works the same as UnitBuff for now
-    // TODO: Implement proper buff/debuff filtering based on aura flags
-    return L_UnitBuff(L);
-}
-
-static int L_UnitAura(lua_State* L)
-{
-    // UnitAura(unit, index, filter) → name, rank, icon, count, debuffType, duration, expirationTime, isFromPlayer, isStealable
-    // For now, same as UnitBuff - could implement filter logic later
-    return L_UnitBuff(L);
-}
-
+static int L_UnitBuff(lua_State* L) { return PushUnitAura(L,"HELPFUL"); }
+static int L_UnitDebuff(lua_State* L) { return PushUnitAura(L,"HARMFUL"); }
+static int L_UnitAura(lua_State* L) { return PushUnitAura(L,"HELPFUL"); }
 static int L_GetUnitName(lua_State* L)
 {
     // Alias for UnitName
@@ -1234,6 +1213,8 @@ static int L_UnitPowerType(lua_State* L)
     lua_pushstring(L, "MANA");
     return 2;
 }
+
+FWowEntity* WowLuaApi::ResolveUnitToken(lua_State* L,int32 Index) { return ResolveUnit(L,Index); }
 
 static int L_UnitStat(lua_State* L)
 {
@@ -1411,8 +1392,20 @@ static int L_SendChatMessage(lua_State* L)
         int32 Type = 1; // SAY
         if (strcmp(chatType, "YELL") == 0) Type = 6;
         else if (strcmp(chatType, "PARTY") == 0) Type = 2;
+        else if (strcmp(chatType, "RAID") == 0) Type = 3;
         else if (strcmp(chatType, "GUILD") == 0) Type = 4;
-        Ctx->ConnectionManager->SendChatMessage(FString(msg), Type);
+        else if (strcmp(chatType, "OFFICER") == 0) Type = 5;
+        else if (strcmp(chatType, "WHISPER") == 0) Type = 7;
+        else if (strcmp(chatType, "EMOTE") == 0) Type = 10;
+        else if (strcmp(chatType, "CHANNEL") == 0) Type = 17;
+        else if (strcmp(chatType, "RAID_WARNING") == 0) Type = 40;
+        else if (strcmp(chatType,"SAY")!=0) return 0;
+        const auto* Player=Ctx->EntityManager?Ctx->EntityManager->GetLocalPlayer():nullptr;
+        const uint8 Race=Player?Player->GetRaceId():1;
+        int32 Language=(Race==1 || Race==3 || Race==4 || Race==7 || Race==11)?7:1;
+        if(lua_isnumber(L,3)) Language=lua_tointeger(L,3);
+        else if(lua_isstring(L,3)) { const FString Lang=UTF8_TO_TCHAR(lua_tostring(L,3)); if(Lang==TEXT("Orcish")) Language=1; else if(Lang==TEXT("Universal")) Language=0; }
+        Ctx->ConnectionManager->SendChatMessage(UTF8_TO_TCHAR(msg),Type,UTF8_TO_TCHAR(luaL_optstring(L,4,"")),Language);
     }
     return 0;
 }
@@ -3473,6 +3466,7 @@ static FString NormalizeCVarName(const FString& Name)
 static FString GetDefaultCVarValue(const FString& Name)
 {
     static const TMap<FString, FString> ExplicitDefaults = {
+        { TEXT("trackerfilter"), TEXT("7") },
         { TEXT("chatstyle"), TEXT("classic") },
         { TEXT("playerstatustext"), TEXT("1") },
         { TEXT("conversationmode"), TEXT("inline") },
@@ -3525,6 +3519,7 @@ static FString GetDefaultCVarValue(const FString& Name)
     {
         return *Explicit;
     }
+    if(Normalized==TEXT("playerstatleftdropdown") || Normalized==TEXT("playerstatrightdropdown")) return TEXT("");
 
     if (Normalized.Contains(TEXT("driverindex")))
     {
@@ -3583,7 +3578,7 @@ static FString GetCurrentOrDefaultCVarValue(const FString& Name)
 static int L_SetCVar(lua_State* L)
 {
     const char* name = luaL_checkstring(L, 1);
-    const char* value = luaL_checkstring(L, 2);
+    const char* value = lua_isboolean(L,2)?(lua_toboolean(L,2)?"1":"0"):luaL_checkstring(L, 2);
     CVarStorage.Add(NormalizeCVarName(UTF8_TO_TCHAR(name)), UTF8_TO_TCHAR(value));
     return 0;
 }
@@ -3653,71 +3648,15 @@ static int L_StopMusic(lua_State* L)
 
 static int L_SetPortraitTexture(lua_State* L)
 {
-    // SetPortraitTexture(texture, unit)
-    luaL_checktype(L, 1, LUA_TTABLE); // texture widget
-    const char* Unit = luaL_checkstring(L, 2);
-
-    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-    if (!Ctx || !Ctx->FrameManager) return 0;
-
-    // Get the entity for the unit
-    FWowEntity* Entity = ResolveUnit(L, 2);
-    if (!Entity || !Entity->IsUnit()) return 0;
-
-    FWowUnitEntity* UnitEntity = static_cast<FWowUnitEntity*>(Entity);
-
-    // Get race and gender for portrait texture
-    uint8 RaceId = UnitEntity->GetRaceId();
-    uint8 Gender = UnitEntity->GetGenderId(); // 0 = male, 1 = female
-
-    // Map race IDs to portrait names (WoW 3.3.5a races)
-    const char* RaceNames[] = {
-        "", "Human", "Orc", "Dwarf", "NightElf", "Undead", "Tauren", "Gnome", "Troll", "", "BloodElf", "Draenei"
-    };
-
-    const char* GenderNames[] = { "Male", "Female" };
-
-    FString PortraitPath;
-    if (RaceId > 0 && RaceId < UE_ARRAY_COUNT(RaceNames) && RaceNames[RaceId] && *RaceNames[RaceId])
-    {
-        // Use temporary portraits: Interface\CharacterFrame\TEMPORARYPORTRAIT-Female-BloodElf.tga
-        PortraitPath = FString::Printf(TEXT("Interface\\CharacterFrame\\TEMPORARYPORTRAIT-%s-%s"),
-            UTF8_TO_TCHAR(GenderNames[Gender]), UTF8_TO_TCHAR(RaceNames[RaceId]));
-    }
-    else
-    {
-        // Fallback to generic portrait
-        PortraitPath = TEXT("Interface\\CharacterFrame\\TEMPORARYPORTRAIT-Male-Human");
-    }
-
-    // Get the texture name from the widget
-    lua_getfield(L, 1, "__name");
-    const char* TextureName = lua_isstring(L, -1) ? lua_tostring(L, -1) : nullptr;
-    lua_pop(L, 1);
-
-    if (TextureName)
-    {
-        UImage* NamedImage = Ctx->FrameManager->GetNamedTexture(UTF8_TO_TCHAR(TextureName));
-        UTexture2D* Texture = Ctx->FrameManager->LoadUITexture(*PortraitPath);
-
-        if (Texture && NamedImage)
-        {
-            FSlateBrush Brush;
-            Brush.SetResourceObject(Texture);
-            Brush.DrawAs = ESlateBrushDrawType::Image;
-            Brush.ImageSize = FVector2D(Texture->GetSizeX(), Texture->GetSizeY());
-            Brush.Tiling = ESlateBrushTileType::NoTile;
-            NamedImage->SetBrush(Brush);
-        }
-    }
-
-    // Store the texture path in the widget table
-    lua_pushstring(L, TCHAR_TO_UTF8(*PortraitPath));
-    lua_setfield(L, 1, "__texture");
-
+    auto* C=WowLuaApi::GetContext(L);
+    if(!C || !C->FrameManager || !C->FrameManager->OnPortrait) return 0;
+    FString Name;
+    if(lua_istable(L,1)) { lua_getfield(L,1,"__name"); if(lua_isstring(L,-1)) Name=UTF8_TO_TCHAR(lua_tostring(L,-1)); lua_pop(L,1); }
+    else if(lua_isstring(L,1)) Name=UTF8_TO_TCHAR(lua_tostring(L,1));
+    auto* Entity=ResolveUnit(L,2);
+    if(!Name.IsEmpty()) C->FrameManager->OnPortrait(Name,Entity?Entity->Guid:0);
     return 0;
 }
-
 static int L_SetPortraitToTexture(lua_State* L)
 {
     // SetPortraitToTexture(texture, texturePath)
@@ -4318,6 +4257,7 @@ static int L_CombatLogGetCurrentEventInfo(lua_State* L)
 {
     // CombatLogGetCurrentEventInfo() → timestamp, subevent, hideCaster, sourceGUID, sourceName, sourceFlags, sourceRaidFlags, destGUID, destName, destFlags, destRaidFlags, ...
     // Return basic placeholder data using the WotLK combat-log field order.
+    if(GCombatLogNumEntries<=0) { lua_pushnil(L); return 1; }
     return PushPlaceholderCombatLogEntry(L, "SPELL_DAMAGE", "Unknown", "Unknown");
 }
 
@@ -4330,6 +4270,7 @@ static int L_CombatLogGetNumEntries(lua_State* L)
 static int L_CombatLogGetCurrentEntry(lua_State* L)
 {
     GCombatLogCurrentEntry = ClampCombatLogEntry(GCombatLogCurrentEntry);
+    if(!GCombatLogCurrentEntry) { lua_pushnil(L); return 1; }
     return PushPlaceholderCombatLogEntry(L, "", "", "");
 }
 
@@ -4344,6 +4285,7 @@ static int L_CombatLogAdvanceEntry(lua_State* L)
 {
     const int32 Delta = static_cast<int32>(luaL_optinteger(L, 1, 1));
     GCombatLogCurrentEntry = ClampCombatLogEntry(GCombatLogCurrentEntry + Delta);
+    if(!GCombatLogCurrentEntry) { lua_pushnil(L); return 1; }
     return PushPlaceholderCombatLogEntry(L, "", "", "");
 }
 
@@ -4917,6 +4859,12 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "UnitBuff", L_UnitBuff);
     lua_register(L, "UnitDebuff", L_UnitDebuff);
     lua_register(L, "UnitAura", L_UnitAura);
+    lua_register(L,"UnitPVPName",[](lua_State* S)->int { const int32 Count=L_UnitName(S); if(Count>1) lua_pop(S,Count-1); return 1; });
+    lua_register(L,"UnitResistance",[](lua_State* S)->int {
+        const auto* Unit=ResolveUnit(S); const int32 School=luaL_checkinteger(S,2);
+        const int32 Total=Unit && School>=0 && School<7?Unit->GetField(UnitField::RESISTANCES+School):0;
+        lua_pushinteger(S,Total); lua_pushinteger(S,Total); lua_pushinteger(S,0); lua_pushinteger(S,0); return 4;
+    });
     lua_register(L, "UnitExists", L_UnitExists);
     lua_register(L, "UnitGUID", L_UnitGUID);
     lua_register(L, "UnitStat", L_UnitStat);
@@ -6504,9 +6452,10 @@ lua_pushboolean(L2, PLATFORM_MAC);
         }
         return 0;
     });
-    lua_register(L, "ToggleWorldMap", [](lua_State* L2) -> int { return 0; });
-    lua_register(L, "OpenWorldMap", [](lua_State* L2) -> int { return 0; });
-    lua_register(L, "CloseWorldMap", [](lua_State* L2) -> int { return 0; });
+    lua_register(L, "IdleWowMapCommand", [](lua_State* S) -> int { auto* C=WowLuaApi::GetContext(S); if(C && C->FrameManager && C->FrameManager->OnMapCommand) C->FrameManager->OnMapCommand(luaL_optinteger(S,1,0)); return 0; });
+    lua_register(L, "ToggleWorldMap", [](lua_State* S) -> int { auto* C=WowLuaApi::GetContext(S); if(C && C->FrameManager && C->FrameManager->OnMapCommand) C->FrameManager->OnMapCommand(0); return 0; });
+    lua_register(L, "OpenWorldMap", [](lua_State* S) -> int { auto* C=WowLuaApi::GetContext(S); if(C && C->FrameManager && C->FrameManager->OnMapCommand) { const auto H=C->FrameManager->FindFrame(TEXT("IdleWowWorldMapFrame")); if(H<0 || !C->FrameManager->IsFrameHierarchyShown(H)) C->FrameManager->OnMapCommand(0); } return 0; });
+    lua_register(L, "CloseWorldMap", [](lua_State* S) -> int { auto* C=WowLuaApi::GetContext(S); if(C && C->FrameManager && C->FrameManager->OnMapCommand) C->FrameManager->OnMapCommand(3); return 0; });
     lua_register(L, "GetCoinText", [](lua_State* L2) -> int { lua_pushstring(L2, "0g"); return 1; });
     // ShowUIPanel(frame) / HideUIPanel(frame) — THE core panel management functions
     // Every WoW UI panel (spellbook, character, quest log etc.) uses these

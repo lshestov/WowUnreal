@@ -36,6 +36,9 @@ public:
 
     /** Load WDT/WDL and enable terrain streaming. Call after deferred startup (e.g. login scene). */
     void EnableTerrainStreaming();
+    void SuspendStreaming() { bStreamingSuspended=true; }
+    void LoadStreamingAt(const FVector& Position) { StreamingLoadPosition=Position; bStreamingSuspended=false; LastCameraTile=FIntPoint(-1,-1); }
+    void FollowStreamingActor(AActor* Actor) { StreamingFocusActor=Actor; StreamingLoadPosition.Reset(); bStreamingSuspended=false; LastCameraTile=FIntPoint(-1,-1); }
 
     /** Queue initial tiles around a UE world position. Returns how many were queued. */
     int32 LoadTilesAroundPosition(const FVector& UEPosition, int32 Radius = 2);
@@ -113,6 +116,10 @@ public:
     int32 MaxWmoGroupsPerObject = 100;
 
 private:
+    bool bStreamingSuspended=false;
+    TOptional<FVector> StreamingLoadPosition;
+    TWeakObjectPtr<AActor> StreamingFocusActor;
+    FVector StreamingPosition(const FVector& Camera) const { return StreamingLoadPosition.IsSet()?StreamingLoadPosition.GetValue():StreamingFocusActor.IsValid()?StreamingFocusActor->GetActorLocation():Camera; }
     TUniquePtr<FMpqManager> MpqManager;
     TUniquePtr<FWowAssetCache> AssetCache;
     TUniquePtr<FWdtData> WdtData;

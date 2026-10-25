@@ -21,6 +21,7 @@ class WOWUNREAL_API AWowCharacterPreview : public AActor
 public:
     AWowCharacterPreview();
     virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 
     /** Initialize the capture system */
     void Setup(AWowWorldManager* InWorldManager, int32 Width = 512, int32 Height = 768);
@@ -39,6 +40,7 @@ public:
 
 private:
     void PositionCamera(uint8 RaceId);
+    FTimerHandle CaptureTimer,SecondCaptureTimer;
 
     UPROPERTY()
     TObjectPtr<USceneCaptureComponent2D> CaptureComponent;

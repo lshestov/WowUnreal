@@ -61,6 +61,7 @@ public:
     void CloseLoot();
     uint32 GetShownQuestId() const;
     bool IsPointerOverWindow() const;
+    bool CloseActiveWindow();
 
     /** Show or refresh the trade window */
     void ShowTradeWindow(const FWowTradeState& TradeState);

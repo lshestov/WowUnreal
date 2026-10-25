@@ -15,6 +15,8 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/TextBlock.h"
+#include "Components/CanvasPanelSlot.h"
 #include "Engine/World.h"
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
@@ -23,6 +25,24 @@
 #include "Misc/Paths.h"
 #include "HAL/FileManager.h"
 #include "UnrealClient.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Framework/Application/IInputProcessor.h"
+
+// Native probe callbacks drive the test. Consume physical input in this test
+// process so typing or moving the mouse in other apps cannot steer its player.
+class FWowProbeInputGuard final : public IInputProcessor
+{
+public:
+    void Tick(float,FSlateApplication&,TSharedRef<ICursor>) override {}
+    bool HandleKeyDownEvent(FSlateApplication&,const FKeyEvent&) override { return true; }
+    bool HandleKeyUpEvent(FSlateApplication&,const FKeyEvent&) override { return true; }
+    bool HandleAnalogInputEvent(FSlateApplication&,const FAnalogInputEvent&) override { return true; }
+    bool HandleMouseMoveEvent(FSlateApplication&,const FPointerEvent&) override { return true; }
+    bool HandleMouseButtonDownEvent(FSlateApplication&,const FPointerEvent&) override { return true; }
+    bool HandleMouseButtonUpEvent(FSlateApplication&,const FPointerEvent&) override { return true; }
+    bool HandleMouseButtonDoubleClickEvent(FSlateApplication&,const FPointerEvent&) override { return true; }
+    bool HandleMouseWheelOrGestureEvent(FSlateApplication&,const FPointerEvent&,const FPointerEvent*) override { return true; }
+};
 
 // Explicit development probe. It invokes the same controller/UI callbacks as
 // ordinary input, waits for server state, captures rendered frames and exits.
@@ -35,15 +55,19 @@ struct FWowGameplayProbe
     int32 Index=0;
     double Started=FPlatformTime::Seconds(), StepStarted=0;
     bool bInvoked=false, bFinished=false;
+    bool bVerifiedCharacter=false;
     bool bJumpRequested=false,bJumpObserved=false;
     double FailureExitAt=0;
     uint32 LastEquippedItem=0;
     TWeakObjectPtr<UPrimitiveComponent> Avoiding;
     float AvoidSide=1;
     TMap<FString,TArray<double>> Profile;
+    TSharedPtr<FJsonObject> Inspections=MakeShared<FJsonObject>();
+    TSharedPtr<FWowProbeInputGuard> InputGuard;
 
     explicit FWowGameplayProbe(const FString& Path)
     {
+        if(FSlateApplication::IsInitialized()) { InputGuard=MakeShared<FWowProbeInputGuard>(); FSlateApplication::Get().RegisterInputPreProcessor(InputGuard,0); }
         FString Text;
         if (!FFileHelper::LoadFileToString(Text,*Path) || !FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Text),Spec) || !Spec.IsValid())
         { Failure=TEXT("Invalid probe specification"); return; }
@@ -52,6 +76,7 @@ struct FWowGameplayProbe
         Steps=*Values; Output=Spec->GetStringField(TEXT("output"));
         if (Output.IsEmpty() || !IFileManager::Get().MakeDirectory(*Output,true)) Failure=TEXT("Invalid output directory");
     }
+    ~FWowGameplayProbe() { if(InputGuard && FSlateApplication::IsInitialized()) FSlateApplication::Get().UnregisterInputPreProcessor(InputGuard); }
 
     void Finish(AWowGameplayController& Controller,bool Passed)
     {
@@ -62,6 +87,7 @@ struct FWowGameplayProbe
         const auto Report=MakeShared<FJsonObject>();
         Report->SetBoolField(TEXT("passed"),Passed); Report->SetStringField(TEXT("failure"),Failure);
         Report->SetNumberField(TEXT("completedSteps"),Index); Report->SetArrayField(TEXT("steps"),Results);
+        Report->SetObjectField(TEXT("ui"),Inspections);
         Report->SetBoolField(TEXT("jumpObserved"),bJumpObserved);
         Report->SetStringField(TEXT("character"),Controller.ConnectionManager?Controller.ConnectionManager->GetCharacterName():TEXT(""));
         if (const auto* Character=Cast<ACharacter>(Controller.GetPawn()))
@@ -154,8 +180,13 @@ struct FWowGameplayProbe
         if (!Failure.IsEmpty()) { Finish(C,false); return; }
         if (Now-Started>600) { Failure=TEXT("Overall timeout"); Finish(C,false); return; }
         auto* Connection=C.ConnectionManager.Get();
-        if (!Connection || !C.GameUI || !C.UIManager || !C.GetPawn() || !Connection->PacketHandler.EntityManager.GetLocalPlayer()) return;
-        if (Connection->GetCharacterName()!=Spec->GetStringField(TEXT("character"))) { Failure=TEXT("Verification character mismatch"); Finish(C,false); return; }
+        if (!Connection || !C.GameUI || !C.UIManager || !C.GetPawn()) return;
+        if(!bVerifiedCharacter)
+        {
+            if(!Connection->PacketHandler.EntityManager.GetLocalPlayer()) return;
+            if (Connection->GetCharacterName()!=Spec->GetStringField(TEXT("character"))) { Failure=TEXT("Verification character mismatch"); Finish(C,false); return; }
+            bVerifiedCharacter=true;
+        }
         if (bJumpRequested) if (const auto* Character=Cast<ACharacter>(C.GetPawn()); Character && Character->GetCharacterMovement()->IsFalling()) bJumpObserved=true;
         if (Index>=Steps.Num()) { Finish(C,true); return; }
         const auto Step=Steps[Index]->AsObject();
@@ -166,6 +197,12 @@ struct FWowGameplayProbe
         auto& Handler=Connection->PacketHandler;
         bool Done=false;
         if (Op==TEXT("wait")) Done=Now-StepStarted>=Step->GetNumberField(TEXT("seconds"));
+        else if(Op==TEXT("wait_character_select")) Done=Connection->GetState()==EWowSessionState::WorldHaveCharList;
+        else if(Op==TEXT("enter_character"))
+        {
+            for(const auto& Character:Connection->GetCachedCharacters()) if(Character.Name==Spec->GetStringField(TEXT("character"))) { Connection->EnterWorld(Character.Guid); Done=true; break; }
+        }
+        else if(Op==TEXT("wait_world")) Done=Connection->GetState()==EWowSessionState::WorldInGame && Connection->PacketHandler.EntityManager.GetLocalPlayer()!=nullptr;
         else if (Op==TEXT("time"))
         {
             if (auto* Sky=Cast<AWowSkyManager>(UGameplayStatics::GetActorOfClass(C.GetWorld(),AWowSkyManager::StaticClass())))
@@ -249,6 +286,7 @@ struct FWowGameplayProbe
         else if (Op==TEXT("jump")) { if (auto* Character=Cast<ACharacter>(C.GetPawn())) { bJumpRequested=true; bJumpObserved=false; Character->Jump(); Done=true; } }
         else if (Op==TEXT("release_jump")) { if (auto* Character=Cast<ACharacter>(C.GetPawn())) { Character->StopJumping(); Done=true; } }
         else if (Op==TEXT("wait_landed")) { const auto* Character=Cast<ACharacter>(C.GetPawn()); Done=bJumpObserved && Character && Character->GetCharacterMovement()->IsMovingOnGround() && Now-StepStarted>.5; if(Done)bJumpRequested=false; }
+        else if(Op==TEXT("wait_floor")) { const auto* Character=Cast<ACharacter>(C.GetPawn()); Done=Character && Character->GetCharacterMovement()->IsMovingOnGround() && Character->GetCharacterMovement()->CurrentFloor.IsWalkableFloor(); }
         else if (Op==TEXT("wait_menu")) Done=(Handler.GossipMenu.Guid==C.TargetGuid && (Handler.GossipMenu.Quests.Num() || Handler.GossipMenu.Options.Num())) || (Handler.QuestDetails.QuestGiverGuid==C.TargetGuid && C.GameUI->GetShownQuestId()!=0);
         else if (Op==TEXT("quest")) { if (C.GameUI->GetShownQuestId()!=uint32(Step->GetIntegerField(TEXT("id")))) C.GameUI->SelectGossipQuest(Step->GetIntegerField(TEXT("id"))); Done=true; }
         else if (Op==TEXT("wait_dialog")) Done=C.GameUI->GetShownQuestId()==uint32(Step->GetIntegerField(TEXT("id")));
@@ -312,6 +350,88 @@ struct FWowGameplayProbe
         }
         else if (Op==TEXT("bags")) { C.UIManager->ToggleBagWindow(); C.UIManager->ToggleCharacterPanel(); Done=true; }
         else if (Op==TEXT("lua")) { Done=C.UIManager->GetLuaVM()->ExecuteString(Step->GetStringField(TEXT("code")),TEXT("=GameplayProbe")); if (!Done) { Failure=TEXT("Lua assertion failed"); Finish(C,false); return; } }
+        else if(Op==TEXT("drop_action_cursor")) { Done=Connection->DropActionCursor(); if(!Done) { Failure=TEXT("No action is held by the cursor"); Finish(C,false); return; } }
+        else if (Op==TEXT("click_frame") || Op==TEXT("drag_frame") || Op==TEXT("hover_frame") || Op==TEXT("wheel_frame"))
+        {
+            auto* Frames=C.UIManager->GetFrameManager();
+            const int64 Handle=Frames->FindFrame(Step->GetStringField(TEXT("name")));
+            if(Handle<0 || !Frames->IsFrameDrawn(Handle)) { Failure=TEXT("Requested UI frame is not visible"); Finish(C,false); return; }
+            const auto Rect=Frames->GetLayoutRect(Handle); const float Scale=Frames->GetScreenScale();
+            const float X=(Rect.X+Rect.Z*.5f)*Scale,Y=(Rect.Y+Rect.W*.5f)*Scale;
+            const int64 Hit=Frames->HitTestFrames(X,Y); bool Allowed=Hit==Handle;
+            if(Op==TEXT("wheel_frame")) for(int64 Parent=Hit,Depth=0;Parent>=0 && Depth<64;++Depth,Parent=Frames->GetParentHandle(Parent)) Allowed|=Parent==Handle;
+            if(!Allowed) { Failure=FString::Printf(TEXT("UI frame %s is obscured by %s"),*Step->GetStringField(TEXT("name")),*Frames->GetFrameName(Hit)); Finish(C,false); return; }
+            Frames->UpdateMouseHover(X,Y);
+            C.GameplayProbePointer=FVector2D(X,Y);
+            if(Op==TEXT("hover_frame") || Op==TEXT("wheel_frame"))
+            {
+                if(Op==TEXT("wheel_frame")) Frames->DispatchMouseWheel(Hit,Step->GetNumberField(TEXT("delta")));
+                Done=true;
+            }
+            else
+            {
+            FString Button=TEXT("LeftButton"); Step->TryGetStringField(TEXT("button"),Button);
+            Frames->DispatchMouseDown(Handle,Button);
+            if(Op==TEXT("drag_frame"))
+            {
+                const int64 Destination=Frames->FindFrame(Step->GetStringField(TEXT("destination")));
+                if(!Frames->DispatchDragStart(Handle,Button) || Destination<0 || !Frames->IsFrameDrawn(Destination)) { Failure=TEXT("UI drag could not start"); Finish(C,false); return; }
+                const auto DestRect=Frames->GetLayoutRect(Destination);
+                const float DX=(DestRect.X+DestRect.Z*.5f)*Scale,DY=(DestRect.Y+DestRect.W*.5f)*Scale;
+                if(Frames->HitTestFrames(DX,DY)!=Destination) { Failure=TEXT("UI drop destination is obscured"); Finish(C,false); return; }
+                Frames->UpdateMouseHover(DX,DY); Frames->DispatchReceiveDrag(Destination); Frames->DispatchDragStop(Handle,Button);
+                C.GameplayProbePointer=FVector2D(DX,DY);
+            }
+            else
+            {
+                if(Frames->IsFrameClickRegistered(Handle,Button,true)) Frames->DispatchClick(Handle,Button,true);
+                Frames->DispatchMouseUp(Handle,Button);
+                if(Frames->IsFrameClickRegistered(Handle,Button,false)) Frames->DispatchClick(Handle,Button,false);
+            }
+            Done=true;
+            }
+        }
+        else if(Op==TEXT("inspect_frame"))
+        {
+            const FString Name=Step->GetStringField(TEXT("name")); auto* Frames=C.UIManager->GetFrameManager(); const int64 Handle=Frames->FindFrame(Name);
+            const auto Rect=Handle>=0?Frames->GetLayoutRect(Handle):Frames->GetRegionRect(Name);
+            auto Row=MakeShared<FJsonObject>(); Row->SetNumberField(TEXT("x"),Rect.X); Row->SetNumberField(TEXT("y"),Rect.Y); Row->SetNumberField(TEXT("width"),Rect.Z); Row->SetNumberField(TEXT("height"),Rect.W);
+            Row->SetStringField(TEXT("hit"),Frames->GetFrameName(Frames->HitTestFrames((Rect.X+Rect.Z*.5f)*Frames->GetScreenScale(),(Rect.Y+Rect.W*.5f)*Frames->GetScreenScale())));
+            if(const auto* Def=Frames->GetFrameDef(Handle)) { Row->SetNumberField(TEXT("level"),Def->FrameLevel); Row->SetNumberField(TEXT("strata"),int32(Def->Strata)); }
+            auto* Text=Handle>=0?Frames->GetPrimaryTextWidget(Handle):Frames->GetNamedFontString(Name);
+            if(Text)
+            {
+                Row->SetStringField(TEXT("text"),Text->GetText().ToString()); Row->SetNumberField(TEXT("fontSize"),Text->GetFont().Size);
+                Row->SetNumberField(TEXT("opacity"),Text->GetRenderOpacity()); Row->SetNumberField(TEXT("visibility"),int32(Text->GetVisibility()));
+                Row->SetStringField(TEXT("desired"),Text->GetDesiredSize().ToString()); Row->SetStringField(TEXT("color"),Text->GetColorAndOpacity().GetSpecifiedColor().ToString());
+                if(const auto* Slot=Cast<UCanvasPanelSlot>(Text->Slot)) { Row->SetStringField(TEXT("slotSize"),Slot->GetSize().ToString()); Row->SetStringField(TEXT("slotPosition"),Slot->GetPosition().ToString()); }
+            }
+            Inspections->SetObjectField(Name,Row); Done=true;
+        }
+        else if(Op==TEXT("assert_key_state"))
+        {
+            const FKey Key(*Step->GetStringField(TEXT("name")));
+            if(C.IsInputKeyDown(Key)!=Step->GetBoolField(TEXT("down"))) { Failure=TEXT("Unexpected routed key state"); Finish(C,false); return; } Done=true;
+        }
+        else if(Op==TEXT("input_key"))
+        {
+            const FKey Key(*Step->GetStringField(TEXT("name"))); if(!Key.IsValid()) { Failure=TEXT("Invalid native input key"); Finish(C,false); return; }
+            TGuardValue<bool> Synthetic(C.bProbeSyntheticKeyboard,true);
+            C.InputKey(FInputKeyEventArgs::CreateSimulated(Key,Step->GetStringField(TEXT("event"))==TEXT("release")?IE_Released:IE_Pressed,1.f)); Done=true;
+        }
+        else if(Op==TEXT("key"))
+        {
+            const FString Key=Step->GetStringField(TEXT("name"));
+            if(Key==TEXT("Escape")) C.OnEscapeKey();
+            else if(Key==TEXT("B")) C.OnBagKey();
+            else if(Key==TEXT("C")) C.OnCharacterKey();
+            else if(Key==TEXT("P")) C.OnSpellbookKey();
+            else if(Key==TEXT("L")) C.OnQuestLogKey();
+            else if(Key==TEXT("M")) C.OnToggleMap();
+            else if(Key==TEXT("Enter")) C.OnEnterKey();
+            else { Failure=TEXT("Unsupported UI probe key"); Finish(C,false); return; }
+            Done=true;
+        }
         else if (Op==TEXT("capture"))
         {
             const FString Path=Output/(Step->GetStringField(TEXT("name"))+TEXT(".png"));

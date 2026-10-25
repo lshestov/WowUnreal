@@ -183,8 +183,26 @@ void FWowPacketHandler::HandleItemQueryResponse(FPacketReader& R)
     Item.Class=R.ReadU32(); Item.Subclass=R.ReadU32(); R.Skip(4);
     Item.Name=R.ReadCString(); R.ReadCString(); R.ReadCString(); R.ReadCString();
     if (!R.CanRead(44)) return;
-    Item.DisplayId=R.ReadU32(); Item.Quality=R.ReadU32(); R.Skip(16);
-    Item.InventoryType=R.ReadU32(); R.Skip(12); Item.RequiredLevel=R.ReadU32();
+    Item.DisplayId=R.ReadU32(); Item.Quality=R.ReadU32(); Item.Flags=R.ReadU32(); R.Skip(8); Item.SellPrice=R.ReadU32();
+    Item.InventoryType=R.ReadU32(); R.Skip(8); Item.ItemLevel=R.ReadU32(); Item.RequiredLevel=R.ReadU32();
+    // The remainder follows AzerothCore's WotLK SMSG_ITEM_QUERY_SINGLE_RESPONSE.
+    if (R.CanRead(44))
+    {
+        R.Skip(32); Item.MaxStack=FMath::Max(int32(R.ReadU32()),1); Item.ContainerSlots=R.ReadU32();
+        const uint32 Stats=R.ReadU32();
+        if (Stats>10 || !R.CanRead(Stats*8+261)) return;
+        for(uint32 I=0; I<Stats; ++I) { const uint32 Type=R.ReadU32(); Item.Stats.Emplace(Type,int32(R.ReadU32())); }
+        R.Skip(8); Item.DamageMin=R.ReadFloat(); Item.DamageMax=R.ReadFloat(); R.Skip(16);
+        Item.Armor=R.ReadU32(); R.Skip(24); Item.Delay=R.ReadU32(); R.Skip(8);
+        for(int32 I=0; I<5; ++I)
+        {
+            const uint32 Spell=R.ReadU32(),Trigger=R.ReadU32(); R.Skip(16);
+            if(Spell && (Trigger==0 || Trigger==5) && !Item.UseSpellId) Item.UseSpellId=Spell;
+        }
+        R.Skip(4); Item.Description=R.ReadCString();
+        if(!R.CanRead(64)) return;
+        R.Skip(44); Item.MaxDurability=R.ReadU32(); R.Skip(8); Item.BagFamily=R.ReadU32();
+    }
     const auto& Stored=ItemTemplates.Add(Item.Id,MoveTemp(Item));
     bool LootChanged=false;
     for (auto& LootItem : Loot.Items) if (LootItem.ItemId==Stored.Id) { LootItem.Name=Stored.Name; LootItem.Quality=Stored.Quality; LootChanged=true; }

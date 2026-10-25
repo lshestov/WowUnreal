@@ -701,7 +701,7 @@ void AWowWorldManager::Tick(float DT)
         return;
     }
 
-    if (!bStreamingEnabled || !MpqManager || !MpqManager->IsInitialized())
+    if (bStreamingSuspended || !bStreamingEnabled || !MpqManager || !MpqManager->IsInitialized())
     {
         return;
     }
@@ -926,6 +926,7 @@ void AWowWorldManager::UpdateStreaming()
     FVector CamLoc;
     FRotator CamRot;
     PC->GetPlayerViewPoint(CamLoc, CamRot);
+    CamLoc=StreamingPosition(CamLoc);
 
     // Figure out which tile the camera is over
     FIntPoint CameraTile = FWowCoordinate::WorldToTile(CamLoc);
@@ -1524,6 +1525,7 @@ void AWowWorldManager::UpdateObjectStreaming()
     FVector CamLoc;
     FRotator CamRot;
     PC->GetPlayerViewPoint(CamLoc, CamRot);
+    CamLoc=StreamingPosition(CamLoc);
 
     const float DoodadRadiusSq = DoodadRadius * DoodadRadius;
     const float DoodadDespawnRadiusSq = (DoodadRadius * 1.2f) * (DoodadRadius * 1.2f);

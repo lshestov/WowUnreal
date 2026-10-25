@@ -10,6 +10,7 @@
 #include "Animation/AnimSequence.h"
 #include "Animation/AnimData/IAnimationDataController.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/SkeletalMeshSocket.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "MeshDescription.h"
@@ -331,6 +332,12 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 	USkeletalMesh* SkelMesh = NewObject<USkeletalMesh>();
 	SkelMesh->SetSkeleton(Skeleton);
 	SkelMesh->SetRefSkeleton(Skeleton->GetReferenceSkeleton());
+	for(int32 I=0; I<Data.Bones.Num(); ++I) if(Data.Bones[I].KeyBoneId==6)
+	{
+		auto* Socket=NewObject<USkeletalMeshSocket>(SkelMesh);
+		Socket->SocketName=TEXT("WowPortraitHead"); Socket->BoneName=GetBoneName(I);
+		SkelMesh->GetMeshOnlySocketList().Add(Socket); break;
+	}
 
 	const FReferenceSkeleton& RefSkel = Skeleton->GetReferenceSkeleton();
 

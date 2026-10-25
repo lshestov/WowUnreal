@@ -48,6 +48,7 @@ struct FWowAnchor
 /** A texture element within a layer */
 struct FWowTextureElement
 {
+	bool bAdditive = false;
 	FString Name;
 	FString ParentKey;
 	FString File;
@@ -64,6 +65,7 @@ struct FWowTextureElement
 /** A font string element within a layer */
 struct FWowFontStringElement
 {
+	bool bHasColor = false;
 	bool bHidden = false;
 	FString Name;
 	FString ParentKey;
@@ -75,7 +77,7 @@ struct FWowFontStringElement
 	FString JustifyH = TEXT("CENTER");
 	FString JustifyV = TEXT("MIDDLE");
 	FLinearColor Color = FLinearColor::White;
-	float FontHeight = 12.f;
+	float FontHeight = 0.f;
 	FString FontFlags; // OUTLINE, THICKOUTLINE, MONOCHROME
 };
 
@@ -145,6 +147,7 @@ struct WOWUI_API FWowFrameDef
 	bool bSetAllPoints = false;
 	bool bEnableMouse = false;
 	bool bEnableKeyboard = false;
+	bool bScrollChild = false;
 
 	float Width = 0.f;
 	float Height = 0.f;
@@ -165,6 +168,7 @@ struct WOWUI_API FWowFrameDef
 	// Type-specific properties
 	FString ButtonText;
 	FString NormalTexture, PushedTexture, HighlightTexture, DisabledTexture;
+	FString CheckedTexture;
 	FString NormalTextureName, PushedTextureName, HighlightTextureName, DisabledTextureName;
 	FString NormalTextureParentKey, PushedTextureParentKey, HighlightTextureParentKey, DisabledTextureParentKey;
 	float MinValue = 0.f, MaxValue = 100.f, DefaultValue = 0.f;
@@ -186,6 +190,7 @@ struct FWowXmlDirective
 	// For Font
 	FString FontName;
 	FString FontInherits;
-	float FontHeight = 12.f;
+	float FontHeight = 0.f;
 	FString FontFlags;
+	TOptional<FLinearColor> FontColor;
 };

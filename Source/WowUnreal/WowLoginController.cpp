@@ -17,6 +17,8 @@
 #include "WowWorldManager.h"
 #include "WowAudioManager.h"
 #include "WowUIManager.h"
+#include "WowLuaVM.h"
+#include "WowEventSystem.h"
 #include "SWowLoadingScreen.h"
 #include "SWowCombatLog.h"
 #include "SWowChatWindow.h"
@@ -120,6 +122,26 @@ void AWowLoginController::StartLoginFlow()
     ConnectionManager->OnCharacterList.AddDynamic(this, &AWowLoginController::OnCharacterList);
     ConnectionManager->OnError.AddDynamic(this, &AWowLoginController::OnError);
     ConnectionManager->OnCharCreateResult.AddDynamic(this, &AWowLoginController::OnCharCreateResult);
+    ConnectionManager->OnLogoutResponse.AddWeakLambda(this,[this](uint32 Reason,bool Instant)
+    {
+        auto* UI=GetGameInstance()->GetSubsystem<UWowUIManager>(); if(!UI || !UI->GetLuaVM()) return;
+        if(Reason) UI->GetEventSystem()->FireEvent(TEXT("UI_ERROR_MESSAGE"),{Reason==1?TEXT("You can't log out while in combat."):TEXT("You can't log out right now.")});
+        else if(!Instant) UI->GetLuaVM()->ExecuteString(TEXT("StaticPopup_Show('CAMP')"),TEXT("=logout_countdown"));
+    });
+    ConnectionManager->OnLogoutComplete.AddWeakLambda(this,[this]
+    {
+        if(WorldManager) WorldManager->SuspendStreaming();
+        bWorldEntryComplete=false; bWaitingForInitialLoad=false; bPendingGroundSnap=false;
+        if(auto* Gameplay=Cast<AWowGameplayController>(UGameplayStatics::GetPlayerController(this,0))) Gameplay->PrepareCharacterSelect();
+        if(auto* UI=GetGameInstance()->GetSubsystem<UWowUIManager>())
+        {
+            UI->GetEventSystem()->FireEvent(TEXT("PLAYER_LEAVING_WORLD")); UI->SetWorldUiVisible(false);
+        }
+        if(auto* PC=UGameplayStatics::GetPlayerController(this,0)) if(APawn* Pawn=PC->GetPawn())
+        {
+            Pawn->SetActorHiddenInGame(true); SuspendPawnUntilGroundReady(Pawn);
+        }
+    });
 
     ShowLoginScreen();
 
@@ -173,6 +195,7 @@ void AWowLoginController::OnStateChanged(EWowSessionState NewState)
         }
         break;
     case EWowSessionState::WorldEnteringWorld:
+        if(WorldManager) WorldManager->SuspendStreaming();
         // Bind entity events and set defer flag BEFORE the server sends LOGIN_VERIFY_WORLD
         // so we capture the spawn position without teleporting the pawn
         {
@@ -383,6 +406,12 @@ void AWowLoginController::InitializeWorldSystems()
         {
             if (UWowUIManager* UIManager = GI->GetSubsystem<UWowUIManager>())
             {
+                if(UIManager->IsUILoaded())
+                {
+                    UIManager->SetWorldUiVisible(true);
+                    UIManager->GetLuaVM()->ExecuteString(TEXT("ReloadUI()"),TEXT("=character_reentry"));
+                    return;
+                }
                 // Create root canvas for WoW UI frame system
                 if (GEngine && GEngine->GameViewport)
                 {
@@ -688,6 +717,7 @@ void AWowLoginController::UpdateLoadingProgress()
         PendingSpawnOrientation = GPC->DeferredSpawnOrientation;
 
         // Now we know where to spawn — start loading tiles there
+        WorldManager->LoadStreamingAt(PendingSpawnPosition);
         WorldManager->LoadTilesAroundPosition(PendingSpawnPosition, 2);
 
         LoadingScreenWidget->SetProgress(0.1f, TEXT("Loading terrain..."));
@@ -739,6 +769,7 @@ void AWowLoginController::FinalizeWorldEntry()
 
         if (APawn* Pawn = GPC->GetPawn())
         {
+            if(WorldManager) WorldManager->FollowStreamingActor(Pawn);
             Pawn->SetActorHiddenInGame(false);
             if (!TrySnapPawnToGround(Pawn, true))
             {
@@ -996,6 +1027,7 @@ void AWowLoginController::ShowCharacterSelectScreen(const TArray<FWowCharacterIn
     if (GEngine && GEngine->GameViewport)
     {
         GEngine->GameViewport->AddViewportWidgetContent(CurrentWidget.ToSharedRef(), 100);
+        ApplyWowLoginUiInputMode(UGameplayStatics::GetPlayerController(this,0),CurrentWidget);
     }
 
     // Create character preview actor if we have a world manager

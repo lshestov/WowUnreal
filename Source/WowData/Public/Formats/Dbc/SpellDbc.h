@@ -38,6 +38,9 @@ struct FSpellDbcEntry
     uint32 StackAmount;
     uint32 Effect[3];
     int32 EffectBasePoints[3];
+    int32 EffectDieSides[3];
+    float EffectPointsPerLevel[3];
+    uint32 EffectAmplitude[3];
     uint32 EffectImplicitTargetA[3];
     uint32 EffectImplicitTargetB[3];
     uint32 EffectApplyAuraName[3];
@@ -63,6 +66,10 @@ public:
     const FSpellDbcEntry* GetById(uint32 ID) const;
     struct FRange { float Min[2] = {}, Max[2] = {}; uint32 Flags = 0; };
     bool LoadRanges(const FDbcParser& Parser);
+    bool LoadTimes(const FDbcParser& Parser,bool CastTimes);
+    float Duration(uint32 Id) const { const auto* Value=Durations.Find(Id); return Value?*Value:0; }
+    float CastTime(uint32 Id) const { const auto* Value=CastTimes.Find(Id); return Value?*Value:0; }
+    FString Description(uint32 Id,int32 Level=1,bool Aura=false) const;
     const FRange* GetRange(uint32 ID) const { return Ranges.Find(ID); }
     const TArray<FSpellDbcEntry>& GetAll() const { return Entries; }
     int32 Num() const { return Entries.Num(); }
@@ -71,4 +78,5 @@ private:
     TArray<FSpellDbcEntry> Entries;
     TMap<uint32, int32> IdIndex;
     TMap<uint32, FRange> Ranges;
+    TMap<uint32,float> Durations,CastTimes;
 };

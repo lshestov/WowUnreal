@@ -1,4 +1,5 @@
 #include "WowGameplayController.h"
+#include "WowKeyBindings.h"
 #include "WowConnectionManager.h"
 #include "WowPacketHandler.h"
 #include "WowEntity.h"
@@ -177,6 +178,13 @@ void AWowGameplayController::BeginPlay()
 	if (UGameInstance* GI = GetGameInstance())
 	{
 		UIManager = GI->GetSubsystem<UWowUIManager>();
+		if(UIManager) UIManager->SetActorResolver([WeakThis=TWeakObjectPtr<AWowGameplayController>(this)](uint64 Guid)->AActor*
+		{
+			if(!WeakThis.IsValid() || !WeakThis->ConnectionManager) return nullptr;
+			if(Guid==WeakThis->ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid) return WeakThis->GetPawn();
+			if(auto* Found=WeakThis->SpawnedEntityActors.Find(Guid)) return Found->Get();
+			return nullptr;
+		});
 		if (UIManager && UIManager->GetFrameManager())
 		{
 			// Bind native secure action dispatch — emulates WoW's C++ action button handling
@@ -269,6 +277,16 @@ void AWowGameplayController::SetupInputComponent()
 void AWowGameplayController::BindEntityEvents()
 {
 	if (!ConnectionManager) return;
+	ConnectionManager->OnCursorChanged.AddWeakLambda(this,[this]()
+	{
+		FireUIEvent(TEXT("CURSOR_UPDATE"));
+		FireUIEvent(ConnectionManager->HasCursorPayload()?TEXT("ACTIONBAR_SHOWGRID"):TEXT("ACTIONBAR_HIDEGRID"));
+	});
+	ConnectionManager->PacketHandler.OnUnitAuraUpdate.AddLambda([this](uint64 Guid)
+	{
+		if(Guid==ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid) FireUIEvent(TEXT("UNIT_AURA"),{TEXT("player")});
+		else if(Guid==TargetGuid) FireUIEvent(TEXT("UNIT_AURA"),{TEXT("target")});
+	});
 
 	// Listen for login verify world — teleport pawn to spawn position
 	ConnectionManager->PacketHandler.OnLoginVerifyWorld.AddUObject(
@@ -374,6 +392,7 @@ void AWowGameplayController::BindEntityEvents()
 	// Listen for spell cooldowns to update action bar
 	ConnectionManager->PacketHandler.OnSpellCooldown.AddLambda([this](uint32 SpellId, float Duration)
 	{
+		FireUIEvent(TEXT("SPELL_UPDATE_COOLDOWN")); FireUIEvent(TEXT("ACTIONBAR_UPDATE_COOLDOWN")); FireUIEvent(TEXT("BAG_UPDATE_COOLDOWN"));
 		if (ActionBarWidget.IsValid())
 		{
 			ActionBarWidget->UpdateCooldown(SpellId, Duration);
@@ -387,6 +406,7 @@ void AWowGameplayController::BindEntityEvents()
 	});
 	ConnectionManager->PacketHandler.OnQuestLogChanged.AddLambda([this]()
 	{
+		if(ConnectionManager) for(const auto& Quest:ConnectionManager->PacketHandler.QuestLog) ConnectionManager->RequestQuestTemplate(Quest.QuestId);
 		FireUIEvent(TEXT("QUEST_LOG_UPDATE")); UpdateQuestTracker();
 	});
 	ConnectionManager->PacketHandler.OnLootOpened.AddLambda(
@@ -901,6 +921,8 @@ void AWowGameplayController::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 	TickGameplayProbe();
+	if(UIManager) UIManager->ProcessPendingReload();
+	if(ConnectionManager && ConnectionManager->GetState()!=EWowSessionState::WorldInGame) return;
 	const uint64 UiStarted=FPlatformTime::Cycles64();
 
 	// Dispatch OnUpdate to all WoW UI frames each tick
@@ -914,11 +936,15 @@ void AWowGameplayController::Tick(float DeltaTime)
 	if (UIManager && UIManager->GetFrameManager())
 	{
 		uint64 PartStarted=FPlatformTime::Cycles64();
-		float MX, MY;
-		if (GetMousePosition(MX, MY))
+		float MX=0, MY=0;
+		if(GameplayProbePointer.IsSet()) { MX=GameplayProbePointer->X; MY=GameplayProbePointer->Y; }
+		if (GameplayProbePointer.IsSet() || GetMousePosition(MX, MY))
 		{
+			if(PressedLeftMouseFrameHandle>=0 && !bDraggingUi && FVector2D::DistSquared(UiDragOrigin,FVector2D(MX,MY))>25)
+				bDraggingUi=UIManager->GetFrameManager()->DispatchDragStart(PressedLeftMouseFrameHandle,TEXT("LeftButton"));
 			UIManager->GetFrameManager()->UpdateMouseHover(MX, MY);
 		}
+		else UIManager->GetFrameManager()->UpdateMouseHover(-1,-1);
 		LastHoverMilliseconds=FPlatformTime::ToMilliseconds64(FPlatformTime::Cycles64()-PartStarted);
 		PartStarted=FPlatformTime::Cycles64();
 
@@ -931,6 +957,7 @@ void AWowGameplayController::Tick(float DeltaTime)
 
 		// Update cooldown overlay animations
 		UIManager->GetFrameManager()->TickCooldowns();
+		UIManager->TickWorldImages(GetWorld());
 		LastWidgetMilliseconds=FPlatformTime::ToMilliseconds64(FPlatformTime::Cycles64()-PartStarted);
 
 
@@ -947,7 +974,7 @@ void AWowGameplayController::Tick(float DeltaTime)
 	RefreshDuelUi();
 	LastUiMilliseconds=FPlatformTime::ToMilliseconds64(FPlatformTime::Cycles64()-UiStarted);
 
-	if (!ConnectionManager) return;
+	if (!ConnectionManager || ConnectionManager->GetState()!=EWowSessionState::WorldInGame) return;
 
 	// Update entity spline movement
 	UpdateEntitySplineMovement(DeltaTime);
@@ -1010,6 +1037,18 @@ void AWowGameplayController::Tick(float DeltaTime)
 		AuraUpdateTimer = 0.0f;
 		UpdateAuraDisplay();
 	}
+}
+
+void AWowGameplayController::PrepareCharacterSelect()
+{
+    bIsAutoAttacking=false; AutoAttackTargetGuid=0; TargetGuid=0; bIsCasting=false;
+    for(auto& Pair:SpawnedEntityActors) if(IsValid(Pair.Value)) Pair.Value->Destroy();
+    SpawnedEntityActors.Reset(); EntityNameplates.Reset(); DeadEntityGuids.Reset();
+    NpcGroundOffsets.Reset(); NpcReferenceFeet.Reset(); LocalPlayerAppearance.Reset();
+    bHasServerPosition=false;
+    if(TargetHighlightCircle) TargetHighlightCircle->SetVisibility(false);
+    if(GameUI) { GameUI->HideLootWindow(); GameUI->HideVendorWindow(); GameUI->HideQuestDialog(); GameUI->HideTradeWindow(); }
+    if(UIManager) UIManager->HideBankWindow();
 }
 
 void AWowGameplayController::SendMovementUpdate()
@@ -1131,11 +1170,39 @@ void AWowGameplayController::OnOpcodeReceived(uint16 Opcode)
 
 bool AWowGameplayController::InputKey(const FInputKeyEventArgs& Params)
 {
+	if(GameplayProbe && !bProbeSyntheticKeyboard) return true;
+	// Release the key originally routed on key-down even if a text box gained
+	// focus in the meantime. Otherwise custom movement bindings can stay held.
+	if(Params.Event==IE_Released) if(const auto* Held=HeldBindingKeys.Find(Params.Key))
+	{
+		auto Routed=Params; Routed.Key=*Held; HeldBindingKeys.Remove(Params.Key); return Super::InputKey(Routed);
+	}
+	if(Params.Event==IE_Pressed && UIManager && UIManager->GetFrameManager() && (Params.Key==EKeys::MouseScrollUp || Params.Key==EKeys::MouseScrollDown))
+		if(UIManager->GetFrameManager()->DispatchMouseWheel(GetUiFrameUnderCursor(),Params.Key==EKeys::MouseScrollUp?1.f:-1.f)) return true;
 	if (Params.Event == IE_Pressed
 		&& IsWowUiConsumingKeyboardInput()
 		&& ShouldSuppressGameplayHotkey(Params.Key))
 	{
 		return true;
+	}
+	if(UIManager && UIManager->GetLuaVM() && !Params.Key.IsMouseButton() && Params.Event!=IE_Axis)
+	{
+		const FString Name=FWowKeyBindings::KeyName(Params.Key);
+		if(UIManager->GetFrameManager()->DispatchKeyboard(Name,Params.Event==IE_Pressed || Params.Event==IE_Repeat)) return true;
+		if(!IsWowUiConsumingKeyboardInput())
+		{
+			FString Chord=Name;
+			if(FSlateApplication::IsInitialized())
+			{
+				const auto Modifiers=FSlateApplication::Get().GetModifierKeys();
+				if(Modifiers.IsShiftDown()) Chord=TEXT("SHIFT-")+Chord;
+				if(Modifiers.IsControlDown()) Chord=TEXT("CTRL-")+Chord;
+				if(Modifiers.IsAltDown()) Chord=TEXT("ALT-")+Chord;
+			}
+			const FKey Virtual=FWowKeyBindings::GameplayKey(FWowKeyBindings::Action(UIManager->GetLuaVM()->GetState(),Chord));
+			if(Virtual.IsValid()) { auto Routed=Params; Routed.Key=Virtual; if(Params.Event==IE_Pressed) HeldBindingKeys.Add(Params.Key,Virtual); return Super::InputKey(Routed); }
+			if(FWowKeyBindings::IsDefaultGameplayKey(Params.Key)) return true;
+		}
 	}
 
 	return Super::InputKey(Params);
@@ -1150,7 +1217,8 @@ int64 AWowGameplayController::GetUiFrameUnderCursor() const
 
 	float MouseX = 0.0f;
 	float MouseY = 0.0f;
-	if (!GetMousePosition(MouseX, MouseY))
+	if(GameplayProbePointer.IsSet()) { MouseX=GameplayProbePointer->X; MouseY=GameplayProbePointer->Y; }
+	if (!GameplayProbePointer.IsSet() && !GetMousePosition(MouseX, MouseY))
 	{
 		return -1;
 	}
@@ -1181,6 +1249,7 @@ bool AWowGameplayController::HandleUiMousePress(const FString& Button, int64& Pr
 	}
 
 	PressedFrameHandle = HitFrame;
+	if(bAllowDragDrop) { float X=0,Y=0; GetMousePosition(X,Y); UiDragOrigin=FVector2D(X,Y); bDraggingUi=false; }
 	FrameManager->DispatchMouseDown(HitFrame, Button);
 	if (FrameManager->IsFrameClickRegistered(HitFrame, Button, true))
 	{
@@ -1208,6 +1277,15 @@ bool AWowGameplayController::HandleUiMouseRelease(const FString& Button, int64& 
 	PressedFrameHandle = -1;
 
 	FrameManager->DispatchMouseUp(ReleasedFrameHandle, Button);
+	if(Button==TEXT("LeftButton") && bDraggingUi)
+	{
+		bDraggingUi=false;
+		const int64 Destination=GetUiFrameUnderCursor();
+		if(Destination<0 && ConnectionManager) ConnectionManager->DropActionCursor();
+		else FrameManager->DispatchReceiveDrag(Destination);
+		FrameManager->DispatchDragStop(ReleasedFrameHandle,Button);
+		return true;
+	}
 	if (FrameManager->IsFrameClickRegistered(ReleasedFrameHandle, Button, false)
 		&& GetUiFrameUnderCursor() == ReleasedFrameHandle)
 	{
@@ -3678,10 +3756,7 @@ void AWowGameplayController::OnTaxiActivateReply(uint8 Result)
 
 void AWowGameplayController::OnToggleMap()
 {
-	if (MinimapWidget.IsValid())
-	{
-		MinimapWidget->ToggleFullScreenMap();
-	}
+	if(!IsWowUiConsumingKeyboardInput() && UIManager) UIManager->MapCommand(0);
 }
 
 void AWowGameplayController::CastSpellFromSlot(int32 SlotIndex)
@@ -4162,10 +4237,7 @@ void AWowGameplayController::OnEnterKey()
 		}
 	}
 
-	if (ChatWindow.IsValid())
-	{
-		ChatWindow->ToggleInputFocus();
-	}
+	if(UIManager && UIManager->GetLuaVM()) UIManager->GetLuaVM()->ExecuteString(TEXT("ChatFrame_OpenChat('',DEFAULT_CHAT_FRAME)"),TEXT("=keybind_Enter"));
 }
 
 void AWowGameplayController::OnChatInputModeChanged(bool bChatActive)
@@ -4182,6 +4254,7 @@ void AWowGameplayController::OnChatInputModeChanged(bool bChatActive)
 
 void AWowGameplayController::OnBagKey()
 {
+	if(IsWowUiConsumingKeyboardInput()) return;
 	// Use FrameXML ToggleBackpack — no native fallback
 	if (UIManager && UIManager->GetLuaVM() && UIManager->GetLuaVM()->IsInitialized())
 	{
@@ -4191,6 +4264,7 @@ void AWowGameplayController::OnBagKey()
 
 void AWowGameplayController::OnCharacterKey()
 {
+	if(IsWowUiConsumingKeyboardInput()) return;
 	// Use FrameXML ToggleCharacter — no native fallback
 	if (UIManager && UIManager->GetLuaVM() && UIManager->GetLuaVM()->IsInitialized())
 	{
@@ -4200,15 +4274,7 @@ void AWowGameplayController::OnCharacterKey()
 
 void AWowGameplayController::OnQuestLogKey()
 {
-	if (!QuestLogWidget.IsValid())
-	{
-		CreateQuestLog();
-	}
-
-	if (QuestLogWidget.IsValid())
-	{
-		QuestLogWidget->ToggleVisibility();
-	}
+	if(!IsWowUiConsumingKeyboardInput() && UIManager && UIManager->GetLuaVM()) UIManager->GetLuaVM()->ExecuteString(TEXT("ToggleQuestLog()"),TEXT("=keybind_L"));
 }
 
 void AWowGameplayController::CreateQuestLog()
@@ -4467,9 +4533,9 @@ void AWowGameplayController::OnPlayerInventoryUpdated()
 			SetupLocalPlayerCharacterModel(*LocalEntity);
 
 	// Fire inventory events
-	FireUIEvent(TEXT("BAG_UPDATE"),{TEXT("0")});
+	for(int32 Bag=0; Bag<=4; ++Bag) FireUIEvent(TEXT("BAG_UPDATE"),{FString::FromInt(Bag)});
 	FireUIEvent(TEXT("PLAYER_MONEY"));
-	FireUIEvent(TEXT("PLAYER_EQUIPMENT_CHANGED"));
+	FireUIEvent(TEXT("UNIT_INVENTORY_CHANGED"),{TEXT("player")});
 	FireUIEvent(TEXT("UPDATE_INVENTORY_DURABILITY"));
 }
 
@@ -4545,7 +4611,7 @@ void AWowGameplayController::OnInitialSpells(const TArray<uint32>& SpellIds)
 
 	// Fire spell book events
 	FireUIEvent(TEXT("SPELLS_CHANGED"));
-	FireUIEvent(TEXT("LEARNED_SPELL_IN_TAB"));
+	// Initial spell snapshots do not represent a newly learned spell in a tab.
 }
 
 void AWowGameplayController::OnActionButtonsUpdated()
@@ -5034,6 +5100,7 @@ void AWowGameplayController::CreateSpellbook()
 
 void AWowGameplayController::OnSpellbookKey()
 {
+	if(IsWowUiConsumingKeyboardInput()) return;
 	// Fire WoW Lua — ToggleSpellBook(BOOKTYPE_SPELL)
 	if (UIManager && UIManager->GetLuaVM() && UIManager->GetLuaVM()->IsInitialized())
 	{
@@ -5064,6 +5131,12 @@ void AWowGameplayController::OnEscapeKey()
 	}
 
 	// 2. Clear target
+	if(GameUI && GameUI->CloseActiveWindow()) return;
+	if(UIManager && UIManager->GetFrameManager())
+	{
+		const int64 Map=UIManager->GetFrameManager()->FindFrame(TEXT("IdleWowWorldMapFrame"));
+		if(UIManager->GetFrameManager()->IsFrameHierarchyShown(Map)) { UIManager->MapCommand(3); return; }
+	}
 	if (TargetGuid != 0)
 	{
 		SetTarget(0);
@@ -5073,10 +5146,7 @@ void AWowGameplayController::OnEscapeKey()
 	// 3. If no target, try closing UI panels via WoW Lua
 	if (UIManager && UIManager->GetLuaVM() && UIManager->GetLuaVM()->IsInitialized())
 	{
-		UIManager->GetLuaVM()->ExecuteString(
-			TEXT("if GameMenuFrame and GameMenuFrame:IsShown() then HideUIPanel(GameMenuFrame) ")
-			TEXT("elseif CloseAllWindows then CloseAllWindows() end"),
-			TEXT("=keybind_Escape"));
+		UIManager->GetLuaVM()->ExecuteString(TEXT("ToggleGameMenu()"),TEXT("=keybind_Escape"));
 	}
 }
 

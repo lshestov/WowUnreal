@@ -2,6 +2,7 @@
 #include "WowPacketHandler.h"
 #include "WowConnectionManager.h"
 #include "UObject/StrongObjectPtr.h"
+#include "WowPcmSoundWave.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 namespace
@@ -14,9 +15,34 @@ struct FWire
 };
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGameplayChatAndFaction,"WowUnreal.Gameplay.ChatAndReputation",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FGameplayChatAndFaction::RunTest(const FString&)
+{
+    const auto Payload=UWowConnectionManager::BuildChatPacket(TEXT("Привет"),7,TEXT("Smrleadhcwxg"),7);
+    FPacketReader Reader(Payload); TestEqual(TEXT("Whisper type"),Reader.ReadU32(),7u); TestEqual(TEXT("Common language"),Reader.ReadU32(),7u);
+    TestEqual(TEXT("Whisper target precedes the body"),Reader.ReadCString(),FString(TEXT("Smrleadhcwxg"))); TestEqual(TEXT("UTF-8 message body round trips"),Reader.ReadCString(),FString(TEXT("Привет")));
+    const auto Long=UWowConnectionManager::BuildChatPacket(FString::ChrN(200,TCHAR(0x044f)),1,TEXT(""),7);
+    TestEqual(TEXT("Byte limit never splits a Cyrillic code point"),Long.Num(),8+254+1);
+    FWowPacketHandler Handler; FWire Factions; Factions.Add(uint32(2)).Add(uint8(1)).Add(int32(-300)).Add(uint8(3)).Add(int32(450)); Handler.HandlePacket(0x0122,Factions.Data);
+    TestEqual(TEXT("Faction flags retain visibility and war state"),Handler.Reputations[1].Flags,uint8(3)); TestEqual(TEXT("Signed faction reputation is preserved"),Handler.Reputations[0].Standing,-300);
+    FWire Update; Update.Add(float(0)).Add(uint8(0)).Add(uint32(1)).Add(uint32(0)).Add(int32(1000)); Handler.HandlePacket(0x0124,Update.Data);
+    TestEqual(TEXT("Faction standing updates address the correct row"),Handler.Reputations[0].Standing,1000);
+    Update.Data.SetNum(Update.Data.Num()-1); Handler.HandlePacket(0x0124,Update.Data); TestEqual(TEXT("Truncated standing cannot overwrite cached state"),Handler.Reputations[0].Standing,1000);
+    FString LastSender,LastMessage; int32 ChatEvents=0;
+    Handler.OnChatMessage.AddLambda([&](uint8,uint32,uint64,const FString& Name,const FString& Message,const FString&) { LastSender=Name; LastMessage=Message; ++ChatEvents; });
+    FWire Gm; Gm.Add(uint8(1)).Add(uint32(7)).Add(uint64(1)).Add(uint32(0)).Add(uint32(7)).Text("Tester").Add(uint64(0)).Add(uint32(6)).Text("Hello").Add(uint8(3));
+    Handler.HandlePacket(0x03B3,Gm.Data); TestEqual(TEXT("GM chat includes the explicit sender name"),LastSender,FString(TEXT("Tester"))); TestEqual(TEXT("GM chat body is aligned after the name and receiver"),LastMessage,FString(TEXT("Hello")));
+    Gm.Data.SetNum(Gm.Data.Num()-2); Handler.HandlePacket(0x03B3,Gm.Data); TestEqual(TEXT("Truncated GM chat is rejected"),ChatEvents,1);
+    FWire Name; Name.Add(uint8(1)).Add(uint8(1)).Add(uint8(0)).Text("Tester").Text("").Add(uint8(1)).Add(uint8(0)).Add(uint8(1)).Add(uint8(0));
+    Handler.HandlePacket(0x0051,Name.Data); TestEqual(TEXT("A zero unknown flag identifies a successful name query"),Handler.PlayerNameCache.FindRef(1),FString(TEXT("Tester")));
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGameplayQuestPackets,"WowUnreal.Gameplay.QuestPackets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FGameplayQuestPackets::RunTest(const FString&)
 {
+    const TArray<uint8> Utf8={0xd0,0x9f,0xd1,0x80,0xd0,0xb8,0xd0,0xb2,0xd0,0xb5,0xd1,0x82,0}; FPacketReader TextReader(Utf8);
+    TestEqual(TEXT("Network strings decode UTF-8 for chat and localized quest text"),TextReader.ReadCString(),FString(TEXT("Привет")));
     FWowPacketHandler Handler;
     const uint64 Guid=0xF130000337000001ULL;
     FWire Details;
@@ -36,6 +62,29 @@ bool FGameplayQuestPackets::RunTest(const FString&)
     const auto Accept=UWowConnectionManager::BuildQuestAcceptPacket(1,7);
     const TArray<uint8> Expected={1,0,0,0,0,0,0,0,7,0,0,0,0,0,0,0};
     TestTrue(TEXT("Accept includes the server's final uint32 field"),Accept==Expected);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGameplayQuestTemplate,"WowUnreal.Gameplay.QuestTemplate",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FGameplayQuestTemplate::RunTest(const FString&)
+{
+    FWowPacketHandler Handler; FWire Wire;
+    Wire.Add(uint32(783)).Add(uint32(2)).Add(int32(1)).Add(uint32(1)).Add(int32(12)).Add(uint32(0)).Add(uint32(1));
+    for(int32 I=0; I<6; ++I) Wire.Add(uint32(0));
+    Wire.Add(int32(42)); for(int32 I=0; I<6; ++I) Wire.Add(uint32(0));
+    Wire.Add(uint32(0x1000)); for(int32 I=0; I<5; ++I) Wire.Add(uint32(0));
+    for(int32 I=0; I<39; ++I) Wire.Add(uint32(0));
+    Wire.Text("A Threat Within").Text("Speak with Marshal McBride.").Text("The server quest description.").Text("").Text("All objectives completed.");
+    for(int32 I=0; I<4; ++I) Wire.Add(uint32(I==0?80:0)).Add(uint32(I==0?3:0)).Add(uint32(0)).Add(uint32(0));
+    for(int32 I=0; I<6; ++I) Wire.Add(uint32(I==0?6948:0)).Add(uint32(I==0?1:0));
+    Wire.Text("Kobold slain").Text("").Text("").Text("");
+    int32 Updates=0; Handler.OnQuestLogChanged.AddLambda([&Updates](){++Updates;});
+    Handler.HandlePacket(WowOpcode::SMSG_QUEST_QUERY_RESPONSE,Wire.Data);
+    const auto* Quest=Handler.QuestTemplates.Find(783);
+    TestTrue(TEXT("Quest query retains real title, level, reward and objectives"),Quest && Quest->Title==TEXT("A Threat Within") && Quest->Level==1 && Quest->Money==42 && Quest->Flags==0x1000 && Quest->CreatureId[0]==80 && Quest->CreatureCount[0]==3 && Quest->ItemId[0]==6948 && Quest->ObjectiveText[0]==TEXT("Kobold slain"));
+    TestEqual(TEXT("Quest metadata notifies the journal"),Updates,1);
+    Wire.Data.SetNum(100); Handler.HandlePacket(WowOpcode::SMSG_QUEST_QUERY_RESPONSE,Wire.Data);
+    TestEqual(TEXT("Truncated query cannot replace valid metadata"),Updates,1);
     return true;
 }
 
@@ -116,9 +165,39 @@ bool FGameplayItemTemplate::RunTest(const FString&)
     Item.Add(uint32(1367)).Add(uint32(4)).Add(uint32(1)).Add(uint32(0)).Text("Ragged Leather Boots").Text("").Text("").Text("")
         .Add(uint32(14454)).Add(uint32(0)).Add(uint32(0)).Add(uint32(0)).Add(uint32(100)).Add(uint32(20))
         .Add(uint32(8)).Add(uint32(0xffffffff)).Add(uint32(0xffffffff)).Add(uint32(2)).Add(uint32(1));
+    for(int32 I=0; I<7; ++I) Item.Add(uint32(0)); // requirements
+    Item.Add(uint32(0)).Add(uint32(20)).Add(uint32(0)).Add(uint32(1)).Add(uint32(7)).Add(int32(5));
+    Item.Add(uint32(0)).Add(uint32(0)); // scaling
+    Item.Add(2.f).Add(3.f).Add(uint32(0)).Add(0.f).Add(0.f).Add(uint32(0));
+    Item.Add(uint32(32)); for(int32 I=0; I<6; ++I) Item.Add(uint32(0));
+    Item.Add(uint32(1500)).Add(uint32(0)).Add(0.f);
+    for(int32 I=0; I<5; ++I) { Item.Add(uint32(I==0?6995:0)).Add(uint32(0)); for(int32 J=0; J<4; ++J) Item.Add(uint32(0)); }
+    Item.Add(uint32(1)).Text("A server supplied description");
+    for(int32 I=0; I<16; ++I) Item.Add(uint32(I==11?40:I==14?8:0));
     Handler.HandlePacket(WowOpcode::SMSG_ITEM_QUERY_SINGLE_RESPONSE,Item.Data);
     const auto* Template=Handler.ItemTemplates.Find(1367);
     TestTrue(TEXT("Item metadata supplies its actual name and equipment type"),Template && Template->Name==TEXT("Ragged Leather Boots") && Template->InventoryType==8 && Template->RequiredLevel==1);
+    TestTrue(TEXT("Item tooltip and use metadata follow the complete WotLK response"),Template && Template->SellPrice==20 && Template->ItemLevel==2 && Template->MaxStack==20 && Template->Armor==32 && Template->Delay==1500 && Template->UseSpellId==6995 && Template->Description==TEXT("A server supplied description") && Template->MaxDurability==40 && Template->BagFamily==8 && Template->Stats.Num()==1 && Template->Stats[0].Key==7 && Template->Stats[0].Value==5);
+    return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGameplayAuraPackets,"WowUnreal.Gameplay.AuraPackets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FGameplayAuraPackets::RunTest(const FString&)
+{
+    FWowPacketHandler H;
+    auto& Unit=H.EntityManager.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER);
+    Unit.Auras[0].bActive=true; Unit.Auras[0].SpellId=999;
+    FWire All;
+    All.Add(uint8(1)).Add(uint8(1)); // packed target guid
+    All.Add(uint8(5)).Add(uint32(6673)).Add(uint8(0x39)).Add(uint8(20)).Add(uint8(3)).Add(uint32(120000)).Add(uint32(90000));
+    All.Add(uint8(31)).Add(uint32(772)).Add(uint8(0xA1)).Add(uint8(20)).Add(uint8(0)).Add(uint8(1)).Add(uint8(2)).Add(uint32(15000)).Add(uint32(10000));
+    int32 Changes=0; H.OnUnitAuraUpdate.AddLambda([&](uint64 Guid){if(Guid==1) ++Changes;});
+    H.HandlePacket(0x495,All.Data);
+    TestFalse(TEXT("Aura snapshot clears absent old slots"),Unit.Auras[0].bActive);
+    TestTrue(TEXT("Snapshot consumes both sparse slots and implicit self caster"),Unit.Auras[5].bActive && Unit.Auras[5].CasterGuid==1 && Unit.Auras[5].DurationMs==120000 && Unit.Auras[5].RemainingMs==90000);
+    TestTrue(TEXT("External caster flag and timer remain byte-aligned"),Unit.Auras[31].bActive && Unit.Auras[31].CasterGuid==2 && Unit.Auras[31].RemainingMs==10000);
+    FWire Remove; Remove.Add(uint8(1)).Add(uint8(1)).Add(uint8(5)).Add(uint32(0));
+    H.HandlePacket(0x496,Remove.Data);
+    TestTrue(TEXT("Single update removes only its slot and notifies the correct unit"),!Unit.Auras[5].bActive && Unit.Auras[31].bActive && Changes==2);
     return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTraversalMovementPackets,"WowUnreal.Traversal.MovementPackets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
@@ -154,6 +233,24 @@ bool FTraversalMovementPackets::RunTest(const FString&)
     FPacketReader TimeReader(Response);
     TestEqual(TEXT("Time sync echoes the server counter"),TimeReader.ReadU32(),9u);
     TestTrue(TEXT("Time sync uses the movement millisecond clock"),uint32(TimeReader.ReadU32()-Before)<=uint32(After-Before));
+    return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUiCursorAndAudio,"WowUnreal.Gameplay.CursorAndAudio",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FUiCursorAndAudio::RunTest(const FString&)
+{
+    auto* Connection=NewObject<UWowConnectionManager>(); TArray<bool> States;
+    Connection->OnCursorChanged.AddLambda([&](){States.Add(Connection->HasCursorPayload());});
+    Connection->PickupBagItemCursor(255,23,6948); Connection->PlaceCursorIntoActionSlot(11);
+    TestTrue(TEXT("Pickup shows empty buttons; placing an item clears the cursor without moving the physical item"),States==TArray<bool>({true,false}) && Connection->PacketHandler.ActionButtons[11]==0x80001B24);
+    auto Pcm=MakeShared<TArray<uint8>,ESPMode::ThreadSafe>(); Pcm->Append({1,2,3,4});
+    auto* Wave=NewObject<UWowPcmSoundWave>(); Wave->Pcm=Pcm;
+    uint8 Buffer[8];
+    TestEqual(TEXT("Finite audio always completes the mixer render quantum"),Wave->GeneratePCMData(Buffer,4),8);
+    TestTrue(TEXT("Final PCM samples are followed by silence"),Buffer[0]==1 && Buffer[3]==4 && Buffer[4]==0 && Buffer[7]==0);
+    TestEqual(TEXT("Subsequent requests cannot spin on a zero-byte buffer"),Wave->GeneratePCMData(Buffer,4),8);
+    TestTrue(TEXT("Finished audio is silent"),Buffer[0]==0 && Buffer[7]==0);
+    auto* Loop=NewObject<UWowPcmSoundWave>(); Loop->Pcm=Pcm; Loop->bRepeat=true; Loop->GeneratePCMData(Buffer,4);
+    TestTrue(TEXT("Ambient loops cross the buffer boundary without a gap"),Buffer[0]==1 && Buffer[4]==1 && Buffer[7]==4);
     return true;
 }
 #endif

@@ -82,9 +82,13 @@ public:
 
 	/** Set the font manager for font rendering */
 	void SetFontManager(FWowFontManager* InFontManager) { FontManager = InFontManager; }
+	FWowFontManager* GetFontManager() const { return FontManager; }
 
 	/** Set MPQ manager for loading texture files */
 	void SetMpqManager(FMpqManager* InMpqManager) { MpqManager = InMpqManager; }
+	FMpqManager* GetMpqManager() const { return MpqManager; }
+	TFunction<void(int32)> OnMapCommand;
+	int32 MinimapZoom=2;
 
 	/** Set asset cache for texture caching */
 	void SetAssetCache(FWowAssetCache* InAssetCache) { AssetCache = InAssetCache; }
@@ -112,14 +116,23 @@ public:
 
 	/** Check if a frame is currently visible */
 	bool IsFrameVisible(int64 Handle) const;
+	bool IsFrameHierarchyShown(int64 Handle) const;
 	bool IsFrameDrawn(int64 Handle) const;
 
 	/** Set frame size and update widget */
 	void SetFrameSize(int64 Handle, float W, float H);
+	bool ReparentFrame(int64 Handle,int64 ParentHandle);
+	bool ReparentRegion(const FString& Name,int64 ParentHandle);
+	FString CreateFontStringRegion(int64 Parent,const FString& Name,const FString& Inherits);
+	void InvalidateTextLayout() { FrameRects.Reset(); bLayoutDirty=true; }
 	void SetFrameScale(int64 Handle, float Scale);
 	float GetFrameScale(int64 Handle) const;
 	float GetEffectiveFrameScale(int64 Handle) const;
 	FVector4 GetLayoutRect(int64 Handle);
+	FVector4 GetRegionRect(const FString& Name);
+	FVector2D GetRegionSize(const FString& Name);
+	void SetRegionSize(const FString& Name,float Width,float Height);
+	void SetRegionPoint(const FString& Name,const FWowAnchor& Anchor,bool Clear=false);
 	void RefreshLayout();
 	void UpdateViewportLayout();
 
@@ -159,6 +172,8 @@ public:
 
 	/** Get the USlider child widget for a frame (nullptr if not found or invalid) */
 	USlider* GetSliderWidget(int64 Handle) const;
+	/** Set a Lua-driven value without re-emitting it from native input polling. */
+	void SetSliderValue(int64 Handle, float Value);
 
 	/** Get the primary text widget associated with a frame (button label, etc.) */
 	UTextBlock* GetPrimaryTextWidget(int64 Handle) const;
@@ -174,6 +189,8 @@ public:
 	bool IsFrameMouseEnabled(int64 Handle) const;
 	bool IsFrameKeyboardEnabled(int64 Handle) const;
 	bool IsFrameMouseWheelEnabled(int64 Handle) const;
+	FVector2D GetPointerPosition() const { return LastPointerPosition; }
+	bool DispatchMouseWheel(int64 Handle,float Delta);
 	bool IsFrameClickRegistered(int64 Handle, const FString& Button, bool bMouseDown) const;
 
 	/** Create a simple test frame for debugging */
@@ -196,6 +213,7 @@ public:
 	/** Find the topmost interactive frame under a screen position (pixels).
 	 *  Returns frame handle or -1 if no interactive frame found. */
 	int64 HitTestFrames(float ScreenX, float ScreenY) const;
+	bool DispatchKeyboard(const FString& Key,bool bDown);
 	bool IsMouseOverFrame(int64 Handle, float TopOffset = 0.f, float BottomOffset = 0.f, float LeftOffset = 0.f, float RightOffset = 0.f) const;
 
 	/** Dispatch a mouse click event to a frame's Lua scripts.
@@ -204,6 +222,11 @@ public:
 	void DispatchMouseUp(int64 Handle, const FString& Button);
 	void DispatchClick(int64 Handle, const FString& Button, bool bMouseDown);
 	bool DispatchReceiveDrag(int64 Handle);
+	TFunction<void(const FString&,uint64)> OnPortrait;
+	TFunction<void(int64,uint64)> OnUnitModel;
+	TFunction<void(int64,float)> OnModelFacing;
+	bool DispatchDragStart(int64 Handle,const FString& Button);
+	void DispatchDragStop(int64 Handle,const FString& Button);
 
 	/** Update mouse hover state — call once per frame from Tick.
 	 *  Dispatches OnEnter/OnLeave events to Lua scripts. */
@@ -234,6 +257,17 @@ public:
 	/** Cooldown API */
 	void SetCooldown(int64 Handle, double StartTime, float Duration);
 	void TickCooldowns();
+	struct FMessage { FString Text; FLinearColor Color; int32 Id=0; };
+	struct FMessageState { TArray<FMessage> Lines; TArray<TWeakObjectPtr<UTextBlock>> Widgets; int32 Offset=0,Limit=200; };
+	TMap<int64,FMessageState> MessageFrames;
+	void AddMessage(int64 Handle,const FString& Text,FLinearColor Color,int32 Id=0);
+	void ScrollMessages(int64 Handle,int32 Offset,bool Absolute=false);
+	void DrawMessages(int64 Handle);
+	void SetChecked(int64 Handle,bool Checked);
+	bool GetChecked(int64 Handle) const { return CheckedFrames.Contains(Handle); }
+	TSet<int64> CheckedFrames;
+	TMap<int64,TWeakObjectPtr<UImage>> CheckImages;
+	TMap<int64,int32> EditBoxMaxBytes,EditBoxMaxLetters;
 
 	/** Set the UI scale factor (typically calculated from viewport size vs WoW's base resolution) */
 	void SetUIScale(float InScale) { UIScale = InScale; }
@@ -253,6 +287,7 @@ private:
 
 	/** Handle of the frame currently under the mouse cursor (-1 if none) */
 	int64 HoverFrameHandle = -1;
+	FVector2D LastPointerPosition=FVector2D::ZeroVector;
 
 	/** Last-known text for each EditBox, used to detect changes for OnTextChanged dispatch */
 	TMap<int64, FString> EditBoxLastText;
@@ -338,7 +373,7 @@ public:
 	void TooltipSetText(int64 TooltipHandle, const FString& Text);
 	void TooltipAppendText(int64 TooltipHandle, const FString& Text);
 	void TooltipSetItem(int64 TooltipHandle, const FString& ItemLink);
-	void TooltipSetSpell(int64 TooltipHandle, int32 SpellId);
+	void TooltipSetSpell(int64 TooltipHandle, int32 SpellId,int32 Level=1,bool Aura=false);
 	void TooltipSetUnit(int64 TooltipHandle, const FString& UnitToken);
 	void TooltipUpdateDisplay(int64 TooltipHandle);
 	FTooltipState* GetTooltipState(int64 TooltipHandle);
@@ -365,6 +400,8 @@ private:
 		bool bAllPoints;
 	};
 	TArray<FRegionLayout> RegionLayouts;
+	TMap<int64,float> LastScrollRanges;
+	double NextScrollRangeCheck=0;
 	bool bLayoutDirty = false;
 	TSet<FString> ResolvingRects;
 	FVector2D LayoutViewport = FVector2D::ZeroVector;

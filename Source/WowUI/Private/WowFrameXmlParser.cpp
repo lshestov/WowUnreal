@@ -219,6 +219,11 @@ TArray<FWowXmlDirective> ParseXmlWithFXmlFallback(const FString& XmlContent, con
 			}
 
 			Dir.FontFlags = Child->GetAttribute(TEXT("flags"));
+			if(const auto* Color=Child->FindChildNode(TEXT("Color")))
+			{
+				const auto Read=[Color](const TCHAR* Key,float Default) { const FString Value=Color->GetAttribute(Key); return Value.IsEmpty()?Default:FCString::Atof(*Value); };
+				Dir.FontColor=FLinearColor(Read(TEXT("r"),1),Read(TEXT("g"),1),Read(TEXT("b"),1),Read(TEXT("a"),1));
+			}
 
 			const FXmlNode* FontHeightNode = Child->FindChildNode(TEXT("FontHeight"));
 			if (FontHeightNode)
@@ -439,6 +444,7 @@ static FWowTextureElement ParseTextureNode(const FXmlNode* Node)
 	Tex.Name = Node->GetAttribute(TEXT("name"));
 	Tex.ParentKey = Node->GetAttribute(TEXT("parentKey"));
 	Tex.File = Node->GetAttribute(TEXT("file"));
+	Tex.bAdditive=Node->GetAttribute(TEXT("alphaMode")).Equals(TEXT("ADD"),ESearchCase::IgnoreCase);
 
 	// Size from attributes or child
 	const FXmlNode* SizeNode = Node->FindChildNode(TEXT("Size"));
@@ -501,6 +507,7 @@ static FWowFontStringElement ParseFontStringNode(const FXmlNode* Node)
 	if (ColorNode)
 	{
 		FS.Color = ParseColor(ColorNode);
+		FS.bHasColor = true;
 	}
 
 	// FontHeight
@@ -709,6 +716,7 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 	FWowFrameDef Def;
 	Def.Type = FWowFrameXmlParser::ParseFrameType(UTF8_TO_TCHAR(Node.name()));
 	Def.Name = UTF8_TO_TCHAR(Node.attribute("name").as_string());
+	Def.ButtonText = UTF8_TO_TCHAR(Node.attribute("text").as_string());
 	Def.ParentKey = UTF8_TO_TCHAR(Node.attribute("parentKey").as_string());
 	Def.Parent = UTF8_TO_TCHAR(Node.attribute("parent").as_string());
 	Def.Inherits = UTF8_TO_TCHAR(Node.attribute("inherits").as_string());
@@ -803,6 +811,7 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 						T.Name = UTF8_TO_TCHAR(Tex.attribute("name").as_string());
 						T.ParentKey = UTF8_TO_TCHAR(Tex.attribute("parentKey").as_string());
 						T.File = UTF8_TO_TCHAR(Tex.attribute("file").as_string());
+						T.bAdditive=FString(UTF8_TO_TCHAR(Tex.attribute("alphaMode").as_string())).Equals(TEXT("ADD"),ESearchCase::IgnoreCase);
 						T.bSetAllPoints = Tex.attribute("setAllPoints").as_bool(false);
 						T.bHidden = Tex.attribute("hidden").as_bool(false);
 
@@ -961,6 +970,7 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 								Color.attribute("g").as_float(1.0f),
 								Color.attribute("b").as_float(1.0f),
 								Color.attribute("a").as_float(1.0f));
+							FS.bHasColor = true;
 						}
 						L.FontStrings.Add(FS);
 					}
@@ -1006,7 +1016,8 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 				if (ChildFrame.type() != pugi::node_element) continue;
 				if (IsFrameTypeTag(UTF8_TO_TCHAR(ChildFrame.name())))
 				{
-					Def.Children.Add(ParseFrameNode_Pugi(ChildFrame));
+					auto ScrollChild=ParseFrameNode_Pugi(ChildFrame); ScrollChild.bScrollChild=true;
+					Def.Children.Add(MoveTemp(ScrollChild));
 				}
 			}
 		}
@@ -1028,6 +1039,7 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 			Def.NormalTextureName = UTF8_TO_TCHAR(Child.attribute("name").as_string());
 			Def.NormalTextureParentKey = UTF8_TO_TCHAR(Child.attribute("parentKey").as_string());
 		}
+		else if(Tag==TEXT("CheckedTexture")) { Def.CheckedTexture=UTF8_TO_TCHAR(Child.attribute("file").as_string()); }
 		else if (Tag == TEXT("PushedTexture"))
 		{
 			Def.PushedTexture = UTF8_TO_TCHAR(Child.attribute("file").as_string());
@@ -1103,7 +1115,18 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 		else if (Tag == TEXT("ButtonText"))
 		{
 			pugi::xml_node FS = Child.child("FontString");
-			Def.ButtonText = FS ? UTF8_TO_TCHAR(FS.attribute("text").as_string()) : UTF8_TO_TCHAR(Child.child_value());
+			const FString Caption=FS ? UTF8_TO_TCHAR(FS.attribute("text").as_string()) : UTF8_TO_TCHAR(Child.child_value());
+			if(!Caption.IsEmpty()) Def.ButtonText=Caption;
+			// ButtonText uses the same sizing/anchor/font contract as FontString.
+			pugi::xml_document RegionDocument; auto Frame=RegionDocument.append_child("Frame");
+			auto Layer=Frame.append_child("Layers").append_child("Layer"); Layer.append_attribute("level")="OVERLAY";
+			auto Region=Layer.append_copy(FS?FS:Child); Region.set_name("FontString");
+			auto Parsed=ParseFrameNode_Pugi(Frame);
+			for(auto& ParsedLayer:Parsed.Layers)
+			{
+				for(auto& Text:ParsedLayer.FontStrings) { if(Text.Name.IsEmpty()) Text.Name=TEXT("$parentText"); if(Text.Text.IsEmpty()) Text.Text=Def.ButtonText; }
+				Def.Layers.Add(MoveTemp(ParsedLayer));
+			}
 		}
 	}
 
@@ -1120,6 +1143,7 @@ static FWowFrameDef ParseFrameNode(const FXmlNode* Node)
 	FWowFrameDef Def;
 	Def.Type = FWowFrameXmlParser::ParseFrameType(Node->GetTag());
 	Def.Name = Node->GetAttribute(TEXT("name"));
+	Def.ButtonText = Node->GetAttribute(TEXT("text"));
 	Def.ParentKey = Node->GetAttribute(TEXT("parentKey"));
 	Def.Parent = Node->GetAttribute(TEXT("parent"));
 	Def.Inherits = Node->GetAttribute(TEXT("inherits"));
@@ -1207,7 +1231,8 @@ static FWowFrameDef ParseFrameNode(const FXmlNode* Node)
 			{
 				if (IsFrameTypeTag(ChildFrame->GetTag()))
 				{
-					Def.Children.Add(ParseFrameNode(ChildFrame));
+					auto ScrollChild=ParseFrameNode(ChildFrame); ScrollChild.bScrollChild=true;
+					Def.Children.Add(MoveTemp(ScrollChild));
 				}
 			}
 		}
@@ -1217,11 +1242,13 @@ static FWowFrameDef ParseFrameNode(const FXmlNode* Node)
 			const FXmlNode* FS = Child->FindChildNode(TEXT("FontString"));
 			if (FS)
 			{
-				Def.ButtonText = FS->GetAttribute(TEXT("text"));
+				const FString Caption=FS->GetAttribute(TEXT("text"));
+				if(!Caption.IsEmpty()) Def.ButtonText=Caption;
 			}
 			else
 			{
-				Def.ButtonText = Child->GetContent();
+				const FString Caption=Child->GetContent();
+				if(!Caption.IsEmpty()) Def.ButtonText=Caption;
 			}
 		}
 		else if (Tag.Equals(TEXT("NormalTexture"), ESearchCase::IgnoreCase))
@@ -1365,7 +1392,8 @@ TArray<FWowXmlDirective> FWowFrameXmlParser::ParseXml(const TArray<uint8>& Data,
 			Dir.FontName = UTF8_TO_TCHAR(Child.attribute("name").as_string());
 			Dir.FontInherits = UTF8_TO_TCHAR(Child.attribute("inherits").as_string());
 			Dir.FontFlags = UTF8_TO_TCHAR(Child.attribute("flags").as_string());
-			Dir.FontHeight = Child.attribute("height").as_float(12.0f);
+			Dir.FontHeight = Child.attribute("height").as_float(0.0f);
+			if(const auto Color=Child.child("Color")) Dir.FontColor=FLinearColor(Color.attribute("r").as_float(1),Color.attribute("g").as_float(1),Color.attribute("b").as_float(1),Color.attribute("a").as_float(1));
 
 			pugi::xml_node FontHeightNode = Child.child("FontHeight");
 			if (FontHeightNode)
