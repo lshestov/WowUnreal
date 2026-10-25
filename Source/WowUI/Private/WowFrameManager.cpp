@@ -1,3 +1,4 @@
+#include "WowTextBlock.h"
 #include "WowBackdropWidget.h"
 #include "WowFrameManager.h"
 #include "WowEventSystem.h"
@@ -767,6 +768,11 @@ void FWowFrameManager::InvalidateFrameRectsRecursive(int64 Handle)
 	}
 }
 
+UTextBlock* FWowFrameManager::CreateTextBlock(UObject* Outer)
+{
+    auto* Text=NewObject<UWowTextBlock>(Outer); Text->InitializeLabel(this,UIScale); RichTextWidgets.Add(Text); return Text;
+}
+
 void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFrameDef& Def, int64 OwnerHandle)
 {
 	if (!Container) return;
@@ -970,7 +976,7 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 		// Create UTextBlock widgets for fontstrings
 		for (const FWowFontStringElement& FS : Layer.FontStrings)
 		{
-			UTextBlock* TextWidget = NewObject<UTextBlock>(Outer);
+			UTextBlock* TextWidget = CreateTextBlock(Outer);
 			TextWidget->SetVisibility(FS.bHidden ? ESlateVisibility::Collapsed : ESlateVisibility::SelfHitTestInvisible);
 
 			const bool IsCaption=FS.Name==Def.Name+TEXT("Text") || FS.Name==Def.Name+TEXT("NormalText") || FS.ParentKey==TEXT("normalText");
@@ -978,7 +984,7 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 			const FString ResolvedCaption=EventSystem?EventSystem->ResolveText(Caption):Caption;
 			if (!Caption.IsEmpty())
 			{
-				TextWidget->SetText(FText::FromString(WowUiPlainText(ResolvedCaption)));
+				TextWidget->SetText(FText::FromString(ResolvedCaption));
 			}
 
 			// Apply color
@@ -1227,9 +1233,9 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 			for(const auto& Layer:Def.Layers) for(const auto& Text:Layer.FontStrings) HasCaptionRegion|=Text.Name==Def.Name+TEXT("Text") || Text.Name==Def.Name+TEXT("NormalText") || Text.ParentKey==TEXT("text") || Text.ParentKey==TEXT("normalText");
 			if (!HasCaptionRegion)
 			{
-				UTextBlock* ButtonText = NewObject<UTextBlock>(ContainerWidget);
+				UTextBlock* ButtonText = CreateTextBlock(ContainerWidget);
 				const FString Caption=EventSystem?EventSystem->ResolveText(Def.ButtonText):Def.ButtonText;
-				ButtonText->SetText(FText::FromString(WowUiPlainText(Caption)));
+				ButtonText->SetText(FText::FromString(Caption));
 				ButtonText->SetJustification(ETextJustify::Center);
 				ButtonText->SetColorAndOpacity(FLinearColor(1,.82f,0));
 				FSlateFontInfo FontInfo = FontManager?FontManager->GetDefaultFont(FMath::RoundToInt(12.f*UIScale)):ButtonText->GetFont();
@@ -1912,7 +1918,7 @@ void FWowFrameManager::AddMessage(int64 Handle,const FString& Text,FLinearColor 
 {
 	if(Text.IsEmpty() || !Frames.Contains(Handle)) return;
 	auto& State=MessageFrames.FindOrAdd(Handle);
-	State.Lines.Add({WowUiPlainText(Text),Color,Id});
+	State.Lines.Add({Text,Color,Id});
 	if(State.Lines.Num()>State.Limit) State.Lines.RemoveAt(0,State.Lines.Num()-State.Limit);
 	if(State.Offset>0) ++State.Offset;
 	DrawMessages(Handle);
@@ -1954,7 +1960,7 @@ void FWowFrameManager::DrawMessages(int64 Handle)
 	Canvas->SetClipping(EWidgetClipping::ClipToBounds);
 	while(State.Widgets.Num()<Visible)
 	{
-		auto* Text=NewObject<UTextBlock>(Canvas); Text->SetVisibility(ESlateVisibility::HitTestInvisible);
+		auto* Text=CreateTextBlock(Canvas); Text->SetVisibility(ESlateVisibility::HitTestInvisible);
 		Text->SetJustification(ETextJustify::Left); Text->SetAutoWrapText(true);
 		if(FontManager) Text->SetFont(FontManager->GetDefaultFont(FMath::Max(1,FMath::RoundToInt(12*UIScale))));
 		Canvas->AddChildToCanvas(Text); State.Widgets.Add(Text);
@@ -2691,7 +2697,7 @@ void FWowFrameManager::TooltipUpdateDisplay(int64 TooltipHandle)
 		UTextBlock* Text=GetNamedFontString(Name);
 		if(!Text) if(auto* Canvas=Cast<UCanvasPanel>(GetWidgetForHandle(TooltipHandle)))
 		{
-			Text=NewObject<UTextBlock>(Canvas); Canvas->AddChildToCanvas(Text);
+			Text=CreateTextBlock(Canvas); Canvas->AddChildToCanvas(Text);
 			NamedFontStringWidgets.Add(Name,Text); RegionOwners.Add(Name,Prefix);
 			if(EventSystem) EventSystem->CreateTextureRegionGlobal(Name,TooltipHandle,TEXT("FontString"));
 		}
@@ -2722,7 +2728,7 @@ void FWowFrameManager::TooltipUpdateDisplay(int64 TooltipHandle)
 
 		if (LeftTextBlock)
 		{
-			LeftTextBlock->SetText(FText::FromString(WowUiPlainText(Line.Text)));
+			LeftTextBlock->SetText(FText::FromString(Line.Text));
 			LeftTextBlock->SetAutoWrapText(Line.bWrapText); LeftTextBlock->SetWrapTextAt(Line.bWrapText?300*UIScale:0);
 			LeftTextBlock->SetColorAndOpacity(FSlateColor(Line.Color));
 			LeftTextBlock->SetVisibility(ESlateVisibility::Visible);

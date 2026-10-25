@@ -427,6 +427,7 @@ private:
 		bool bAllPoints;
 	};
 	TArray<FRegionLayout> RegionLayouts;
+	TArray<TWeakObjectPtr<class UWowTextBlock>> RichTextWidgets;
 	TMap<int64,float> LastScrollRanges;
 	double NextScrollRangeCheck=0;
 	bool bLayoutDirty = false;
@@ -439,6 +440,7 @@ private:
 
 	/** Create layer content (textures and fontstrings) inside a frame's canvas */
 	void CreateLayerContent(UCanvasPanel* Container, const FWowFrameDef& Def, int64 OwnerHandle);
+	UTextBlock* CreateTextBlock(UObject* Outer);
 
 	/** Resolve template inheritance for a frame definition */
 	FWowFrameDef ResolveInherits(const FWowFrameDef& Def) const;

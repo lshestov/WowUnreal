@@ -10,6 +10,7 @@
 #include "WowCombatLogUi.h"
 #include "WowMultiLineEditBox.h"
 #include "WowBackdropWidget.h"
+#include "WowTextBlock.h"
 #include "WowSavedVariables.h"
 #include "WowAddonLoader.h"
 #include "Misc/Paths.h"
@@ -391,7 +392,9 @@ bool FHudTextureTemplates::RunTest(const FString&)
         if(Directive.Type==FWowXmlDirective::EType::Texture) F.Frames.LoadTextureDefinition(Directive.TextureDef,Directive.TextureParent);
         if(Directive.Type==FWowXmlDirective::EType::Frame && Directive.FrameDef.bVirtual) F.Frames.CreateFrame(Directive.FrameDef);
     }
-    TestTrue(TEXT("Instantiate original game-menu button"),F.Lua.ExecuteString(TEXT("SkinButton=CreateFrame('Button','SkinButton',UIParent,'GameMenuButtonTemplate'); SkinButton:SetPoint('CENTER',UIParent,'CENTER',0,0); SkinButton:SetText('Stock button')")));
+    FWowFrameDef Button; Button.Name=TEXT("SkinButton"); Button.Parent=TEXT("UIParent"); Button.Inherits=TEXT("GameMenuButtonTemplate"); Button.Type=EWowFrameType::Button;
+    Button.Width=144; Button.Height=21; Button.Anchors.Add({EWowAnchorPoint::CENTER,TEXT("UIParent"),EWowAnchorPoint::CENTER,0,0}); F.Frames.CreateFrame(Button);
+    TestTrue(TEXT("Instantiate original game-menu button"),F.Lua.ExecuteString(TEXT("SkinButton:SetText('Stock button')")));
     const auto Handle=F.Frames.FindFrame(TEXT("SkinButton"));
     const auto* Normal=F.Frames.GetNamedTexture(F.Frames.EnsureButtonTexture(Handle,TEXT("Normal")));
     TestTrue(TEXT("Inherited texture resource loads from MPQ"),Normal && Normal->GetBrush().GetResourceObject());
@@ -401,6 +404,28 @@ bool FHudTextureTemplates::RunTest(const FString&)
     TestTrue(TEXT("Disabled caption receives the disabled font color"),Text && FMath::IsNearlyEqual(Text->GetColorAndOpacity().GetSpecifiedColor().R,.5f));
     TestTrue(TEXT("Normal font can change through original Lua API"),F.Lua.ExecuteString(TEXT("SkinButton:Enable(); SkinButton:SetNormalFontObject(GameFontNormal); assert(SkinButton:GetNormalFontObject()==GameFontNormal)")));
     TestTrue(TEXT("Updated normal caption color is visible"),Text && FMath::IsNearlyEqual(Text->GetColorAndOpacity().GetSpecifiedColor().G,.8f));
+    return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudInlineLabels,"WowUnreal.Hud.StockInlineLabels",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudInlineLabels::RunTest(const FString&)
+{
+    const auto Parsed=UWowTextBlock::ParseMarkup(TEXT("Before |cffff0000red|r |TInterface/Icons/Example:16:24:2:-1:64:64:4:36:8:40|t |Hitem:123|h[item]|h || <text>"));
+    TestEqual(TEXT("Markup preserves visible text and escaped pipes"),Parsed.Plain,FString(TEXT("Before red  [item] | <text>")));
+    if(!TestEqual(TEXT("Inline texture parsed"),Parsed.Icons.Num(),1)) return false;
+    const auto& Icon=Parsed.Icons[0];
+    TestTrue(TEXT("Icon dimensions, offsets and crop are retained"),Icon.Height==16 && Icon.Width==24 && Icon.OffsetX==2 && Icon.OffsetY==-1 && Icon.Crop.X==.0625f && Icon.Crop.Y==.125f);
+    TestTrue(TEXT("Literal markup cannot become a decorator"),Parsed.Rich.Contains(TEXT("&lt;text&gt;")) && Parsed.Rich.Contains(TEXT("wowimage")));
+    FString DataPath; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),DataPath)) return false;
+    FMpqManager Mpq; if(!Mpq.Initialize(DataPath)) return false;
+    FHudFixture F; F.Frames.SetMpqManager(&Mpq); FWowAssetCache Cache; F.Frames.SetAssetCache(&Cache);
+    TestTrue(TEXT("Inline icons participate in measured width and wrapping"),F.Lua.ExecuteString(TEXT(R"LUA(
+        InlineLabel=UIParent:CreateFontString('InlineLabel'); InlineLabel:SetPoint('CENTER',UIParent,'CENTER',0,0)
+        InlineLabel:SetText('A'); local before=InlineLabel:GetStringWidth()
+        local raw='A|TInterface\\Icons\\INV_Misc_QuestionMark:20:40|t'; InlineLabel:SetText(raw)
+        assert(InlineLabel:GetText()==raw and InlineLabel:GetStringWidth()>=before+39)
+        InlineLabel:SetWidth(60); InlineLabel:SetText(raw..' multiple wrapped words after the icon')
+        assert(InlineLabel:GetHeight()>20)
+    )LUA")));
     return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudInventoryItems,"WowUnreal.Hud.InventoryItems",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)

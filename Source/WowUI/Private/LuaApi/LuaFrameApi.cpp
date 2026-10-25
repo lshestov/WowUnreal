@@ -1,3 +1,4 @@
+#include "WowTextBlock.h"
 #include "WowEntity.h"
 #include "WowUiText.h"
 #include "LuaApiRegistry.h"
@@ -1783,6 +1784,7 @@ static int LF_FontStringSetTextColor(lua_State* L)
 	{
 		FLinearColor TextColor(R, G, B, A);
 		TextBlock->SetColorAndOpacity(FSlateColor(TextColor));
+		if(auto* Rich=Cast<UWowTextBlock>(TextBlock)) Rich->RefreshRichStyle();
 	}
 
 	return 0;
@@ -1843,6 +1845,15 @@ static int LF_FontStringGetFont(lua_State* L)
 // fontstring:GetStringWidth() -> approximate width
 static int LF_FontStringGetStringWidth(lua_State* L)
 {
+	if(auto* TextBlock=GetTextBlockWidgetForTable(L,1))
+	{
+        const float Wrap=TextBlock->GetWrapTextAt(); const bool Auto=TextBlock->GetAutoWrapText(); TextBlock->SetAutoWrapText(false); TextBlock->SetWrapTextAt(0);
+		if(auto* Rich=Cast<UWowTextBlock>(TextBlock)) Rich->RefreshRichStyle();
+		TextBlock->TakeWidget()->Invalidate(EInvalidateWidgetReason::Prepass); TextBlock->ForceLayoutPrepass();
+        const float Width=TextBlock->GetDesiredSize().X; TextBlock->SetWrapTextAt(Wrap); TextBlock->SetAutoWrapText(Auto);
+		const auto* C=WowLuaApi::GetContext(L); const float Scale=C && C->FrameManager?C->FrameManager->GetUIScale():1;
+		lua_pushnumber(L,Width/FMath::Max(Scale,.001f)); return 1;
+	}
 	FString Text;
 	float FontSize = 12.0f;
 
@@ -2345,7 +2356,7 @@ static int LF_SetText(lua_State* L)
 	if(auto* Edit=GetMultiLineEditor(L)) { Edit->SetText(FText::FromString(UTF8_TO_TCHAR(Text))); return 0; }
 	if (UTextBlock* TextBlock = GetTextBlockWidgetForTable(L, 1))
 	{
-		FText TextContent = FText::FromString(WowUiPlainText(UTF8_TO_TCHAR(Text)));
+		FText TextContent = FText::FromString(UTF8_TO_TCHAR(Text));
 		if(!TextBlock->GetText().EqualTo(TextContent))
 		{
 			TextBlock->SetText(TextContent);

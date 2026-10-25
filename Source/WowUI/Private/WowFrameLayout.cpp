@@ -1,3 +1,4 @@
+#include "WowTextBlock.h"
 #include "WowBackdropWidget.h"
 #include "WowFrameManager.h"
 #include "Components/CanvasPanel.h"
@@ -317,6 +318,7 @@ void FWowFrameManager::ApplyElementAnchors(UWidget* Widget, UCanvasPanel* Parent
         // A horizontal text constraint still needs its natural wrapped height.
         // Treating an unspecified height as zero erased quest descriptions.
         Text->SetWrapTextAt(Width>0?Width*UIScale:0);
+        if(auto* Rich=Cast<UWowTextBlock>(Text)) Rich->RefreshRichStyle(UIScale);
         Text->TakeWidget()->Invalidate(EInvalidateWidgetReason::Prepass);
         Text->ForceLayoutPrepass(); const auto Desired=Text->GetDesiredSize()/UIScale;
         if(Width<=0) Width=Desired.X;
@@ -351,4 +353,5 @@ void FWowFrameManager::UpdateViewportLayout()
         bLayoutDirty = true;
     }
     if (bLayoutDirty) RefreshLayout();
+    for(const auto& Text:RichTextWidgets) if(Text.IsValid() && Text->Markup().Formatted) Text->RefreshRichStyle(UIScale);
 }

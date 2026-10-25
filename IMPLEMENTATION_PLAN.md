@@ -245,13 +245,16 @@ Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 Requested stock-interface sequence (complete in this order; each stage needs
 build, automation, native autologin and rendered screenshot verification):
 
-- [ ] 1. Stock window rendering: backdrop edges/corners/tiling, fonts and inline icons.
+- [x] 1. Stock window rendering: backdrop edges/corners/tiling, fonts and inline icons.
   - [x] Shared backdrop renderer: XML dimensions/insets/colors, tiled backgrounds,
     complete border atlas, runtime replacement/clear/color APIs. Verified 65 tests
     and native original options/menu plus resized/scaled/colorized frames.
   - [x] Stock button texture templates and inherited font styles; normal,
     highlighted and disabled captions. Verified 66 tests and native menu,
     macro panel, hover/click and disabled-button screenshots.
+  - [x] Shared rich labels: inline texture size/crop/offset, color runs, literal
+    escaping, native width measurement, wrapping and scaling. Verified 67 tests
+    and native options/category, Cyrillic chat, colored/icon labels and plain-text reset.
 - [ ] 2. Control behavior: movement/clamping, text alignment, region APIs and button states.
 - [ ] 3. Spellbook/class windows: hidden spells, ranks/tabs, talents, glyphs and specializations.
 - [ ] 4. Inventory: split/delete, compare/try-on, merchant/bank/mail/trade round trips.

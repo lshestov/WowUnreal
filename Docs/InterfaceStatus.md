@@ -53,9 +53,10 @@ Runtime anchors accept an omitted relative point with frame/name arguments,
 and resolve `$parent` references for frames and regions. Options category labels
 stay inside their rows, and descriptions wrap inside explicit text widths even
 when the original XML also supplies a height.
-XML labels use the same plain-glyph rendering as runtime text, so inline texture
-markup no longer prints asset paths. Lua FontString `GetText` retains the
-original markup for category identity and script comparisons.
+XML and runtime labels render inline texture icons, cropped/offset image runs,
+color escapes and literal text safely. Their measured width includes the icons,
+and wrapped/scaled labels retain their formatting. Lua FontString `GetText`
+retains the original markup for category identity and script comparisons.
 Native backdrops render tiled backgrounds, all eight border pieces, XML
 insets/dimensions/colors and runtime SetBackdrop/clear/color changes. Geometry
 is batched by texture and bounded for addon-supplied tiny tile sizes.
@@ -69,7 +70,7 @@ The Windows Editor and packaged Development client are built from the same
 source tree. `WowUnreal.Hud`, `WowUnreal.UI`, `WowUnreal.Gameplay` and the related
 player, collision, equipment, lighting, rendering, traversal and performance
 suites cover both isolated controls and live protocol state. The interface
-regression set contains 66 tests. Existing optional character texture-layout
+regression set contains 67 tests. Existing optional character texture-layout
 DBC and test-fixture size warnings remain.
 
 Native gameplay probes exercise live server state and rendered UI at 1280x720
@@ -83,8 +84,7 @@ may use NullRHI; visual checks require a rendered client.
 
 Full WoW UI compatibility is **not complete**. In particular:
 
-- Remaining stock window presentation, including inline icon painting and
-  additional frame/region API behavior. Visible panels and
+- Additional frame/region and control API behavior. Visible panels and
   readable category lists do not establish complete visual parity.
 - Advanced macro commands such as cast sequences, complete conditional syntax,
   additional combat event families and clickable chat links. See
