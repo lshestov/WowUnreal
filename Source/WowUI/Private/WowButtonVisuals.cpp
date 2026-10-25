@@ -102,7 +102,7 @@ void FWowFrameManager::RefreshButtonVisuals(int64 Handle)
                 auto* Material=UMaterialInstanceDynamic::Create(Base,Image); Material->SetTextureParameterValue(TEXT("Image"),Texture);
                 auto Brush=Image->GetBrush(); Brush.SetResourceObject(Material); Image->SetBrush(Brush);
             }
-        Image->SetVisibility(Show && !ButtonRegionHidden.FindRef(Pair.Value)?ESlateVisibility::HitTestInvisible:ESlateVisibility::Collapsed);
+        Image->SetVisibility(Show && !ButtonRegionHidden.FindRef(Pair.Value)?(IsRegionAnchored(Pair.Value)?ESlateVisibility::HitTestInvisible:ESlateVisibility::Hidden):ESlateVisibility::Collapsed);
     }
     if(const auto* Entry=Frames.Find(Handle); Entry && EventSystem)
     {
@@ -129,6 +129,7 @@ void FWowFrameManager::SetButtonState(int64 Handle,const FString& State,bool Loc
 void FWowFrameManager::SetButtonEnabled(int64 Handle,bool Enabled)
 {
     auto* Button=GetButtonWidget(Handle); if(!Button || Button->GetIsEnabled()==Enabled) return;
+    if(!Enabled) { auto& Visual=ButtonVisualStates.FindOrAdd(Handle); Visual.MousePressed=false; Visual.ForcedPressed=false; Visual.PressLocked=false; }
     Button->SetIsEnabled(Enabled); RefreshButtonVisuals(Handle);
     if(EventSystem) EventSystem->RunFrameScript(Handle,Enabled?TEXT("OnEnable"):TEXT("OnDisable"));
 }

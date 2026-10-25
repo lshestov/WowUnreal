@@ -125,6 +125,7 @@ public:
 	bool ReparentFrame(int64 Handle,int64 ParentHandle);
 	bool ReparentRegion(const FString& Name,int64 ParentHandle);
 	FString CreateFontStringRegion(int64 Parent,const FString& Name,const FString& Inherits);
+	FString CreateTextureRegion(int64 Parent,const FString& Name,const FString& Layer,const FString& Inherits);
 	void InvalidateTextLayout() { FrameRects.Reset(); bLayoutDirty=true; }
 	void SetFrameScale(int64 Handle, float Scale);
 	float GetFrameScale(int64 Handle) const;
@@ -134,6 +135,11 @@ public:
 	FVector2D GetRegionSize(const FString& Name);
 	void SetRegionSize(const FString& Name,float Width,float Height);
 	void SetRegionPoint(const FString& Name,const FWowAnchor& Anchor,bool Clear=false);
+	TArray<FWowAnchor> GetRegionPoints(const FString& Name) const;
+	bool IsRegionAnchored(const FString& Name) const;
+	bool StartFrameMovement(int64 Handle,const FString& SizingPoint=FString());
+	void StopFrameMovement(int64 Handle);
+	bool IsFrameDragging(int64 Handle) const;
 	void RefreshLayout();
 	void UpdateViewportLayout();
 
@@ -302,6 +308,12 @@ private:
 	/** Handle of the frame currently under the mouse cursor (-1 if none) */
 	int64 HoverFrameHandle = -1;
 	FVector2D LastPointerPosition=FVector2D::ZeroVector;
+	int64 MovingFrame=-1;
+	int64 DraggingFrame=-1;
+	FString SizingPoint;
+	FVector2D MovePointerOrigin;
+	FVector4 MoveRect;
+	void UpdateFrameMovement();
 
 	/** Last-known text for each EditBox, used to detect changes for OnTextChanged dispatch */
 	TMap<int64, FString> EditBoxLastText;
@@ -425,8 +437,10 @@ private:
 		TArray<FWowAnchor> Anchors;
 		float Width, Height;
 		bool bAllPoints;
+		bool bUnanchored=false; // Explicit ClearAllPoints; distinct from XML's implicit owner layout.
 	};
 	TArray<FRegionLayout> RegionLayouts;
+	TSet<FString> UnanchoredRegions;
 	TArray<TWeakObjectPtr<class UWowTextBlock>> RichTextWidgets;
 	TMap<int64,float> LastScrollRanges;
 	double NextScrollRangeCheck=0;

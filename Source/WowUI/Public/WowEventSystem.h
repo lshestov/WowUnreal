@@ -5,6 +5,7 @@ struct lua_State;
 class FWowLuaVM;
 class FWowFrameManager;
 struct FWowFrameDef;
+struct FWowTextureElement;
 struct lua_State;
 
 /**
@@ -47,6 +48,7 @@ public:
 	/** Create a Lua global table for a named texture/fontstring region */
 	void CreateTextureRegionGlobal(const FString& RegionName, int64 ParentHandle = -1, const FString& ObjectType = TEXT("Texture"), const FString& InitialText = FString());
 	void ApplyRegionFont(const FString& RegionName,const FString& FontName);
+	void InitializeTextureRegion(const FWowTextureElement& Texture,const FString& Layer);
 
 	/** Alias an existing named Lua global object to another global name. */
 	void AliasGlobalObject(const FString& ExistingName, const FString& AliasName);

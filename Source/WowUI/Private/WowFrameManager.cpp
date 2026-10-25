@@ -321,7 +321,23 @@ FString FWowFrameManager::CreateFontStringRegion(int64 Parent,const FString& Nam
     FString Key=Name; if(Key.IsEmpty()) { int32 Id=RegionLayouts.Num(); do { Key=FString::Printf(TEXT("_DynamicFontString%d"),Id++); } while(NamedFontStringWidgets.Contains(Key)); }
     FWowFrameDef Def; Def.Name=GetFrameName(Parent); const auto Rect=GetLayoutRect(Parent); Def.Width=Rect.Z; Def.Height=Rect.W;
     FWowLayer Layer; Layer.Level=EWowDrawLayer::OVERLAY; FWowFontStringElement Text; Text.Name=Key; Text.Inherits=Inherits; Text.JustifyH=TEXT("LEFT"); Layer.FontStrings.Add(Text); Def.Layers.Add(Layer);
-    CreateLayerContent(Canvas,Def,Parent); return Key;
+    CreateLayerContent(Canvas,Def,Parent); SetRegionPoint(Key,FWowAnchor(),true); return Key;
+}
+
+FString FWowFrameManager::CreateTextureRegion(int64 Parent,const FString& Name,const FString& LayerName,const FString& Inherits)
+{
+    auto* Canvas=Cast<UCanvasPanel>(GetWidgetForHandle(Parent)); if(!Canvas && Parent==FindFrame(TEXT("UIParent"))) Canvas=RootCanvas.Get();
+    if(!Canvas) return {};
+    FString Key=Name; Key.ReplaceInline(TEXT("$parent"),*GetFrameName(Parent));
+    if(Key.IsEmpty()) { int32 Id=RegionLayouts.Num(); do { Key=FString::Printf(TEXT("_DynamicTexture%d"),Id++); } while(NamedTextureWidgets.Contains(Key)); }
+    FWowFrameDef Def; Def.Name=GetFrameName(Parent); const auto Rect=GetLayoutRect(Parent); Def.Width=Rect.Z; Def.Height=Rect.W;
+    FWowLayer Layer; Layer.Level=LayerName==TEXT("BACKGROUND")?EWowDrawLayer::BACKGROUND:LayerName==TEXT("BORDER")?EWowDrawLayer::BORDER:LayerName==TEXT("OVERLAY")?EWowDrawLayer::OVERLAY:LayerName==TEXT("HIGHLIGHT")?EWowDrawLayer::HIGHLIGHT:EWowDrawLayer::ARTWORK;
+    FWowTextureElement Texture; Texture.Name=Key; Texture.Inherits=Inherits;
+    Texture=ResolveTexture(Texture);
+    for(auto& Anchor:Texture.Anchors) Anchor.RelativeTo.ReplaceInline(TEXT("$parent"),*Def.Name);
+    Layer.Textures.Add(Texture); Def.Layers.Add(Layer); CreateLayerContent(Canvas,Def,Parent);
+    if(Texture.Anchors.IsEmpty() && !Texture.bSetAllPoints) SetRegionPoint(Key,FWowAnchor(),true);
+    return Key;
 }
 
 void FWowFrameManager::SetFrameSize(int64 Handle, float W, float H)
@@ -618,6 +634,9 @@ void FWowFrameManager::MergeTemplate(FWowFrameDef& Target, const FWowFrameDef& T
 
 	// EnableMouse / EnableKeyboard — inherit from template
 	if (Template.bEnableMouse && !Target.bEnableMouse) Target.bEnableMouse = true;
+	Target.bMovable|=Template.bMovable; Target.bResizable|=Template.bResizable; Target.bClampedToScreen|=Template.bClampedToScreen;
+	Target.bMotionScriptsWhileDisabled|=Template.bMotionScriptsWhileDisabled;
+	if(Target.HitInsets.Equals(FVector4(0,0,0,0))) Target.HitInsets=Template.HitInsets;
 	if (Template.bEnableKeyboard && !Target.bEnableKeyboard) Target.bEnableKeyboard = true;
 
 	// SetAllPoints
@@ -841,6 +860,8 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 				if (EventSystem)
 				{
 					EventSystem->CreateTextureRegionGlobal(Tex.Name, OwnerHandle, TEXT("Texture"));
+					const TCHAR* LayerNames[]={TEXT("BACKGROUND"),TEXT("BORDER"),TEXT("ARTWORK"),TEXT("OVERLAY"),TEXT("HIGHLIGHT")};
+					EventSystem->InitializeTextureRegion(Tex,LayerNames[static_cast<int32>(Layer.Level)]);
 					UE_LOG(LogWowFrame, Verbose, TEXT("    Registered texture region global: %s"), *Tex.Name);
 				}
 				else
@@ -1007,6 +1028,7 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 				FontInfo.Size = FMath::Max(1,FMath::RoundToInt((FS.FontHeight>0?FS.FontHeight:12) * UIScale*.75f));
 			}
 			TextWidget->SetFont(FontInfo);
+			if(auto* Label=Cast<UWowTextBlock>(TextWidget)) Label->SetVerticalJustification(FS.JustifyV);
 
 			// Apply justification
 			if (FS.JustifyH == TEXT("LEFT"))
@@ -2082,7 +2104,8 @@ int64 FWowFrameManager::HitTestFrames(float ScreenX, float ScreenY) const
         }
         if (!Visible) continue;
         const auto* Rect = FrameRects.Find(Entry.Def.Name);
-        if (!Rect || X < Rect->X || X > Rect->X + Rect->W || Y < Rect->Y || Y > Rect->Y + Rect->H) continue;
+        const auto Insets=Entry.Def.HitInsets*GetEffectiveFrameScale(Pair.Key);
+        if (!Rect || X < Rect->X+Insets.X || X > Rect->X+Rect->W-Insets.Y || Y < Rect->Y+Insets.Z || Y > Rect->Y+Rect->H-Insets.W) continue;
         const int32 Z = static_cast<int32>(Entry.Def.Strata) * 1000 + Entry.Def.FrameLevel;
         if (Z > BestZ || (Z == BestZ && Pair.Key > Best)) { Best = Pair.Key; BestZ = Z; }
     }
@@ -2252,12 +2275,14 @@ bool FWowFrameManager::DispatchEditBoxEscapePressed()
 void FWowFrameManager::UpdateMouseHover(float ScreenX, float ScreenY)
 {
 	LastPointerPosition=FVector2D(ScreenX,ScreenY);
+	UpdateFrameMovement();
 	int64 NewHover = HitTestFrames(ScreenX, ScreenY);
 
 	if (NewHover != HoverFrameHandle)
 	{
+		const auto MotionAllowed=[&](int64 H) { const auto* B=GetButtonWidget(H); const auto* D=GetFrameDef(H); return !B || B->GetIsEnabled() || (D && D->bMotionScriptsWhileDisabled); };
 		// Dispatch OnLeave for the old frame
-		if (HoverFrameHandle >= 0 && EventSystem)
+		if (HoverFrameHandle >= 0 && EventSystem && MotionAllowed(HoverFrameHandle))
 		{
 			EventSystem->RunFrameScript(HoverFrameHandle, TEXT("OnLeave"), {TEXT("0")});
 		}
@@ -2267,7 +2292,7 @@ void FWowFrameManager::UpdateMouseHover(float ScreenX, float ScreenY)
 		RefreshButtonVisuals(OldHover); RefreshButtonVisuals(NewHover);
 
 		// Dispatch OnEnter for the new frame
-		if (HoverFrameHandle >= 0 && EventSystem)
+		if (HoverFrameHandle >= 0 && EventSystem && MotionAllowed(HoverFrameHandle))
 		{
 			EventSystem->RunFrameScript(HoverFrameHandle, TEXT("OnEnter"), {TEXT("0")});
 		}
@@ -2287,12 +2312,23 @@ void FWowFrameManager::DispatchMouseDown(int64 Handle, const FString& Button)
 
 bool FWowFrameManager::DispatchDragStart(int64 Handle,const FString& Button)
 {
-    return EventSystem && EventSystem->GetFrameAttribute(Handle,TEXT("drag_")+Button)==TEXT("1") && EventSystem->RunFrameScript(Handle,TEXT("OnDragStart"),{Button});
+    if(!EventSystem || EventSystem->GetFrameAttribute(Handle,TEXT("drag_")+Button)!=TEXT("1")) return false;
+    if(const auto* B=GetButtonWidget(Handle); B && !B->GetIsEnabled()) return false;
+    DraggingFrame=Handle;
+    if(EventSystem->RunFrameScript(Handle,TEXT("OnDragStart"),{Button})) return true;
+    DraggingFrame=-1; return false;
 }
 
 void FWowFrameManager::DispatchDragStop(int64 Handle,const FString& Button)
 {
     if(EventSystem) EventSystem->RunFrameScript(Handle,TEXT("OnDragStop"),{Button});
+    if(DraggingFrame==Handle) DraggingFrame=-1;
+}
+
+bool FWowFrameManager::IsFrameDragging(int64 Handle) const
+{
+    for(int32 Depth=0;Handle>=0 && Depth<64;++Depth,Handle=GetParentHandle(Handle)) if(Handle==DraggingFrame) return true;
+    return false;
 }
 
 bool FWowFrameManager::DispatchMouseWheel(int64 Handle,float Delta)

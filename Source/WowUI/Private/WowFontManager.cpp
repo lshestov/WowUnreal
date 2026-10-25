@@ -119,6 +119,8 @@ FSlateFontInfo FWowFontManager::GetFont(const FString& WowFontName, int32 Size) 
 	const FString* TtfFileName = FontMappings.Find(WowFontName);
 	if (!TtfFileName)
 	{
+		const FString Requested=FPaths::GetCleanFilename(WowFontName.Replace(TEXT("\\"),TEXT("/"))).ToUpper();
+		if(const auto* Direct=AvailableFonts.Find(Requested)) return CreateFontFromFile(*Direct,Size);
 		UE_LOG(LogWowFont, Verbose, TEXT("Unknown WoW font name '%s', using default"), *WowFontName);
 		return GetDefaultFont(Size);
 	}

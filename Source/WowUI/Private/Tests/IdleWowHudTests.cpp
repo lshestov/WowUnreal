@@ -425,6 +425,9 @@ bool FHudInlineLabels::RunTest(const FString&)
         assert(InlineLabel:GetText()==raw and InlineLabel:GetStringWidth()>=before+39)
         InlineLabel:SetWidth(60); InlineLabel:SetText(raw..' multiple wrapped words after the icon')
         assert(InlineLabel:GetHeight()>20)
+        NaturalIcon=UIParent:CreateTexture('NaturalIcon'); assert(not NaturalIcon:IsVisible())
+        NaturalIcon:SetTexture('Interface\\Icons\\INV_Misc_QuestionMark'); assert(NaturalIcon:GetWidth()>16)
+        NaturalIcon:SetPoint('CENTER'); assert(NaturalIcon:IsVisible() and NaturalIcon:GetWidth()>16)
     )LUA")));
     return true;
 }
@@ -509,6 +512,94 @@ bool FHudInventoryItems::RunTest(const FString&)
     TestTrue(TEXT("Bag tooltip contains the real item name and durability"),Tooltip && Tooltip->Lines.Num()>=2 && Tooltip->Lines[0].Text==T.Name && Tooltip->Lines.Last().Text==TEXT("Durability 18 / 40"));
     const auto* Display=FDbcStore::Get().ItemDisplayInfo().GetById(14454);
     TestTrue(TEXT("Server display resolves an existing MPQ icon"),Display && F.Frames.LoadUITexture(TEXT("Interface\\Icons\\")+Display->Icon1));
+    return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUiWindowMovement,"WowUnreal.Hud.WindowMovement",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FUiWindowMovement::RunTest(const FString&)
+{
+    FHudFixture F;
+    TestTrue(TEXT("Movement setup uses the public APIs"),F.Lua.ExecuteString(TEXT(R"LUA(
+        Move=CreateFrame('Frame','Move',UIParent); Move:SetSize(180,100); Move:SetScale(.8)
+        Move:SetPoint('TOPLEFT',UIParent,'TOPLEFT',100,-100); Move:EnableMouse(true)
+        assert(not Move:IsMovable() and not Move:IsResizable() and not Move:IsClampedToScreen())
+        Move:SetMovable(true); Move:SetResizable(true); Move:SetClampedToScreen(true)
+        Move:SetMinResize(120,80); Move:SetMaxResize(260,180)
+        assert(Move:IsMovable()==1 and Move:IsResizable()==1 and Move:IsClampedToScreen()==1)
+        assert(Move:GetMinResize()==120 and Move:GetMaxResize()==260)
+        Move:RegisterForDrag('LeftButton')
+        Move:SetScript('OnDragStart',function(self) assert(self:IsDragging()); self:StartMoving(); self:StartMoving() end)
+        Move:SetScript('OnDragStop',function(self) self:StopMovingOrSizing() end)
+    )LUA")));
+    const int64 H=F.Frames.FindFrame(TEXT("Move")); const auto Before=F.Frames.GetLayoutRect(H);
+    F.Frames.UpdateMouseHover(100,100); F.Frames.DispatchMouseDown(H,TEXT("LeftButton"));
+    TestTrue(TEXT("Registered native drag starts the stock handler"),F.Frames.DispatchDragStart(H,TEXT("LeftButton")));
+    F.Frames.UpdateMouseHover(220,150); F.Frames.DispatchDragStop(H,TEXT("LeftButton"));
+    const auto After=F.Frames.GetLayoutRect(H);
+    TestTrue(TEXT("Drag state ends with native release"),F.Lua.ExecuteString(TEXT("assert(not Move:IsDragging())")));
+    TestTrue(TEXT("Movement follows physical pointer delta at non-unit scale"),FMath::IsNearlyEqual(After.X-Before.X,120/F.Frames.GetScreenScale(),.01) && FMath::IsNearlyEqual(After.Y-Before.Y,50/F.Frames.GetScreenScale(),.01));
+    F.Frames.UpdateMouseHover(300,200);
+    TestTrue(TEXT("Stop prevents later cursor movement from changing the frame"),After.Equals(F.Frames.GetLayoutRect(H),.01));
+    TestTrue(TEXT("Resize starts"),F.Lua.ExecuteString(TEXT("Move:StartSizing('BOTTOMRIGHT')")));
+    F.Frames.UpdateMouseHover(2000,2000); F.Lua.ExecuteString(TEXT("Move:StopMovingOrSizing()"));
+    TestTrue(TEXT("Resize honors max bounds"),F.Lua.ExecuteString(TEXT("assert(math.abs(Move:GetWidth()-260)<.01 and math.abs(Move:GetHeight()-180)<.01); Move:StartMoving()")));
+    F.Frames.UpdateMouseHover(-2000,-2000); F.Lua.ExecuteString(TEXT("Move:StopMovingOrSizing()"));
+    const auto Clamped=F.Frames.GetLayoutRect(H);
+    TestTrue(TEXT("Clamped dragging cannot lose the window off screen"),Clamped.X>=0 && Clamped.Y>=0);
+    TestTrue(TEXT("Clamp insets persist and disabling clamp restores unrestricted placement"),F.Lua.ExecuteString(TEXT("Move:SetClampRectInsets(5,6,7,8); local l,r,t,b=Move:GetClampRectInsets(); assert(l==5 and r==6 and t==7 and b==8); Move:SetClampedToScreen(false); Move:ClearAllPoints(); Move:SetPoint('TOPLEFT',UIParent,'TOPLEFT',-500,500); assert(Move:GetLeft()<0)")));
+    return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUiRegionControls,"WowUnreal.Hud.RegionControls",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FUiRegionControls::RunTest(const FString&)
+{
+    FHudFixture F;
+    TestTrue(TEXT("Dynamic texture regions use canonical anchors, dimensions and visibility"),F.Lua.ExecuteString(TEXT(R"LUA(
+        Owner=CreateFrame('Frame','Owner',UIParent); Owner:SetSize(300,180); Owner:SetPoint('CENTER'); Owner:SetScale(.8)
+        Tex=Owner:CreateTexture('OwnerTexture','BACKGROUND'); Tex:SetTexture(1,0,0,.5)
+        Tex:SetSize(60,40); Tex:SetPoint('TOPLEFT',Owner,'TOPLEFT',20,-30)
+        assert(Tex:GetParent()==Owner and Tex:GetNumPoints()==1)
+        local a,b,c,x,y=Tex:GetPoint(); assert(a=='TOPLEFT' and b==Owner and c=='TOPLEFT' and x==20 and y==-30)
+        assert(math.abs(Tex:GetWidth()-60)<.1 and math.abs(Tex:GetHeight()-40)<.1)
+        Tex:SetTexCoord(.1,.7,.2,.9); local ulx,uly,llx,lly,urx,ury,lrx,lry=Tex:GetTexCoord()
+        assert(math.abs(ulx-.1)<.001 and math.abs(uly-.2)<.001 and math.abs(lrx-.7)<.001 and math.abs(lry-.9)<.001)
+        Tex:SetDrawLayer('OVERLAY',3); local layer,sub=Tex:GetDrawLayer(); assert(layer=='OVERLAY' and sub==3)
+        Tex:Hide(); assert(not Tex:IsShown()); Tex:Show(); assert(Tex:IsShown())
+        Tex:ClearAllPoints(); assert(Tex:GetNumPoints()==0 and Tex:IsShown() and not Tex:IsVisible()); Tex:Show(); assert(not Tex:IsVisible()); Tex:SetAllPoints(Owner); assert(Tex:IsVisible())
+        assert(Tex:GetNumPoints()==2 and math.abs(Tex:GetWidth()-Owner:GetWidth())<.1)
+        Other=CreateTexture(nil,Owner,'BORDER'); Other:SetSize(30,20); Other:SetPoint('CENTER',Tex,'CENTER')
+        assert(Other:GetName()==nil and Other:GetParent()==Owner and select(2,Other:GetPoint())==Tex)
+        Label=Owner:CreateFontString('ControlLabel'); Label:SetSize(180,80); Label:SetPoint('CENTER'); Label:SetText('long words that should wrap onto more than one line')
+        Label:SetJustifyH('RIGHT'); Label:SetJustifyV('BOTTOM'); assert(Label:GetJustifyH()=='RIGHT' and Label:GetJustifyV()=='BOTTOM')
+        Label:SetWordWrap(false); assert(not Label:CanWordWrap()); Label:SetWordWrap(true); assert(Label:CanWordWrap()==1)
+        Label:SetNonSpaceWrap(true); assert(Label:CanNonSpaceWrap()==1)
+        Label:SetSpacing(3); assert(Label:GetSpacing()==3)
+        Label:SetShadowOffset(2,-3); local x,y=Label:GetShadowOffset(); assert(math.abs(x-2)<.001 and math.abs(y+3)<.001)
+        Label:SetShadowColor(.2,.3,.4,.5); local r,g,b,a=Label:GetShadowColor(); assert(math.abs(r-.2)<.001 and math.abs(a-.5)<.001)
+        Label:SetTextHeight(20); assert(math.abs(Label:GetTextHeight()-20)<1.5)
+        ControlFont=CreateFont('ControlFont'); ControlFont:SetFont('Fonts\\FRIZQT__.TTF',14)
+        ControlFont:SetJustifyH('LEFT'); ControlFont:SetJustifyV('TOP'); ControlFont:SetSpacing(5); ControlFont:SetWordWrap(false)
+        ControlFont:SetShadowOffset(1,-1); ControlFont:SetShadowColor(0,0,0,1)
+        Label:SetFontObject(ControlFont); assert(Label:GetJustifyH()=='LEFT' and Label:GetJustifyV()=='TOP' and Label:GetSpacing()==5 and not Label:CanWordWrap())
+    )LUA")));
+    const auto* Image=F.Frames.GetNamedTexture(TEXT("OwnerTexture")); const auto* Slot=Image?Cast<UCanvasPanelSlot>(Image->Slot):nullptr;
+    TestTrue(TEXT("Draw layer/sublevel changes reach the native image"),Slot && Slot->GetZOrder()==303);
+    TestTrue(TEXT("Region definitions survive a full layout refresh"),F.Lua.ExecuteString(TEXT("Owner:SetSize(350,200); assert(math.abs(Tex:GetWidth()-350)<.1 and math.abs(Tex:GetHeight()-200)<.1)")));
+    return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUiButtonInputStates,"WowUnreal.Hud.ButtonInputStates",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FUiButtonInputStates::RunTest(const FString&)
+{
+    FHudFixture F;
+    FWowFrameDef D; D.Name=TEXT("InputButton"); D.Parent=TEXT("UIParent"); D.Type=EWowFrameType::Button; D.Width=100; D.Height=40;
+    D.Anchors.Add({EWowAnchorPoint::TOPLEFT,TEXT("UIParent"),EWowAnchorPoint::TOPLEFT,40,-40}); const auto H=F.Frames.CreateFrame(D);
+    F.Frames.RefreshLayout(); const auto R=F.Frames.GetLayoutRect(H); const float S=F.Frames.GetScreenScale();
+    TestTrue(TEXT("Button scripts initialize"),F.Lua.ExecuteString(TEXT("EnterCount=0; ClickCount=0; InputButton:SetScript('OnEnter',function() EnterCount=EnterCount+1 end); InputButton:SetScript('OnClick',function() ClickCount=ClickCount+1 end)")));
+    F.Frames.UpdateMouseHover(-100,-100); F.Frames.UpdateMouseHover((R.X+50)*S,(R.Y+20)*S);
+    TestTrue(TEXT("Enabled hover and locked pressed states work"),F.Lua.ExecuteString(TEXT("assert(EnterCount==1); InputButton:SetButtonState('PUSHED',true); assert(InputButton:GetButtonState()=='PUSHED'); InputButton:Disable(); assert(InputButton:GetButtonState()=='DISABLED' and not InputButton:GetMotionScriptsWhileDisabled())")));
+    F.Frames.UpdateMouseHover(-100,-100); F.Frames.UpdateMouseHover((R.X+50)*S,(R.Y+20)*S); F.Frames.DispatchClick(H,TEXT("LeftButton"),false);
+    TestTrue(TEXT("Disabled buttons suppress hover/click handlers unless requested"),F.Lua.ExecuteString(TEXT("assert(EnterCount==1 and ClickCount==0); InputButton:SetMotionScriptsWhileDisabled(true); assert(InputButton:GetMotionScriptsWhileDisabled())")));
+    F.Frames.UpdateMouseHover(-100,-100); F.Frames.UpdateMouseHover((R.X+50)*S,(R.Y+20)*S);
+    TestTrue(TEXT("Opted-in disabled tooltips receive hover, and re-enable releases pressed state"),F.Lua.ExecuteString(TEXT("assert(EnterCount==2); InputButton:Enable(); assert(InputButton:GetButtonState()=='NORMAL'); InputButton:SetHitRectInsets(20,0,0,0); local l,r,t,b=InputButton:GetHitRectInsets(); assert(l==20 and r==0 and t==0 and b==0)")));
+    TestTrue(TEXT("Hit insets change actual native picking"),F.Frames.HitTestFrames((R.X+5)*S,(R.Y+20)*S)!=H && F.Frames.HitTestFrames((R.X+50)*S,(R.Y+20)*S)==H);
     return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUiStatefulControls,"WowUnreal.Hud.StatefulControls",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)

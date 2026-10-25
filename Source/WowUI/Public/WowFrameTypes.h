@@ -153,6 +153,11 @@ struct WOWUI_API FWowFrameDef
 	bool bEnableMouse = false;
 	bool bEnableKeyboard = false;
 	bool bScrollChild = false;
+	bool bMovable=false,bResizable=false,bClampedToScreen=false;
+	bool bMotionScriptsWhileDisabled=false;
+	FVector4 HitInsets=FVector4(0,0,0,0);
+	FVector4 ClampInsets=FVector4(0,0,0,0); // left, right, top, bottom
+	FVector2D MinResize=FVector2D(0,0),MaxResize=FVector2D(100000,100000);
 
 	float Width = 0.f;
 	float Height = 0.f;

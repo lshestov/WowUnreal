@@ -375,12 +375,20 @@ struct FWowGameplayProbe
             Frames->DispatchMouseDown(Handle,Button);
             if(Op==TEXT("drag_frame"))
             {
-                const int64 Destination=Frames->FindFrame(Step->GetStringField(TEXT("destination")));
-                if(!Frames->DispatchDragStart(Handle,Button) || Destination<0 || !Frames->IsFrameDrawn(Destination)) { Failure=TEXT("UI drag could not start"); Finish(C,false); return; }
-                const auto DestRect=Frames->GetLayoutRect(Destination);
-                const float DX=(DestRect.X+DestRect.Z*.5f)*Scale,DY=(DestRect.Y+DestRect.W*.5f)*Scale;
-                if(Frames->HitTestFrames(DX,DY)!=Destination) { Failure=TEXT("UI drop destination is obscured"); Finish(C,false); return; }
-                Frames->UpdateMouseHover(DX,DY); Frames->DispatchReceiveDrag(Destination); Frames->DispatchDragStop(Handle,Button);
+                if(!Frames->DispatchDragStart(Handle,Button)) { Failure=TEXT("UI drag could not start"); Finish(C,false); return; }
+                FString Target; const bool HasDestination=Step->TryGetStringField(TEXT("destination"),Target);
+                const int64 Destination=HasDestination?Frames->FindFrame(Target):-1;
+                float DX=X,DY=Y;
+                if(HasDestination)
+                {
+                    if(Destination<0 || !Frames->IsFrameDrawn(Destination)) { Failure=TEXT("UI drop destination is not visible"); Finish(C,false); return; }
+                    const auto DestRect=Frames->GetLayoutRect(Destination); DX=(DestRect.X+DestRect.Z*.5f)*Scale; DY=(DestRect.Y+DestRect.W*.5f)*Scale;
+                    if(Frames->HitTestFrames(DX,DY)!=Destination) { Failure=TEXT("UI drop destination is obscured"); Finish(C,false); return; }
+                }
+                else { DX+=Step->GetNumberField(TEXT("dx")); DY+=Step->GetNumberField(TEXT("dy")); }
+                for(int32 Sample=1;Sample<=4;++Sample) Frames->UpdateMouseHover(FMath::Lerp(X,DX,Sample/4.f),FMath::Lerp(Y,DY,Sample/4.f));
+                if(HasDestination) Frames->DispatchReceiveDrag(Destination);
+                Frames->DispatchDragStop(Handle,Button);
                 Frames->DispatchMouseUp(Handle,Button);
                 C.GameplayProbePointer=FVector2D(DX,DY);
             }

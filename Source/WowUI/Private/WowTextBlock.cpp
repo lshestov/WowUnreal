@@ -126,7 +126,7 @@ void UWowTextBlock::RebuildContent()
     RichState=MakeShared<FWowRichLabelState>();
     TArray<TSharedRef<ITextDecorator>> Decorators; Decorators.Add(MakeShared<FWowLabelDecorator>(RichState.ToSharedRef()));
     RichWidget=SNew(SRichTextBlock).Text(FText::FromString(Parsed.Rich)).Decorators(Decorators).Clipping(EWidgetClipping::Inherit);
-    RefreshRichStyle(); Host->SetContent(RichWidget.ToSharedRef());
+    RefreshRichStyle(); Host->SetContent(RichWidget.ToSharedRef()); SetNonSpaceWrapping(NonSpaceWrapping); SetPixelSpacing(PixelSpacing);
 }
 void UWowTextBlock::RefreshRichStyle(float Scale)
 {
@@ -154,9 +154,24 @@ void UWowTextBlock::RefreshRichStyle(float Scale)
     if(RichState->AutoWrap!=GetAutoWrapText()) { RichState->AutoWrap=GetAutoWrapText(); RichWidget->SetAutoWrapText(RichState->AutoWrap); }
     if(RichState->Justification!=LabelJustification) { RichState->Justification=LabelJustification; RichWidget->SetJustification(LabelJustification); }
 }
+void UWowTextBlock::SetVerticalJustification(const FString& Value)
+{
+    VerticalJustification=Value;
+    if(Host) Host->SetVAlign(Value==TEXT("TOP")?VAlign_Top:Value==TEXT("BOTTOM")?VAlign_Bottom:VAlign_Center);
+}
+void UWowTextBlock::SetNonSpaceWrapping(bool Value)
+{
+    NonSpaceWrapping=Value; SetWrappingPolicy(Value?ETextWrappingPolicy::AllowPerCharacterWrapping:ETextWrappingPolicy::DefaultWrapping);
+    if(RichWidget) RichWidget->SetWrappingPolicy(Value?ETextWrappingPolicy::AllowPerCharacterWrapping:ETextWrappingPolicy::DefaultWrapping);
+}
+void UWowTextBlock::SetPixelSpacing(float Value)
+{
+    PixelSpacing=Value; const float Percentage=FMath::Max(.1f,1+Value*UnitScale/FMath::Max(1.f,GetFont().Size*4.f/3));
+    SetLineHeightPercentage(Percentage); if(RichWidget) RichWidget->SetLineHeightPercentage(Percentage);
+}
 TSharedRef<SWidget> UWowTextBlock::RebuildWidget()
 {
-    PlainWidget=Super::RebuildWidget(); Host=SNew(SBox); RebuildContent(); return Host.ToSharedRef();
+    PlainWidget=Super::RebuildWidget(); Host=SNew(SBox); RebuildContent(); SetVerticalJustification(VerticalJustification); SetNonSpaceWrapping(NonSpaceWrapping); SetPixelSpacing(PixelSpacing); return Host.ToSharedRef();
 }
 void UWowTextBlock::SynchronizeProperties() { Super::SynchronizeProperties(); RefreshRichStyle(); }
 void UWowTextBlock::ReleaseSlateResources(bool Children) { Super::ReleaseSlateResources(Children); Host.Reset(); PlainWidget.Reset(); RichWidget.Reset(); RichState.Reset(); }

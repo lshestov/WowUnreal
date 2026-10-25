@@ -30,6 +30,15 @@ public:
     void InitializeLabel(FWowFrameManager* Frames,float Scale);
     virtual void SetText(FText InText) override;
     void RefreshRichStyle(float Scale=0);
+    void SetVerticalJustification(const FString& Value);
+    const FString& GetVerticalJustification() const { return VerticalJustification; }
+    ETextJustify::Type GetHorizontalJustification() const { return Justification; }
+    void SetWordWrapping(bool Value) { WordWrapping=Value; }
+    bool CanWordWrap() const { return WordWrapping; }
+    void SetNonSpaceWrapping(bool Value);
+    bool CanNonSpaceWrap() const { return NonSpaceWrapping; }
+    void SetPixelSpacing(float Value);
+    float GetPixelSpacing() const { return PixelSpacing; }
     static FWowLabelMarkup ParseMarkup(const FString& Text);
     const FWowLabelMarkup& Markup() const { return Parsed; }
     virtual void SynchronizeProperties() override;
@@ -46,6 +55,9 @@ private:
     FWowLabelMarkup Parsed;
     FString OriginalText;
     bool HasOriginal=false;
+    FString VerticalJustification=TEXT("MIDDLE");
+    bool WordWrapping=true,NonSpaceWrapping=false;
+    float PixelSpacing=0;
     UPROPERTY(Transient) TArray<TObjectPtr<UTexture2D>> IconTextures;
     TSharedPtr<FWowRichLabelState> RichState;
     TSharedPtr<SBox> Host;

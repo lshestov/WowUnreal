@@ -255,7 +255,14 @@ build, automation, native autologin and rendered screenshot verification):
   - [x] Shared rich labels: inline texture size/crop/offset, color runs, literal
     escaping, native width measurement, wrapping and scaling. Verified 67 tests
     and native options/category, Cyrillic chat, colored/icon labels and plain-text reset.
-- [ ] 2. Control behavior: movement/clamping, text alignment, region APIs and button states.
+- [x] 2. Control behavior: movement/clamping, text alignment, region APIs and button states.
+  - Native movement/resizing with bounds and screen clamps; shared dynamic/XML
+    region anchors and size queries; horizontal/vertical text alignment, shadows,
+    spacing and wrap controls; hit insets and disabled/pressed button input.
+    Natural texture dimensions and unanchored-region visibility are retained;
+    automatic text bounds reserve a physical pixel for fractional-scale glyphs.
+    Verified 70 tests, 84 native probe steps and 22 rendered screenshots at
+    1280x720 and 1920x1080, including original menu/video panels.
 - [ ] 3. Spellbook/class windows: hidden spells, ranks/tabs, talents, glyphs and specializations.
 - [ ] 4. Inventory: split/delete, compare/try-on, merchant/bank/mail/trade round trips.
 - [ ] 5. Chat/combat/macros: hyperlinks, remaining combat events and macro execution families.

@@ -692,6 +692,22 @@ void FWowEventSystem::CreateTextureRegionGlobal(const FString& RegionName, int64
 #endif
 }
 
+void FWowEventSystem::InitializeTextureRegion(const FWowTextureElement& Texture,const FString& Layer)
+{
+#if HAS_LUA
+    if(!LuaVM || Texture.Name.IsEmpty()) return;
+    auto* L=LuaVM->GetState(); lua_getglobal(L,TCHAR_TO_UTF8(*Texture.Name));
+    if(lua_istable(L,-1))
+    {
+        if(!Texture.File.IsEmpty()) { lua_pushstring(L,TCHAR_TO_UTF8(*Texture.File)); lua_setfield(L,-2,"__texture"); }
+        lua_pushstring(L,TCHAR_TO_UTF8(*Layer)); lua_setfield(L,-2,"__drawLayer");
+        const double Values[]={Texture.Left,Texture.Right,Texture.Top,Texture.Bottom}; const char* Keys[]={"__texLeft","__texRight","__texTop","__texBottom"};
+        for(int32 I=0;I<4;++I) { lua_pushnumber(L,Values[I]); lua_setfield(L,-2,Keys[I]); }
+    }
+    lua_pop(L,1);
+#endif
+}
+
 void FWowEventSystem::RemoveFrameScripts(int64 Handle)
 {
 #if HAS_LUA

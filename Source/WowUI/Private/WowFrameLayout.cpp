@@ -97,6 +97,13 @@ FWowFrameManager::FFrameRect FWowFrameManager::CalculateFrameRect(const FWowFram
     Rect.W = FMath::Max(0.f, Rect.W); Rect.H = FMath::Max(0.f, Rect.H);
     Rect.X = P.X - Fraction.X * Rect.W;
     Rect.Y = P.Y - Fraction.Y * Rect.H;
+    if(Def.bClampedToScreen)
+    {
+        const auto Screen=GetFrameRect(TEXT("UIParent"));
+        const auto Insets=Def.ClampInsets*Scale;
+        Rect.X=FMath::Clamp(Rect.X,float(-Insets.X),FMath::Max(float(-Insets.X),Screen.W-Rect.W+float(Insets.Y)));
+        Rect.Y=FMath::Clamp(Rect.Y,float(-Insets.Z),FMath::Max(float(-Insets.Z),Screen.H-Rect.H+float(Insets.W)));
+    }
     const int64 ParentHandle=FindFrame(Def.Parent);
     if(ScrollChildHandles.FindRef(ParentHandle)==FindFrame(Def.Name) && ScrollChildHandles.Contains(ParentHandle))
     {
@@ -129,14 +136,16 @@ FWowFrameManager::FFrameRect FWowFrameManager::GetFrameRect(const FString& Name)
         // Frames can anchor to paragraphs whose wrapped height changed in this
         // callback. Resolve those regions from their definitions before reading
         // their slots, rather than using geometry from the previous frame.
+        bool Anchored=true;
         if(Widget) for(const auto& Layout:RegionLayouts) if(Layout.Widget.Get()==Widget)
         {
+            if(Layout.bUnanchored) { Anchored=false; break; }
             const float Scale=GetEffectiveFrameScale(FindFrame(*Owner));
             ApplyElementAnchors(Widget,nullptr,Layout.Anchors,Layout.Width,Layout.Height,Layout.bAllPoints,Parent.W/Scale,Parent.H/Scale);
             break;
         }
         const auto* Slot = Widget ? Cast<UCanvasPanelSlot>(Widget->Slot) : nullptr;
-        if (Slot)
+        if (Slot && Anchored)
         {
             if(Slot->GetAutoSize()) Widget->ForceLayoutPrepass();
             const auto Anchors = Slot->GetAnchors();
@@ -171,6 +180,13 @@ FVector4 FWowFrameManager::GetRegionRect(const FString& Name)
 
 FVector2D FWowFrameManager::GetRegionSize(const FString& Name)
 {
+    UWidget* Widget=GetNamedTexture(Name); if(!Widget) Widget=GetNamedFontString(Name);
+    for(const auto& Layout:RegionLayouts) if(Widget && Layout.Widget.Get()==Widget && Layout.bUnanchored)
+    {
+        Widget->TakeWidget(); Widget->ForceLayoutPrepass(); auto Size=Widget->GetDesiredSize()/FMath::Max(UIScale,.001f);
+        if(const auto* Image=Cast<UImage>(Widget)) Size=Image->GetBrush().DrawAs==ESlateBrushDrawType::NoDrawType?FVector2D::ZeroVector:FVector2D(Image->GetBrush().ImageSize);
+        return FVector2D(Layout.Width>0?Layout.Width:Size.X,Layout.Height>0?Layout.Height:Size.Y);
+    }
     // GetFrameRect measures the requested region and its anchor dependencies.
     // Rebuilding thousands of unrelated frames for every FontString query
     // makes FrameXML bootstrap and panel OnShow handlers stall for seconds.
@@ -195,6 +211,9 @@ void FWowFrameManager::SetRegionPoint(const FString& Name,const FWowAnchor& Anch
     for(auto& Layout:RegionLayouts) if(Layout.Widget.Get()==Widget && Widget)
     {
         Layout.bAllPoints=false;
+        Layout.bUnanchored=Clear;
+        if(Clear) UnanchoredRegions.Add(Name); else UnanchoredRegions.Remove(Name);
+        if(Widget->GetVisibility()!=ESlateVisibility::Collapsed) Widget->SetVisibility(Clear?ESlateVisibility::Hidden:ESlateVisibility::SelfHitTestInvisible);
         if(Clear) Layout.Anchors.Reset();
         else
         {
@@ -203,6 +222,61 @@ void FWowFrameManager::SetRegionPoint(const FString& Name,const FWowAnchor& Anch
         }
         FrameRects.Empty(); bLayoutDirty=true; return;
     }
+}
+
+TArray<FWowAnchor> FWowFrameManager::GetRegionPoints(const FString& Name) const
+{
+    UWidget* Widget=GetNamedTexture(Name); if(!Widget) Widget=GetNamedFontString(Name);
+    for(const auto& Layout:RegionLayouts) if(Widget && Layout.Widget.Get()==Widget)
+    {
+        if(Layout.bAllPoints) return {{EWowAnchorPoint::TOPLEFT,Layout.Owner,EWowAnchorPoint::TOPLEFT,0,0},{EWowAnchorPoint::BOTTOMRIGHT,Layout.Owner,EWowAnchorPoint::BOTTOMRIGHT,0,0}};
+        return Layout.Anchors;
+    }
+    return {};
+}
+bool FWowFrameManager::IsRegionAnchored(const FString& Name) const
+{
+    return !UnanchoredRegions.Contains(Name);
+}
+
+bool FWowFrameManager::StartFrameMovement(int64 Handle,const FString& Point)
+{
+    const auto* Def=GetFrameDef(Handle);
+    if(!Def || (Point.IsEmpty()?!Def->bMovable:!Def->bResizable)) return false;
+    if(MovingFrame>=0) return true;
+    MovingFrame=Handle; SizingPoint=Point; MovePointerOrigin=LastPointerPosition;
+    MoveRect=GetLayoutRect(Handle);
+    return true;
+}
+
+void FWowFrameManager::StopFrameMovement(int64 Handle)
+{
+    if(MovingFrame!=Handle) return;
+    UpdateFrameMovement(); MovingFrame=-1; SizingPoint.Reset();
+}
+
+void FWowFrameManager::UpdateFrameMovement()
+{
+    if(MovingFrame<0) return;
+    auto* Def=GetMutableFrameDef(MovingFrame);
+    if(!Def || Def->bHidden) { MovingFrame=-1; return; }
+    const auto Delta=(LastPointerPosition-MovePointerOrigin)/FMath::Max(RawViewportScale,.001f);
+    const float Scale=GetEffectiveFrameScale(MovingFrame);
+    double X=MoveRect.X,Y=MoveRect.Y,W=MoveRect.Z,H=MoveRect.W;
+    if(SizingPoint.IsEmpty()) { X+=Delta.X; Y+=Delta.Y; }
+    else
+    {
+        const bool Left=SizingPoint.Contains(TEXT("LEFT")),Right=SizingPoint.Contains(TEXT("RIGHT"));
+        const bool Top=SizingPoint.Contains(TEXT("TOP")),Bottom=SizingPoint.Contains(TEXT("BOTTOM"));
+        W=FMath::Clamp(W+(Right?Delta.X:Left?-Delta.X:0),Def->MinResize.X*Scale,Def->MaxResize.X*Scale);
+        H=FMath::Clamp(H+(Bottom?Delta.Y:Top?-Delta.Y:0),Def->MinResize.Y*Scale,Def->MaxResize.Y*Scale);
+        if(Left) X=MoveRect.X+MoveRect.Z-W;
+        if(Top) Y=MoveRect.Y+MoveRect.W-H;
+        SetFrameSize(MovingFrame,W/Scale,H/Scale);
+    }
+    FWowAnchor Anchor; Anchor.Point=Anchor.RelativePoint=EWowAnchorPoint::TOPLEFT;
+    Anchor.RelativeTo=TEXT("UIParent"); Anchor.OffsetX=X/Scale; Anchor.OffsetY=-Y/Scale;
+    SetFrameAnchors(MovingFrame,{Anchor});
 }
 
 void FWowFrameManager::ApplyAnchors(UWidget* Widget, const FWowFrameDef& Def)
@@ -246,8 +320,11 @@ void FWowFrameManager::RefreshLayout()
         const auto Owner = GetFrameRect(Region.Owner);
         const float Scale = GetEffectiveFrameScale(FindFrame(Region.Owner));
         if (Region.Widget.IsValid())
+        {
+            if(Region.bUnanchored) { if(Region.Widget->GetVisibility()!=ESlateVisibility::Collapsed) Region.Widget->SetVisibility(ESlateVisibility::Hidden); continue; }
             ApplyElementAnchors(Region.Widget.Get(), nullptr, Region.Anchors, Region.Width, Region.Height,
                 Region.bAllPoints, Owner.W / Scale, Owner.H / Scale);
+        }
     }
     }
     // WoW orders frames globally. UMG nests panels, so anonymous grouping
@@ -290,8 +367,9 @@ void FWowFrameManager::ApplyElementAnchors(UWidget* Widget, UCanvasPanel* Parent
     bool bAutoSize = Cast<UTextBlock>(Widget) && (Width <= 0 || Height <= 0);
     if (const auto* Image = Cast<UImage>(Widget))
     {
-        if (Width <= 0) Width = Image->GetBrush().ImageSize.X;
-        if (Height <= 0) Height = Image->GetBrush().ImageSize.Y;
+        const bool Empty=Image->GetBrush().DrawAs==ESlateBrushDrawType::NoDrawType;
+        if (Width <= 0) Width = Empty?0:Image->GetBrush().ImageSize.X;
+        if (Height <= 0) Height = Empty?0:Image->GetBrush().ImageSize.Y;
     }
     const auto Target = [&](const FWowAnchor& A)
     {
@@ -317,11 +395,18 @@ void FWowFrameManager::ApplyElementAnchors(UWidget* Widget, UCanvasPanel* Parent
     {
         // A horizontal text constraint still needs its natural wrapped height.
         // Treating an unspecified height as zero erased quest descriptions.
-        Text->SetWrapTextAt(Width>0?Width*UIScale:0);
+        const auto* Label=Cast<UWowTextBlock>(Text);
+        Text->SetWrapTextAt(Width>0 && (!Label || Label->CanWordWrap())?Width*UIScale:0);
         if(auto* Rich=Cast<UWowTextBlock>(Text)) Rich->RefreshRichStyle(UIScale);
         Text->TakeWidget()->Invalidate(EInvalidateWidgetReason::Prepass);
         Text->ForceLayoutPrepass(); const auto Desired=Text->GetDesiredSize()/UIScale;
-        if(Width<=0) Width=Desired.X;
+        if(Width<=0)
+        {
+            // Fractional DPI/parent scales can clip the final glyph at its
+            // advance boundary. Reserve a physical pixel for glyph overhang.
+            const float Pixel=1/FMath::Max(.001f,RawViewportScale*OwnerScale);
+            Width=FMath::CeilToFloat(Desired.X/Pixel)*Pixel+Pixel;
+        }
         // WoW permits glyphs to extend beyond a FontString's nominal height.
         // Give Slate its full line box so short XML labels keep their baseline.
         Height=FMath::Max(Height,float(Desired.Y));

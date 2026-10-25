@@ -63,6 +63,14 @@ is batched by texture and bounded for addon-supplied tiny tile sizes.
 Virtual texture definitions and their inheritance supply the original panel
 button skins and atlas crops. XML and Lua button font objects control normal,
 highlighted and disabled captions.
+Frames move and resize through native drag events, honor resize limits, local
+scale and screen clamp insets. Hit-test insets affect actual picking. Buttons
+release their pressed state when disabled, and disabled hover scripts follow
+the requested motion-script flag. Dragging state is available to child regions.
+Dynamic and XML regions share anchors, all-points sizing, visibility and layout
+refresh. Region anchor queries, draw layers/sublevels and texture UV queries
+retain their values. Labels support horizontal/vertical alignment, shadows,
+spacing, wrap controls, text height and inherited runtime font properties.
 
 ## Verification
 
@@ -70,7 +78,7 @@ The Windows Editor and packaged Development client are built from the same
 source tree. `WowUnreal.Hud`, `WowUnreal.UI`, `WowUnreal.Gameplay` and the related
 player, collision, equipment, lighting, rendering, traversal and performance
 suites cover both isolated controls and live protocol state. The interface
-regression set contains 67 tests. Existing optional character texture-layout
+regression set contains 70 tests. Existing optional character texture-layout
 DBC and test-fixture size warnings remain.
 
 Native gameplay probes exercise live server state and rendered UI at 1280x720
@@ -84,7 +92,7 @@ may use NullRHI; visual checks require a rendered client.
 
 Full WoW UI compatibility is **not complete**. In particular:
 
-- Additional frame/region and control API behavior. Visible panels and
+- Specialized legacy frame/region methods and broader addon compatibility. Visible panels and
   readable category lists do not establish complete visual parity.
 - Advanced macro commands such as cast sequences, complete conditional syntax,
   additional combat event families and clickable chat links. See
