@@ -272,7 +272,7 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
         return Result;
     }
 
-    UE_LOG(LogM2, Log, TEXT("M2 version=%u, verts=%u, textures=%u, bones=%u"),
+    UE_LOG(LogM2, Verbose, TEXT("M2 version=%u, verts=%u, textures=%u, bones=%u"),
         Header.Version, Header.nVertices, Header.nTextures, Header.nBones);
 
     // ── Read model name ─────────────────────────────────────────────────
@@ -340,7 +340,7 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
             Dst.ParentBone = Src.ParentBone;
             Dst.PivotPoint = FVector(Src.PivotPoint[0], Src.PivotPoint[1], Src.PivotPoint[2]);
         }
-        UE_LOG(LogM2, Log, TEXT("  Parsed %d bones"), Result.Bones.Num());
+        UE_LOG(LogM2, Verbose, TEXT("  Parsed %d bones"), Result.Bones.Num());
     }
 
     // ── Read animation sequences ────────────────────────────────────────
@@ -360,7 +360,7 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
             Dst.NextAnimation = Src.NextAnimation;
             Dst.AliasNext = Src.AliasNext;
         }
-        UE_LOG(LogM2, Log, TEXT("  Parsed %d animation sequences"), Result.Animations.Num());
+        UE_LOG(LogM2, Verbose, TEXT("  Parsed %d animation sequences"), Result.Animations.Num());
     }
 
     // ── Parse animation keyframes ─────────────────────────────────────────
@@ -539,7 +539,7 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
             }
         }
 
-        UE_LOG(LogM2, Log, TEXT("  Parsed %d animation tracks with keyframe data"), Result.AnimationTracks.Num());
+        UE_LOG(LogM2, Verbose, TEXT("  Parsed %d animation tracks with keyframe data"), Result.AnimationTracks.Num());
     }
 
     // ── Read textures ───────────────────────────────────────────────────
@@ -702,7 +702,7 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
             Dst.Bone = static_cast<int32>(Src.Bone);
             Dst.Position = FVector(Src.Position[0], Src.Position[1], Src.Position[2]);
         }
-        UE_LOG(LogM2, Log, TEXT("  Parsed %d attachments"), Result.Attachments.Num());
+        UE_LOG(LogM2, Verbose, TEXT("  Parsed %d attachments"), Result.Attachments.Num());
     }
 
     // ── Parse attachment lookup ─────────────────────────────────────────
@@ -766,7 +766,7 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
             Dst.EmissionAreaWidth = 10.0f;
             Dst.Gravity = Src.Gravity != 0.0f ? Src.Gravity : -9.8f;
         }
-        UE_LOG(LogM2, Log, TEXT("  Parsed %d particle emitters"), Result.ParticleEmitters.Num());
+        UE_LOG(LogM2, Verbose, TEXT("  Parsed %d particle emitters"), Result.ParticleEmitters.Num());
     }
 
     // ── Parse submeshes from skin file ──────────────────────────────────
@@ -789,12 +789,12 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
                 Dst.CenterMass = FVector(Src.CenterMass[0], Src.CenterMass[1], Src.CenterMass[2]);
                 Dst.Radius = Src.Radius;
             }
-            UE_LOG(LogM2, Log, TEXT("  Parsed %d submeshes from skin"), Result.Submeshes.Num());
+            UE_LOG(LogM2, Verbose, TEXT("  Parsed %d submeshes from skin"), Result.Submeshes.Num());
         }
     }
 
     Result.bIsValid = true;
-    UE_LOG(LogM2, Log, TEXT("M2 '%s' parsed: %d verts, %d indices, %d passes, %d textures, %d attachments, %d submeshes, %d particle emitters"),
+    UE_LOG(LogM2, Verbose, TEXT("M2 '%s' parsed: %d verts, %d indices, %d passes, %d textures, %d attachments, %d submeshes, %d particle emitters"),
         *ModelName, Result.Vertices.Num(), Result.Indices.Num(),
         Result.RenderPasses.Num(), Result.TexturePaths.Num(),
         Result.Attachments.Num(), Result.Submeshes.Num(), Result.ParticleEmitters.Num());

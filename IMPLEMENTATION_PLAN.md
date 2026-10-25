@@ -105,7 +105,7 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 - [x] Zone detection from MCNK area IDs
 
 ### WoW UI System (Lua + FrameXML)
-- [ ] Profile native UI/game/render/GPU frame times, reduce recurring Lua GC work and routine log volume, and verify memory stability with live autologin.
+- [x] Profile native UI/game/render/GPU frame times, reduce recurring OnUpdate GC slices from 1024 to 64 while preserving pressure checks and the 128 MiB sandbox, and move routine frame/model/animation traces to Verbose. Verified with 25 regression tests and the same 22-step native route: median UI time improves from about 3.1 ms to 0.7–0.8 ms, frame p95 from about 15 ms to 4.3 ms, with stable 56.6 MiB Lua memory. A transient-allocation test checks callback delivery and bounded heap use independently of timing.
 - [x] Lua 5.1 VM (sandboxed, memory limited 128MB, instruction limited)
 - [x] FrameXML parser (19 frame types, anchors, strata, templates)
 - [x] Addon/TOC loader with dependency resolution (Kahn's algorithm)

@@ -35,6 +35,7 @@ struct FWowGameplayProbe
     int32 Index=0;
     double Started=FPlatformTime::Seconds(), StepStarted=0;
     bool bInvoked=false, bFinished=false;
+    bool bJumpRequested=false,bJumpObserved=false;
     double FailureExitAt=0;
     uint32 LastEquippedItem=0;
     TWeakObjectPtr<UPrimitiveComponent> Avoiding;
@@ -61,6 +62,7 @@ struct FWowGameplayProbe
         const auto Report=MakeShared<FJsonObject>();
         Report->SetBoolField(TEXT("passed"),Passed); Report->SetStringField(TEXT("failure"),Failure);
         Report->SetNumberField(TEXT("completedSteps"),Index); Report->SetArrayField(TEXT("steps"),Results);
+        Report->SetBoolField(TEXT("jumpObserved"),bJumpObserved);
         Report->SetStringField(TEXT("character"),Controller.ConnectionManager?Controller.ConnectionManager->GetCharacterName():TEXT(""));
         if (const auto* Character=Cast<ACharacter>(Controller.GetPawn()))
         {
@@ -154,6 +156,7 @@ struct FWowGameplayProbe
         auto* Connection=C.ConnectionManager.Get();
         if (!Connection || !C.GameUI || !C.UIManager || !C.GetPawn() || !Connection->PacketHandler.EntityManager.GetLocalPlayer()) return;
         if (Connection->GetCharacterName()!=Spec->GetStringField(TEXT("character"))) { Failure=TEXT("Verification character mismatch"); Finish(C,false); return; }
+        if (bJumpRequested) if (const auto* Character=Cast<ACharacter>(C.GetPawn()); Character && Character->GetCharacterMovement()->IsFalling()) bJumpObserved=true;
         if (Index>=Steps.Num()) { Finish(C,true); return; }
         const auto Step=Steps[Index]->AsObject();
         const FString Op=Step->GetStringField(TEXT("op"));
@@ -243,9 +246,9 @@ struct FWowGameplayProbe
             Done=FFileHelper::SaveStringToFile(Text,*(Output/(Step->GetStringField(TEXT("name"))+TEXT(".json"))));
         }
         else if (Op==TEXT("interact")) { C.InteractWithTarget(); Done=true; }
-        else if (Op==TEXT("jump")) { if (auto* Character=Cast<ACharacter>(C.GetPawn())) { Character->Jump(); Done=true; } }
+        else if (Op==TEXT("jump")) { if (auto* Character=Cast<ACharacter>(C.GetPawn())) { bJumpRequested=true; bJumpObserved=false; Character->Jump(); Done=true; } }
         else if (Op==TEXT("release_jump")) { if (auto* Character=Cast<ACharacter>(C.GetPawn())) { Character->StopJumping(); Done=true; } }
-        else if (Op==TEXT("wait_landed")) { const auto* Character=Cast<ACharacter>(C.GetPawn()); Done=Character && Character->GetCharacterMovement()->IsMovingOnGround() && Now-StepStarted>.5; }
+        else if (Op==TEXT("wait_landed")) { const auto* Character=Cast<ACharacter>(C.GetPawn()); Done=bJumpObserved && Character && Character->GetCharacterMovement()->IsMovingOnGround() && Now-StepStarted>.5; if(Done)bJumpRequested=false; }
         else if (Op==TEXT("wait_menu")) Done=(Handler.GossipMenu.Guid==C.TargetGuid && (Handler.GossipMenu.Quests.Num() || Handler.GossipMenu.Options.Num())) || (Handler.QuestDetails.QuestGiverGuid==C.TargetGuid && C.GameUI->GetShownQuestId()!=0);
         else if (Op==TEXT("quest")) { if (C.GameUI->GetShownQuestId()!=uint32(Step->GetIntegerField(TEXT("id")))) C.GameUI->SelectGossipQuest(Step->GetIntegerField(TEXT("id"))); Done=true; }
         else if (Op==TEXT("wait_dialog")) Done=C.GameUI->GetShownQuestId()==uint32(Step->GetIntegerField(TEXT("id")));

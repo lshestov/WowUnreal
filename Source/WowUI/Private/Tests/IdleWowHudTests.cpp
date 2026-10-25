@@ -242,4 +242,33 @@ bool FGameplaySecureAction::RunTest(const FString&)
     TestEqual(TEXT("Mouse action uses current page, not a fixed battle slot"),Slot,84);
     return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUiIncrementalGc,"WowUnreal.Performance.UiTransientMemory",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FUiIncrementalGc::RunTest(const FString&)
+{
+    FHudFixture F;
+    F.Lua.SetMemoryLimit(16*1024*1024);
+    TestTrue(TEXT("Transient allocation handler loads"),F.Lua.ExecuteString(TEXT(R"LUA(
+        BudgetTicks=0
+        BudgetFrame=CreateFrame('Frame','BudgetFrame',UIParent)
+        BudgetFrame:SetSize(32,32)
+        BudgetFrame:SetPoint('CENTER',UIParent,'CENTER',0,0)
+        BudgetFrame:SetScript('OnUpdate',function(self,elapsed)
+            BudgetTicks=BudgetTicks+1
+            local transient={}
+            for i=1,1024 do transient[i]=string.rep('x',64)..i..':'..BudgetTicks end
+            self.lastValue=transient[1024]
+        end)
+    )LUA")));
+    F.Frames.RefreshLayout();
+    TestTrue(TEXT("Allocation handler is attached to a drawn frame"),F.Frames.IsFrameDrawn(F.Frames.FindFrame(TEXT("BudgetFrame"))));
+    SIZE_T Peak=0;
+    for (int32 I=0; I<180; ++I)
+    {
+        F.Events.TickOnUpdate(1.f/60);
+        Peak=FMath::Max(Peak,F.Lua.GetMemoryUsage());
+    }
+    TestTrue(TEXT("All callbacks run without dropping updates or exceeding the sandbox"),F.Lua.ExecuteString(TEXT("assert(BudgetTicks==180); assert(BudgetFrame.lastValue==string.rep('x',64)..'1024:180')")));
+    TestTrue(TEXT("Incremental collection bounds transient memory"),Peak<F.Lua.GetMemoryLimit()*9/10);
+    return true;
+}
 #endif

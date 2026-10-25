@@ -1533,14 +1533,14 @@ void AWowWorldManager::UpdateObjectStreaming()
     // Debug: log once per second
     static int32 DebugCounter = 0;
     bool bDebugLog = (DebugCounter++ % 2 == 0); // every other tick (1 second at 0.5s tick)
-    if (bDebugLog)
+    if (bDebugLog && UE_LOG_ACTIVE(LogWowWorld,Verbose))
     {
         int32 TotalDoodads = 0, TotalWmos = 0;
         for (auto& TP : LoadedTiles)
         {
             if (TP.Value) { TotalDoodads += TP.Value->DoodadPlacements.Num(); TotalWmos += TP.Value->WmoPlacements.Num(); }
         }
-        UE_LOG(LogWowWorld, Log, TEXT("ObjectStreaming: cam=%s, %d tiles, %d total doodads, %d total wmos, active: %d doodads, %d wmo groups"),
+        UE_LOG(LogWowWorld, Verbose, TEXT("ObjectStreaming: cam=%s, %d tiles, %d total doodads, %d total wmos, active: %d doodads, %d wmo groups"),
             *CamLoc.ToString(), LoadedTiles.Num(), TotalDoodads, TotalWmos, ActiveDoodadCount, ActiveWmoGroupCount);
     }
 

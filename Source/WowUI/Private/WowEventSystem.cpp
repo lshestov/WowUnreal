@@ -211,7 +211,7 @@ void FWowEventSystem::FireEvent(const FString& EventName, const TArray<FString>&
 		return;
 	}
 
-	UE_LOG(LogWowEvent, Log, TEXT("Firing event %s to %d frames (args: %d)"), *EventName, Handles->Num(), Args.Num());
+	UE_LOG(LogWowEvent, Verbose, TEXT("Firing event %s to %d frames (args: %d)"), *EventName, Handles->Num(), Args.Num());
 
 #if HAS_LUA
 	if (!LuaVM || !LuaVM->IsInitialized())
@@ -1559,11 +1559,13 @@ void FWowEventSystem::TickOnUpdate(float DeltaTime)
 		if ((HandleIndex & 15) == 15)
 		{
 			LuaVM->CollectGarbageIfNeeded(0.60);
-			LuaVM->StepGarbageCollector();
+			// OnUpdate is frequent: use small incremental slices rather than
+			// repeatedly traversing megabytes of the live FrameXML heap.
+			LuaVM->StepGarbageCollector(64);
 		}
 	}
 
-	LuaVM->StepGarbageCollector();
+	LuaVM->StepGarbageCollector(64);
 #endif
 }
 

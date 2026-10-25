@@ -220,6 +220,14 @@ GPU, Lua UI callbacks, hover, layout and widget work, plus Lua heap MiB. Use
 the same route, viewpoint, viewport and time for comparisons, let streaming
 settle first, and run without a concurrent editor build or automation suite.
 
+`WowUnreal.Performance.UiTransientMemory` exercises 180 real UI update
+callbacks with unique temporary strings and a restricted Lua heap. Frequent
+updates use bounded incremental GC slices; burst event/bootstrap collection and
+the production heap limit remain in place. Routine frame/model/animation traces
+are `Verbose`; warnings/errors remain enabled. For diagnosis use Unreal's
+`-LogCmds="LogWowFrame Verbose,LogWowEvent Verbose,LogWowAnim Verbose,LogM2 Verbose"`.
+Probe jump verification uses observed physics state rather than log verbosity.
+
 `WowUnreal.Traversal` checks ground, falling and swimming packet layouts and the
 shared millisecond clock used for movement and time sync. `WowUnreal.Collision`
 also verifies player-capsule impact normals on real abbey floor geometry and M2

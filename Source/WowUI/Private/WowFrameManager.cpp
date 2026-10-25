@@ -122,7 +122,7 @@ void FWowFrameManager::Initialize(UCanvasPanel* InRootCanvas)
 			ViewportDPIScale = Method2; // This is what actually gets applied
 			if (ViewportDPIScale <= 0.f) ViewportDPIScale = 1.0f;
 
-			UE_LOG(LogWowFrame, Warning, TEXT("DPI detection: GetDPIScale=%.3f, UISettings.GetDPIScaleBasedOnSize=%.3f, using=%.3f"),
+			UE_LOG(LogWowFrame, Verbose, TEXT("DPI detection: GetDPIScale=%.3f, UISettings.GetDPIScaleBasedOnSize=%.3f, using=%.3f"),
 				Method1, Method2, ViewportDPIScale);
 		}
 
@@ -139,7 +139,7 @@ void FWowFrameManager::Initialize(UCanvasPanel* InRootCanvas)
 		float UIParentW = ViewportSize.X / (ViewportSize.Y / WowBaseHeight); // Use raw viewport ratio
 		float UIParentH = WowBaseHeight;
 
-		UE_LOG(LogWowFrame, Log, TEXT("UI Scale: Viewport (%.0fx%.0f) -> UIParent %.1fx%.1f, scale %.3f"),
+		UE_LOG(LogWowFrame, Verbose, TEXT("UI Scale: Viewport (%.0fx%.0f) -> UIParent %.1fx%.1f, scale %.3f"),
 			ViewportSize.X, ViewportSize.Y, UIParentW, UIParentH, UIScale);
 
 		// Initialize UIParent as a virtual frame that represents the screen
@@ -177,7 +177,7 @@ void FWowFrameManager::Initialize(UCanvasPanel* InRootCanvas)
 			DPIScale = GEngine->GameViewport->GetWindow()->GetNativeWindow()->GetDPIScaleFactor();
 		}
 
-		UE_LOG(LogWowFrame, Log, TEXT("Initialized UIParent virtual frame (%.1fx%.1f WoW coordinates, viewport %.0fx%.0f, UIScale %.3f, DPIScale=%.3f, viewportDPI=%.3f)"),
+		UE_LOG(LogWowFrame, Verbose, TEXT("Initialized UIParent virtual frame (%.1fx%.1f WoW coordinates, viewport %.0fx%.0f, UIScale %.3f, DPIScale=%.3f, viewportDPI=%.3f)"),
 			UIParentW, UIParentH, ViewportSize.X, ViewportSize.Y, UIScale, DPIScale, ViewportDPIScale);
 	}
 
@@ -205,7 +205,7 @@ void FWowFrameManager::Initialize(UCanvasPanel* InRootCanvas)
 		RegisterTemplate(TEXT("FadingFrame"), FadingFrameDef);
 	}
 
-	UE_LOG(LogWowFrame, Log, TEXT("Frame manager initialized - WoW anchor positioning system ready"));
+	UE_LOG(LogWowFrame, Verbose, TEXT("Frame manager initialized - WoW anchor positioning system ready"));
 }
 
 void FWowFrameManager::RegisterTemplate(const FString& Name, const FWowFrameDef& Def)
@@ -294,7 +294,7 @@ void FWowFrameManager::SetFrameSize(int64 Handle, float W, float H)
 
 	if (Entry->Def.Name.Contains(TEXT("MainMenu")))
 	{
-		UE_LOG(LogWowFrame, Warning, TEXT("SetFrameSize %s: %.0fx%.0f -> %.0fx%.0f (anchors=%d)"),
+		UE_LOG(LogWowFrame, Verbose, TEXT("SetFrameSize %s: %.0fx%.0f -> %.0fx%.0f (anchors=%d)"),
 			*Entry->Def.Name, Entry->Def.Width, Entry->Def.Height, W, H, Entry->Def.Anchors.Num());
 	}
 
@@ -721,7 +721,7 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 	for (const FWowLayer& L : Def.Layers) { TotalTextures += L.Textures.Num(); TotalFontStrings += L.FontStrings.Num(); for (const auto& T : L.Textures) { if (!T.Name.IsEmpty()) NamedTextures++; } }
 	if (TotalTextures > 0 || TotalFontStrings > 0)
 	{
-		UE_LOG(LogWowFrame, Log, TEXT("CreateLayerContent: %s — %d layers, %d textures (%d named), %d fontstrings, effectiveSize=%.0fx%.0f"),
+		UE_LOG(LogWowFrame, Verbose, TEXT("CreateLayerContent: %s — %d layers, %d textures (%d named), %d fontstrings, effectiveSize=%.0fx%.0f"),
 			*Def.Name, Def.Layers.Num(), TotalTextures, NamedTextures, TotalFontStrings, EffectiveParentW, EffectiveParentH);
 	}
 
@@ -828,7 +828,7 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 					ImgWidget->SetBrush(SlateBrush);
 					if (Tex.Left > Tex.Right || Tex.Top > Tex.Bottom)
 					{
-						UE_LOG(LogWowFrame, Warning, TEXT("  FLIPPED texture: %s in frame %s (UV: L=%.3f R=%.3f T=%.3f B=%.3f) flipH=%d flipV=%d"),
+						UE_LOG(LogWowFrame, Verbose, TEXT("  FLIPPED texture: %s in frame %s (UV: L=%.3f R=%.3f T=%.3f B=%.3f) flipH=%d flipV=%d"),
 							*Tex.File, *Def.Name, Tex.Left, Tex.Right, Tex.Top, Tex.Bottom,
 							Tex.Left > Tex.Right ? 1 : 0, Tex.Top > Tex.Bottom ? 1 : 0);
 					}
@@ -843,7 +843,7 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 				UCanvasPanelSlot* DbgSlot = Cast<UCanvasPanelSlot>(ImgWidget->Slot);
 				FVector2D DbgPos = DbgSlot ? DbgSlot->GetPosition() : FVector2D::ZeroVector;
 				FVector2D DbgSize = DbgSlot ? DbgSlot->GetSize() : FVector2D::ZeroVector;
-				UE_LOG(LogWowFrame, Log, TEXT("  TEX: %s -> %s (%s) xmlSize=%.0fx%.0f slot=(%.0f,%.0f) slotSz=(%.0f,%.0f) anchors=%d setAll=%d"),
+				UE_LOG(LogWowFrame, Verbose, TEXT("  TEX: %s -> %s (%s) xmlSize=%.0fx%.0f slot=(%.0f,%.0f) slotSz=(%.0f,%.0f) anchors=%d setAll=%d"),
 					*Tex.File, LoadedTexture ? TEXT("OK") : TEXT("FAIL"), *Def.Name, Tex.Width, Tex.Height,
 					DbgPos.X, DbgPos.Y, DbgSize.X, DbgSize.Y, Tex.Anchors.Num(), Tex.bSetAllPoints ? 1 : 0);
 			}
@@ -882,7 +882,7 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 					float ElemH = SlotSize.Y / UIScale;
 
 					// Named-region bounds are resolved from their current owner and slot.
-					UE_LOG(LogWowFrame, Log, TEXT("  Registered texture rect: %s abs=(%.1f,%.1f) sz=(%.1f,%.1f)"),
+					UE_LOG(LogWowFrame, Verbose, TEXT("  Registered texture rect: %s abs=(%.1f,%.1f) sz=(%.1f,%.1f)"),
 						*Tex.Name, ElemX, ElemY, ElemW, ElemH);
 				}
 			}
@@ -1073,7 +1073,7 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 		bForceHidden = true;
 	}
 
-	UE_LOG(LogWowFrame, Log, TEXT("CreateFrame: %s type=%d canvas=%p parent=%p hidden=%d"),
+	UE_LOG(LogWowFrame, Verbose, TEXT("CreateFrame: %s type=%d canvas=%p parent=%p hidden=%d"),
 		*Def.Name, (int32)Def.Type, Canvas, ParentCanvas, Def.bHidden);
 
 	UObject* Outer = ParentCanvas->GetOuter();
@@ -1084,7 +1084,7 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 	// WorldFrame is the 3D world viewport — skip widget creation (it's handled by UE5's viewport)
 	if (Def.Type == EWowFrameType::WorldFrame)
 	{
-		UE_LOG(LogWowFrame, Log, TEXT("  %s: WorldFrame type — skipping widget (3D viewport)"), *Def.Name);
+		UE_LOG(LogWowFrame, Verbose, TEXT("  %s: WorldFrame type — skipping widget (3D viewport)"), *Def.Name);
 		return nullptr;
 	}
 
@@ -1511,7 +1511,7 @@ int64 FWowFrameManager::CreateFrame(const FWowFrameDef& Def)
 			RegisterTemplate(Resolved.Name, Resolved);
 		}
 
-		UE_LOG(LogWowFrame, Log, TEXT("Created virtual frame [%lld] %s"), Handle, *Resolved.Name);
+		UE_LOG(LogWowFrame, Verbose, TEXT("Created virtual frame [%lld] %s"), Handle, *Resolved.Name);
 		return Handle;
 	}
 
@@ -1581,7 +1581,7 @@ int64 FWowFrameManager::CreateFrame(const FWowFrameDef& Def)
 		EventSystem->CompileFrameScripts(Handle, Resolved);
 	}
 
-	UE_LOG(LogWowFrame, Log, TEXT("Created frame [%lld] %s (type %d, %d layers, %d children, widget=%p)"),
+	UE_LOG(LogWowFrame, Verbose, TEXT("Created frame [%lld] %s (type %d, %d layers, %d children, widget=%p)"),
 		Handle, *Resolved.Name, (int32)Resolved.Type, Resolved.Layers.Num(), Resolved.Children.Num(), Entry.Widget.Get());
 	return Handle;
 }
@@ -1754,7 +1754,7 @@ void FWowFrameManager::SyncChildVisibility()
 
 	if (HiddenCount > 0)
 	{
-		UE_LOG(LogWowFrame, Log, TEXT("SyncChildVisibility: hid %d orphaned visible children of hidden parents"), HiddenCount);
+		UE_LOG(LogWowFrame, Verbose, TEXT("SyncChildVisibility: hid %d orphaned visible children of hidden parents"), HiddenCount);
 	}
 
 	// Force-show frames that WoW's Lua would show at startup but our FrameXML
@@ -1796,7 +1796,7 @@ void FWowFrameManager::SyncChildVisibility()
 	}
 	if (ForceShownCount > 0)
 	{
-		UE_LOG(LogWowFrame, Log, TEXT("SyncChildVisibility: force-showed %d action bar frames"), ForceShownCount);
+		UE_LOG(LogWowFrame, Verbose, TEXT("SyncChildVisibility: force-showed %d action bar frames"), ForceShownCount);
 	}
 
 	// Force-hide frames that WoW expects to start hidden but our XML/template
@@ -1823,7 +1823,7 @@ void FWowFrameManager::SyncChildVisibility()
 	}
 	if (ForceHiddenCount > 0)
 	{
-		UE_LOG(LogWowFrame, Log, TEXT("SyncChildVisibility: force-hid %d frames (FadingFrame pattern)"), ForceHiddenCount);
+		UE_LOG(LogWowFrame, Verbose, TEXT("SyncChildVisibility: force-hid %d frames (FadingFrame pattern)"), ForceHiddenCount);
 	}
 
 	// Hide Flash textures on action buttons — these start visible but should be hidden
@@ -1839,7 +1839,7 @@ void FWowFrameManager::SyncChildVisibility()
 	}
 	if (FlashHiddenCount > 0)
 	{
-		UE_LOG(LogWowFrame, Log, TEXT("SyncChildVisibility: hid %d Flash textures"), FlashHiddenCount);
+		UE_LOG(LogWowFrame, Verbose, TEXT("SyncChildVisibility: hid %d Flash textures"), FlashHiddenCount);
 	}
 
 	// Dump all visible frames with their positions for debugging
@@ -2032,7 +2032,7 @@ void FWowFrameManager::DebugDumpLayout() const
 			const auto P = RootGeometry.AbsoluteToLocal(Geometry.LocalToAbsolute(FVector2D::ZeroVector)) / UIScale;
 			const auto End = RootGeometry.AbsoluteToLocal(Geometry.LocalToAbsolute(Geometry.GetLocalSize())) / UIScale;
 			if ((P.X < 760 && End.X > 600 && P.Y < 420 && End.Y > 350) || (End.X - P.X > 600 && End.Y - P.Y < 100))
-				UE_LOG(LogWowFrame, Log, TEXT("HudRegion: %s owner=%s actual=(%.1f,%.1f,%.1f,%.1f)"),
+				UE_LOG(LogWowFrame, Verbose, TEXT("HudRegion: %s owner=%s actual=(%.1f,%.1f,%.1f,%.1f)"),
 					*Pair.Key, *RegionOwners.FindRef(Pair.Key), P.X, P.Y, End.X-P.X, End.Y-P.Y);
 		}
 	}
@@ -2308,7 +2308,7 @@ void FWowFrameManager::DispatchClick(int64 Handle, const FString& Button, bool b
 		if (ActionSlot > 0 && OnSecureActionDispatch.IsBound())
 		{
 			OnSecureActionDispatch.Execute(ActionSlot - 1); // Convert to 0-based
-			UE_LOG(LogWowFrame, Log, TEXT("Secure action dispatch: slot %d (frame %s)"),
+			UE_LOG(LogWowFrame, Verbose, TEXT("Secure action dispatch: slot %d (frame %s)"),
 				ActionSlot, *Entry->Def.Name);
 		}
 	}
@@ -2372,7 +2372,7 @@ void FWowFrameManager::SetScrollChild(int64 ScrollFrameHandle, int64 ChildHandle
 		}
 	}
 
-	UE_LOG(LogWowFrame, Log, TEXT("SetScrollChild: frame %lld child %lld"), ScrollFrameHandle, ChildHandle);
+	UE_LOG(LogWowFrame, Verbose, TEXT("SetScrollChild: frame %lld child %lld"), ScrollFrameHandle, ChildHandle);
 }
 
 int64 FWowFrameManager::GetScrollChild(int64 ScrollFrameHandle) const

@@ -28,7 +28,7 @@ void UWowAnimationController::InitializeRuntime(USkeletalMeshComponent* InMeshCo
     RuntimeInstance = Cast<UWowM2AnimInstance>(MeshComponent->GetAnimInstance());
     if (!RuntimeInstance) return;
     RuntimeInstance->InitializeModel(RuntimeModel);
-    UE_LOG(LogWowAnim, Log, TEXT("Runtime M2 controller: %d clips, initial AnimID=%d"),
+    UE_LOG(LogWowAnim, Verbose, TEXT("Runtime M2 controller: %d clips, initial AnimID=%d"),
         RuntimeModel->AnimationTracks.Num(), RuntimeInstance->GetM2AnimationId());
 }
 
@@ -67,7 +67,7 @@ void UWowAnimationController::Initialize(USkeletalMeshComponent* InMeshComponent
         AllAnimations.Add(Anim);
     }
 
-    UE_LOG(LogWowAnim, Log, TEXT("WowAnimationController initialized with %d animations"), AllAnimations.Num());
+    UE_LOG(LogWowAnim, Verbose, TEXT("WowAnimationController initialized with %d animations"), AllAnimations.Num());
 
     // Play idle animation immediately - try mapped idle first, then fallback
     if (MeshComponent)
@@ -78,7 +78,7 @@ void UWowAnimationController::Initialize(USkeletalMeshComponent* InMeshComponent
         if (TObjectPtr<UAnimSequence>* Found = AnimationCache.Find(0))
         {
             IdleAnim = *Found;
-            UE_LOG(LogWowAnim, Log, TEXT("WowAnimationController::Initialize: Found mapped Stand animation (ID 0): %s"),
+            UE_LOG(LogWowAnim, Verbose, TEXT("WowAnimationController::Initialize: Found mapped Stand animation (ID 0): %s"),
                 IdleAnim ? *IdleAnim->GetName() : TEXT("NULL"));
         }
 
@@ -94,7 +94,7 @@ void UWowAnimationController::Initialize(USkeletalMeshComponent* InMeshComponent
         {
             MeshComponent->SetAnimationMode(EAnimationMode::AnimationSingleNode);
             MeshComponent->PlayAnimation(IdleAnim, true);
-            UE_LOG(LogWowAnim, Log, TEXT("WowAnimationController::Initialize: Playing initial animation: %s"), *IdleAnim->GetName());
+            UE_LOG(LogWowAnim, Verbose, TEXT("WowAnimationController::Initialize: Playing initial animation: %s"), *IdleAnim->GetName());
         }
         else
         {
@@ -385,7 +385,7 @@ void UWowAnimationController::SetAnimationState(EWowAnimState NewState, bool bFo
         // Takeoff is a movement phase, not an uninterruptible action. It must
         // yield to airborne/fall/landing even if the source clip is longer.
         if (NewState == EWowAnimState::Jumping) bPlayingOneShot = false;
-        UE_LOG(LogWowAnim, Log, TEXT("Animation state changed to %s (AnimID %d)"),
+        UE_LOG(LogWowAnim, Verbose, TEXT("Animation state changed to %s (AnimID %d)"),
             *UEnum::GetValueAsString(CurrentState), static_cast<int32>(AnimId));
     }
     else
@@ -420,7 +420,7 @@ void UWowAnimationController::SetAnimationIdMap(const TMap<int32, int32>& InMap)
         if (AllAnimations.IsValidIndex(TrackIndex) && AllAnimations[TrackIndex])
         {
             AnimationCache.Add(AnimId, AllAnimations[TrackIndex]);
-            UE_LOG(LogWowAnim, Log, TEXT("SetAnimationIdMap: Mapped AnimID %d -> TrackIndex %d -> Animation %s"),
+            UE_LOG(LogWowAnim, Verbose, TEXT("SetAnimationIdMap: Mapped AnimID %d -> TrackIndex %d -> Animation %s"),
                 AnimId, TrackIndex, *AllAnimations[TrackIndex]->GetName());
         }
         else
@@ -428,7 +428,7 @@ void UWowAnimationController::SetAnimationIdMap(const TMap<int32, int32>& InMap)
             UE_LOG(LogWowAnim, Warning, TEXT("SetAnimationIdMap: Invalid TrackIndex %d for AnimID %d"), TrackIndex, AnimId);
         }
     }
-    UE_LOG(LogWowAnim, Log, TEXT("SetAnimationIdMap: mapped %d animation IDs"), AnimationCache.Num());
+    UE_LOG(LogWowAnim, Verbose, TEXT("SetAnimationIdMap: mapped %d animation IDs"), AnimationCache.Num());
 
     // Play idle if available - try alternatives to AnimID 0 if it might be problematic
     UAnimSequence* BestIdleAnim = nullptr;
@@ -448,7 +448,7 @@ void UWowAnimationController::SetAnimationIdMap(const TMap<int32, int32>& InMap)
                 BestIdleAnim = AnimationCache[FallbackId];
                 BestIdleAnimId = FallbackId;
                 bTriedAlternatives = true;
-                UE_LOG(LogWowAnim, Log, TEXT("SetAnimationIdMap: Using AnimID %d as Stand animation (alternative to potentially problematic AnimID 0)"), FallbackId);
+                UE_LOG(LogWowAnim, Verbose, TEXT("SetAnimationIdMap: Using AnimID %d as Stand animation (alternative to potentially problematic AnimID 0)"), FallbackId);
                 break;
             }
         }
@@ -458,7 +458,7 @@ void UWowAnimationController::SetAnimationIdMap(const TMap<int32, int32>& InMap)
         {
             BestIdleAnim = AnimationCache[0];
             BestIdleAnimId = 0;
-            UE_LOG(LogWowAnim, Log, TEXT("SetAnimationIdMap: Using AnimID 0 as Stand animation (no alternatives available)"));
+            UE_LOG(LogWowAnim, Verbose, TEXT("SetAnimationIdMap: Using AnimID 0 as Stand animation (no alternatives available)"));
         }
     }
 
@@ -467,7 +467,7 @@ void UWowAnimationController::SetAnimationIdMap(const TMap<int32, int32>& InMap)
         MeshComponent->SetAnimationMode(EAnimationMode::AnimationSingleNode);
         MeshComponent->PlayAnimation(BestIdleAnim, true);
         CurrentAnimation = BestIdleAnim;
-        UE_LOG(LogWowAnim, Log, TEXT("SetAnimationIdMap: Playing Stand animation (ID %d): %s"), BestIdleAnimId, *BestIdleAnim->GetName());
+        UE_LOG(LogWowAnim, Verbose, TEXT("SetAnimationIdMap: Playing Stand animation (ID %d): %s"), BestIdleAnimId, *BestIdleAnim->GetName());
     }
     else if (MeshComponent)
     {
@@ -532,7 +532,7 @@ bool UWowAnimationController::PlayAnimationById(EWowAnimId AnimId, bool bLooping
                     if (*FallbackFound)
                     {
                         AnimToPlay = *FallbackFound;
-                        UE_LOG(LogWowAnim, Log, TEXT("PlayAnimationById: Using AnimID %d as Stand animation fallback"), FallbackId);
+                        UE_LOG(LogWowAnim, Verbose, TEXT("PlayAnimationById: Using AnimID %d as Stand animation fallback"), FallbackId);
                         break;
                     }
                 }
