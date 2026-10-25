@@ -111,6 +111,7 @@ bool FIdleWowArchitectureCollision::RunTest(const FString& Parameters)
     auto* Root = CollisionRoot(World);
     TOptional<FVector> FloorPoint, WallPoint, WallNormal;
     int32 CollisionFaces = 0;
+    double FloorArea=0;
     for (uint32 GroupIndex = 0; GroupIndex < RootData.NumGroups; ++GroupIndex)
     {
         Raw.Reset();
@@ -127,7 +128,11 @@ bool FIdleWowArchitectureCollision::RunTest(const FString& Parameters)
             const FVector Cross=FVector::CrossProduct(Points[1]-Points[0],Points[2]-Points[0]);
             if (Cross.Size()<10000) continue;
             const FVector Normal=Cross.GetSafeNormal(), Center=(Points[0]+Points[1]+Points[2])/3;
-            if (!FloorPoint.IsSet() && FMath::Abs(Normal.Z)>0.9) FloorPoint=Center;
+            const double Perimeter=(Points[1]-Points[0]).Size()+(Points[2]-Points[1]).Size()+(Points[0]-Points[2]).Size();
+            // A capsule needs a broad horizontal face, not an arbitrary narrow
+            // decoration triangle whose centroid can be inside adjacent geometry.
+            if (Normal.Z<-.999 && Cross.Size()>FloorArea && Cross.Size()/Perimeter>100)
+            { FloorPoint=Center; FloorArea=Cross.Size(); }
             if (!WallPoint.IsSet() && FMath::Abs(Normal.Z)<0.05) {WallPoint=Center;WallNormal=Normal;}
         }
     }
@@ -139,8 +144,13 @@ bool FIdleWowArchitectureCollision::RunTest(const FString& Parameters)
     Mpq.ReadFile(TEXT("WORLD\\GENERIC\\PASSIVEDOODADS\\FURNITURE\\CONTAINERS\\CRATE0300.skin"), Skin);
     const auto Crate=FM2Parser::Parse(M2,Skin);
     TestTrue(TEXT("M2 bounding collision is parsed independently of rendering"), !Crate.CollisionVertices.IsEmpty() && !Crate.CollisionIndices.IsEmpty());
+    TArray<FVector> CrateVertices; TArray<int32> CrateIndices;
+    FWowWorldCollision::AppendM2(Crate,FTransform(FVector(20000,0,0)),CrateVertices,CrateIndices);
+    FWowWorldCollision::Create(Root,TEXT("CrateBounds"),CrateVertices,CrateIndices);
+    FBox CrateBox(ForceInit); for (const auto& Vertex:CrateVertices) CrateBox+=Vertex;
+    const FVector CrateTop(CrateBox.GetCenter().X,CrateBox.GetCenter().Y,CrateBox.Max.Z);
     const double Started=FPlatformTime::Seconds();
-    ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this,World,FloorPoint,WallPoint,WallNormal,Started]()
+    ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this,World,FloorPoint,WallPoint,WallNormal,CrateTop,Started]()
     {
         FHitResult Hit;
         const FCollisionObjectQueryParams Objects(ECC_WorldStatic);
@@ -148,6 +158,13 @@ bool FIdleWowArchitectureCollision::RunTest(const FString& Parameters)
         const bool FloorReady=World->LineTraceSingleByObjectType(Hit,FloorPoint.GetValue()+FVector(0,0,5),FloorPoint.GetValue()-FVector(0,0,5),Objects,Query);
         if (!FloorReady && FPlatformTime::Seconds()-Started<10) return false;
         TestTrue(TEXT("Actual abbey floor blocks a downward trace"),FloorReady);
+        const bool CapsuleFloor=World->SweepSingleByObjectType(Hit,FloorPoint.GetValue()+FVector(0,0,120),FloorPoint.GetValue()+FVector(0,0,40),
+            FQuat::Identity,Objects,FCollisionShape::MakeCapsule(35,88),Query);
+        AddInfo(FString::Printf(TEXT("Abbey capsule floor: sample=%s hit=%d normalZ=%.4f penetrating=%d"),*FloorPoint.GetValue().ToString(),CapsuleFloor,Hit.ImpactNormal.Z,Hit.bStartPenetrating));
+        TestTrue(TEXT("Abbey floor has an upward capsule impact normal, not just a ray hit"),CapsuleFloor && Hit.ImpactNormal.Z>.9);
+        const bool CrateFloor=World->SweepSingleByObjectType(Hit,CrateTop+FVector(0,0,100),CrateTop-FVector(0,0,10),
+            FQuat::Identity,Objects,FCollisionShape::MakeCapsule(10,20),Query);
+        TestTrue(TEXT("M2 bounding top is walkable from above"),CrateFloor && Hit.ImpactNormal.Z>.8);
         TestTrue(TEXT("Actual abbey wall blocks a capsule"),World->SweepSingleByObjectType(Hit,
             WallPoint.GetValue()+WallNormal.GetValue()*100,WallPoint.GetValue()-WallNormal.GetValue()*100,FQuat::Identity,Objects,FCollisionShape::MakeCapsule(10,20),Query));
         DestroyCollisionWorld(World);return true;

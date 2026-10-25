@@ -1052,27 +1052,47 @@ void AWowGameplayController::SendMovementUpdate()
 
 		if (Movement->IsFalling())
 		{
-			if (Velocity.Z > 0)
-				MoveFlags |= 0x00002000; // JUMPING
-			else
-				MoveFlags |= 0x00001000; // FALLING
+			MoveFlags |= 0x00001000; // FALLING applies to both ascending and descending jumps.
 		}
 
 		if (Movement->MaxWalkSpeed <= 250.0f && Speed2D > 10.0f)
 			MoveFlags |= 0x00000100; // WALK_MODE
 	}
 
-	// Always send heartbeat (even when stationary — server needs to know we're alive and where)
+	const double Now=FPlatformTime::Seconds();
+	const bool Falling=(MoveFlags&0x1000)!=0, WasFalling=(LastSentMovementFlags&0x1000)!=0;
+	if (Falling && !WasFalling)
+	{
+		MovementFallStarted=Now;
+		MovementJumpZSpeed=FMath::Max(0.f,float(Movement->Velocity.Z/100));
+	}
+	FWowMovementInfo Info;
+	Info.Position=WowPos; Info.Orientation=WowOrientation; Info.MoveFlags=MoveFlags;
+	if (Falling || WasFalling)
+	{
+		Info.FallTime=uint32(FMath::Max(0.0,Now-MovementFallStarted)*1000);
+		Info.JumpZSpeed=MovementJumpZSpeed;
+		Info.JumpXYSpeed=Movement?Movement->Velocity.Size2D()/100:0;
+		if (Info.JumpXYSpeed>.001f)
+		{
+			Info.JumpCosAngle=Movement->Velocity.X/(Info.JumpXYSpeed*100);
+			Info.JumpSinAngle=-Movement->Velocity.Y/(Info.JumpXYSpeed*100);
+		}
+	}
+	// Preserve jump/landing transitions and send a bounded stationary heartbeat.
 	bool bPositionChanged = !Pos.Equals(LastSentPosition, 1.0f);
 	bool bFlagsChanged = MoveFlags != LastSentMovementFlags;
 	const bool bTurned=FMath::Abs(FMath::FindDeltaAngleRadians(LastSentOrientation,WowOrientation))>.01f;
 
-	if (bPositionChanged || bFlagsChanged || bTurned)
+	if (bPositionChanged || bFlagsChanged || bTurned || Now-LastMovementPacketTime>=1)
 	{
+		const int32 Opcode=Falling && !WasFalling && MovementJumpZSpeed>0?WowOpcode::MSG_MOVE_JUMP:
+			(!Falling && WasFalling?WowOpcode::MSG_MOVE_FALL_LAND:WowOpcode::MSG_MOVE_HEARTBEAT);
 		LastSentPosition = Pos;
 		LastSentMovementFlags=MoveFlags;
 		LastSentOrientation=WowOrientation;
-		ConnectionManager->SendMovement(WowOpcode::MSG_MOVE_HEARTBEAT, WowPos, WowOrientation, MoveFlags);
+		LastMovementPacketTime=Now;
+		ConnectionManager->SendMovementInfo(Opcode,Info);
 	}
 }
 

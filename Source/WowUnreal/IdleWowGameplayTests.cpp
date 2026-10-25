@@ -121,4 +121,39 @@ bool FGameplayItemTemplate::RunTest(const FString&)
     TestTrue(TEXT("Item metadata supplies its actual name and equipment type"),Template && Template->Name==TEXT("Ragged Leather Boots") && Template->InventoryType==8 && Template->RequiredLevel==1);
     return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTraversalMovementPackets,"WowUnreal.Traversal.MovementPackets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FTraversalMovementPackets::RunTest(const FString&)
+{
+    FWowMovementInfo Move;
+    Move.Position=FVector(1,2,3); Move.Orientation=0;
+    const TArray<uint8> Ground={1,1, 0,0,0,0, 0,0, 0xE8,3,0,0, 0,0,0x80,0x3F, 0,0,0,0x40, 0,0,0x40,0x40, 0,0,0,0, 0,0,0,0};
+    TestTrue(TEXT("Ground packet matches WotLK packed GUID and millisecond layout"),UWowConnectionManager::BuildMovementPacket(1,Move,1000)==Ground);
+    Move.MoveFlags=0x1001; Move.FallTime=250; Move.JumpZSpeed=6; Move.JumpSinAngle=-1; Move.JumpCosAngle=0; Move.JumpXYSpeed=7;
+    const auto Jump=UWowConnectionManager::BuildMovementPacket(1,Move,1250);
+    TestEqual(TEXT("Falling adds all four required jump floats"),Jump.Num(),Ground.Num()+16);
+    FPacketReader Reader(Jump); Reader.Skip(Ground.Num()-4);
+    TestEqual(TEXT("Actual fall time is retained"),Reader.ReadU32(),250u);
+    TestEqual(TEXT("Vertical speed is in yards per second"),Reader.ReadFloat(),6.f);
+    TestEqual(TEXT("WoW horizontal sine"),Reader.ReadFloat(),-1.f);
+    TestEqual(TEXT("WoW horizontal cosine"),Reader.ReadFloat(),0.f);
+    TestEqual(TEXT("Horizontal speed"),Reader.ReadFloat(),7.f);
+    TestEqual(TEXT("Server consumes every byte of a jump packet"),Reader.Remaining(),0);
+    Move.MoveFlags=0x200000; Move.Pitch=.5f;
+    const auto Swim=UWowConnectionManager::BuildMovementPacket(1,Move,1500);
+    TestEqual(TEXT("Swimming includes pitch before fall time"),Swim.Num(),Ground.Num()+4);
+    FPacketReader SwimReader(Swim); SwimReader.Skip(Ground.Num()-4);
+    TestEqual(TEXT("Pitch does not shift fall time"),SwimReader.ReadFloat(),.5f);
+    TestEqual(TEXT("Fall time after pitch"),SwimReader.ReadU32(),250u);
+    TestEqual(TEXT("Keep-alive is the client opcode, not the server cheat opcode"),int32(WowOpcode::CMSG_KEEP_ALIVE),0x407);
+    FWowPacketHandler Handler;
+    TArray<uint8> Response;
+    Handler.OnSendPacket.BindLambda([&Response](uint32 Opcode,const TArray<uint8>& Data){if(Opcode==WowOpcode::CMSG_TIME_SYNC_RESP)Response=Data;});
+    const uint32 Before=uint32(uint64(FPlatformTime::Seconds()*1000.0));
+    Handler.HandlePacket(WowOpcode::SMSG_TIME_SYNC_REQ,{9,0,0,0});
+    const uint32 After=uint32(uint64(FPlatformTime::Seconds()*1000.0));
+    FPacketReader TimeReader(Response);
+    TestEqual(TEXT("Time sync echoes the server counter"),TimeReader.ReadU32(),9u);
+    TestTrue(TEXT("Time sync uses the movement millisecond clock"),uint32(TimeReader.ReadU32()-Before)<=uint32(After-Before));
+    return true;
+}
 #endif

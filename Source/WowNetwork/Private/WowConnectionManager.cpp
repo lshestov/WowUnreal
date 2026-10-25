@@ -237,63 +237,9 @@ void UWowConnectionManager::DeleteCharacter(int64 Guid)
 
 void UWowConnectionManager::SendMovement(int32 Opcode, const FVector& Position, float Orientation, int32 MoveFlags)
 {
-    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
-    if (auto* Player=PacketHandler.EntityManager.GetLocalPlayer())
-    {
-        Player->Movement.Position=Position; Player->Movement.Orientation=Orientation;
-    }
-
-    // Build movement info payload:
-    // packedGuid + uint32 moveFlags + uint16 moveFlags2 + uint32 timestamp
-    // + float x,y,z,orientation + uint32 fallTime
-    uint64 Guid = PacketHandler.EntityManager.LocalPlayerGuid;
-
-    // Pack GUID (variable-length)
-    TArray<uint8> Data;
-    Data.Reserve(64);
-
-    // Packed GUID
-    uint8 GuidMask = 0;
-    uint8 GuidBytes[8];
-    int32 GuidByteCount = 0;
-    for (int32 i = 0; i < 8; ++i)
-    {
-        uint8 Byte = static_cast<uint8>((Guid >> (i * 8)) & 0xFF);
-        if (Byte != 0)
-        {
-            GuidMask |= (1 << i);
-            GuidBytes[GuidByteCount++] = Byte;
-        }
-    }
-    Data.Add(GuidMask);
-    Data.Append(GuidBytes, GuidByteCount);
-
-    // Movement flags
-    uint32 MF = static_cast<uint32>(MoveFlags);
-    Data.Append(reinterpret_cast<const uint8*>(&MF), 4);
-
-    // MoveFlags2 = 0
-    uint16 MF2 = 0;
-    Data.Append(reinterpret_cast<const uint8*>(&MF2), 2);
-
-    // Timestamp
-    uint32 Time = FPlatformTime::Cycles();
-    Data.Append(reinterpret_cast<const uint8*>(&Time), 4);
-
-    // Position (x, y, z, orientation) — WoW coordinates, not UE
-    float X = static_cast<float>(Position.X);
-    float Y = static_cast<float>(Position.Y);
-    float Z = static_cast<float>(Position.Z);
-    Data.Append(reinterpret_cast<const uint8*>(&X), 4);
-    Data.Append(reinterpret_cast<const uint8*>(&Y), 4);
-    Data.Append(reinterpret_cast<const uint8*>(&Z), 4);
-    Data.Append(reinterpret_cast<const uint8*>(&Orientation), 4);
-
-    // Fall time = 0
-    uint32 FallTime = 0;
-    Data.Append(reinterpret_cast<const uint8*>(&FallTime), 4);
-
-    WorldSocket->SendPacket(static_cast<uint32>(Opcode), Data);
+    FWowMovementInfo Move;
+    Move.Position=Position; Move.Orientation=Orientation; Move.MoveFlags=uint32(MoveFlags);
+    SendMovementInfo(Opcode,Move);
 }
 
 void UWowConnectionManager::SendChatMessage(const FString& Message, int32 Type, const FString& Target, int32 Language)

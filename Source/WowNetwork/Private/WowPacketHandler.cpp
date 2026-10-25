@@ -842,7 +842,7 @@ void FWowPacketHandler::HandleTimeSyncReq(FPacketReader& R)
     TArray<uint8> Resp;
     Resp.SetNumUninitialized(8);
     FMemory::Memcpy(Resp.GetData(), &Counter, 4);
-    uint32 ClientTicks = FPlatformTime::Cycles(); // monotonic tick
+    uint32 ClientTicks = uint32(uint64(FPlatformTime::Seconds()*1000.0)); // same millisecond clock as movement
     FMemory::Memcpy(Resp.GetData() + 4, &ClientTicks, 4);
 
     OnSendPacket.ExecuteIfBound(WowOpcode::CMSG_TIME_SYNC_RESP, Resp);

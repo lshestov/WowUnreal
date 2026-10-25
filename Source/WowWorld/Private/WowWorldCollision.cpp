@@ -49,7 +49,9 @@ void FWowWorldCollision::AddWmo(USceneComponent* Parent, FName Name, const FWmoG
     {
         if (!Group.HasCollision(I / 3)) continue;
         if (!Vertices.IsValidIndex(Group.Indices[I]) || !Vertices.IsValidIndex(Group.Indices[I + 1]) || !Vertices.IsValidIndex(Group.Indices[I + 2])) continue;
-        Indices.Append({Group.Indices[I], Group.Indices[I + 2], Group.Indices[I + 1]});
+        // Keep the same clockwise order as the rendered mesh. The axis swap
+        // already converts the handedness; reversing again inverts sweep normals.
+        Indices.Append({Group.Indices[I], Group.Indices[I + 1], Group.Indices[I + 2]});
     }
     Create(Parent, Name, Vertices, Indices);
 }
@@ -63,7 +65,7 @@ void FWowWorldCollision::AppendM2(const FM2Data& Model, const FTransform& Transf
     for (int32 I = 0; I + 2 < Model.CollisionIndices.Num(); I += 3)
     {
         if (!Model.CollisionVertices.IsValidIndex(Model.CollisionIndices[I]) || !Model.CollisionVertices.IsValidIndex(Model.CollisionIndices[I + 1]) || !Model.CollisionVertices.IsValidIndex(Model.CollisionIndices[I + 2])) continue;
-        Indices.Append({Base + Model.CollisionIndices[I], Base + Model.CollisionIndices[I + 2], Base + Model.CollisionIndices[I + 1]});
+        Indices.Append({Base + Model.CollisionIndices[I], Base + Model.CollisionIndices[I + 1], Base + Model.CollisionIndices[I + 2]});
     }
 }
 

@@ -19,6 +19,11 @@ struct WOWNETWORK_API FWowMovementInfo
     uint32 MoveFlags = 0;
     uint16 MoveFlags2 = 0;
     uint32 FallTime = 0;
+    float Pitch = 0;
+    float JumpZSpeed = 0;
+    float JumpSinAngle = 0;
+    float JumpCosAngle = 1;
+    float JumpXYSpeed = 0;
     float RunSpeed = 7.0f;
     float RunBackSpeed = 4.5f;
     float SwimSpeed = 4.722f;

@@ -206,6 +206,19 @@ and clearing). The MPQ case requires `-wowdata=<client Data directory>`.
 
 ### Running filters
 
+`WowUnreal.Traversal` checks ground, falling and swimming packet layouts and the
+shared millisecond clock used for movement and time sync. `WowUnreal.Collision`
+also verifies player-capsule impact normals on real abbey floor geometry and M2
+crate bounds. A ray hit alone does not prove that CharacterMovement can walk on
+a surface: collision triangles must retain the rendered mesh's winding after
+the coordinate conversion.
+
+For a deliberate live route, probe `walk` steps can set `direct: true` to disable
+the probe's obstacle steering while preserving normal character physics. The
+`jump`, `release_jump` and `wait_landed` steps exercise normal jump input. The
+optional `survey` step exports nearby floor/capsule diagnostics with a maximum
+of 4096 samples; it does not change world collision or character position.
+
 `WowUnreal.Gameplay` covers quest packet layouts (including the divider GUID),
 gossip and quest lists, solo-owner loot permissions and server acknowledgements,
 item query metadata, authoritative quest slots, action pages, secure mouse

@@ -5,6 +5,7 @@
 #include "WowInventoryManager.h"
 #include "WowLuaVM.h"
 #include "WowFrameManager.h"
+#include "WowWorldCollision.h"
 #include "Coord/WowCoordinate.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -59,6 +60,20 @@ struct FWowGameplayProbe
         {
             const auto Position=FWowCoordinate::UEToWow(Character->GetActorLocation());
             Report->SetNumberField(TEXT("x"),Position.X); Report->SetNumberField(TEXT("y"),Position.Y); Report->SetNumberField(TEXT("z"),Position.Z);
+            const auto* Movement=Character->GetCharacterMovement();
+            Report->SetNumberField(TEXT("floorNormalZ"),Movement->CurrentFloor.HitResult.ImpactNormal.Z);
+            Report->SetBoolField(TEXT("walkableFloor"),Movement->CurrentFloor.IsWalkableFloor());
+            FHitResult Hit; FCollisionQueryParams Query(SCENE_QUERY_STAT(ProbeBlocker),false,Character);
+            const auto* Capsule=Character->GetCapsuleComponent();
+            if (Controller.GetWorld()->SweepSingleByChannel(Hit,Character->GetActorLocation(),Character->GetActorLocation()+Character->GetActorForwardVector()*100,
+                FQuat::Identity,ECC_Pawn,FCollisionShape::MakeCapsule(Capsule->GetScaledCapsuleRadius(),Capsule->GetScaledCapsuleHalfHeight()),Query))
+            {
+                Report->SetStringField(TEXT("blocker"),GetNameSafe(Hit.GetComponent()));
+                Report->SetNumberField(TEXT("blockerNormalZ"),Hit.ImpactNormal.Z);
+                Report->SetNumberField(TEXT("blockerShapeNormalZ"),Hit.Normal.Z);
+                Report->SetBoolField(TEXT("blockerAllowsStepUp"),Hit.GetComponent() && Hit.GetComponent()->CanCharacterStepUp(const_cast<ACharacter*>(Character)));
+                Report->SetBoolField(TEXT("startPenetrating"),Hit.bStartPenetrating);
+            }
         }
         FString Text; FJsonSerializer::Serialize(Report,TJsonWriterFactory<>::Create(&Text));
         if (!Output.IsEmpty()) FFileHelper::SaveStringToFile(Text,*(Output/TEXT("probe.json")));
@@ -84,7 +99,7 @@ struct FWowGameplayProbe
         return Guid;
     }
 
-    bool Walk(AWowGameplayController& C,const FVector& Point,float Range)
+    bool Walk(AWowGameplayController& C,const FVector& Point,float Range,bool AvoidObstacles=true)
     {
         APawn* Pawn=C.GetPawn();
         FVector Delta=Point-Pawn->GetActorLocation(); Delta.Z=0;
@@ -95,7 +110,7 @@ struct FWowGameplayProbe
             return true;
         }
         FVector Direction=Delta.GetSafeNormal();
-        if (auto* Character=Cast<ACharacter>(Pawn))
+        if (auto* Character=Cast<ACharacter>(Pawn); Character && AvoidObstacles)
         {
             // Drive normal movement around nearby trunks/walls instead of
             // treating a straight test route as a path through solid objects.
@@ -170,9 +185,42 @@ struct FWowGameplayProbe
         else if (Op==TEXT("walk"))
         {
             const auto Values=Step->GetArrayField(TEXT("position"));
-            Done=Walk(C,FWowCoordinate::WowToUE(Values[0]->AsNumber(),Values[1]->AsNumber(),Values[2]->AsNumber()),1.5f);
+            bool Direct=false; Step->TryGetBoolField(TEXT("direct"),Direct);
+            Done=Walk(C,FWowCoordinate::WowToUE(Values[0]->AsNumber(),Values[1]->AsNumber(),Values[2]->AsNumber()),1.5f,!Direct);
+        }
+        else if (Op==TEXT("survey"))
+        {
+            const auto Min=Step->GetArrayField(TEXT("min")), Max=Step->GetArrayField(TEXT("max"));
+            const double Spacing=Step->GetNumberField(TEXT("spacing"));
+            if (Spacing<.25 || Min.Num()!=3 || Max.Num()!=3 || Max[0]->AsNumber()-Min[0]->AsNumber()>100 || Max[1]->AsNumber()-Min[1]->AsNumber()>100)
+            { Failure=TEXT("Invalid bounded floor survey"); Finish(C,false); return; }
+            const double Width=Max[0]->AsNumber()-Min[0]->AsNumber(), Height=Max[1]->AsNumber()-Min[1]->AsNumber();
+            if (Width<0 || Height<0 || (Width/Spacing+1)*(Height/Spacing+1)>4096)
+            { Failure=TEXT("Floor survey exceeds the sample budget"); Finish(C,false); return; }
+            TArray<TSharedPtr<FJsonValue>> Points;
+            for (double X=Min[0]->AsNumber(); X<=Max[0]->AsNumber(); X+=Spacing)
+                for (double Y=Min[1]->AsNumber(); Y<=Max[1]->AsNumber(); Y+=Spacing)
+                {
+                    FHitResult Hit;
+                    const FVector Feet=FWowCoordinate::WowToUE(X,Y,Min[2]->AsNumber());
+                    if (!FWowWorldCollision::FindFloor(C.GetWorld(),Feet,C.GetPawn(),Hit,(Max[2]->AsNumber()-Min[2]->AsNumber())*100,500,35,88)) continue;
+                    const auto Point=MakeShared<FJsonObject>();
+                    Point->SetNumberField(TEXT("x"),X); Point->SetNumberField(TEXT("y"),Y); Point->SetNumberField(TEXT("z"),Hit.ImpactPoint.Z/100);
+                    Point->SetStringField(TEXT("surface"),GetNameSafe(Hit.GetComponent()));
+                    Point->SetNumberField(TEXT("normalZ"),Hit.ImpactNormal.Z);
+                    FCollisionQueryParams Query(SCENE_QUERY_STAT(ProbeSurvey),false,C.GetPawn());
+                    const bool Blocked=C.GetWorld()->OverlapBlockingTestByChannel(Hit.ImpactPoint+FVector(0,0,90),FQuat::Identity,ECC_Pawn,FCollisionShape::MakeCapsule(35,88),Query);
+                    Point->SetBoolField(TEXT("blocked"),Blocked);
+                    Points.Add(MakeShared<FJsonValueObject>(Point));
+                }
+            const auto Report=MakeShared<FJsonObject>(); Report->SetArrayField(TEXT("points"),Points);
+            FString Text; FJsonSerializer::Serialize(Report,TJsonWriterFactory<>::Create(&Text));
+            Done=FFileHelper::SaveStringToFile(Text,*(Output/(Step->GetStringField(TEXT("name"))+TEXT(".json"))));
         }
         else if (Op==TEXT("interact")) { C.InteractWithTarget(); Done=true; }
+        else if (Op==TEXT("jump")) { if (auto* Character=Cast<ACharacter>(C.GetPawn())) { Character->Jump(); Done=true; } }
+        else if (Op==TEXT("release_jump")) { if (auto* Character=Cast<ACharacter>(C.GetPawn())) { Character->StopJumping(); Done=true; } }
+        else if (Op==TEXT("wait_landed")) { const auto* Character=Cast<ACharacter>(C.GetPawn()); Done=Character && Character->GetCharacterMovement()->IsMovingOnGround() && Now-StepStarted>.5; }
         else if (Op==TEXT("wait_menu")) Done=(Handler.GossipMenu.Guid==C.TargetGuid && (Handler.GossipMenu.Quests.Num() || Handler.GossipMenu.Options.Num())) || (Handler.QuestDetails.QuestGiverGuid==C.TargetGuid && C.GameUI->GetShownQuestId()!=0);
         else if (Op==TEXT("quest")) { if (C.GameUI->GetShownQuestId()!=uint32(Step->GetIntegerField(TEXT("id")))) C.GameUI->SelectGossipQuest(Step->GetIntegerField(TEXT("id"))); Done=true; }
         else if (Op==TEXT("wait_dialog")) Done=C.GameUI->GetShownQuestId()==uint32(Step->GetIntegerField(TEXT("id")));

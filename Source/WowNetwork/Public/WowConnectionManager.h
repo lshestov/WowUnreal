@@ -50,6 +50,8 @@ public:
 
     /** Send a movement packet to the server */
     UFUNCTION(BlueprintCallable) void SendMovement(int32 Opcode, const FVector& Position, float Orientation, int32 MoveFlags);
+    void SendMovementInfo(int32 Opcode,const FWowMovementInfo& Movement);
+    static TArray<uint8> BuildMovementPacket(uint64 Guid,const FWowMovementInfo& Movement,uint32 TimeMilliseconds);
 
     /** Send a chat message */
     UFUNCTION(BlueprintCallable) void SendChatMessage(const FString& Message, int32 Type = 1 /*SAY*/, const FString& Target = TEXT(""), int32 Language = 7 /*Common*/);

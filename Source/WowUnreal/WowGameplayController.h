@@ -86,6 +86,9 @@ private:
     void TickGameplayProbe();
     uint32 LastSentMovementFlags=0;
     float LastSentOrientation=0;
+    double MovementFallStarted=0;
+    double LastMovementPacketTime=0;
+    float MovementJumpZSpeed=0;
     TWeakObjectPtr<AActor> NpcCaptureTarget;
     TWeakObjectPtr<class ACameraActor> NpcCaptureCamera;
     void UpdateNpcCaptureCamera();

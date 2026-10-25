@@ -91,7 +91,7 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 - [x] Single-instance lockfile (prevents dual UE launches)
 
 ### Player Controller
-- [ ] Verify deliberate traversal of WMO stairs and tight passages; the direct live probe route to Marshal McBride stops at Northshire Abbey's entrance (priority 3).
+- [x] WMO/M2 collision winding matches rendered geometry, preserving walkable capsule impact normals. Verified 20 Traversal/Gameplay/Hud/Player/Collision/Equipment tests and a rendered 23-step round trip: Northshire Abbey stairs and doorway in both directions, indoor jumping/landing and outdoor uphill/downhill movement. WotLK movement uses millisecond timestamps, matching time sync, complete fall/pitch fields and jump/landing transitions; keep-alive uses opcode 0x407.
 - [x] 3rd-person chase camera (spring arm, zoom, orbit)
 - [x] WASD movement, mouse look, jump, walk/run toggle, auto-run
 - [x] Swim speed, fall damage tracking
