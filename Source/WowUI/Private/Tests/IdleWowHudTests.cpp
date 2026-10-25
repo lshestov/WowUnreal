@@ -242,6 +242,53 @@ bool FGameplaySpellRange::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudSpellBookViews,"WowUnreal.Hud.SpellBookViews",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudSpellBookViews::RunTest(const FString&)
+{
+    FString DataPath; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),DataPath)) return false;
+    FMpqManager Mpq; if(!Mpq.Initialize(DataPath)) return false;
+    if(!FDbcStore::Get().IsLoaded()) FDbcStore::Get().LoadAll(Mpq);
+    if(!FDbcStore::Get().IsDeferredLoaded()) FDbcStore::Get().LoadDeferred(Mpq);
+    FHudFixture F; TStrongObjectPtr<UWowConnectionManager> Connection(NewObject<UWowConnectionManager>());
+    auto& E=Connection->PacketHandler.EntityManager; E.LocalPlayerGuid=1;
+    auto& P=E.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER);
+    P.SetField(UnitField::BYTES_0,(8u<<8)|1u); // Human mage.
+    F.Context.ConnectionManager=Connection.Get(); F.Context.EntityManager=&E;
+    auto& Known=Connection->PacketHandler.KnownSpells; Known.Append({6603,2259,133,143,145,116,1449,470});
+    uint32 Hidden=0,NotInBook=0,Recipe=0;
+    for(const auto& S:FDbcStore::Get().Spells().GetAll())
+    {
+        if(Known.Contains(S.ID)) continue;
+        if(!Hidden && (S.Attributes&0x80)) Hidden=S.ID;
+        if(!NotInBook && (S.AttributesEx4&0x8000)) NotInBook=S.ID;
+        if(!Recipe && (S.Attributes&0x20)) Recipe=S.ID;
+        if(Hidden && NotInBook && Recipe) break;
+    }
+    if(!TestTrue(TEXT("Real DBC contains the three excluded spell families"),Hidden && NotInBook && Recipe)) return false;
+    Known.Append({Hidden,NotInBook,Recipe});
+    TestTrue(TEXT("Spellbook filters internal spells, recipes and mounts, sorts skill names and maps highest ranks"),F.Lua.ExecuteString(TEXT(R"LUA(
+        assert(GetNumSpellTabs()==4)
+        local expected={'General','Arcane','Fire','Frost'}; local count,highest=0,0
+        for i=1,4 do
+            local name,icon,offset,num,highOffset,highNum=GetSpellTabInfo(i)
+            assert(name==expected[i] and icon and offset==count and highOffset==highest)
+            count=count+num; highest=highest+highNum
+            for j=1,highNum do assert(GetSpellName(GetKnownSlotFromHighestRankSlot(highOffset+j),'spell')) end
+        end
+        assert(count==7 and highest==5 and GetSpellName(8,'spell')==nil)
+        assert(FindSpellBookSlotByID(2259) and not FindSpellBookSlotByID(470) and GetNumCompanions('MOUNT')==1)
+        local _,_,offset,num,highOffset,highNum=GetSpellTabInfo(3)
+        assert(num==3 and highNum==1)
+        local name,rank=GetSpellName(GetKnownSlotFromHighestRankSlot(highOffset+1),'spell')
+        assert(name=='Fireball' and rank=='Rank 3')
+        assert(select(2,GetSpellBookItemInfo(offset+1,'spell'))==133)
+        assert(select(2,GetSpellBookItemInfo(offset+3,'spell'))==145)
+        assert(GetKnownSlotFromHighestRankSlot(6)==0)
+    )LUA")));
+    Known.Remove(145);
+    TestTrue(TEXT("Learning/unlearning invalidates both views without stale rank slots"),F.Lua.ExecuteString(TEXT("local _,_,_,count,offset,highest=GetSpellTabInfo(3); assert(count==2 and highest==1); assert(select(2,GetSpellName(GetKnownSlotFromHighestRankSlot(offset+1),'spell'))=='Rank 2')")));
+    return true;
+}
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGameplaySecureAction,"WowUnreal.Gameplay.VisibleActionClick",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FGameplaySecureAction::RunTest(const FString&)
 {

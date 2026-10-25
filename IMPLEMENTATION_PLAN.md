@@ -264,6 +264,11 @@ build, automation, native autologin and rendered screenshot verification):
     Verified 70 tests, 84 native probe steps and 22 rendered screenshots at
     1280x720 and 1920x1080, including original menu/video panels.
 - [ ] 3. Spellbook/class windows: hidden spells, ranks/tabs, talents, glyphs and specializations.
+  - [x] Spellbook visibility, SkillRaceClassInfo grouping, alphabetical tabs,
+    independent highest-rank indices and real spell-slot lookup. Automation:
+    71 tests plus focused slot regression passed; native 21-step run verifies
+    original general/class pages, tooltip, rank views, scaling and dragging into
+    the active stance bar with the server action slot restored. Five screenshots.
 - [ ] 4. Inventory: split/delete, compare/try-on, merchant/bank/mail/trade round trips.
 - [ ] 5. Chat/combat/macros: hyperlinks, remaining combat events and macro execution families.
 - [ ] 6. Maps: points of interest, tracking, interior minimaps and original map bootstrap.

@@ -71,6 +71,10 @@ Dynamic and XML regions share anchors, all-points sizing, visibility and layout
 refresh. Region anchor queries, draw layers/sublevels and texture UV queries
 retain their values. Labels support horizontal/vertical alignment, shadows,
 spacing, wrap controls, text height and inherited runtime font properties.
+Spellbook entries filter hidden/internal spells, crafting recipes and companion
+summons. SkillRaceClassInfo flags place general/profession actions correctly;
+skill tabs sort by their display names. Known-rank and highest-rank offsets use
+separate views, with an explicit mapping back to the real spellbook slots.
 
 ## Verification
 
@@ -78,7 +82,7 @@ The Windows Editor and packaged Development client are built from the same
 source tree. `WowUnreal.Hud`, `WowUnreal.UI`, `WowUnreal.Gameplay` and the related
 player, collision, equipment, lighting, rendering, traversal and performance
 suites cover both isolated controls and live protocol state. The interface
-regression set contains 70 tests. Existing optional character texture-layout
+regression set contains 71 tests. Existing optional character texture-layout
 DBC and test-fixture size warnings remain.
 
 Native gameplay probes exercise live server state and rendered UI at 1280x720

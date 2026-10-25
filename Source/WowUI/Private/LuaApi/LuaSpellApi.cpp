@@ -9,6 +9,7 @@ struct FWowSpellBookView
     struct FTab { FString Name,Texture; int32 Offset=0,Count=0,HighestOffset=0,HighestCount=0; };
     TArray<FTab> Tabs;
     TArray<uint32> Spells;
+    TArray<int32> HighestSlots;
     TSet<uint32> Known;
     uint8 Class=0,Race=0;
 };
@@ -19,6 +20,18 @@ extern "C" {
 }
 namespace
 {
+int32 ProgressionRank(const FSpellDbcEntry& S)
+{
+    int32 Rank=0;
+    for(const auto Ch:S.Rank) { if(FChar::IsDigit(Ch)) Rank=Rank*10+(Ch-'0'); else if(Rank) break; }
+    return Rank;
+}
+bool VisibleInBook(const FSpellDbcEntry& S)
+{
+    if((S.Attributes&0xa0) || (S.AttributesEx4&0x8000) || S.EffectApplyAuraName[0]==78) return false;
+    if(const auto* Abilities=FDbcStore::Get().SpellBook().Abilities(S.ID)) for(const auto& A:*Abilities) if(A.Skill==777 || A.Skill==778) return false;
+    return true;
+}
 void RegisterSpell(lua_State* L,const char* Name,lua_CFunction Function) { lua_pushcfunction(L,Function); lua_setglobal(L,Name); }
 TArray<uint32> Forms(FWowLuaContext* C)
 {
@@ -51,32 +64,29 @@ FWowSpellBookView* Book(FWowLuaContext* C)
     Groups.Add(0);
     for(const uint32 Id:Known)
     {
-        const auto* S=D.Spells().GetById(Id); if(!S) continue;
-        uint32 Group=0;
-        if(const auto* Abilities=D.SpellBook().Abilities(Id)) for(const auto& A:*Abilities)
-        {
-            if((A.ClassMask && (B->Class<1 || !(A.ClassMask&(1u<<(B->Class-1))))) || (A.RaceMask && (B->Race<1 || !(A.RaceMask&(1u<<(B->Race-1)))))) continue;
-            const auto* Skill=D.SpellBook().Skill(A.Skill);
-            if(Skill && (Skill->Category==7 || Skill->Category==9 || Skill->Category==11)) { Group=A.Skill; break; }
-        }
+        const auto* S=D.Spells().GetById(Id); if(!S || !VisibleInBook(*S)) continue;
+        const uint32 Group=D.SpellBook().DisplaySkill(Id,B->Race,B->Class);
         Groups.FindOrAdd(Group).Add(Id);
     }
-    TArray<uint32> Keys; Groups.GetKeys(Keys); Keys.Sort();
+    TArray<uint32> Keys; Groups.GetKeys(Keys); Keys.Sort([&](uint32 A,uint32 Z) { if(A==0 || Z==0) return A==0 && Z!=0; const auto* X=D.SpellBook().Skill(A); const auto* Y=D.SpellBook().Skill(Z); return X && Y?X->Name.Compare(Y->Name,ESearchCase::IgnoreCase)<0:A<Z; });
     if(Keys.Num()>8) { for(int32 I=8; I<Keys.Num(); ++I) Groups[0].Append(Groups[Keys[I]]); Keys.SetNum(8); }
     for(uint32 Key:Keys)
     {
         auto& Ids=Groups[Key];
-        Ids.Sort([&](uint32 A,uint32 Z){ const auto* X=D.Spells().GetById(A); const auto* Y=D.Spells().GetById(Z); return X->SpellName==Y->SpellName?X->SpellLevel==Y->SpellLevel?A<Z:X->SpellLevel<Y->SpellLevel:X->SpellName<Y->SpellName; });
-        FWowSpellBookView::FTab Tab; Tab.Name=TEXT("General"); Tab.Texture=TEXT("Interface\\Icons\\INV_Misc_Book_09");
+        Ids.Sort([&](uint32 A,uint32 Z){ const auto* X=D.Spells().GetById(A); const auto* Y=D.Spells().GetById(Z); const int32 Name=X->SpellName.Compare(Y->SpellName,ESearchCase::IgnoreCase); if(Name) return Name<0; const int32 RankX=ProgressionRank(*X),RankY=ProgressionRank(*Y); const uint32 RX=RankX?RankX:X->SpellLevel,RY=RankY?RankY:Y->SpellLevel; return RX==RY?A<Z:RX<RY; });
+        FWowSpellBookView::FTab Tab; Tab.Name=TEXT("General"); Tab.Texture=TEXT("Interface\\Icons\\Ability_Kick");
         if(const auto* Skill=D.SpellBook().Skill(Key)) { Tab.Name=Skill->Name; if(const auto* Icon=D.SpellIcons().GetById(Skill->Icon)) Tab.Texture=Icon->TexturePath; }
         Tab.Offset=B->Spells.Num(); Tab.Count=Ids.Num(); B->Spells.Append(Ids); B->Tabs.Add(MoveTemp(Tab));
     }
     for(int32 I=0; I<Keys.Num(); ++I)
     {
-        auto& Tab=B->Tabs[I]; Tab.HighestOffset=B->Spells.Num(); TMap<FString,uint32> Highest;
-        for(uint32 Id:Groups[Keys[I]]) Highest.Add(D.Spells().GetById(Id)->SpellName,Id);
-        for(uint32 Id:Groups[Keys[I]]) if(Highest[D.Spells().GetById(Id)->SpellName]==Id) B->Spells.Add(Id);
-        Tab.HighestCount=B->Spells.Num()-Tab.HighestOffset;
+        auto& Tab=B->Tabs[I]; Tab.HighestOffset=B->HighestSlots.Num(); const auto& Ids=Groups[Keys[I]];
+        for(int32 J=0;J<Ids.Num();++J)
+        {
+            if(J+1<Ids.Num()) { const auto* Current=D.Spells().GetById(Ids[J]); const auto* Next=D.Spells().GetById(Ids[J+1]); if(Current->SpellName==Next->SpellName && ProgressionRank(*Next)>0) continue; }
+            B->HighestSlots.Add(Tab.Offset+J);
+        }
+        Tab.HighestCount=B->HighestSlots.Num()-Tab.HighestOffset;
     }
     return B;
 }
@@ -166,8 +176,14 @@ void WowLuaApi::RegisterSpellApi(lua_State* L)
     RegisterSpell(L,"IsSelectedSpell",[](lua_State* S)->int { auto* C=GetContext(S); const uint32 Id=Resolve(S); FString Type,Detail; int32 Selected=0; const bool Has=C && C->ConnectionManager && C->ConnectionManager->GetCursorInfo(Type,Selected,Detail); lua_pushboolean(S,Has && Type==TEXT("spell") && Selected==int32(Id)); return 1; });
     RegisterSpell(L,"GetKnownSlotFromHighestRankSlot",[](lua_State* S)->int {
         const auto* B=Book(GetContext(S)); const int32 Slot=luaL_checkinteger(S,1)-1;
-        if(!B || !B->Spells.IsValidIndex(Slot)) { lua_pushnil(S); return 1; }
-        lua_pushinteger(S,B->Spells.Find(B->Spells[Slot])+1); return 1;
+        if(!B || !B->HighestSlots.IsValidIndex(Slot)) { lua_pushinteger(S,0); return 1; }
+        lua_pushinteger(S,B->HighestSlots[Slot]+1); return 1;
+    });
+    RegisterSpell(L,"FindSpellBookSlotByID",[](lua_State* S)->int {
+        const uint32 Id=luaL_checkinteger(S,1); auto* C=GetContext(S); int32 Slot=INDEX_NONE;
+        if(lua_toboolean(S,2)!=0) { if(C && C->ConnectionManager) Slot=C->ConnectionManager->PacketHandler.PetActionBar.KnownSpells.Find(Id); }
+        else if(const auto* B=Book(C)) Slot=B->Spells.Find(Id);
+        if(Slot==INDEX_NONE) lua_pushnil(S); else lua_pushinteger(S,Slot+1); return 1;
     });
     RegisterSpell(L,"UpdateSpells",[](lua_State* S)->int {
         for(int32 I=1; I<=12; ++I)

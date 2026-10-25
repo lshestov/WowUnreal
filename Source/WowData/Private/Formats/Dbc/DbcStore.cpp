@@ -500,6 +500,7 @@ void FDbcStore::LoadDeferred(FMpqManager& Mpq)
         }
     }
     if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\SkillLineAbility.dbc"),Parser)) SpellBookDbc.LoadAbilities(Parser);
+    if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\SkillRaceClassInfo.dbc"),Parser)) SpellBookDbc.LoadRaceClassInfo(Parser);
     if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\WorldMapOverlay.dbc"),Parser) && Parser.GetFieldCount()>=13)
     {
         MapOverlays.Reset();
