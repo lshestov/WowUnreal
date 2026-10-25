@@ -109,9 +109,10 @@ bool FIdleWowArchitectureCollision::RunTest(const FString& Parameters)
     if (!TestTrue(TEXT("Actual abbey root is valid"), RootData.bIsValid)) return false;
     UWorld* World = CollisionWorld();
     auto* Root = CollisionRoot(World);
-    TOptional<FVector> FloorPoint, WallPoint, WallNormal;
+    TOptional<FVector> FloorPoint, WallPoint, WallNormal, RampPoint;
     int32 CollisionFaces = 0;
     double FloorArea=0;
+    double LowestRampZ=DBL_MAX;
     for (uint32 GroupIndex = 0; GroupIndex < RootData.NumGroups; ++GroupIndex)
     {
         Raw.Reset();
@@ -133,12 +134,14 @@ bool FIdleWowArchitectureCollision::RunTest(const FString& Parameters)
             // decoration triangle whose centroid can be inside adjacent geometry.
             if (Normal.Z<-.999 && Cross.Size()>FloorArea && Cross.Size()/Perimeter>100)
             { FloorPoint=Center; FloorArea=Cross.Size(); }
+            if (Normal.Z<-.85 && Normal.Z>-.94 && Cross.Size()/Perimeter>75 && Center.Z<LowestRampZ)
+            { RampPoint=Center; LowestRampZ=Center.Z; }
             if (!WallPoint.IsSet() && FMath::Abs(Normal.Z)<0.05) {WallPoint=Center;WallNormal=Normal;}
         }
     }
     TestTrue(TEXT("Real abbey collision faces found"), CollisionFaces>100);
-    TestTrue(TEXT("Floor and wall test points found"), FloorPoint.IsSet() && WallPoint.IsSet());
-    if (!FloorPoint.IsSet() || !WallPoint.IsSet()) {DestroyCollisionWorld(World);return false;}
+    TestTrue(TEXT("Floor, stair ramp and wall test points found"), FloorPoint.IsSet() && WallPoint.IsSet() && RampPoint.IsSet());
+    if (!FloorPoint.IsSet() || !WallPoint.IsSet() || !RampPoint.IsSet()) {DestroyCollisionWorld(World);return false;}
     TArray<uint8> M2, Skin;
     Mpq.ReadFile(TEXT("WORLD\\GENERIC\\PASSIVEDOODADS\\FURNITURE\\CONTAINERS\\CRATE03.M2"), M2);
     Mpq.ReadFile(TEXT("WORLD\\GENERIC\\PASSIVEDOODADS\\FURNITURE\\CONTAINERS\\CRATE0300.skin"), Skin);
@@ -150,7 +153,7 @@ bool FIdleWowArchitectureCollision::RunTest(const FString& Parameters)
     FBox CrateBox(ForceInit); for (const auto& Vertex:CrateVertices) CrateBox+=Vertex;
     const FVector CrateTop(CrateBox.GetCenter().X,CrateBox.GetCenter().Y,CrateBox.Max.Z);
     const double Started=FPlatformTime::Seconds();
-    ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this,World,FloorPoint,WallPoint,WallNormal,CrateTop,Started]()
+    ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this,World,FloorPoint,WallPoint,WallNormal,RampPoint,CrateTop,Started]()
     {
         FHitResult Hit;
         const FCollisionObjectQueryParams Objects(ECC_WorldStatic);
@@ -158,13 +161,13 @@ bool FIdleWowArchitectureCollision::RunTest(const FString& Parameters)
         const bool FloorReady=World->LineTraceSingleByObjectType(Hit,FloorPoint.GetValue()+FVector(0,0,5),FloorPoint.GetValue()-FVector(0,0,5),Objects,Query);
         if (!FloorReady && FPlatformTime::Seconds()-Started<10) return false;
         TestTrue(TEXT("Actual abbey floor blocks a downward trace"),FloorReady);
-        const bool CapsuleFloor=World->SweepSingleByObjectType(Hit,FloorPoint.GetValue()+FVector(0,0,120),FloorPoint.GetValue()+FVector(0,0,40),
+        const bool CapsuleFloor=World->SweepSingleByObjectType(Hit,RampPoint.GetValue()+FVector(0,0,150),RampPoint.GetValue()+FVector(0,0,30),
             FQuat::Identity,Objects,FCollisionShape::MakeCapsule(35,88),Query);
-        AddInfo(FString::Printf(TEXT("Abbey capsule floor: sample=%s hit=%d normalZ=%.4f penetrating=%d"),*FloorPoint.GetValue().ToString(),CapsuleFloor,Hit.ImpactNormal.Z,Hit.bStartPenetrating));
-        TestTrue(TEXT("Abbey floor has an upward capsule impact normal, not just a ray hit"),CapsuleFloor && Hit.ImpactNormal.Z>.9);
+        AddInfo(FString::Printf(TEXT("Abbey stair capsule: sample=%s hit=%d normalZ=%.4f penetrating=%d"),*RampPoint.GetValue().ToString(),CapsuleFloor,Hit.ImpactNormal.Z,Hit.bStartPenetrating));
+        TestTrue(TEXT("Abbey stair ramp has a walkable nonpenetrating capsule impact"),CapsuleFloor && !Hit.bStartPenetrating && Hit.ImpactNormal.Z>.8);
         const bool CrateFloor=World->SweepSingleByObjectType(Hit,CrateTop+FVector(0,0,100),CrateTop-FVector(0,0,10),
             FQuat::Identity,Objects,FCollisionShape::MakeCapsule(10,20),Query);
-        TestTrue(TEXT("M2 bounding top is walkable from above"),CrateFloor && Hit.ImpactNormal.Z>.8);
+        TestTrue(TEXT("M2 bounding top is walkable from above"),CrateFloor && !Hit.bStartPenetrating && Hit.ImpactNormal.Z>.8);
         TestTrue(TEXT("Actual abbey wall blocks a capsule"),World->SweepSingleByObjectType(Hit,
             WallPoint.GetValue()+WallNormal.GetValue()*100,WallPoint.GetValue()-WallNormal.GetValue()*100,FQuat::Identity,Objects,FCollisionShape::MakeCapsule(10,20),Query));
         DestroyCollisionWorld(World);return true;
