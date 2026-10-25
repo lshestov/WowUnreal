@@ -3,6 +3,9 @@
 #include "WowOpcodes.h"
 #include "WowEntityManager.h"
 #include "WowWardenHandler.h"
+#include "WowCombatLog.h"
+
+DECLARE_DELEGATE_OneParam(FOnWowCombatLog,const FWowCombatEntry&);
 
 DECLARE_MULTICAST_DELEGATE_FiveParams(FOnLoginVerifyWorld, uint32 /*MapId*/, float /*X*/, float /*Y*/, float /*Z*/, float /*Orientation*/);
 DECLARE_MULTICAST_DELEGATE_SixParams(FOnChatMessage, uint8 /*Type*/, uint32 /*Language*/, uint64 /*SenderGuid*/, const FString& /*SenderName*/, const FString& /*Message*/, const FString& /*Channel*/);
@@ -145,6 +148,9 @@ public:
 
     /** Entity manager — tracks all objects in the world */
     FWowEntityManager EntityManager;
+    FWowCombatHistory CombatHistory;
+    FOnWowCombatLog OnCombatLog;
+    void RecordCombat(FWowCombatEntry Entry);
 
     /** Known spell IDs (populated from SMSG_INITIAL_SPELLS) */
     TSet<uint32> KnownSpells;
@@ -329,6 +335,8 @@ private:
     void HandleSpellFailure(FPacketReader& R);
     void HandleSpellCooldown(FPacketReader& R);
     void HandleAttackerStateUpdate(FPacketReader& R);
+    void HandleSpellDamageLog(FPacketReader& R);
+    void HandleSpellHealLog(FPacketReader& R);
     void HandleAttackStart(FPacketReader& R);
     void HandleAttackStop(FPacketReader& R);
     void HandleAuraUpdate(FPacketReader& R);

@@ -7,6 +7,7 @@
 #include "WowEntityManager.h"
 #include "WowConnectionManager.h"
 #include "WowMacros.h"
+#include "WowCombatLogUi.h"
 #include "WowMultiLineEditBox.h"
 #include "WowSavedVariables.h"
 #include "WowAddonLoader.h"
@@ -385,6 +386,7 @@ bool FUiStatefulControls::RunTest(const FString&)
         SetGamma(.25); assert(math.abs(tonumber(GetCVar('gamma'))-1.25)<.0001 and math.abs(GetGamma()-.25)<.0001)
         SetGamma(0); assert(math.abs(tonumber(GetCVar('gamma'))-1)<.0001 and math.abs(GetGamma())<.0001)
         assert(GetBindingAction('W')=='MOVEFORWARD' and GetBindingKey('MOVEFORWARD')=='W')
+        assert(tonumber(GetCVar('uiScale'))>0 and tonumber(GetCVarDefault('uiScale'))>0)
         assert(SetBinding('F8','TOGGLESPELLBOOK') and GetBindingAction('F8')=='TOGGLESPELLBOOK')
         assert(SetBinding('P') and GetBindingAction('P')=='')
         assert(not SetBinding('F9','UNSUPPORTED_COMMAND'))
@@ -394,7 +396,7 @@ bool FUiStatefulControls::RunTest(const FString&)
         Anonymous:RegisterEvent('UI_FIXTURE')
         AnonymousChild=CreateFrame('Frame',nil,Anonymous); assert(AnonymousChild:GetParent()==Anonymous)
         assert(CombatLogGetCurrentEntry()==nil and CombatLogAdvanceEntry(-1)==nil)
-        Control=CreateFrame('CheckButton','Control',UIParent)
+        Control=CreateFrame('CHECKBUTTON','Control',UIParent)
         assert(Control:IsObjectType('frame') and Control:IsObjectType('Button') and Control:IsObjectType('CheckButton') and not Control:IsObjectType('EditBox'))
         FixtureFont=CreateFont('FixtureFont'); FixtureFont:SetFont('Fonts\\FRIZQT__.TTF',14); FixtureFont:SetTextColor(.2,.4,.6)
         CaptionButtonText:SetFontObject(FixtureFont); assert(CaptionButtonText:GetFontObject()==FixtureFont)
@@ -525,6 +527,72 @@ bool FHudMacroFlow::RunTest(const FString&)
     const auto Packet=UWowConnectionManager::BuildUseItemPacket(255,23,0x400000000000000aULL,8690,0x0102000000000003ULL);
     FPacketReader R(Packet);
     TestTrue(TEXT("Targeted item macros encode the full WotLK use-item layout"),R.ReadU8()==255 && R.ReadU8()==23 && R.ReadU8()==0 && R.ReadU32()==8690 && R.ReadU64()==0x400000000000000aULL && R.ReadU32()==0 && R.ReadU8()==0 && R.ReadU32()==2 && R.ReadPackedGuid()==0x0102000000000003ULL && R.Remaining()==0);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudCombatHistory,"WowUnreal.Hud.CombatHistory",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudCombatHistory::RunTest(const FString&)
+{
+    FHudFixture F;
+    TStrongObjectPtr<UWowConnectionManager> Connection(NewObject<UWowConnectionManager>());
+    F.Context.ConnectionManager=Connection.Get(); auto& H=Connection->PacketHandler;
+    F.Context.EntityManager=&H.EntityManager; H.EntityManager.LocalPlayerGuid=1;
+    H.EntityManager.PromoteToTyped(1,WowTypeMask::PLAYER|WowTypeMask::UNIT);
+    const uint64 Victim=0xf130000005000001ULL;
+    auto& Unit=H.EntityManager.PromoteToTyped(Victim,WowTypeMask::UNIT); Unit.Entry=5;
+    H.PlayerNameCache.Add(1,TEXT("Player")); H.CreatureNameCache.Add(5,TEXT("Wolf"));
+    H.OnCombatLog.BindLambda([&](const FWowCombatEntry& E) { FWowCombatLogUi::Dispatch(F.Lua.GetState(),E); });
+    TestTrue(TEXT("Combat listeners initialize"),F.Lua.ExecuteString(TEXT(R"LUA(
+        CombatRows={}; CombatFiltered=0; CombatListener=CreateFrame('Frame');
+        CombatListener:RegisterEvent('COMBAT_LOG_EVENT'); CombatListener:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
+        CombatListener:SetScript('OnEvent',function(self,event,...)
+            if event=='COMBAT_LOG_EVENT' then CombatFiltered=CombatFiltered+1 else
+                local row={...}; CombatRows[#CombatRows+1]=row
+                assert(type(row[1])=='number' and type(row[5])=='number')
+                assert(select(2,CombatLogGetCurrentEventInfo())==row[2])
+            end
+        end)
+        CombatLogResetFilter()
+    )LUA")));
+    TArray<uint8> Packet;
+    const auto U32=[&](uint32 Value) { Packet.Append(reinterpret_cast<const uint8*>(&Value),4); };
+    const auto Float=[&](float Value) { Packet.Append(reinterpret_cast<const uint8*>(&Value),4); };
+    const auto Guid=[&](uint64 Value) { uint8 Mask=0; TArray<uint8> Bytes; for(int I=0;I<8;++I) if(uint8 Byte=Value>>(8*I)) { Mask|=1<<I; Bytes.Add(Byte); } Packet.Add(Mask); Packet.Append(Bytes); };
+    U32(0x2340); Guid(1); Guid(Victim); U32(75); U32(0); Packet.Add(2);
+    U32(1); Float(50); U32(50); U32(4); Float(25); U32(25);
+    U32(3); U32(2); U32(4); U32(1); Packet.Add(1); U32(0); U32(0); U32(8);
+    H.HandlePacket(WowOpcode::SMSG_ATTACKERSTATEUPDATE,Packet);
+    TestTrue(TEXT("Melee packet retains all WotLK damage schools and conditional fields"),F.Lua.ExecuteString(TEXT(R"LUA(
+        local e=CombatRows[1]; assert(#CombatRows==1 and e[2]=='SWING_DAMAGE')
+        assert(e[3]=='0x0000000000000001' and e[4]=='Player' and e[7]=='Wolf')
+        assert(e[9]==75 and e[10]==0 and e[11]==5 and e[12]==5 and e[13]==8 and e[14]==5 and e[15]==true and e[16]==false)
+    )LUA")));
+    Packet.Pop(); H.HandlePacket(WowOpcode::SMSG_ATTACKERSTATEUPDATE,Packet);
+    TestEqual(TEXT("Truncated conditional melee payload does not enter history"),H.CombatHistory.Num(),1);
+    const uint64 NpcOwner=0xf130000006000001ULL;
+    Unit.Fields.Add(UnitField::SUMMONEDBY,uint32(NpcOwner&0xffffffffULL)); Unit.Fields.Add(UnitField::SUMMONEDBY+1,uint32(NpcOwner>>32));
+    TestEqual(TEXT("A creature controlled by another NPC retains NPC control flags"),WowLuaApi::CombatLogFlags(&F.Context,Victim)&0x300u,0x200u);
+    Packet.Reset(); Guid(Victim); Guid(1); U32(78); U32(31); U32(0); Packet.Add(1); U32(4); U32(2); Packet.Add(0); Packet.Add(0); U32(3); U32(2); Packet.Add(0);
+    H.HandlePacket(0x250,Packet);
+    Packet.Reset(); Guid(1); Guid(1); U32(2050); U32(60); U32(17); U32(4); Packet.Add(1); Packet.Add(0);
+    H.HandlePacket(0x150,Packet);
+    TestTrue(TEXT("Spell events retain typed payloads and history filtering terminates"),F.Lua.ExecuteString(TEXT(R"LUA(
+        assert(#CombatRows==3 and CombatFiltered==3)
+        local d=CombatRows[2]; assert(d[2]=='SPELL_DAMAGE' and d[9]==78 and d[12]==31 and d[15]==2 and d[16]==3 and d[17]==4 and d[18]==true)
+        local h=CombatRows[3]; assert(h[2]=='SPELL_HEAL' and h[9]==2050 and h[12]==60 and h[13]==17 and h[14]==4 and h[15]==true)
+        CombatLogResetFilter(); CombatLogAddFilter('SPELL_HEAL','0x0000000000000001',nil)
+        assert(CombatLogGetNumEntries()==1 and CombatLogGetNumEntries(true)==3)
+        CombatLogSetCurrentEntry(0); assert(select(2,CombatLogGetCurrentEntry())=='SPELL_HEAL')
+        assert(not CombatLogAdvanceEntry(-1) and CombatLogGetCurrentEntry()==nil)
+        CombatLogResetFilter(); CombatLogAddFilter('',nil,nil); assert(CombatLogGetNumEntries()==0)
+        CombatLogResetFilter(); CombatLogAddFilter(nil,nil,nil); CombatLogSetCurrentEntry(0)
+        local count=0; while CombatLogGetCurrentEntry() do count=count+1; assert(count<=3); if not CombatLogAdvanceEntry(-1) then break end end
+        assert(count==3)
+        CombatLogClearEntries(); assert(CombatLogGetNumEntries()==0 and CombatLogGetCurrentEntry()==nil)
+    )LUA")));
+    FWowCombatHistory Ring;
+    for(int I=0;I<FWowCombatHistory::Capacity+5;++I) { FWowCombatEntry E; E.Event=TEXT("SWING_DAMAGE"); Ring.Append(MoveTemp(E)); }
+    TestTrue(TEXT("Bounded history evicts old serials without aliasing retained entries"),Ring.Num()==FWowCombatHistory::Capacity && !Ring.Find(1) && Ring.Find(Ring.First()) && Ring.Find(Ring.End()-1)->Serial==Ring.End()-1);
     return true;
 }
 

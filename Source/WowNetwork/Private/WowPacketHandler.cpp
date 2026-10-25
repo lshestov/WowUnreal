@@ -29,6 +29,8 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(WowOpcode::SMSG_SPELL_FAILURE,            &FWowPacketHandler::HandleSpellFailure);
     Handlers.Add(WowOpcode::SMSG_SPELL_COOLDOWN,           &FWowPacketHandler::HandleSpellCooldown);
     Handlers.Add(WowOpcode::SMSG_ATTACKERSTATEUPDATE,      &FWowPacketHandler::HandleAttackerStateUpdate);
+    Handlers.Add(0x0250,&FWowPacketHandler::HandleSpellDamageLog);
+    Handlers.Add(0x0150,&FWowPacketHandler::HandleSpellHealLog);
     Handlers.Add(WowOpcode::SMSG_ATTACKSTART,              &FWowPacketHandler::HandleAttackStart);
     Handlers.Add(WowOpcode::SMSG_ATTACKSTOP,               &FWowPacketHandler::HandleAttackStop);
     Handlers.Add(WowOpcode::SMSG_AURA_UPDATE,              &FWowPacketHandler::HandleAuraUpdate);
@@ -323,7 +325,10 @@ void FWowPacketHandler::ParseUpdateBlock(FPacketReader& R)
         FWowEntity* Entity = EntityManager.Find(Guid);
         if (Entity)
         {
+            const int32 PreviousHealth=Entity->IsUnit()?Entity->GetHealth():0;
             ParseUpdateFields(R, *Entity);
+            if(PreviousHealth>0 && Entity->IsUnit() && Entity->GetHealth()==0)
+            { FWowCombatEntry Death; Death.Event=TEXT("UNIT_DIED"); Death.Destination=Guid; RecordCombat(MoveTemp(Death)); OnEntityDeath.Broadcast(Guid); }
             if (const uint32 UpdatedTypeMask = Entity->GetField(ObjectField::TYPE); UpdatedTypeMask != 0)
             {
                 Entity = &EntityManager.PromoteToTyped(Guid, UpdatedTypeMask);
@@ -1075,40 +1080,6 @@ void FWowPacketHandler::HandleSpellCooldown(FPacketReader& R)
 // uint32 hit_info, packed guid attacker, packed guid target, uint32 damage, uint8 damage_school_count
 // for each school: uint32 damage, uint32 absorbed
 
-void FWowPacketHandler::HandleAttackerStateUpdate(FPacketReader& R)
-{
-    if (!R.CanRead(8)) // minimum: hit_info + 2 packed guids (at least 1 byte each)
-    {
-        UE_LOG(LogWowPacket, Warning, TEXT("ATTACKERSTATEUPDATE: packet too short"));
-        return;
-    }
-
-    uint32 HitInfo = R.ReadU32();
-    uint64 AttackerGuid = R.ReadPackedGuid();
-    uint64 TargetGuid = R.ReadPackedGuid();
-
-    if (!R.CanRead(5)) // damage + school count
-    {
-        UE_LOG(LogWowPacket, Warning, TEXT("ATTACKERSTATEUPDATE: packet truncated"));
-        return;
-    }
-
-    uint32 TotalDamage = R.ReadU32();
-    uint8 DamageSchoolCount = R.ReadU8();
-
-    // Parse damage by school (for now just track total damage)
-    for (uint8 i = 0; i < DamageSchoolCount && R.CanRead(8); ++i)
-    {
-        uint32 SchoolDamage = R.ReadU32();
-        uint32 SchoolAbsorbed = R.ReadU32();
-        // We could track school-specific damage but for basic combat text, total damage is enough
-    }
-
-    UE_LOG(LogWowPacket, Log, TEXT("ATTACKERSTATEUPDATE: attacker=%llu target=%llu damage=%u hitInfo=0x%08X"),
-        AttackerGuid, TargetGuid, TotalDamage, HitInfo);
-
-    OnAttackerStateUpdate.Broadcast(AttackerGuid, TargetGuid, HitInfo, TotalDamage);
-}
 
 void FWowPacketHandler::HandleAttackStart(FPacketReader& R)
 {
@@ -2521,6 +2492,10 @@ void FWowPacketHandler::HandleEnvironmentalDamageLog(FPacketReader& R)
     uint32 Damage = R.ReadU32();
     uint32 Absorbed = R.ReadU32();
     uint32 Resisted = R.ReadU32();
+    static const TCHAR* Types[]={TEXT("EXHAUSTION"),TEXT("DROWNING"),TEXT("FALLING"),TEXT("LAVA"),TEXT("SLIME"),TEXT("FIRE")};
+    FWowCombatEntry Entry; Entry.Event=TEXT("ENVIRONMENTAL_DAMAGE"); Entry.Destination=VictimGuid;
+    Entry.Values={FWowCombatValue::S(DamageType<UE_ARRAY_COUNT(Types)?Types[DamageType]:TEXT("UNKNOWN")),FWowCombatValue::N(Damage),FWowCombatValue::N(0),FWowCombatValue::N(DamageType==3 || DamageType==5?4:DamageType==4?8:1),FWowCombatValue::N(Resisted),FWowCombatValue::N(0),FWowCombatValue::N(Absorbed),FWowCombatValue::B(false),FWowCombatValue::B(false),FWowCombatValue::B(false)};
+    RecordCombat(MoveTemp(Entry));
 
     UE_LOG(LogWowPacket, Log, TEXT("ENVIRONMENTAL_DAMAGE_LOG: GUID %llu, type %u, %u damage (%u absorbed, %u resisted)"),
            VictimGuid, DamageType, Damage, Absorbed, Resisted);

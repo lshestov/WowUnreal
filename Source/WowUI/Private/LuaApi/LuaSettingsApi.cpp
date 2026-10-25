@@ -1,6 +1,7 @@
 #include "LuaApiRegistry.h"
 #include "WowConnectionManager.h"
 #include "WowEventSystem.h"
+#include "WowFrameManager.h"
 #include "WowAudioManager.h"
 #include "WowSavedVariables.h"
 #include "WowAddonLoader.h"
@@ -28,6 +29,12 @@ UWorld* World(lua_State* L)
 AWowAudioManager* ResolveAudioManager(lua_State* L) { auto* W=World(L); return W?Cast<AWowAudioManager>(UGameplayStatics::GetActorOfClass(W,AWowAudioManager::StaticClass())):nullptr; }
 bool NativeValue(lua_State* L,const FString& Name,FString& Value)
 {
+    if(Name==TEXT("uiscale"))
+    {
+        const auto* C=WowLuaApi::GetContext(L);
+        Value=FString::SanitizeFloat(C && C->FrameManager?C->FrameManager->GetUIScale():1.f);
+        return true;
+    }
     if(!World(L)) return false;
     const auto* Settings=UGameUserSettings::GetGameUserSettings();
     if(Name.StartsWith(TEXT("sound_"))) if(auto* Manager=ResolveAudioManager(L); Manager && Manager->GetUiOption(Name,Value)) return true;

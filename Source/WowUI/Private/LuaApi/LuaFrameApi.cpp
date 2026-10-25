@@ -243,20 +243,20 @@ static int LF_IsMouseOver(lua_State* L)
 static EWowFrameType ParseFrameType(const char* TypeStr)
 {
 	if (!TypeStr) return EWowFrameType::Frame;
-	if (strcmp(TypeStr, "Button") == 0) return EWowFrameType::Button;
-	if (strcmp(TypeStr, "CheckButton") == 0) return EWowFrameType::CheckButton;
-	if (strcmp(TypeStr, "EditBox") == 0) return EWowFrameType::EditBox;
-	if (strcmp(TypeStr, "ScrollFrame") == 0) return EWowFrameType::ScrollFrame;
-	if (strcmp(TypeStr, "Slider") == 0) return EWowFrameType::Slider;
-	if (strcmp(TypeStr, "StatusBar") == 0) return EWowFrameType::StatusBar;
-	if (strcmp(TypeStr, "SimpleHTML") == 0) return EWowFrameType::SimpleHTML;
-	if (strcmp(TypeStr, "Cooldown") == 0) return EWowFrameType::Cooldown;
-	if (strcmp(TypeStr, "GameTooltip") == 0) return EWowFrameType::GameTooltip;
-	if (strcmp(TypeStr, "Minimap") == 0) return EWowFrameType::Minimap;
-	if (strcmp(TypeStr, "Model") == 0) return EWowFrameType::Model;
-	if (strcmp(TypeStr, "PlayerModel") == 0) return EWowFrameType::PlayerModel;
-	if (strcmp(TypeStr, "MessageFrame") == 0) return EWowFrameType::MessageFrame;
-	if (strcmp(TypeStr, "ScrollingMessageFrame") == 0) return EWowFrameType::ScrollingMessageFrame;
+	if (FCStringAnsi::Stricmp(TypeStr, "Button") == 0) return EWowFrameType::Button;
+	if (FCStringAnsi::Stricmp(TypeStr, "CheckButton") == 0) return EWowFrameType::CheckButton;
+	if (FCStringAnsi::Stricmp(TypeStr, "EditBox") == 0) return EWowFrameType::EditBox;
+	if (FCStringAnsi::Stricmp(TypeStr, "ScrollFrame") == 0) return EWowFrameType::ScrollFrame;
+	if (FCStringAnsi::Stricmp(TypeStr, "Slider") == 0) return EWowFrameType::Slider;
+	if (FCStringAnsi::Stricmp(TypeStr, "StatusBar") == 0) return EWowFrameType::StatusBar;
+	if (FCStringAnsi::Stricmp(TypeStr, "SimpleHTML") == 0) return EWowFrameType::SimpleHTML;
+	if (FCStringAnsi::Stricmp(TypeStr, "Cooldown") == 0) return EWowFrameType::Cooldown;
+	if (FCStringAnsi::Stricmp(TypeStr, "GameTooltip") == 0) return EWowFrameType::GameTooltip;
+	if (FCStringAnsi::Stricmp(TypeStr, "Minimap") == 0) return EWowFrameType::Minimap;
+	if (FCStringAnsi::Stricmp(TypeStr, "Model") == 0) return EWowFrameType::Model;
+	if (FCStringAnsi::Stricmp(TypeStr, "PlayerModel") == 0) return EWowFrameType::PlayerModel;
+	if (FCStringAnsi::Stricmp(TypeStr, "MessageFrame") == 0) return EWowFrameType::MessageFrame;
+	if (FCStringAnsi::Stricmp(TypeStr, "ScrollingMessageFrame") == 0) return EWowFrameType::ScrollingMessageFrame;
 	return EWowFrameType::Frame;
 }
 

@@ -12,6 +12,7 @@ class FMpqManager;
 class AActor;
 struct FWowEntity;
 struct FWowSpellBookView;
+struct FWowCombatLogView;
 
 /** Context passed to Lua API functions so they can access game state */
 struct FWowLuaContext
@@ -21,6 +22,7 @@ struct FWowLuaContext
     FWowEventSystem* EventSystem = nullptr;
     FWowFrameManager* FrameManager = nullptr;
     TSharedPtr<FWowSpellBookView> SpellBook;
+    TSharedPtr<FWowCombatLogView> CombatLog;
     TFunction<AActor*(uint64)> ResolveActor;
     TFunction<void()> ReloadUI;
     TMap<FName,int32> SelectedRows;
@@ -42,6 +44,7 @@ namespace WowLuaApi
     void SetUiPreference(lua_State* L,const FString& Key,int32 Value);
     int PushSpellCooldown(lua_State* L,uint32 SpellId);
     FWowEntity* ResolveUnitToken(lua_State* L,int32 Index=1);
+    uint32 CombatLogFlags(FWowLuaContext* Context,uint64 Guid);
     void RegisterFrameApi(lua_State* L);
     int SetBagItemTooltip(lua_State* L);
     int SetInventoryItemTooltip(lua_State* L);

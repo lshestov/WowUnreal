@@ -357,6 +357,7 @@ FString FWowFrameManager::CreateFontStringRegion(int64 Parent,const FString& Nam
 
 void FWowFrameManager::SetFrameSize(int64 Handle, float W, float H)
 {
+	if(!FMath::IsFinite(W) || !FMath::IsFinite(H) || W<0 || H<0) return;
 	FFrameEntry* Entry = Frames.Find(Handle);
 	if (!Entry) return;
 
@@ -384,6 +385,7 @@ void FWowFrameManager::SetFrameSize(int64 Handle, float W, float H)
 
 void FWowFrameManager::SetFrameAnchors(int64 Handle, const TArray<FWowAnchor>& NewAnchors)
 {
+	if(NewAnchors.ContainsByPredicate([](const FWowAnchor& A) { return !FMath::IsFinite(A.OffsetX) || !FMath::IsFinite(A.OffsetY); })) return;
 	FFrameEntry* Entry = Frames.Find(Handle);
 	if (!Entry) return;
 	if (!Entry->Def.bSetAllPoints && Entry->Def.Anchors.Num() == NewAnchors.Num())

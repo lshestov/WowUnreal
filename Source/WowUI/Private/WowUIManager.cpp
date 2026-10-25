@@ -20,6 +20,7 @@
 #include "Engine/GameViewportClient.h"
 #include "WowSavedVariables.h"
 #include "WowMacros.h"
+#include "WowCombatLogUi.h"
 
 #if __has_include("lua.h")
 extern "C" {
@@ -203,6 +204,8 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 	FWowSavedVariables::LoadForAddon(LuaVM->GetState(),TEXT("IdleWowUI"),Preferences);
 	WowLuaApi::ApplySavedUiSettings(LuaVM->GetState());
 	FWowMacros::LoadSavedVariables(LuaVM->GetState());
+	if(ConnectionManager) ConnectionManager->PacketHandler.OnCombatLog.BindWeakLambda(this,[this](const FWowCombatEntry& Entry)
+	{ if(LuaVM) FWowCombatLogUi::Dispatch(LuaVM->GetState(),Entry); });
 	if(ConnectionManager) ConnectionManager->OnMacroUse.BindWeakLambda(this,[this](uint32 Id)
 	{
 		if(!LuaVM) return false;

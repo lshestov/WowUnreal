@@ -3918,8 +3918,8 @@ void AWowGameplayController::OnAttackerStateUpdate(uint64 AttackerGuid, uint64 V
 			TextInfo.Color = FLinearColor(0.7f, 0.7f, 0.7f, 1.0f);
 		}
 
-		// Check for critical hit (bit 1 in HitInfo)
-		if (HitInfo & 0x2)
+		// WotLK HITINFO_CRITICALHIT is bit 9.
+		if (HitInfo & 0x200)
 		{
 			TextInfo.Text += TEXT("!");
 			TextInfo.Color = FLinearColor::Yellow;
@@ -3996,8 +3996,7 @@ void AWowGameplayController::OnAttackerStateUpdate(uint64 AttackerGuid, uint64 V
 		}
 	}
 
-	// Fire combat log event
-	FireUIEvent(TEXT("COMBAT_LOG_EVENT"));
+	// Typed combat-log dispatch comes from the parsed protocol entry.
 }
 
 

@@ -32,6 +32,10 @@ compatibility work.
   Macro changes save immediately and survive ReloadUI, including UTF-8 text.
   The multiline editor supports caret placement, insertion, wrapping and scroll
   notifications. Engine font fallback renders Cyrillic absent from enUS fonts.
+- Live combat-log entries for melee damage/misses, direct spell damage and
+  healing, environmental damage and observed unit deaths. Bounded history,
+  event/GUID/object-mask filters and cursor traversal survive ReloadUI.
+  Native self-healing verifies the original combat-log formatter and tab.
 
 The UI bridge also supports anonymous frame identity, frame and region
 reparenting, font objects, positional formatting, typed wheel/scroll callbacks,
@@ -39,15 +43,17 @@ numeric slider values, clipping, additive highlights and wrapped text geometry.
 Button normal, pushed, disabled and highlight textures are real editable
 regions. XML dimensions, anchors and UVs are retained, and custom mouse routing
 updates their state. Micro-menu icons and panel clicks are verified natively.
+CreateFrame recognizes Blizzard's uppercase type names. The uiScale CVar
+reports the actual positive viewport scale, preventing invalid chat anchors.
 
 ## Verification
 
 The Windows Editor and packaged Development client are built from the same
 source tree. `WowUnreal.Hud`, `WowUnreal.UI`, `WowUnreal.Gameplay` and the related
 player, collision, equipment, lighting, rendering, traversal and performance
-suites cover both isolated controls and live protocol state. The button-state
-change passed 45 targeted UI, HUD, gameplay and performance tests. Two existing
-optional character texture-layout DBC warnings remain.
+suites cover both isolated controls and live protocol state. The interface
+regression set contains 62 tests. Existing optional character texture-layout
+DBC and test-fixture size warnings remain.
 
 Native gameplay probes exercise live server state and rendered UI at 1280x720
 and 1920x1080. Tests restore moved inventory items, temporary action slots and
@@ -61,7 +67,8 @@ may use NullRHI; visual checks require a rendered client.
 Full WoW UI compatibility is **not complete**. In particular:
 
 - Advanced macro commands such as cast sequences, complete conditional syntax,
-  combat-log history and clickable chat links. See [macro support](Macros.md).
+  additional combat event families and clickable chat links. See
+  [macro support](Macros.md) and [combat-log support](CombatLog.md).
 - Complete PvP/battleground, LFG and achievement panels and protocol support.
 - World-map points of interest, indoor minimap tiles and tracking markers.
 - Legacy options without an engine-side implementation; persisting a CVar

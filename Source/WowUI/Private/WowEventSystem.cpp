@@ -197,7 +197,30 @@ void FWowEventSystem::FireChatMessage(uint8 Type, uint32 Language, uint64 Sender
 		FString::Printf(TEXT("0x%016llX"),SenderGuid)});
 }
 
-void FWowEventSystem::FireEvent(const FString& EventName, const TArray<FString>& Args)
+void FWowEventSystem::FireEvent(const FString& EventName,const TArray<FString>& Args)
+{
+#if HAS_LUA
+    FireEventTyped(EventName,[&](lua_State* L)
+    {
+		// Push args
+		for (int32 Index = 0; Index < Args.Num(); ++Index)
+		{
+            if ((EventName.StartsWith(TEXT("CHAT_MSG_")) && (Index == 6 || Index == 7 || Index == 10))
+                || ((EventName==TEXT("BAG_UPDATE") || EventName==TEXT("ACTIONBAR_SLOT_CHANGED")) && Index==0))
+				lua_pushnumber(L, FCString::Atoi(*Args[Index]));
+			else
+			{
+				FTCHARToUTF8 UTF8Arg(*Args[Index]);
+				lua_pushstring(L, UTF8Arg.Get());
+			}
+		}
+
+        return Args.Num();
+    });
+#endif
+}
+
+void FWowEventSystem::FireEventTyped(const FString& EventName,TFunctionRef<int32(lua_State*)> PushArguments)
 {
 	const TSet<int64>* Handles = EventRegistrations.Find(EventName);
 	if (!Handles || Handles->Num() == 0)
@@ -211,7 +234,7 @@ void FWowEventSystem::FireEvent(const FString& EventName, const TArray<FString>&
 		return;
 	}
 
-	UE_LOG(LogWowEvent, Verbose, TEXT("Firing event %s to %d frames (args: %d)"), *EventName, Handles->Num(), Args.Num());
+	UE_LOG(LogWowEvent, Verbose, TEXT("Firing event %s to %d frames"), *EventName, Handles->Num());
 
 #if HAS_LUA
 	if (!LuaVM || !LuaVM->IsInitialized())
@@ -264,27 +287,15 @@ void FWowEventSystem::FireEvent(const FString& EventName, const TArray<FString>&
 		FTCHARToUTF8 UTF8Event(*EventName);
 		lua_pushstring(L, UTF8Event.Get());
 
-		// Push args
-		for (int32 Index = 0; Index < Args.Num(); ++Index)
-		{
-            if ((EventName.StartsWith(TEXT("CHAT_MSG_")) && (Index == 6 || Index == 7 || Index == 10))
-                || ((EventName==TEXT("BAG_UPDATE") || EventName==TEXT("ACTIONBAR_SLOT_CHANGED")) && Index==0))
-				lua_pushnumber(L, FCString::Atoi(*Args[Index]));
-			else
-			{
-				FTCHARToUTF8 UTF8Arg(*Args[Index]);
-				lua_pushstring(L, UTF8Arg.Get());
-			}
-		}
-
+		const int32 ArgumentCount=PushArguments(L);
 		// Call: func(self, event, arg1, arg2, ...)
-		int32 NumArgs = 2 + Args.Num();
+		int32 NumArgs = 2 + ArgumentCount;
 		const int32 FunctionIndex = lua_gettop(L) - NumArgs;
 		const int32 SelfIndex = FunctionIndex + 1;
 		const int32 EventIndex = FunctionIndex + 2;
 		TArray<int32> LegacyArgIndices;
-		LegacyArgIndices.Reserve(FMath::Min(Args.Num(), MaxLegacyLuaArgs));
-		for (int32 ArgIndex = 0; ArgIndex < Args.Num() && ArgIndex < MaxLegacyLuaArgs; ++ArgIndex)
+		LegacyArgIndices.Reserve(FMath::Min(ArgumentCount, MaxLegacyLuaArgs));
+		for (int32 ArgIndex = 0; ArgIndex < ArgumentCount && ArgIndex < MaxLegacyLuaArgs; ++ArgIndex)
 		{
 			LegacyArgIndices.Add(FunctionIndex + 3 + ArgIndex);
 		}
