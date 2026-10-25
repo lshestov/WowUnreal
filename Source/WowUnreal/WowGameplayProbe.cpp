@@ -389,7 +389,7 @@ struct FWowGameplayProbe
             Frames->DispatchMouseDown(Handle,Button);
             if(Op==TEXT("drag_frame"))
             {
-                if(!Frames->DispatchDragStart(Handle,Button)) { Failure=TEXT("UI drag could not start"); Finish(C,false); return; }
+                if(!Frames->GetSliderWidget(Handle) && !Frames->DispatchDragStart(Handle,Button)) { Failure=TEXT("UI drag could not start"); Finish(C,false); return; }
                 FString Target; const bool HasDestination=Step->TryGetStringField(TEXT("destination"),Target);
                 const int64 Destination=HasDestination?Frames->FindFrame(Target):-1;
                 float DX=X,DY=Y;

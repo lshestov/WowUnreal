@@ -1038,6 +1038,38 @@ bool FUiIncrementalGc::RunTest(const FString&)
     TestTrue(TEXT("Incremental collection bounds transient memory"),Peak<F.Lua.GetMemoryLimit()*9/10);
     return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudSliderControls,"WowUnreal.Hud.SliderControls",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudSliderControls::RunTest(const FString&)
+{
+    FHudFixture F;
+    const FString Xml=TEXT("<Ui><Slider name='RangeSlider' minValue='10' maxValue='30' defaultValue='15' valueStep='2' orientation='VERTICAL'><Size x='32' y='200'/><Anchors><Anchor point='TOPLEFT' relativeTo='UIParent' relativePoint='TOPLEFT' x='20' y='-30'/></Anchors><ThumbTexture name='$parentThumb'><Size x='12' y='24'/><Color r='1' g='1' b='1' a='1'/></ThumbTexture><Scripts><OnMinMaxChanged>MinEvent=min; MaxEvent=max</OnMinMaxChanged></Scripts></Slider></Ui>");
+    const FTCHARToUTF8 Utf8(*Xml); TArray<uint8> Bytes; Bytes.Append(reinterpret_cast<const uint8*>(Utf8.Get()),Utf8.Length());
+    const auto Parsed=FWowFrameXmlParser::ParseXml(Bytes,TEXT("SliderFixture")); if(Parsed.Num()!=1) return false;
+    const int64 Handle=F.Frames.CreateFrame(Parsed[0].FrameDef); F.Frames.RefreshLayout();
+    TestTrue(TEXT("XML range, default, orientation and step reach the canonical slider"),F.Lua.ExecuteString(TEXT("assert(RangeSlider:GetValue()==16 and RangeSlider:GetValueStep()==2 and RangeSlider:GetOrientation()=='VERTICAL'); assert(RangeSlider:GetThumbTexture()==RangeSliderThumb); assert(select(1,RangeSlider:GetMinMaxValues())==10)")));
+    TestTrue(TEXT("Min/max changes preserve typed arguments and clamp the current value"),F.Lua.ExecuteString(TEXT("RangeSlider:SetMinMaxValues(20,40); assert(MinEvent==20 and MaxEvent==40 and RangeSlider:GetValue()==20); RangeSlider:SetMinMaxValues(10,30); RangeSlider:SetValue(30)")));
+    F.Frames.RefreshLayout(); const auto End=F.Frames.GetRegionRect(TEXT("RangeSliderThumb")); const auto Track=F.Frames.GetLayoutRect(Handle);
+    TestTrue(TEXT("Maximum vertical value places the thumb at the bottom"),FMath::IsNearlyEqual(End.Y+End.W,Track.Y+Track.W,.1));
+    TestTrue(TEXT("Orientation changes retain the same semantic value"),F.Lua.ExecuteString(TEXT("RangeSlider:SetOrientation('HORIZONTAL'); assert(RangeSlider:GetValue()==30); RangeSlider:SetSize(200,32); RangeSlider:SetValue(10)")));
+    F.Frames.RefreshLayout(); const auto Start=F.Frames.GetRegionRect(TEXT("RangeSliderThumb"));
+    TestTrue(TEXT("Minimum horizontal value places the thumb at the left"),FMath::IsNearlyEqual(Start.X,Track.X,.1));
+    const auto R=F.Frames.GetLayoutRect(Handle); const float Scale=F.Frames.GetScreenScale();
+    F.Frames.UpdateMouseHover((R.X+6)*Scale,(R.Y+16)*Scale); F.Frames.DispatchMouseDown(Handle,TEXT("LeftButton"));
+    F.Frames.UpdateMouseHover((R.X+R.Z-6)*Scale,(R.Y+16)*Scale); F.Frames.DispatchMouseUp(Handle,TEXT("LeftButton"));
+    TestTrue(TEXT("Pointer dragging updates the value over the full thumb travel"),F.Frames.GetSliderValue(Handle)==30);
+    TestTrue(TEXT("Disabled sliders keep their value during pointer input"),F.Lua.ExecuteString(TEXT("RangeSlider:Disable(); RangeSlider:SetValue(20)")));
+    F.Frames.UpdateMouseHover((R.X+6)*Scale,(R.Y+16)*Scale); F.Frames.DispatchMouseDown(Handle,TEXT("LeftButton")); F.Frames.UpdateMouseHover((R.X+R.Z)*Scale,(R.Y+16)*Scale); F.Frames.DispatchMouseUp(Handle,TEXT("LeftButton"));
+    TestEqual(TEXT("Disabled input is ignored"),F.Frames.GetSliderValue(Handle),20.f);
+    TestTrue(TEXT("Fractional callbacks preserve the exact value returned by GetValue"),F.Lua.ExecuteString(TEXT("RangeSlider:Enable(); RangeSlider:SetValueStep(.001); FloatEvents=0; RangeSlider:SetScript('OnValueChanged',function(self,value) assert(self:GetValue()==value); FloatEvents=FloatEvents+1 end); RangeSlider:SetValue(24.123); assert(FloatEvents==1)")));
+    for(int32 Tick=0;Tick<20;++Tick) F.Frames.TickWidgetEvents();
+    TestTrue(TEXT("Polling does not repeat a fractional change"),F.Lua.ExecuteString(TEXT("assert(FloatEvents==1)")));
+    TestTrue(TEXT("Existing texture regions keep their identity when assigned as a thumb"),F.Lua.ExecuteString(TEXT("OtherThumb=UIParent:CreateTexture('OtherThumb','ARTWORK'); OtherThumb:SetSize(20,20); OtherThumb:SetTexture(1,1,1,1); RangeSlider:SetThumbTexture(OtherThumb); assert(RangeSlider:GetThumbTexture()==OtherThumb and OtherThumb:GetParent()==RangeSlider); RangeSlider:SetThumbTexture(nil); assert(RangeSlider:GetThumbTexture()==nil)")));
+    TestTrue(TEXT("A dynamically created thumb can be restored after removal"),F.Lua.ExecuteString(TEXT("RangeSlider:SetThumbTexture(1,.5,0,1); RangeSlider:GetThumbTexture():SetSize(18,30)")));
+    F.Frames.RefreshLayout(); const auto* Dynamic=F.Frames.GetNamedTexture(F.Frames.SliderThumbRegions.FindRef(Handle));
+    TestTrue(TEXT("Anchoring a dynamic thumb restores its painted visibility"),Dynamic && Dynamic->GetVisibility()!=ESlateVisibility::Hidden && Dynamic->GetVisibility()!=ESlateVisibility::Collapsed);
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudScrollContent,"WowUnreal.Hud.ScrollContent",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FHudScrollContent::RunTest(const FString&)
 {
@@ -1093,7 +1125,7 @@ bool FHudScrollContent::RunTest(const FString&)
     TestTrue(TEXT("Polling cannot decay a programmatic scroll position"),F.Lua.ExecuteString(TEXT("assert(ScrollSlider:GetValue()==75 and Journal:GetVerticalScroll()==75 and SliderEvents==1)")));
     auto* Slider=F.Frames.GetSliderWidget(F.Frames.FindFrame(TEXT("ScrollSlider")));
     if(!TestNotNull(TEXT("Scroll slider has a native thumb"),Slider)) return false;
-    Slider->SetValue(120);
+    Slider->SetValue(80); // Native vertical slider increases upward; WoW scroll offsets increase downward.
     for(int32 Tick=0;Tick<20;++Tick) F.Frames.TickWidgetEvents();
     TestTrue(TEXT("Native slider movement reports a stable raw offset exactly once"),F.Lua.ExecuteString(TEXT("assert(ScrollSlider:GetValue()==120 and Journal:GetVerticalScroll()==120 and SliderEvents==2)")));
     TestTrue(TEXT("Visible keyboard capture reaches the binding handler"),F.Frames.DispatchKeyboard(TEXT("F8"),true));

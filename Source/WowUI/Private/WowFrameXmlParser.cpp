@@ -754,6 +754,8 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 	Def.MinValue = Node.attribute("minValue").as_float(0.0f);
 	Def.MaxValue = Node.attribute("maxValue").as_float(100.0f);
 	Def.DefaultValue = Node.attribute("defaultValue").as_float(0.0f);
+    Def.ValueStep=Node.attribute("valueStep").as_float(.001f);
+    Def.SliderProperties=(Node.attribute("minValue")?1:0)|(Node.attribute("maxValue")?2:0)|(Node.attribute("defaultValue")?4:0)|(Node.attribute("valueStep")?8:0);
 	TArray<FWowTextureElement> InlineTextures;
 
 	// Parse child elements
@@ -1094,57 +1096,14 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 		}
 		else if (Tag == TEXT("ThumbTexture"))
 		{
-			FWowTextureElement ThumbTexture;
-			ThumbTexture.Name = UTF8_TO_TCHAR(Child.attribute("name").as_string());
-			ThumbTexture.ParentKey = UTF8_TO_TCHAR(Child.attribute("parentKey").as_string());
-			ThumbTexture.File = UTF8_TO_TCHAR(Child.attribute("file").as_string());
-			ThumbTexture.bSetAllPoints = Child.attribute("setAllPoints").as_bool(false);
-			ThumbTexture.bHidden = Child.attribute("hidden").as_bool(false);
-
-			pugi::xml_node ThumbSize = Child.child("Size");
-			if (ThumbSize)
-			{
-				pugi::xml_node ThumbAbsDim = ThumbSize.child("AbsDimension");
-				if (!ThumbAbsDim) ThumbAbsDim = ThumbSize;
-				if (ThumbAbsDim)
-				{
-					ThumbTexture.Width = ThumbAbsDim.attribute("x").as_float(0.0f);
-					ThumbTexture.Height = ThumbAbsDim.attribute("y").as_float(0.0f);
-				}
-			}
-
-			pugi::xml_node ThumbAnchors = Child.child("Anchors");
-			if (ThumbAnchors)
-			{
-				for (pugi::xml_node ThumbAnchor = ThumbAnchors.child("Anchor"); ThumbAnchor; ThumbAnchor = ThumbAnchor.next_sibling("Anchor"))
-				{
-					FWowAnchor A;
-					A.Point = FWowFrameXmlParser::ParseAnchorPoint(UTF8_TO_TCHAR(ThumbAnchor.attribute("point").as_string()));
-					A.RelativeTo = UTF8_TO_TCHAR(ThumbAnchor.attribute("relativeTo").as_string());
-					const char* ThumbRelPoint = ThumbAnchor.attribute("relativePoint").as_string("");
-					A.RelativePoint = (ThumbRelPoint[0] != '\0')
-						? FWowFrameXmlParser::ParseAnchorPoint(UTF8_TO_TCHAR(ThumbRelPoint))
-						: A.Point;
-					pugi::xml_node ThumbOffset = ThumbAnchor.child("Offset");
-					if (ThumbOffset)
-					{
-						pugi::xml_node ThumbOffAbsDim = ThumbOffset.child("AbsDimension");
-						if (ThumbOffAbsDim)
-						{
-							A.OffsetX = ThumbOffAbsDim.attribute("x").as_float(0.0f);
-							A.OffsetY = ThumbOffAbsDim.attribute("y").as_float(0.0f);
-						}
-						else
-						{
-							A.OffsetX = ThumbOffset.attribute("x").as_float(0.0f);
-							A.OffsetY = ThumbOffset.attribute("y").as_float(0.0f);
-						}
-					}
-					ThumbTexture.Anchors.Add(A);
-				}
-			}
-
-			InlineTextures.Add(MoveTemp(ThumbTexture));
+            pugi::xml_document Document; auto Frame=Document.append_child("Frame");
+            auto Texture=Frame.append_child("Layers").append_child("Layer").append_copy(Child); Texture.set_name("Texture");
+            const auto Parsed=ParseFrameNode_Pugi(Frame);
+            if(Parsed.Layers.Num() && Parsed.Layers[0].Textures.Num())
+            {
+                auto Thumb=Parsed.Layers[0].Textures[0]; Thumb.bSliderThumb=true;
+                if(Thumb.Name.IsEmpty()) Thumb.Name=TEXT("$parentThumbTexture"); InlineTextures.Add(Thumb);
+            }
 		}
 		else if(Tag==TEXT("NormalFont") || Tag==TEXT("HighlightFont") || Tag==TEXT("DisabledFont"))
         {
@@ -1244,6 +1203,8 @@ static FWowFrameDef ParseFrameNode(const FXmlNode* Node)
 	if (!MinVal.IsEmpty()) Def.MinValue = FCString::Atof(*MinVal);
 	if (!MaxVal.IsEmpty()) Def.MaxValue = FCString::Atof(*MaxVal);
 	if (!DefVal.IsEmpty()) Def.DefaultValue = FCString::Atof(*DefVal);
+    const FString Step=Node->GetAttribute(TEXT("valueStep")); if(!Step.IsEmpty()) Def.ValueStep=FCString::Atof(*Step);
+    Def.SliderProperties=(!MinVal.IsEmpty()?1:0)|(!MaxVal.IsEmpty()?2:0)|(!DefVal.IsEmpty()?4:0)|(!Step.IsEmpty()?8:0);
 
 	// Parse children
 	for (const FXmlNode* Child = Node->GetFirstChildNode(); Child; Child = Child->GetNextNode())
@@ -1341,7 +1302,7 @@ static FWowFrameDef ParseFrameNode(const FXmlNode* Node)
 		}
 		else if (Tag.Equals(TEXT("ThumbTexture"), ESearchCase::IgnoreCase))
 		{
-			InlineTextures.Add(ParseTextureNode(Child));
+			auto Thumb=ParseTextureNode(Child); Thumb.bSliderThumb=true; if(Thumb.Name.IsEmpty()) Thumb.Name=TEXT("$parentThumbTexture"); InlineTextures.Add(Thumb);
 		}
 	}
 

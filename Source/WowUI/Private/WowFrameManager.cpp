@@ -485,15 +485,6 @@ UEditableTextBox* FWowFrameManager::GetEditBoxWidget(int64 Handle) const
 	return (Found && Found->IsValid()) ? Found->Get() : nullptr;
 }
 
-void FWowFrameManager::SetSliderValue(int64 Handle, float Value)
-{
-	if (auto* Slider = GetSliderWidget(Handle))
-	{
-		Slider->SetValue(Value);
-		SliderLastValue.Add(Handle, Slider->GetValue());
-	}
-}
-
 USlider* FWowFrameManager::GetSliderWidget(int64 Handle) const
 {
 	const TWeakObjectPtr<USlider>* Found = SliderWidgets.Find(Handle);
@@ -709,6 +700,11 @@ void FWowFrameManager::MergeTemplate(FWowFrameDef& Target, const FWowFrameDef& T
 	if (Target.DisabledTexture.IsEmpty()) { Target.DisabledTexture = Template.DisabledTexture; Target.DisabledTextureName = Template.DisabledTextureName; Target.DisabledTextureParentKey = Template.DisabledTextureParentKey; }
 	if(Target.CheckedTexture.IsEmpty()) Target.CheckedTexture=Template.CheckedTexture;
 	if (Target.Orientation.IsEmpty()) Target.Orientation = Template.Orientation;
+    if(!(Target.SliderProperties&1) && (Template.SliderProperties&1)) Target.MinValue=Template.MinValue;
+    if(!(Target.SliderProperties&2) && (Template.SliderProperties&2)) Target.MaxValue=Template.MaxValue;
+    if(!(Target.SliderProperties&4) && (Template.SliderProperties&4)) Target.DefaultValue=Template.DefaultValue;
+    if(!(Target.SliderProperties&8) && (Template.SliderProperties&8)) Target.ValueStep=Template.ValueStep;
+    Target.SliderProperties|=Template.SliderProperties;
 }
 
 FWowFrameDef FWowFrameManager::ResolveInherits(const FWowFrameDef& Def) const
@@ -965,6 +961,7 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 			RegionLayouts.Add({ImgWidget, Def.Name, Tex.Anchors, Tex.Width, Tex.Height,
 				Tex.bSetAllPoints || (Tex.Anchors.IsEmpty() && Tex.Width <= 0 && Tex.Height <= 0)});
 			if (!Tex.Name.IsEmpty()) RegionOwners.Add(Tex.Name, Def.Name);
+            if(Tex.bSliderThumb) SliderThumbRegions.Add(OwnerHandle,Tex.Name);
 
 			// Register named texture elements so other frames can anchor to them
 			if (!Tex.Name.IsEmpty())
@@ -1310,9 +1307,13 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 				Slider->SetOrientation(EOrientation::Orient_Vertical);
 			}
 			// Use transparent bar — WoW sliders use XML textures
-			Slider->SetSliderBarColor(FLinearColor::Transparent);
+			Slider->SetSliderBarColor(FLinearColor::Transparent); Slider->SetLocked(true);
+            auto Style=Slider->GetWidgetStyle(); FSlateBrush Empty; Empty.DrawAs=ESlateBrushDrawType::NoDrawType;
+            Style.SetNormalThumbImage(Empty); Style.SetHoveredThumbImage(Empty); Style.SetDisabledThumbImage(Empty); Slider->SetWidgetStyle(Style);
 			AddFillChild(Slider, 50, ESlateVisibility::Visible);
 			SliderWidgets.Add(Handle, Slider);
+            Slider->SetMinValue(Def.MinValue); Slider->SetMaxValue(FMath::Max(Def.MinValue,Def.MaxValue));
+            Slider->SetValue(Def.Orientation==TEXT("VERTICAL")?Slider->GetMaxValue()+Slider->GetMinValue()-Def.DefaultValue:Def.DefaultValue);
 		}
 	}
 
@@ -1534,6 +1535,7 @@ int64 FWowFrameManager::CreateFrame(const FWowFrameDef& Def)
 {
 	// Resolve template inheritance first
 	FWowFrameDef Resolved = ResolveInherits(Def);
+    if(Resolved.Type==EWowFrameType::Slider && Resolved.Orientation.IsEmpty()) Resolved.Orientation=TEXT("VERTICAL");
 	if(Resolved.Name==TEXT("UIParent"))
 	{
 		const auto Root=GetFrameRect(TEXT("UIParent"));
@@ -1610,6 +1612,8 @@ int64 FWowFrameManager::CreateFrame(const FWowFrameDef& Def)
 	{
 		NameToHandle.Add(Resolved.Name, Handle);
 	}
+
+    if(Resolved.Type==EWowFrameType::Slider) SetSliderValue(Handle,Resolved.DefaultValue);
 
 	// Register frame as Lua global FIRST (so children and scripts can find it)
 	UpdateFrameVisibility(Handle);
@@ -2195,7 +2199,7 @@ void FWowFrameManager::TickWidgetEvents()
 	for (auto& Pair : SliderWidgets)
 	{
 		if (!Pair.Value.IsValid()) continue;
-		float CurrentValue = Pair.Value->GetValue();
+		float CurrentValue = GetSliderValue(Pair.Key);
 		float* LastValue = SliderLastValue.Find(Pair.Key);
 		if (!LastValue)
 		{
@@ -2203,11 +2207,11 @@ void FWowFrameManager::TickWidgetEvents()
 		}
 		else if (!FMath::IsNearlyEqual(*LastValue, CurrentValue))
 		{
-			*LastValue = CurrentValue;
-			if (EventSystem)
+			*LastValue = CurrentValue; SetSliderValue(Pair.Key,CurrentValue); CurrentValue=GetSliderValue(Pair.Key);
+            if (EventSystem)
 			{
 				EventSystem->RunFrameScript(Pair.Key, TEXT("OnValueChanged"),
-					{FString::SanitizeFloat(CurrentValue)});
+					{FString::Printf(TEXT("%.17g"),double(CurrentValue))});
 			}
 		}
 	}
@@ -2255,7 +2259,7 @@ bool FWowFrameManager::DispatchEditBoxEscapePressed()
 void FWowFrameManager::UpdateMouseHover(float ScreenX, float ScreenY)
 {
 	LastPointerPosition=FVector2D(ScreenX,ScreenY);
-	UpdateFrameMovement();
+	UpdateFrameMovement(); UpdateSliderPointer();
 	int64 NewHover = HitTestFrames(ScreenX, ScreenY);
 
 	if (NewHover != HoverFrameHandle)
@@ -2282,7 +2286,8 @@ void FWowFrameManager::UpdateMouseHover(float ScreenX, float ScreenY)
 void FWowFrameManager::DispatchMouseDown(int64 Handle, const FString& Button)
 {
 	if (!EventSystem || Handle < 0) return;
-	if(auto* Widget=GetButtonWidget(Handle))
+    if(auto* Slider=GetSliderWidget(Handle); Slider && Button==TEXT("LeftButton")) { if(!Slider->GetIsEnabled()) return; DraggingSlider=Handle; UpdateSliderPointer(); }
+    if(auto* Widget=GetButtonWidget(Handle))
 	{
 		if(!Widget->GetIsEnabled()) return;
 		ButtonVisualStates.FindOrAdd(Handle).MousePressed=true; RefreshButtonVisuals(Handle);
@@ -2324,6 +2329,7 @@ bool FWowFrameManager::DispatchMouseWheel(int64 Handle,float Delta)
 
 void FWowFrameManager::DispatchMouseUp(int64 Handle, const FString& Button)
 {
+    if(Button==TEXT("LeftButton")) { UpdateSliderPointer(); DraggingSlider=-1; }
 	if (!EventSystem || Handle < 0) return;
 	if(auto* Visual=ButtonVisualStates.Find(Handle)) { Visual->MousePressed=false; if(!Visual->PressLocked) Visual->ForcedPressed=false; RefreshButtonVisuals(Handle); }
 	if(auto* Widget=GetButtonWidget(Handle); Widget && !Widget->GetIsEnabled()) return;

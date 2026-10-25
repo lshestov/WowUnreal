@@ -4,6 +4,7 @@
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/Image.h"
+#include "Components/Slider.h"
 #include "Engine/Texture2D.h"
 #include "Materials/MaterialInstanceDynamic.h"
 
@@ -131,7 +132,9 @@ void FWowFrameManager::SetButtonState(int64 Handle,const FString& State,bool Loc
 
 void FWowFrameManager::SetButtonEnabled(int64 Handle,bool Enabled)
 {
-    auto* Button=GetButtonWidget(Handle); if(!Button || Button->GetIsEnabled()==Enabled) return;
+    auto* Button=GetButtonWidget(Handle);
+    if(!Button) { if(auto* Slider=GetSliderWidget(Handle)) Slider->SetIsEnabled(Enabled); return; }
+    if(Button->GetIsEnabled()==Enabled) return;
     if(!Enabled) { auto& Visual=ButtonVisualStates.FindOrAdd(Handle); Visual.MousePressed=false; Visual.ForcedPressed=false; Visual.PressLocked=false; }
     Button->SetIsEnabled(Enabled); RefreshButtonVisuals(Handle);
     if(EventSystem) EventSystem->RunFrameScript(Handle,Enabled?TEXT("OnEnable"):TEXT("OnDisable"));

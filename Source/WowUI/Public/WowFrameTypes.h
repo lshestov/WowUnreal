@@ -52,6 +52,7 @@ struct FWowTextureElement
 	bool bVirtual=false;
 	bool bHasTexCoords=false;
 	bool bAdditive = false;
+    bool bSliderThumb=false;
 	FString Name;
 	FString ParentKey;
 	FString File;
@@ -186,6 +187,8 @@ struct WOWUI_API FWowFrameDef
 	FString NormalTextureName, PushedTextureName, HighlightTextureName, DisabledTextureName;
 	FString NormalTextureParentKey, PushedTextureParentKey, HighlightTextureParentKey, DisabledTextureParentKey;
 	float MinValue = 0.f, MaxValue = 100.f, DefaultValue = 0.f;
+    float ValueStep=.001f;
+    uint8 SliderProperties=0; // Explicit XML min/max/default/step attributes.
 	FString Orientation; // HORIZONTAL, VERTICAL (for Slider/StatusBar)
 };
 

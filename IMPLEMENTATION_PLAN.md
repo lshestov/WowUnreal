@@ -279,7 +279,11 @@ build, automation, native autologin and rendered screenshot verification):
     these panels. Verified 75 tests and native learning/preview/reset/confirm;
     29-step learning run plus 22-step final run verify original panels, last tier,
     tooltips and restored zero talents/11 free points. Nine rendered screenshots.
-  - [ ] Complete slider thumb rendering/input and shared texture desaturation.
+  - [x] Slider thumb rendering/input: original vertical direction, XML range,
+    default and step inheritance, exact numeric callbacks, native pointer drag,
+    disabled input and editable/replaced/removed thumb regions. Verified 76 tests,
+    targeted regressions and 46 native steps/10 screenshots at 720p and 1080p.
+  - [ ] Shared texture desaturation and arbitrary UV coordinates for class panels.
   - [ ] Glyph metadata/socket APIs, targeting/application/removal and original panel.
   - [ ] Live spell-rank replacement and complete class-window regression.
 - [ ] 4. Inventory: split/delete, compare/try-on, merchant/bank/mail/trade round trips.

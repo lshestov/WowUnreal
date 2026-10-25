@@ -315,6 +315,7 @@ void FWowFrameManager::RefreshLayout()
     for (const auto Handle : Handles)
         if (const auto* Entry = Frames.Find(Handle); Entry && Entry->Widget.IsValid())
             ApplyAnchors(Entry->Widget.Get(), Entry->Def);
+    for(const auto& Slider:SliderWidgets) UpdateSliderThumb(Slider.Key);
     for (const auto& Region : RegionLayouts)
     {
         if(const auto* OwnerDef=GetFrameDef(FindFrame(Region.Owner)); OwnerDef && OwnerDef->Type==EWowFrameType::GameTooltip) continue;

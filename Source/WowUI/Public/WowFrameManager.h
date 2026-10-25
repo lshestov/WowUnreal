@@ -194,6 +194,13 @@ public:
 	USlider* GetSliderWidget(int64 Handle) const;
 	/** Set a Lua-driven value without re-emitting it from native input polling. */
 	void SetSliderValue(int64 Handle, float Value);
+    float GetSliderValue(int64 Handle) const;
+    void SetSliderRange(int64 Handle,float Minimum,float Maximum);
+    void SetSliderStep(int64 Handle,float Step);
+    void SetSliderOrientation(int64 Handle,bool Vertical);
+    FString EnsureSliderThumb(int64 Handle);
+    TMap<int64,FString> SliderThumbRegions;
+    void UpdateSliderThumb(int64 Handle);
 
 	/** Get the primary text widget associated with a frame (button label, etc.) */
 	UTextBlock* GetPrimaryTextWidget(int64 Handle) const;
@@ -309,6 +316,8 @@ private:
 	FVector2D LastPointerPosition=FVector2D::ZeroVector;
 	int64 MovingFrame=-1;
 	int64 DraggingFrame=-1;
+    int64 DraggingSlider=-1;
+    void UpdateSliderPointer();
 	FString SizingPoint;
 	FVector2D MovePointerOrigin;
 	FVector4 MoveRect;

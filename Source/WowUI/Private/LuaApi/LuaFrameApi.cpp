@@ -2167,9 +2167,7 @@ static int LF_SetMinMaxValues(lua_State* L)
 		int64 Handle = GetFrameHandle(L);
 		if (USlider* Slider = Ctx->FrameManager->GetSliderWidget(Handle))
 		{
-			Slider->SetMinValue(MinValue);
-			Slider->SetMaxValue(FMath::Max(MinValue, MaxValue));
-			Slider->SetValue(FMath::Clamp(Slider->GetValue(), MinValue, FMath::Max(MinValue, MaxValue)));
+            Ctx->FrameManager->SetSliderRange(Handle,MinValue,MaxValue);
 		}
 		UProgressBar* ProgressBar = Ctx->FrameManager->GetStatusBarWidget(Handle);
 		if (ProgressBar)
@@ -2190,6 +2188,7 @@ static int LF_SetMinMaxValues(lua_State* L)
 
 static int LF_GetMinMaxValues(lua_State* L)
 {
+    if(auto* C=WowLuaApi::GetContext(L); C && C->FrameManager) if(const auto* Slider=C->FrameManager->GetSliderWidget(GetFrameHandle(L))) { lua_pushnumber(L,Slider->GetMinValue()); lua_pushnumber(L,Slider->GetMaxValue()); return 2; }
 	lua_getfield(L, 1, "__minValue");
 	if (lua_isnil(L, -1)) { lua_pop(L, 1); lua_pushnumber(L, 0); }
 	lua_getfield(L, 1, "__maxValue");
@@ -2206,7 +2205,8 @@ static int LF_SetValue(lua_State* L)
 	USlider* Slider = Ctx && Ctx->FrameManager ? Ctx->FrameManager->GetSliderWidget(Handle) : nullptr;
 	if (Slider) Value = FMath::Clamp(Value, Slider->GetMinValue(), Slider->GetMaxValue());
 	lua_getfield(L, 1, "__value");
-	const bool bChanged = Slider ? !FMath::IsNearlyEqual(Slider->GetValue(), Value) : !lua_isnumber(L, -1) || lua_tonumber(L, -1) != Value;
+	const float SliderBefore=Slider?Ctx->FrameManager->GetSliderValue(Handle):0;
+    bool bChanged = Slider ? !FMath::IsNearlyEqual(SliderBefore, Value) : !lua_isnumber(L, -1) || lua_tonumber(L, -1) != Value;
 	lua_pop(L, 1);
 
 	// Store in Lua table
@@ -2240,6 +2240,8 @@ static int LF_SetValue(lua_State* L)
 			// Keep native and Lua values in the same units. Polling a normalized
 			// thumb position as a WoW offset otherwise repeatedly divides it.
 			Ctx->FrameManager->SetSliderValue(Handle, Value);
+            Value=Ctx->FrameManager->GetSliderValue(Handle); bChanged=!FMath::IsNearlyEqual(SliderBefore,Value);
+            lua_pushnumber(L,Value); lua_setfield(L,1,"__value");
 		}
 	}
 	else
@@ -2248,7 +2250,7 @@ static int LF_SetValue(lua_State* L)
 	}
 	if (bChanged && Ctx && Ctx->EventSystem)
 	{
-		Ctx->EventSystem->RunFrameScript(Handle, TEXT("OnValueChanged"), {FString::SanitizeFloat(Value)});
+		Ctx->EventSystem->RunFrameScript(Handle, TEXT("OnValueChanged"), {FString::Printf(TEXT("%.17g"),double(Value))});
 	}
 
 	return 0;
@@ -2259,7 +2261,7 @@ static int LF_GetValue(lua_State* L)
 	if (auto* Ctx = WowLuaApi::GetContext(L); Ctx && Ctx->FrameManager)
 		if (auto* Slider = Ctx->FrameManager->GetSliderWidget(GetFrameHandle(L)))
 		{
-			lua_pushnumber(L, Slider->GetValue());
+			lua_pushnumber(L, Ctx->FrameManager->GetSliderValue(GetFrameHandle(L)));
 			return 1;
 		}
 	lua_getfield(L, 1, "__value");
@@ -2336,7 +2338,16 @@ static int LF_SetStatusBarColor(lua_State* L)
 
 	return 0;
 }
-static int LF_SetOrientation(lua_State* L) { return 0; }
+static int LF_SetOrientation(lua_State* L)
+{
+    const FString Orientation=UTF8_TO_TCHAR(luaL_checkstring(L,2)); const bool Vertical=Orientation.Equals(TEXT("VERTICAL"),ESearchCase::IgnoreCase);
+    if(auto* C=WowLuaApi::GetContext(L); C && C->FrameManager)
+    {
+        C->FrameManager->SetSliderOrientation(GetFrameHandle(L),Vertical);
+        if(auto* Bar=C->FrameManager->GetStatusBarWidget(GetFrameHandle(L))) Bar->SetBarFillType(Vertical?EProgressBarFillType::BottomToTop:EProgressBarFillType::LeftToRight);
+    }
+    return 0;
+}
 
 // EditBox methods
 static int LF_SetMaxLetters(lua_State* L)
@@ -3402,7 +3413,33 @@ static const luaL_Reg FrameMethods[] =
 	{"SetEdgeTexture", [](lua_State* L) -> int { return 0; }},
 
 	// Slider
-	{"SetValueStep", [](lua_State* L) -> int { return 0; }},
+	{"SetValueStep", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->SetSliderStep(GetFrameHandle(L),luaL_checknumber(L,2)); return 0; }},
+    {"GetValueStep", [](lua_State* L) -> int { const auto* C=WowLuaApi::GetContext(L); const auto* D=C && C->FrameManager?C->FrameManager->GetFrameDef(GetFrameHandle(L)):nullptr; lua_pushnumber(L,D?D->ValueStep:0); return 1; }},
+    {"GetOrientation", [](lua_State* L) -> int { const auto* C=WowLuaApi::GetContext(L); const auto* D=C && C->FrameManager?C->FrameManager->GetFrameDef(GetFrameHandle(L)):nullptr; lua_pushstring(L,D && D->Orientation==TEXT("VERTICAL")?"VERTICAL":"HORIZONTAL"); return 1; }},
+    {"GetThumbTexture", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); const FString Name=C && C->FrameManager?C->FrameManager->SliderThumbRegions.FindRef(GetFrameHandle(L)):FString(); if(Name.IsEmpty()) lua_pushnil(L); else lua_getglobal(L,TCHAR_TO_UTF8(*Name)); return 1; }},
+    {"SetThumbTexture", [](lua_State* L) -> int {
+        auto* C=WowLuaApi::GetContext(L); if(!C || !C->FrameManager) return 0; auto* Frames=C->FrameManager;
+        const int64 Handle=GetFrameHandle(L); if(!Frames->GetSliderWidget(Handle)) return 0;
+        const FString Before=Frames->SliderThumbRegions.FindRef(Handle);
+        if(lua_isnoneornil(L,2))
+        {
+            if(auto* Old=Frames->GetNamedTexture(Before)) Old->SetVisibility(ESlateVisibility::Collapsed);
+            Frames->SliderThumbRegions.Remove(Handle); Frames->GetSliderWidget(Handle)->SetLocked(true); return 0;
+        }
+        if(lua_istable(L,2))
+        {
+            lua_getfield(L,2,"__name"); const FString Name=lua_isstring(L,-1)?UTF8_TO_TCHAR(lua_tostring(L,-1)):TEXT(""); lua_pop(L,1);
+            if(!GetTextureImage(L,2) || !Frames->ReparentRegion(Name,Handle)) return luaL_error(L,"SetThumbTexture expects a texture region");
+            if(Before!=Name) if(auto* Old=Frames->GetNamedTexture(Before)) Old->SetVisibility(ESlateVisibility::Collapsed);
+            Frames->SliderThumbRegions.Add(Handle,Name); Frames->GetNamedTexture(Name)->SetVisibility(ESlateVisibility::HitTestInvisible);
+            lua_pushinteger(L,Handle); lua_setfield(L,2,"__parentHandle");
+        }
+        else
+        {
+            const FString Name=Frames->EnsureSliderThumb(Handle); lua_getglobal(L,TCHAR_TO_UTF8(*Name)); lua_replace(L,1); LF_TextureSetTexture(L);
+        }
+        Frames->UpdateSliderThumb(Handle); return 0;
+    }},
 	{"SetObeyStepOnDrag", [](lua_State* L) -> int { return 0; }},
 
 	// Texture access (region globals use frame metatable)
