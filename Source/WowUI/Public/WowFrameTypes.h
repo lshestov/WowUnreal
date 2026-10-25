@@ -48,6 +48,9 @@ struct FWowAnchor
 /** A texture element within a layer */
 struct FWowTextureElement
 {
+	FString Inherits;
+	bool bVirtual=false;
+	bool bHasTexCoords=false;
 	bool bAdditive = false;
 	FString Name;
 	FString ParentKey;
@@ -169,6 +172,7 @@ struct WOWUI_API FWowFrameDef
 
 	// Type-specific properties
 	FString ButtonText;
+	FString NormalFont,HighlightFont,DisabledFont;
 	bool bMultiLine=false;
 	int32 EditBoxLetters=0;
 	TMap<FString, FWowTextureElement> ButtonTextureRegions;
@@ -183,11 +187,13 @@ struct WOWUI_API FWowFrameDef
 /** Directive from XML parsing */
 struct FWowXmlDirective
 {
-	enum class EType { Frame, Include, Script, Font };
+	enum class EType { Frame, Include, Script, Font, Texture };
 	EType Type;
 
 	// For Frame
 	FWowFrameDef FrameDef;
+	FWowTextureElement TextureDef;
+	FString TextureParent;
 
 	// For Include/Script
 	FString FilePath;

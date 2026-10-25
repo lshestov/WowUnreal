@@ -7,6 +7,44 @@
 #include "Engine/Texture2D.h"
 #include "Materials/MaterialInstanceDynamic.h"
 
+FWowTextureElement FWowFrameManager::ResolveTexture(const FWowTextureElement& Texture,int32 Depth) const
+{
+    FWowTextureElement Result=Texture;
+    if(Depth>=16) return Result;
+    TArray<FString> Names; Texture.Inherits.ParseIntoArray(Names,TEXT(","),true);
+    for(auto Name:Names)
+    {
+        Name.TrimStartAndEndInline(); const auto* Source=TextureTemplates.Find(Name); if(!Source) continue;
+        const auto Base=ResolveTexture(*Source,Depth+1);
+        if(Result.File.IsEmpty()) Result.File=Base.File;
+        if(Result.Width<=0) Result.Width=Base.Width; if(Result.Height<=0) Result.Height=Base.Height;
+        if(Result.Anchors.IsEmpty()) Result.Anchors=Base.Anchors;
+        if(!Result.bHasTexCoords && (Result.Left==0 && Result.Right==1 && Result.Top==0 && Result.Bottom==1))
+        {
+            Result.Left=Base.Left; Result.Right=Base.Right; Result.Top=Base.Top; Result.Bottom=Base.Bottom; Result.bHasTexCoords=Base.bHasTexCoords;
+        }
+        Result.bAdditive|=Base.bAdditive; Result.bSetAllPoints|=Base.bSetAllPoints;
+    }
+    Result.Inherits.Empty(); return Result;
+}
+void FWowFrameManager::LoadTextureDefinition(const FWowTextureElement& Texture,const FString& Parent)
+{
+    if(Texture.bVirtual) { TextureTemplates.Add(Texture.Name,Texture); return; }
+    const FString Owner=Parent.IsEmpty()?TEXT("UIParent"):Parent; const int64 Handle=FindFrame(Owner);
+    auto* Canvas=Cast<UCanvasPanel>(GetWidgetForHandle(Handle)); if(!Canvas && Owner==TEXT("UIParent")) Canvas=RootCanvas.Get();
+    if(!Canvas) return;
+    FWowFrameDef Definition; Definition.Name=Owner; FWowLayer Layer; Layer.Textures.Add(Texture); Definition.Layers.Add(Layer);
+    CreateLayerContent(Canvas,Definition,Handle);
+}
+void FWowFrameManager::SetButtonFont(int64 Handle,const FString& State,const FString& Font)
+{
+    auto* Entry=Frames.Find(Handle); if(!Entry) return;
+    if(State==TEXT("Normal")) Entry->Def.NormalFont=Font;
+    if(State==TEXT("Highlight")) Entry->Def.HighlightFont=Font;
+    if(State==TEXT("Disabled")) Entry->Def.DisabledFont=Font;
+    ButtonVisualStates.FindOrAdd(Handle).AppliedFont.Empty(); RefreshButtonVisuals(Handle);
+}
+
 FString FWowFrameManager::EnsureButtonTexture(int64 Handle,const FString& State)
 {
     const auto* Entry=Frames.Find(Handle);
@@ -49,7 +87,7 @@ FString FWowFrameManager::GetButtonState(int64 Handle) const
 
 void FWowFrameManager::RefreshButtonVisuals(int64 Handle)
 {
-    const auto* Visual=ButtonVisualStates.Find(Handle); if(!Visual) return;
+    auto* Visual=ButtonVisualStates.Find(Handle); if(!Visual) return;
     const FString State=GetButtonState(Handle);
     const bool Pressed=State==TEXT("PUSHED"),Disabled=State==TEXT("DISABLED");
     const auto HasResource=[&](const FString& Key) { const auto* Name=Visual->Regions.Find(Key); const auto* Image=Name?GetNamedTexture(*Name):nullptr; return Image && Image->GetBrush().DrawAs!=ESlateBrushDrawType::NoDrawType && Image->GetRenderOpacity()>0; };
@@ -65,6 +103,17 @@ void FWowFrameManager::RefreshButtonVisuals(int64 Handle)
                 auto Brush=Image->GetBrush(); Brush.SetResourceObject(Material); Image->SetBrush(Brush);
             }
         Image->SetVisibility(Show && !ButtonRegionHidden.FindRef(Pair.Value)?ESlateVisibility::HitTestInvisible:ESlateVisibility::Collapsed);
+    }
+    if(const auto* Entry=Frames.Find(Handle); Entry && EventSystem)
+    {
+        FString Font=Disabled?Entry->Def.DisabledFont:(HoverFrameHandle==Handle || Visual->HighlightLocked)?Entry->Def.HighlightFont:Entry->Def.NormalFont;
+        if(Font.IsEmpty()) Font=Entry->Def.NormalFont;
+        if(!Font.IsEmpty() && Font!=Visual->AppliedFont)
+        {
+            Visual->AppliedFont=Font;
+            const FString TextName=GetNamedFontString(Entry->Def.Name+TEXT("Text"))?Entry->Def.Name+TEXT("Text"):Entry->Def.Name+TEXT("NormalText");
+            EventSystem->ApplyRegionFont(TextName,Font);
+        }
     }
 }
 

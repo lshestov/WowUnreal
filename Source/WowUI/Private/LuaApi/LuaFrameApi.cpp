@@ -2361,6 +2361,21 @@ static int LF_SetText(lua_State* L)
 	return 0;
 }
 
+static int ButtonFontObject(lua_State* L,const FString& State,bool Get)
+{
+    auto* C=WowLuaApi::GetContext(L); if(!C || !C->FrameManager) return 0;
+    if(Get)
+    {
+        const auto* Def=C->FrameManager->GetFrameDef(GetFrameHandle(L));
+        const FString Font=Def?(State==TEXT("Normal")?Def->NormalFont:State==TEXT("Highlight")?Def->HighlightFont:Def->DisabledFont):FString();
+        lua_getglobal(L,TCHAR_TO_UTF8(*Font)); return 1;
+    }
+    FString Font;
+    if(lua_isstring(L,2)) Font=UTF8_TO_TCHAR(lua_tostring(L,2));
+    else if(lua_istable(L,2)) { lua_getfield(L,2,"__name"); Font=UTF8_TO_TCHAR(luaL_optstring(L,-1,"")); lua_pop(L,1); }
+    C->FrameManager->SetButtonFont(GetFrameHandle(L),State,Font); return 0;
+}
+
 static int LF_GetText(lua_State* L)
 {
 	if(auto* Edit=GetMultiLineEditor(L)) { const FString Text=Edit->LuaText(); lua_pushstring(L,TCHAR_TO_UTF8(*Text)); return 1; }
@@ -3426,9 +3441,12 @@ static const luaL_Reg FrameMethods[] =
 	}},
 	{"SetChecked", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->SetChecked(GetFrameHandle(L),lua_toboolean(L,2)!=0 && (!lua_isnumber(L,2) || lua_tonumber(L,2)!=0)); return 0; }},
 	{"GetChecked", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); lua_pushboolean(L,C && C->FrameManager && C->FrameManager->GetChecked(GetFrameHandle(L))); return 1; }},
-	{"SetNormalFontObject", [](lua_State* L) -> int { return 0; }},
-	{"SetHighlightFontObject", [](lua_State* L) -> int { return 0; }},
-	{"SetDisabledFontObject", [](lua_State* L) -> int { return 0; }},
+	{"SetNormalFontObject", [](lua_State* L) -> int { return ButtonFontObject(L,TEXT("Normal"),false); }},
+    {"GetNormalFontObject", [](lua_State* L) -> int { return ButtonFontObject(L,TEXT("Normal"),true); }},
+	{"SetHighlightFontObject", [](lua_State* L) -> int { return ButtonFontObject(L,TEXT("Highlight"),false); }},
+    {"GetHighlightFontObject", [](lua_State* L) -> int { return ButtonFontObject(L,TEXT("Highlight"),true); }},
+	{"SetDisabledFontObject", [](lua_State* L) -> int { return ButtonFontObject(L,TEXT("Disabled"),false); }},
+    {"GetDisabledFontObject", [](lua_State* L) -> int { return ButtonFontObject(L,TEXT("Disabled"),true); }},
 	{"LockHighlight", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->LockButtonHighlight(GetFrameHandle(L),true); return 0; }},
 	{"UnlockHighlight", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->LockButtonHighlight(GetFrameHandle(L),false); return 0; }},
 	{"GetNormalTexture", [](lua_State* L) -> int { return PushButtonTexture(L,TEXT("Normal")); }},

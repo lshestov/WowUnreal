@@ -249,6 +249,9 @@ build, automation, native autologin and rendered screenshot verification):
   - [x] Shared backdrop renderer: XML dimensions/insets/colors, tiled backgrounds,
     complete border atlas, runtime replacement/clear/color APIs. Verified 65 tests
     and native original options/menu plus resized/scaled/colorized frames.
+  - [x] Stock button texture templates and inherited font styles; normal,
+    highlighted and disabled captions. Verified 66 tests and native menu,
+    macro panel, hover/click and disabled-button screenshots.
 - [ ] 2. Control behavior: movement/clamping, text alignment, region APIs and button states.
 - [ ] 3. Spellbook/class windows: hidden spells, ranks/tabs, talents, glyphs and specializations.
 - [ ] 4. Inventory: split/delete, compare/try-on, merchant/bank/mail/trade round trips.

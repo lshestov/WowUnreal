@@ -14,6 +14,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogWowXml, Log, All);
 
 static bool IsFrameTypeTag(const FString& Tag);
 static FWowFrameDef ParseFrameNode(const FXmlNode* Node);
+static FWowTextureElement ParseTextureNode(const FXmlNode* Node);
 
 namespace
 {
@@ -191,6 +192,10 @@ TArray<FWowXmlDirective> ParseXmlWithFXmlFallback(const FString& XmlContent, con
 			Dir.FrameDef = ParseFrameNode(Child);
 			Directives.Add(MoveTemp(Dir));
 		}
+        else if(Tag.Equals(TEXT("Texture"),ESearchCase::IgnoreCase))
+        {
+            FWowXmlDirective Dir; Dir.Type=FWowXmlDirective::EType::Texture; Dir.TextureDef=ParseTextureNode(Child); Dir.TextureParent=Child->GetAttribute(TEXT("parent")); Directives.Add(MoveTemp(Dir));
+        }
 		else if (Tag.Equals(TEXT("Include"), ESearchCase::IgnoreCase))
 		{
 			FWowXmlDirective Dir;
@@ -442,6 +447,7 @@ static FWowTextureElement ParseTextureNode(const FXmlNode* Node)
 {
 	FWowTextureElement Tex;
 	Tex.Name = Node->GetAttribute(TEXT("name"));
+    Tex.Inherits=Node->GetAttribute(TEXT("inherits")); Tex.bVirtual=Node->GetAttribute(TEXT("virtual")).Equals(TEXT("true"),ESearchCase::IgnoreCase);
 	Tex.ParentKey = Node->GetAttribute(TEXT("parentKey"));
 	Tex.File = Node->GetAttribute(TEXT("file"));
 	Tex.bAdditive=Node->GetAttribute(TEXT("alphaMode")).Equals(TEXT("ADD"),ESearchCase::IgnoreCase);
@@ -458,6 +464,7 @@ static FWowTextureElement ParseTextureNode(const FXmlNode* Node)
 	const FXmlNode* TexCoords = Node->FindChildNode(TEXT("TexCoords"));
 	if (TexCoords)
 	{
+        Tex.bHasTexCoords=true;
 		FString L = TexCoords->GetAttribute(TEXT("left"));
 		FString R = TexCoords->GetAttribute(TEXT("right"));
 		FString T = TexCoords->GetAttribute(TEXT("top"));
@@ -713,6 +720,7 @@ static bool IsFrameTypeTag(const FString& Tag)
 // ─── Forward declare ───────────────────────────────────────────────────────────
 
 static FWowFrameDef ParseFrameNode(const FXmlNode* Node);
+static FWowTextureElement ParseTextureNode(const FXmlNode* Node);
 
 #if HAS_PUGIXML
 static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
@@ -816,6 +824,7 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 					{
 						FWowTextureElement T;
 						T.Name = UTF8_TO_TCHAR(Tex.attribute("name").as_string());
+                        T.Inherits=UTF8_TO_TCHAR(Tex.attribute("inherits").as_string()); T.bVirtual=Tex.attribute("virtual").as_bool(false);
 						T.ParentKey = UTF8_TO_TCHAR(Tex.attribute("parentKey").as_string());
 						T.File = UTF8_TO_TCHAR(Tex.attribute("file").as_string());
 						T.bAdditive=FString(UTF8_TO_TCHAR(Tex.attribute("alphaMode").as_string())).Equals(TEXT("ADD"),ESearchCase::IgnoreCase);
@@ -880,7 +889,8 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 						pugi::xml_node TexCoords = Tex.child("TexCoords");
 						if (TexCoords)
 						{
-							T.Left = TexCoords.attribute("left").as_float(0.0f);
+							T.bHasTexCoords=true;
+                            T.Left = TexCoords.attribute("left").as_float(0.0f);
 							T.Right = TexCoords.attribute("right").as_float(1.0f);
 							T.Top = TexCoords.attribute("top").as_float(0.0f);
 							T.Bottom = TexCoords.attribute("bottom").as_float(1.0f);
@@ -1127,6 +1137,11 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 
 			InlineTextures.Add(MoveTemp(ThumbTexture));
 		}
+		else if(Tag==TEXT("NormalFont") || Tag==TEXT("HighlightFont") || Tag==TEXT("DisabledFont"))
+        {
+            const FString Font=UTF8_TO_TCHAR(Child.attribute("style").as_string());
+            if(Tag==TEXT("NormalFont")) Def.NormalFont=Font; else if(Tag==TEXT("HighlightFont")) Def.HighlightFont=Font; else Def.DisabledFont=Font;
+        }
 		else if (Tag == TEXT("ButtonText"))
 		{
 			pugi::xml_node FS = Child.child("FontString");
@@ -1267,6 +1282,11 @@ static FWowFrameDef ParseFrameNode(const FXmlNode* Node)
 				}
 			}
 		}
+		else if(Tag==TEXT("NormalFont") || Tag==TEXT("HighlightFont") || Tag==TEXT("DisabledFont"))
+        {
+            const FString Font=Child->GetAttribute(TEXT("style"));
+            if(Tag==TEXT("NormalFont")) Def.NormalFont=Font; else if(Tag==TEXT("HighlightFont")) Def.HighlightFont=Font; else Def.DisabledFont=Font;
+        }
 		else if (Tag.Equals(TEXT("ButtonText"), ESearchCase::IgnoreCase))
 		{
 			// ButtonText can have a FontString child or just text content
@@ -1423,6 +1443,15 @@ TArray<FWowXmlDirective> FWowFrameXmlParser::ParseXml(const TArray<uint8>& Data,
 				Directives.Add(Dir);
 			}
 		}
+        else if(TagName==TEXT("Texture"))
+        {
+            pugi::xml_document D; auto Frame=D.append_child("Frame"); Frame.append_child("Layers").append_child("Layer").append_copy(Child);
+            const auto Parsed=ParseFrameNode_Pugi(Frame);
+            if(Parsed.Layers.Num() && Parsed.Layers[0].Textures.Num())
+            {
+                FWowXmlDirective Dir; Dir.Type=FWowXmlDirective::EType::Texture; Dir.TextureDef=Parsed.Layers[0].Textures[0]; Dir.TextureParent=UTF8_TO_TCHAR(Child.attribute("parent").as_string()); Directives.Add(MoveTemp(Dir));
+            }
+        }
 		else if (TagName == TEXT("Font"))
 		{
 			FWowXmlDirective Dir;

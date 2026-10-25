@@ -378,6 +378,31 @@ bool FHudBackdrop::RunTest(const FString&)
     TestTrue(TEXT("Tiny addon tile sizes have bounded geometry"),UWowBackdropWidget::BuildQuads(D,FVector2f(100000,100000),1).Num()<4500);
     return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudTextureTemplates,"WowUnreal.Hud.StockButtonTemplates",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudTextureTemplates::RunTest(const FString&)
+{
+    FString DataPath; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),DataPath)) return false;
+    FMpqManager Mpq; if(!Mpq.Initialize(DataPath)) return false;
+    FHudFixture F; F.Frames.SetMpqManager(&Mpq); FWowAssetCache Cache; F.Frames.SetAssetCache(&Cache);
+    TestTrue(TEXT("Create font objects for stock button states"),F.Lua.ExecuteString(TEXT("GameFontNormal=CreateFont('GameFontNormal'); GameFontNormal:SetTextColor(1,.8,0); GameFontHighlight=CreateFont('GameFontHighlight'); GameFontHighlight:SetTextColor(1,1,1); GameFontDisable=CreateFont('GameFontDisable'); GameFontDisable:SetTextColor(.5,.5,.5)")));
+    TArray<uint8> Bytes; if(!Mpq.ReadFile(TEXT("Interface\\FrameXML\\UIPanelTemplates.xml"),Bytes)) return false;
+    for(const auto& Directive:FWowFrameXmlParser::ParseXml(Bytes,TEXT("OriginalButtonTemplates")))
+    {
+        if(Directive.Type==FWowXmlDirective::EType::Texture) F.Frames.LoadTextureDefinition(Directive.TextureDef,Directive.TextureParent);
+        if(Directive.Type==FWowXmlDirective::EType::Frame && Directive.FrameDef.bVirtual) F.Frames.CreateFrame(Directive.FrameDef);
+    }
+    TestTrue(TEXT("Instantiate original game-menu button"),F.Lua.ExecuteString(TEXT("SkinButton=CreateFrame('Button','SkinButton',UIParent,'GameMenuButtonTemplate'); SkinButton:SetPoint('CENTER',UIParent,'CENTER',0,0); SkinButton:SetText('Stock button')")));
+    const auto Handle=F.Frames.FindFrame(TEXT("SkinButton"));
+    const auto* Normal=F.Frames.GetNamedTexture(F.Frames.EnsureButtonTexture(Handle,TEXT("Normal")));
+    TestTrue(TEXT("Inherited texture resource loads from MPQ"),Normal && Normal->GetBrush().GetResourceObject());
+    if(Normal) { const FBox2f UV=Normal->GetBrush().GetUVRegion(); TestTrue(TEXT("Inherited atlas crop retained"),UV.bIsValid && FMath::IsNearlyEqual(UV.Max.X,.625f) && FMath::IsNearlyEqual(UV.Max.Y,.6875f)); }
+    TestTrue(TEXT("Font getters use inherited stock styles"),F.Lua.ExecuteString(TEXT("assert(SkinButton:GetNormalFontObject()==GameFontHighlight); SkinButton:SetDisabledFontObject(GameFontDisable); SkinButton:Disable()")));
+    const auto* Text=F.Frames.GetPrimaryTextWidget(Handle);
+    TestTrue(TEXT("Disabled caption receives the disabled font color"),Text && FMath::IsNearlyEqual(Text->GetColorAndOpacity().GetSpecifiedColor().R,.5f));
+    TestTrue(TEXT("Normal font can change through original Lua API"),F.Lua.ExecuteString(TEXT("SkinButton:Enable(); SkinButton:SetNormalFontObject(GameFontNormal); assert(SkinButton:GetNormalFontObject()==GameFontNormal)")));
+    TestTrue(TEXT("Updated normal caption color is visible"),Text && FMath::IsNearlyEqual(Text->GetColorAndOpacity().GetSpecifiedColor().G,.8f));
+    return true;
+}
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudInventoryItems,"WowUnreal.Hud.InventoryItems",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FHudInventoryItems::RunTest(const FString&)
 {

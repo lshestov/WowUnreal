@@ -148,6 +148,8 @@ public:
 	void SetFrameBackdropColor(int64 Handle,const FLinearColor& Color);
 	void SetFrameBackdropBorderColor(int64 Handle,const FLinearColor& Color);
 	void SetFrameBackdrop(int64 Handle,const TOptional<FWowBackdrop>& Backdrop);
+	void LoadTextureDefinition(const FWowTextureElement& Texture,const FString& Parent);
+	void SetButtonFont(int64 Handle,const FString& State,const FString& Font);
 
 	/** Set frame strata and level */
 	void SetFrameStrata(int64 Handle, EWowFrameStrata Strata);
@@ -324,6 +326,8 @@ private:
 	TMap<int64, FFrameEntry> Frames;
 	TMap<FString, int64> NameToHandle;
 	TMap<FString, FWowFrameDef> Templates;
+	TMap<FString,FWowTextureElement> TextureTemplates;
+	FWowTextureElement ResolveTexture(const FWowTextureElement& Texture,int32 Depth=0) const;
 
 	/** Tooltip state storage */
 	TMap<int64, FTooltipState> TooltipStates;
@@ -359,6 +363,7 @@ private:
 	struct FButtonVisualState
 	{
 		TMap<FString,FString> Regions;
+		FString AppliedFont;
 		bool MousePressed=false, ForcedPressed=false, PressLocked=false, HighlightLocked=false;
 	};
 	TMap<int64,FButtonVisualState> ButtonVisualStates;

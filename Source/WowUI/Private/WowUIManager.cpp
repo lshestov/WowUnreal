@@ -256,7 +256,10 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 		case FWowXmlDirective::EType::Include:
 			// LoadFrameXml now expands includes recursively; keep this as a no-op guard.
 			break;
-		case FWowXmlDirective::EType::Font:
+		case FWowXmlDirective::EType::Texture:
+            if(FrameManager) FrameManager->LoadTextureDefinition(Dir.TextureDef,Dir.TextureParent);
+            break;
+        case FWowXmlDirective::EType::Font:
 		{
 			if (FontManager && !Dir.FontName.IsEmpty())
 			{

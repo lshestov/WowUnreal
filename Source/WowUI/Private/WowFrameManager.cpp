@@ -677,6 +677,9 @@ void FWowFrameManager::MergeTemplate(FWowFrameDef& Target, const FWowFrameDef& T
 
 	// Type-specific properties — use template values if target is empty
 	if (Target.ButtonText.IsEmpty()) Target.ButtonText = Template.ButtonText;
+    if(Target.NormalFont.IsEmpty()) Target.NormalFont=Template.NormalFont;
+    if(Target.HighlightFont.IsEmpty()) Target.HighlightFont=Template.HighlightFont;
+    if(Target.DisabledFont.IsEmpty()) Target.DisabledFont=Template.DisabledFont;
 	Target.bMultiLine|=Template.bMultiLine;
 	if(!Target.EditBoxLetters) Target.EditBoxLetters=Template.EditBoxLetters;
 	for(const auto& Pair:Template.ButtonTextureRegions) if(!Target.ButtonTextureRegions.Contains(Pair.Key)) Target.ButtonTextureRegions.Add(Pair.Key,Pair.Value);
@@ -807,8 +810,9 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 		int32 ZOrder = static_cast<int32>(Layer.Level) * 100;
 
 		// Create UImage widgets for textures
-		for (const FWowTextureElement& Tex : Layer.Textures)
+		for (const FWowTextureElement& SourceTexture : Layer.Textures)
 		{
+            const FWowTextureElement Tex=ResolveTexture(SourceTexture);
 			UImage* ImgWidget = NewObject<UImage>(Outer);
 			// Start with transparent brush — prevents default UE white/grey square
 			// from showing before the BLP texture is loaded (or for empty textures).

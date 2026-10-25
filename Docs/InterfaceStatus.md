@@ -59,6 +59,9 @@ original markup for category identity and script comparisons.
 Native backdrops render tiled backgrounds, all eight border pieces, XML
 insets/dimensions/colors and runtime SetBackdrop/clear/color changes. Geometry
 is batched by texture and bounded for addon-supplied tiny tile sizes.
+Virtual texture definitions and their inheritance supply the original panel
+button skins and atlas crops. XML and Lua button font objects control normal,
+highlighted and disabled captions.
 
 ## Verification
 
@@ -66,7 +69,7 @@ The Windows Editor and packaged Development client are built from the same
 source tree. `WowUnreal.Hud`, `WowUnreal.UI`, `WowUnreal.Gameplay` and the related
 player, collision, equipment, lighting, rendering, traversal and performance
 suites cover both isolated controls and live protocol state. The interface
-regression set contains 65 tests. Existing optional character texture-layout
+regression set contains 66 tests. Existing optional character texture-layout
 DBC and test-fixture size warnings remain.
 
 Native gameplay probes exercise live server state and rendered UI at 1280x720

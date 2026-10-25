@@ -184,7 +184,10 @@ bool ProcessXmlDirectivesRecursive(
 			}
 			break;
 
-		case FWowXmlDirective::EType::Font:
+		case FWowXmlDirective::EType::Texture:
+            if(FrameManager) FrameManager->LoadTextureDefinition(Dir.TextureDef,Dir.TextureParent);
+            break;
+        case FWowXmlDirective::EType::Font:
 			UE_LOG(LogWowAddon, Verbose, TEXT("  Font directive discovered in addon XML: %s"), *Dir.FontName);
 			break;
 		}
