@@ -45,6 +45,10 @@ regions. XML dimensions, anchors and UVs are retained, and custom mouse routing
 updates their state. Micro-menu icons and panel clicks are verified natively.
 CreateFrame recognizes Blizzard's uppercase type names. The uiScale CVar
 reports the actual positive viewport scale, preventing invalid chat anchors.
+Frame visibility follows the original FrameXML, including hidden intermediate
+ancestors, explicit XML visibility overrides and action-bar grid options.
+Bootstrap and layout refresh no longer force named buttons or flash textures
+into a different state. See [stock interface references](StockInterfaceReference.md).
 
 ## Verification
 
@@ -52,7 +56,7 @@ The Windows Editor and packaged Development client are built from the same
 source tree. `WowUnreal.Hud`, `WowUnreal.UI`, `WowUnreal.Gameplay` and the related
 player, collision, equipment, lighting, rendering, traversal and performance
 suites cover both isolated controls and live protocol state. The interface
-regression set contains 62 tests. Existing optional character texture-layout
+regression set contains 63 tests. Existing optional character texture-layout
 DBC and test-fixture size warnings remain.
 
 Native gameplay probes exercise live server state and rendered UI at 1280x720

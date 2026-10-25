@@ -279,6 +279,41 @@ bool FHudLifecycle::RunTest(const FString&)
     TestTrue(TEXT("Named OnLoad initializes its own persistent frame object"),F.Lua.ExecuteString(TEXT("assert(InitializedFrame.initialized==true)")));
     return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudStockVisibility,"WowUnreal.Hud.StockFrameVisibility",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudStockVisibility::RunTest(const FString&)
+{
+    FHudFixture F;
+    TestTrue(TEXT("Construct stock-named frames and a hidden intermediate ancestor"),F.Lua.ExecuteString(TEXT(R"LUA(
+        VisibilityRoot=CreateFrame('Frame','VisibilityRoot',UIParent); VisibilityRoot:SetAllPoints(UIParent)
+        VisibilityBranch=CreateFrame('Frame','VisibilityBranch',VisibilityRoot); VisibilityBranch:SetAllPoints(VisibilityRoot)
+        VisibilityLeaf=CreateFrame('Button','VisibilityLeaf',VisibilityBranch); VisibilityLeaf:SetAllPoints(VisibilityBranch)
+        VisibilityBranch:Hide(); VisibilityRoot:Hide(); VisibilityRoot:Show()
+        VisibilityNewLeaf=CreateFrame('Button','VisibilityNewLeaf',VisibilityBranch); VisibilityNewLeaf:SetAllPoints(VisibilityBranch)
+        assert(VisibilityLeaf:IsShown() and not VisibilityLeaf:IsVisible())
+        ActionButton1=CreateFrame('CheckButton','ActionButton1',UIParent); ActionButton1:SetAllPoints(UIParent); ActionButton1:Hide()
+        BonusActionButton1=CreateFrame('CheckButton','BonusActionButton1',UIParent); BonusActionButton1:SetAllPoints(UIParent); BonusActionButton1:Hide()
+        ZoneTextFrame=CreateFrame('Frame','ZoneTextFrame',UIParent); ZoneTextFrame:SetAllPoints(UIParent)
+        TestFlash=ZoneTextFrame:CreateTexture('TestFlash'); TestFlash:SetAllPoints(ZoneTextFrame); TestFlash:Show()
+    )LUA")));
+    const auto Leaf=F.Frames.FindFrame(TEXT("VisibilityLeaf"));
+    TestTrue(TEXT("Creating and positioning a child respects its hidden parent"),F.Frames.GetWidgetForHandle(F.Frames.FindFrame(TEXT("VisibilityNewLeaf")))->GetVisibility()==ESlateVisibility::Collapsed);
+    TestTrue(TEXT("Showing a grandparent cannot reveal a hidden branch"),F.Frames.GetWidgetForHandle(Leaf)->GetVisibility()==ESlateVisibility::Collapsed);
+    F.Frames.RefreshLayout(); F.Frames.SyncChildVisibility();
+    TestTrue(TEXT("Layout and bootstrap preserve the hidden branch"),F.Frames.GetWidgetForHandle(Leaf)->GetVisibility()==ESlateVisibility::Collapsed);
+    TestTrue(TEXT("Stock names do not override FrameXML visibility"),F.Lua.ExecuteString(TEXT("assert(not ActionButton1:IsShown() and not BonusActionButton1:IsShown()); assert(ZoneTextFrame:IsShown() and TestFlash:IsShown())")));
+    TestTrue(TEXT("Native action widgets remain collapsed"),F.Frames.GetWidgetForHandle(F.Frames.FindFrame(TEXT("BonusActionButton1")))->GetVisibility()==ESlateVisibility::Collapsed);
+    TestTrue(TEXT("Showing the intermediate parent restores its shown descendants"),F.Lua.ExecuteString(TEXT("VisibilityBranch:Show(); assert(VisibilityLeaf:IsVisible())")));
+    TestTrue(TEXT("Native descendant is restored"),F.Frames.GetWidgetForHandle(Leaf)->GetVisibility()!=ESlateVisibility::Collapsed);
+
+    const char* Xml="<Ui><Frame name='HiddenTemplate' virtual='true' hidden='true'><Size x='40' y='40'/><Anchors><Anchor point='CENTER'/></Anchors></Frame><Frame name='ExplicitVisible' inherits='HiddenTemplate' hidden='false'/><Frame name='InheritedHidden' inherits='HiddenTemplate'/></Ui>";
+    TArray<uint8> Bytes; Bytes.Append(reinterpret_cast<const uint8*>(Xml),FCStringAnsi::Strlen(Xml));
+    const auto Parsed=FWowFrameXmlParser::ParseXml(Bytes,TEXT("StockVisibilityFixture"));
+    if(!TestEqual(TEXT("Visibility fixture parsed"),Parsed.Num(),3)) return false;
+    F.Frames.RegisterTemplate(Parsed[0].FrameDef.Name,Parsed[0].FrameDef);
+    F.Frames.CreateFrame(Parsed[1].FrameDef); F.Frames.CreateFrame(Parsed[2].FrameDef);
+    TestTrue(TEXT("Explicit XML visibility overrides a hidden template"),F.Lua.ExecuteString(TEXT("assert(ExplicitVisible:IsShown() and not InheritedHidden:IsShown())")));
+    return true;
+}
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudInventoryItems,"WowUnreal.Hud.InventoryItems",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FHudInventoryItems::RunTest(const FString&)
 {

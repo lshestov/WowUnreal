@@ -428,6 +428,7 @@ private:
 	FFrameRect CalculateFrameRect(const FWowFrameDef& Def);
 
 	UWidget* CreateWidgetForFrame(const FWowFrameDef& Def, int64 Handle, int64 ParentHandle = -1);
+	void UpdateFrameVisibility(int64 Handle);
 
 	/** Create layer content (textures and fontstrings) inside a frame's canvas */
 	void CreateLayerContent(UCanvasPanel* Container, const FWowFrameDef& Def, int64 OwnerHandle);

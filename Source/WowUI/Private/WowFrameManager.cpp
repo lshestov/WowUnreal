@@ -257,40 +257,7 @@ void FWowFrameManager::SetFrameVisible(int64 Handle, bool bVisible)
 	for(const int64 Child:Descendants) WasDrawn.Add(Child,IsFrameHierarchyShown(Child));
 	Entry->Def.bHidden = !bVisible;
 
-	if (Entry->Widget.IsValid())
-	{
-		if (bVisible && (Entry->Def.bSetAllPoints || !Entry->Def.Anchors.IsEmpty()))
-		{
-			Entry->Widget->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-		}
-		else
-		{
-			Entry->Widget->SetVisibility(ESlateVisibility::Collapsed);
-		}
-	}
-
-	// Propagate visibility recursively to ALL descendant frames
-	TArray<int64> ToPropagate;
-	ToPropagate.Add(Handle);
-	while (ToPropagate.Num() > 0)
-	{
-		int64 Current = ToPropagate.Pop();
-		for (auto& Pair : Frames)
-		{
-			if (Pair.Value.ParentHandle == Current && Pair.Value.Widget.IsValid())
-			{
-				if (!bVisible)
-				{
-					Pair.Value.Widget->SetVisibility(ESlateVisibility::Collapsed);
-				}
-				else if (!Pair.Value.Def.bHidden)
-				{
-					Pair.Value.Widget->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-				}
-				ToPropagate.Add(Pair.Key);
-			}
-		}
-	}
+	for(const int64 Child:Descendants) UpdateFrameVisibility(Child);
 	if(EventSystem) for(const int64 Child:Descendants)
 	{
 		const bool Drawn=IsFrameHierarchyShown(Child);
@@ -640,8 +607,11 @@ void FWowFrameManager::MergeTemplate(FWowFrameDef& Target, const FWowFrameDef& T
 	if (Target.FrameLevel == 0 && Template.FrameLevel != 0)
 		Target.FrameLevel = Template.FrameLevel;
 
-	// Hidden — template hidden overrides unless target explicitly sets visible
-	if (Template.bHidden && !Target.bHidden) Target.bHidden = Template.bHidden;
+	if (!Target.bHiddenSpecified && !Target.bHidden)
+	{
+		Target.bHidden = Template.bHidden;
+		Target.bHiddenSpecified = Template.bHiddenSpecified;
+	}
 	if (Target.ParentKey.IsEmpty()) Target.ParentKey = Template.ParentKey;
 
 	// EnableMouse / EnableKeyboard — inherit from template
@@ -1355,46 +1325,8 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 		}
 	}
 
-	// Frames that WoW's Lua hides at startup but aren't marked hidden="true" in XML.
-	// These are typically voice chat, quest info sub-frames, and other panels that
-	// are shown conditionally by scripts we haven't fully implemented.
-	static const TSet<FString> LuaHiddenFrames = {
-		TEXT("LoopbackVUMeter"),
-		TEXT("QuestInfoRequiredMoneyFrame"),
-		TEXT("QuestInfoRequiredMoneyDisplay"),
-		TEXT("WatchFrame"),  // Objectives tracker — shown by WatchFrame_Update Lua
-	};
-	bool bLuaHidden = LuaHiddenFrames.Contains(Def.Name);
-
-	// Frames that WoW's Lua SHOWS at startup (via OnLoad scripts) but our FrameXML
-	// scripts fail to execute. Force these visible so the UI is usable.
-	// ActionButton1-12, their icons, and micro buttons are key examples.
-	bool bForceVisible = false;
-	if (Def.bHidden && !bForceHidden && !bParentHidden)
-	{
-		// ActionButton1-12, MultiBarBottomLeftButton1-12, etc.
-		if (Def.Name.StartsWith(TEXT("ActionButton")) ||
-			Def.Name.StartsWith(TEXT("MultiBarBottomLeftButton")) ||
-			Def.Name.StartsWith(TEXT("MultiBarBottomRightButton")) ||
-			Def.Name.StartsWith(TEXT("MultiBarRightButton")) ||
-			Def.Name.StartsWith(TEXT("MultiBarLeftButton")))
-		{
-			bForceVisible = true;
-		}
-	}
-
-	if ((Def.bHidden && !bForceVisible) || bForceHidden || bParentHidden || bLuaHidden)
-	{
-		Widget->SetVisibility(ESlateVisibility::Collapsed);
-	}
-	else
-	{
-		// All frame containers use SelfHitTestInvisible — clicks pass through to the
-		// 3D world and are routed to Lua via our custom HitTestFrames() in the
-		// PlayerController.  EditBox and Slider children that need UMG interaction
-		// set their own visibility to Visible.
-		Widget->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-	}
+	Widget->SetVisibility(Def.bHidden || bForceHidden || bParentHidden
+        ? ESlateVisibility::Collapsed : ESlateVisibility::SelfHitTestInvisible);
 
 	// Add to parent canvas (may be root canvas or a parent frame's canvas)
 	UCanvasPanelSlot* Slot = ParentCanvas->AddChildToCanvas(Widget);
@@ -1670,6 +1602,7 @@ int64 FWowFrameManager::CreateFrame(const FWowFrameDef& Def)
 	}
 
 	// Register frame as Lua global FIRST (so children and scripts can find it)
+	UpdateFrameVisibility(Handle);
 	if (EventSystem && !Resolved.Name.IsEmpty())
 	{
 		EventSystem->CreateFrameObject(Handle, Resolved.Name, Resolved.FrameID);
@@ -1864,148 +1797,29 @@ int64 FWowFrameManager::CreateDebugFrame(const FString& Name, float Width, float
 	return Handle;
 }
 
+void FWowFrameManager::UpdateFrameVisibility(int64 Handle)
+{
+    auto* Entry=Frames.Find(Handle);
+    if(!Entry || !Entry->Widget.IsValid()) return;
+    bool Visible=IsFrameHierarchyShown(Handle);
+    // Unpositioned frames and unresolved parents cannot be drawn. Walk the
+    // definitions rather than cached native visibility, which may be stale.
+    int32 Depth=0;
+    for(int64 Ancestor=Handle;Visible && Ancestor>=0 && Depth++<64;Ancestor=GetParentHandle(Ancestor))
+    {
+        const auto* Parent=Frames.Find(Ancestor);
+        if(!Parent) break;
+        if(!Parent->Def.bVirtual && !Parent->Def.bSetAllPoints && Parent->Def.Anchors.IsEmpty()) Visible=false;
+        if(!Parent->Def.Parent.IsEmpty() && Parent->ParentHandle<0) Visible=false;
+    }
+    Entry->Widget->SetVisibility(Visible ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+}
+
 void FWowFrameManager::SyncChildVisibility()
 {
-	// After all OnLoad scripts fire, some parents got hidden but their children
-	// were already created visible. Walk the tree and hide children of hidden ancestors.
-	int32 HiddenCount = 0;
-	for (auto& Pair : Frames)
-	{
-		if (!Pair.Value.Widget.IsValid()) continue;
-		if (Pair.Value.Def.bHidden) continue; // Already hidden by itself
-
-		// Walk parent chain
-		int64 CheckHandle = Pair.Value.ParentHandle;
-		int32 MaxDepth = 20;
-		bool bAncestorHidden = false;
-		while (CheckHandle >= 0 && MaxDepth-- > 0)
-		{
-			const FFrameEntry* Ancestor = Frames.Find(CheckHandle);
-			if (!Ancestor) break;
-			if (Ancestor->Def.bHidden || (Ancestor->Widget.IsValid() &&
-				Ancestor->Widget->GetVisibility() == ESlateVisibility::Collapsed))
-			{
-				bAncestorHidden = true;
-				break;
-			}
-			CheckHandle = Ancestor->ParentHandle;
-		}
-
-		if (bAncestorHidden && Pair.Value.Widget->GetVisibility() != ESlateVisibility::Collapsed)
-		{
-			Pair.Value.Widget->SetVisibility(ESlateVisibility::Collapsed);
-			HiddenCount++;
-		}
-	}
-
-	if (HiddenCount > 0)
-	{
-		UE_LOG(LogWowFrame, Verbose, TEXT("SyncChildVisibility: hid %d orphaned visible children of hidden parents"), HiddenCount);
-	}
-
-	// Force-show frames that WoW's Lua would show at startup but our FrameXML
-	// scripts can't execute (missing API stubs cause OnLoad to fail/hide them).
-	int32 ForceShownCount = 0;
-	for (auto& Pair : Frames)
-	{
-		if (!Pair.Value.Widget.IsValid()) continue;
-		const FString& Name = Pair.Value.Def.Name;
-
-		bool bShouldForceShow = false;
-
-		// ActionButton1-12 (main action bar buttons)
-		if (Name.StartsWith(TEXT("ActionButton")) && Name.Len() <= 14)
-			bShouldForceShow = true;
-		// BonusActionButton1-12
-		if (Name.StartsWith(TEXT("BonusActionButton")))
-			bShouldForceShow = true;
-
-		if (bShouldForceShow && Pair.Value.Widget->GetVisibility() == ESlateVisibility::Collapsed)
-		{
-			// Check parent is actually visible first
-			bool bParentVis = true;
-			int64 PH = Pair.Value.ParentHandle;
-			if (PH >= 0)
-			{
-				const FFrameEntry* PE = Frames.Find(PH);
-				if (PE && PE->Widget.IsValid() && PE->Widget->GetVisibility() == ESlateVisibility::Collapsed)
-					bParentVis = false;
-			}
-			if (bParentVis)
-			{
-				bool bInteractive = (Pair.Value.Def.Type == EWowFrameType::Button ||
-					Pair.Value.Def.Type == EWowFrameType::CheckButton);
-				Pair.Value.Widget->SetVisibility(bInteractive ? ESlateVisibility::Visible : ESlateVisibility::SelfHitTestInvisible);
-				ForceShownCount++;
-			}
-		}
-	}
-	if (ForceShownCount > 0)
-	{
-		UE_LOG(LogWowFrame, Verbose, TEXT("SyncChildVisibility: force-showed %d action bar frames"), ForceShownCount);
-	}
-
-	// Force-hide frames that WoW expects to start hidden but our XML/template
-	// system didn't mark as hidden (e.g., FadingFrame templates not in MPQ XML).
-	static const TCHAR* ForceHideFrames[] = {
-		TEXT("ZoneTextFrame"),
-		TEXT("SubZoneTextFrame"),
-		TEXT("AutoFollowStatusText"),
-		TEXT("PVPInfoTextString"),
-		TEXT("ReadyCheckListenerFrame"),
-		TEXT("ReadyCheckFrame"),
-		TEXT("GMChatFrame"),
-		TEXT("GMChatFrameEditBox"),
-	};
-	int32 ForceHiddenCount = 0;
-	for (const TCHAR* FrameName : ForceHideFrames)
-	{
-		int64 H = FindFrame(FrameName);
-		if (H >= 0)
-		{
-			SetFrameVisible(H, false);
-			ForceHiddenCount++;
-		}
-	}
-	if (ForceHiddenCount > 0)
-	{
-		UE_LOG(LogWowFrame, Verbose, TEXT("SyncChildVisibility: force-hid %d frames (FadingFrame pattern)"), ForceHiddenCount);
-	}
-
-	// Hide Flash textures on action buttons — these start visible but should be hidden
-	// until the FrameXML combat flash animation activates them
-	int32 FlashHiddenCount = 0;
-	for (auto& TexPair : NamedTextureWidgets)
-	{
-		if (TexPair.Key.Contains(TEXT("Flash")) && TexPair.Value.IsValid())
-		{
-			TexPair.Value->SetVisibility(ESlateVisibility::Collapsed);
-			FlashHiddenCount++;
-		}
-	}
-	if (FlashHiddenCount > 0)
-	{
-		UE_LOG(LogWowFrame, Verbose, TEXT("SyncChildVisibility: hid %d Flash textures"), FlashHiddenCount);
-	}
-
-	// Dump all visible frames with their positions for debugging
-	UE_LOG(LogWowFrame, Warning, TEXT("=== VISIBLE FRAMES (post-sync) ==="));
-	for (const auto& Pair : Frames)
-	{
-		if (!Pair.Value.Widget.IsValid()) continue;
-		if (Pair.Value.Widget->GetVisibility() == ESlateVisibility::Collapsed) continue;
-
-		UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(Pair.Value.Widget->Slot);
-		if (!Slot) continue;
-		FVector2D Pos = Slot->GetPosition();
-		FVector2D Sz = Slot->GetSize();
-		// Only log frames with significant area (skip zero-size and tiny frames)
-		if (Sz.X * Sz.Y > 100.f)
-		{
-			UE_LOG(LogWowFrame, Warning, TEXT("  VISIBLE: %-40s pos=(%.0f,%.0f) sz=(%.0f,%.0f) parent='%s'"),
-				*Pair.Value.Def.Name, Pos.X, Pos.Y, Sz.X, Sz.Y, *Pair.Value.Def.Parent);
-		}
-	}
+    // FrameXML owns Show/Hide state, including action bars and flash regions.
+    // Reconcile native widgets without changing the Lua-visible definitions.
+    for(const auto& Pair:Frames) UpdateFrameVisibility(Pair.Key);
 }
 
 void FWowFrameManager::SetCooldown(int64 Handle, double StartTime, float Duration)

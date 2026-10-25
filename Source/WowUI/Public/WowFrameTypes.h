@@ -144,6 +144,7 @@ struct WOWUI_API FWowFrameDef
 	bool bVirtual = false;
 	bool bAnonymous = false; // Private layout identity; Lua GetName() remains nil.
 	bool bHidden = false;
+	bool bHiddenSpecified = false; // XML hidden="false" overrides a hidden template.
 	bool bSetAllPoints = false;
 	bool bEnableMouse = false;
 	bool bEnableKeyboard = false;

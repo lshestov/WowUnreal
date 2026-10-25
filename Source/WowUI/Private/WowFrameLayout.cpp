@@ -217,7 +217,10 @@ void FWowFrameManager::ApplyAnchors(UWidget* Widget, const FWowFrameDef& Def)
     Slot->SetSize(FVector2D(Rect.W, Rect.H) * (UIScale / (ParentScale * Def.Scale)));
     Widget->SetRenderTransformPivot(FVector2D::ZeroVector);
     Widget->SetRenderScale(FVector2D(Def.Scale));
-    Widget->SetVisibility(Def.bHidden || (!Def.bSetAllPoints && Def.Anchors.IsEmpty())
+    // CreateWidgetForFrame lays out the widget before registering its handle.
+    const int64 Handle=FindFrame(Def.Name);
+    if(GetWidgetForHandle(Handle)==Widget) UpdateFrameVisibility(Handle);
+    else Widget->SetVisibility(Def.bHidden || (!Def.bSetAllPoints && Def.Anchors.IsEmpty())
         ? ESlateVisibility::Collapsed : ESlateVisibility::SelfHitTestInvisible);
     FrameRects.Add(Def.Name, Rect);
 }

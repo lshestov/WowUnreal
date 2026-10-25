@@ -724,6 +724,7 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 	Def.Inherits = UTF8_TO_TCHAR(Node.attribute("inherits").as_string());
 	Def.bVirtual = Node.attribute("virtual").as_bool(false);
 	Def.bHidden = Node.attribute("hidden").as_bool(false);
+	Def.bHiddenSpecified = bool(Node.attribute("hidden"));
 	Def.bSetAllPoints = Node.attribute("setAllPoints").as_bool(false);
 	Def.bEnableMouse = Node.attribute("enableMouse").as_bool(false);
 	Def.bEnableKeyboard = Node.attribute("enableKeyboard").as_bool(false);
@@ -1171,6 +1172,7 @@ static FWowFrameDef ParseFrameNode(const FXmlNode* Node)
 
 	FString Hidden = Node->GetAttribute(TEXT("hidden"));
 	Def.bHidden = Hidden.Equals(TEXT("true"), ESearchCase::IgnoreCase);
+	Def.bHiddenSpecified = !Hidden.IsEmpty();
 
 	FString SetAllPoints = Node->GetAttribute(TEXT("setAllPoints"));
 	Def.bSetAllPoints = SetAllPoints.Equals(TEXT("true"), ESearchCase::IgnoreCase);
