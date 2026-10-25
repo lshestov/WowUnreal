@@ -28,6 +28,8 @@ bool FTalentDbc::Load(const FDbcParser& Parser)
 		E.DependsOn = Parser.GetUInt(i, 13);
 		E.DependsOnRank = Parser.GetUInt(i, 16);
 		E.Flags = Parser.GetUInt(i, 19);
+		for(int32 J=0;J<3;++J) { E.Prerequisite[J]=Parser.GetUInt(i,13+J); E.PrerequisiteRank[J]=Parser.GetUInt(i,16+J); }
+		E.RequiredSpell=Parser.GetUInt(i,20); E.CategoryMask[0]=Parser.GetUInt(i,21); E.CategoryMask[1]=Parser.GetUInt(i,22);
 
 		IdIndex.Add(E.TalentID, Entries.Num());
 		Entries.Add(MoveTemp(E));

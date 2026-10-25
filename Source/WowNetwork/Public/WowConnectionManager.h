@@ -248,6 +248,10 @@ public:
 
     /** Send learn talent command */
     UFUNCTION(BlueprintCallable) void SendLearnTalent(int32 TalentId, int32 RequestedRank);
+    static TArray<uint8> BuildLearnTalentPacket(uint32 TalentId,uint32 Rank,uint64 PetGuid=0);
+    static TArray<uint8> BuildPreviewTalentsPacket(const TArray<FWowTalentInfo>& Talents,uint64 PetGuid=0);
+    void SendLearnPetTalent(uint32 TalentId,uint32 Rank);
+    void SendLearnPreviewTalents(const TArray<FWowTalentInfo>& Talents,bool Pet=false);
 
     /** Get the cached character list (valid after WorldHaveCharList state) */
     UFUNCTION(BlueprintCallable) TArray<FWowCharacterInfo> GetCachedCharacters() const { return CachedCharacters; }

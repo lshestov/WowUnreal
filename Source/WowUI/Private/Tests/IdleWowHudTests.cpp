@@ -242,6 +242,60 @@ bool FGameplaySpellRange::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudClassTalents,"WowUnreal.Hud.ClassTalents",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudClassTalents::RunTest(const FString&)
+{
+    FString DataPath; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),DataPath)) return false;
+    FMpqManager Mpq; if(!Mpq.Initialize(DataPath)) return false;
+    if(!FDbcStore::Get().IsLoaded()) FDbcStore::Get().LoadAll(Mpq);
+    if(!FDbcStore::Get().IsDeferredLoaded()) FDbcStore::Get().LoadDeferred(Mpq);
+    FHudFixture F; F.Frames.SetMpqManager(&Mpq); FWowAssetCache Cache; F.Frames.SetAssetCache(&Cache);
+    TStrongObjectPtr<UWowConnectionManager> Connection(NewObject<UWowConnectionManager>());
+    auto& H=Connection->PacketHandler; auto& E=H.EntityManager; E.LocalPlayerGuid=1;
+    auto& P=E.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER); P.SetField(UnitField::BYTES_0,(1u<<8)|1u); P.SetField(UnitField::LEVEL,20);
+    H.TalentGroups.SetNum(1); H.HasTalentInfo=true; H.FreeTalentPoints=11; H.KnownSpells.Append({6603,78,2457}); ++H.PlayerTalentRevision;
+    F.Context.ConnectionManager=Connection.Get(); F.Context.EntityManager=&E;
+    TestTrue(TEXT("Class tabs, real talent names/icons, rank views and preview events use the canonical API"),F.Lua.ExecuteString(TEXT(R"LUA(
+        assert(GetNumTalentTabs()==3 and GetNumTalentGroups()==1 and GetActiveTalentGroup()==1 and GetUnspentTalentPoints()==11)
+        assert(GetNumTalentTabs(false,true)==0)
+        for tab=1,3 do
+            local name,icon,spent,background,preview=GetTalentTabInfo(tab)
+            assert(name and icon and icon:find('Interface') and spent==0 and background and preview==0)
+            if name=='Arms' then ArmsTab=tab end
+        end
+        assert(ArmsTab)
+        for i=1,GetNumTalents(ArmsTab) do
+            local name,icon,tier,col,rank,maxRank,exceptional,available,previewRank=GetTalentInfo(ArmsTab,i)
+            if name then assert(icon and tier>=1 and col>=1 and col<=4 and rank==0 and previewRank==0 and maxRank>=1 and maxRank<=5) end
+            if name=='Improved Heroic Strike' then HeroicIndex=i end
+        end
+        assert(HeroicIndex and GetTalentLink(ArmsTab,HeroicIndex):find('talent:124:'))
+        PreviewObserver=CreateFrame('Frame'); PreviewObserver:RegisterEvent('PREVIEW_TALENT_POINTS_CHANGED')
+        PreviewObserver:SetScript('OnEvent',function(self,event,index,tab,group,delta) if index then assert(type(index)=='number' and type(tab)=='number' and group==1); LastPreviewDelta=delta end end)
+        AddPreviewTalentPoints(ArmsTab,HeroicIndex,1); assert(LastPreviewDelta==1 and GetGroupPreviewTalentPointsSpent()==1)
+        AddPreviewTalentPoints(ArmsTab,HeroicIndex,8)
+        assert(select(5,GetTalentInfo(ArmsTab,HeroicIndex))==0 and select(9,GetTalentInfo(ArmsTab,HeroicIndex))==3)
+        assert(GetUnspentTalentPoints()==11 and GetPreviewTalentPointsSpent(ArmsTab)==3 and GetGroupPreviewTalentPointsSpent()==3); assert(GetTalentLink(ArmsTab,HeroicIndex,false,false,1,true):find('talent:124:2'))
+        AddPreviewTalentPoints(ArmsTab,HeroicIndex,-1); assert(GetGroupPreviewTalentPointsSpent()==2 and LastPreviewDelta==-1)
+        for i=1,GetNumTalents(ArmsTab) do if select(3,GetTalentInfo(ArmsTab,i))>=5 then AddPreviewTalentPoints(ArmsTab,i,1); assert(select(9,GetTalentInfo(ArmsTab,i))==0); break end end
+        ResetPreviewTalentPoints(ArmsTab); assert(GetGroupPreviewTalentPointsSpent()==0)
+        for i=1,GetNumTalents(ArmsTab) do AddPreviewTalentPoints(ArmsTab,i,9) end
+        assert(GetGroupPreviewTalentPointsSpent()>0 and GetGroupPreviewTalentPointsSpent()<=11)
+        ResetGroupPreviewTalentPoints(); assert(GetGroupPreviewTalentPointsSpent()==0)
+        AddPreviewTalentPoints(ArmsTab,HeroicIndex,3); LearnPreviewTalents()
+        assert(select(5,GetTalentInfo(ArmsTab,HeroicIndex))==0 and GetGroupPreviewTalentPointsSpent()==3)
+    )LUA")));
+    TestTrue(TEXT("Preview submission never mutates authoritative talent state"),H.TalentGroups[0].Talents.IsEmpty() && H.FreeTalentPoints==11);
+    H.TalentGroups[0].Talents.Add({124,2}); H.FreeTalentPoints=8; ++H.PlayerTalentRevision;
+    TestTrue(TEXT("Server acknowledgement replaces the preview with the real rank"),F.Lua.ExecuteString(TEXT("assert(select(5,GetTalentInfo(ArmsTab,HeroicIndex))==3 and select(9,GetTalentInfo(ArmsTab,HeroicIndex))==3 and GetGroupPreviewTalentPointsSpent()==0 and GetUnspentTalentPoints()==8); TalentTip=CreateFrame('GameTooltip','TalentTip',UIParent); TalentTip:SetTalent(ArmsTab,HeroicIndex)")));
+    const auto* Tip=F.Frames.GetTooltipState(F.Frames.FindFrame(TEXT("TalentTip")));
+    TestTrue(TEXT("Talent tooltip resolves the real spell rather than a placeholder"),Tip && Tip->Lines.Num()>=2 && Tip->Lines[0].Text==TEXT("Improved Heroic Strike"));
+    TestTrue(TEXT("Rage formulas are evaluated and talent tooltips show ranks without a cast-time line"),Tip && Tip->Lines.Num()>=3 && Tip->Lines[1].Text==TEXT("Rank 3/3") && !FDbcStore::Get().Spells().Description(12282).Contains(TEXT("$")) && FDbcStore::Get().Spells().Description(12282).Contains(TEXT("1 rage")));
+    H.TalentGroups.SetNum(2); H.TalentGroups[1].Talents.Add({130,4}); ++H.PlayerTalentRevision;
+    TestTrue(TEXT("Inactive spec points derive from the same total budget"),F.Lua.ExecuteString(TEXT("assert(GetNumTalentGroups()==2 and GetUnspentTalentPoints(false,false,2)==6); SetActiveTalentGroup(2); assert(GetActiveTalentGroup()==1)")));
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudSpellBookViews,"WowUnreal.Hud.SpellBookViews",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FHudSpellBookViews::RunTest(const FString&)
 {
@@ -753,6 +807,35 @@ bool FButtonStateRegions::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudIndependentAnchorAxes,"WowUnreal.Hud.IndependentAnchorAxes",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudIndependentAnchorAxes::RunTest(const FString&)
+{
+    FHudFixture F;
+    TestTrue(TEXT("Three-edge anchors support a stock talent footer and texture"),F.Lua.ExecuteString(TEXT(R"LUA(
+        local p=CreateFrame('Frame','AnchorPanel',UIParent)
+        p:SetSize(400,500); p:SetPoint('TOPLEFT',UIParent,'TOPLEFT',20,-30)
+        local b=CreateFrame('CheckButton','AnchorFooter',p)
+        b:SetSize(300,26); b:SetPoint('LEFT',p,'LEFT',16,0); b:SetPoint('RIGHT',p,'RIGHT',-36,0); b:SetPoint('BOTTOM',p,'BOTTOM',0,81)
+        local t=b:CreateTexture('AnchorFooterRegion','ARTWORK')
+        t:SetTexture(1,1,1,1); t:SetSize(10,6); t:SetPoint('LEFT',b,'LEFT',4,0); t:SetPoint('RIGHT',b,'RIGHT',-4,0); t:SetPoint('BOTTOM',b,'BOTTOM',0,5)
+        b:SetCheckedTexture(1,0,0,1); b:SetDisabledCheckedTexture(0,1,0,1)
+        assert(b:GetCheckedTexture()==AnchorFooterCheckedTexture)
+        b:GetCheckedTexture():SetSize(64,64); b:GetCheckedTexture():ClearAllPoints(); b:GetCheckedTexture():SetPoint('CENTER',b,'CENTER')
+        b:SetChecked(true)
+    )LUA")));
+    F.Frames.RefreshLayout();
+    const auto R=F.Frames.GetLayoutRect(F.Frames.FindFrame(TEXT("AnchorFooter")));
+    TestTrue(TEXT("LEFT/RIGHT stretch width without overriding BOTTOM placement"),R.Equals(FVector4(36,423,348,26),.1));
+    const auto T=F.Frames.GetRegionRect(TEXT("AnchorFooterRegion"));
+    TestTrue(TEXT("Texture regions solve each anchored axis independently"),T.Equals(FVector4(40,438,340,6),.1));
+    auto* Checked=F.Frames.GetNamedTexture(TEXT("AnchorFooterCheckedTexture"));
+    auto* Disabled=F.Frames.GetNamedTexture(TEXT("AnchorFooterDisabledCheckedTexture"));
+    TestTrue(TEXT("Checked texture is an editable visible state region"),Checked && Checked->GetVisibility()!=ESlateVisibility::Collapsed && F.Frames.GetRegionSize(TEXT("AnchorFooterCheckedTexture")).Equals(FVector2D(64,64),.1));
+    TestTrue(TEXT("Disabled check marks replace the enabled mark"),F.Lua.ExecuteString(TEXT("AnchorFooter:Disable()")) && Checked->GetVisibility()==ESlateVisibility::Collapsed && Disabled && Disabled->GetVisibility()!=ESlateVisibility::Collapsed);
+    TestTrue(TEXT("Unchecking hides both marks"),F.Lua.ExecuteString(TEXT("AnchorFooter:SetChecked(false)")) && Checked->GetVisibility()==ESlateVisibility::Collapsed && Disabled->GetVisibility()==ESlateVisibility::Collapsed);
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudMacroFlow,"WowUnreal.Hud.MacroFlow",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FHudMacroFlow::RunTest(const FString&)
 {
@@ -969,6 +1052,15 @@ bool FHudScrollContent::RunTest(const FString&)
     TestTrue(TEXT("XML wheel handlers enable scrolling and receive numeric deltas"),F.Frames.IsFrameMouseWheelEnabled(Scroll) && F.Frames.DispatchMouseWheel(Scroll,-1) && F.Lua.ExecuteString(TEXT("assert(WheelValue==-1)")));
     F.Frames.RefreshLayout(); const auto Before=F.Frames.GetLayoutRect(Child);
     TestTrue(TEXT("XML registers and anchors a visible scroll child"),F.Frames.GetScrollChild(Scroll)==Child && Before.Z==220 && Before.W==300 && F.Frames.IsFrameDrawn(Child));
+    TestTrue(TEXT("Scroll clipping preserves external scroll-bar clicks"),F.Lua.ExecuteString(TEXT(R"LUA(
+        Journal:EnableMouse(true)
+        ExternalBar=CreateFrame('Button','ExternalBar',Journal); ExternalBar:SetSize(20,100); ExternalBar:SetPoint('TOPLEFT',Journal,'TOPRIGHT',2,0)
+        ClippedButton=CreateFrame('Button','ClippedButton',JournalChild); ClippedButton:SetSize(20,20); ClippedButton:SetPoint('TOPLEFT',JournalChild,'TOPRIGHT',2,0)
+    )LUA")));
+    F.Frames.RefreshLayout(); const auto Bar=F.Frames.GetLayoutRect(F.Frames.FindFrame(TEXT("ExternalBar")));
+    const int64 Hit=F.Frames.HitTestFrames((Bar.X+10)*F.Frames.GetScreenScale(),(Bar.Y+10)*F.Frames.GetScreenScale());
+    TestEqual(TEXT("Only scroll content is clipped, not sibling scroll bars"),Hit,F.Frames.FindFrame(TEXT("ExternalBar")));
+    TestTrue(TEXT("A dedicated viewport clips the scroll child"),F.Frames.GetWidgetForHandle(Child)->GetParent()->GetClipping()==EWidgetClipping::ClipToBoundsAlways && F.Frames.GetWidgetForHandle(Scroll)->GetClipping()==EWidgetClipping::Inherit);
     F.Frames.SetVerticalScroll(Scroll,45); F.Frames.RefreshLayout(); const auto After=F.Frames.GetLayoutRect(Child);
     TestTrue(TEXT("Scroll position notifications carry numeric offsets"),F.Lua.ExecuteString(TEXT("assert(OffsetValue==45)")));
     TestTrue(TEXT("A layout refresh preserves scroll offsets and hit rectangles"),FMath::IsNearlyEqual(After.Y,Before.Y-45));

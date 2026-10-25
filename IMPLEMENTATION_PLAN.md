@@ -272,7 +272,16 @@ build, automation, native autologin and rendered screenshot verification):
   - [x] Talent wire state: player/pet payloads, two specs, free points, per-spec
     glyphs, atomic validation and typed change events. Verified 72 tests and native
     autologin assertions against authoritative player update fields, plus two screenshots.
-  - [ ] Replace talent/glyph/spec API placeholders and verify original panels.
+  - [x] Original talent API/panels: DBC-backed tabs, player/pet ranks, per-spec
+    previews, prerequisite/point validation, single and batch learning, spec
+    activation requests and current/next rank tooltips. Fix independent anchor
+    axes, editable check textures and scroll-child clipping/culling needed by
+    these panels. Verified 75 tests and native learning/preview/reset/confirm;
+    29-step learning run plus 22-step final run verify original panels, last tier,
+    tooltips and restored zero talents/11 free points. Nine rendered screenshots.
+  - [ ] Complete slider thumb rendering/input and shared texture desaturation.
+  - [ ] Glyph metadata/socket APIs, targeting/application/removal and original panel.
+  - [ ] Live spell-rank replacement and complete class-window regression.
 - [ ] 4. Inventory: split/delete, compare/try-on, merchant/bank/mail/trade round trips.
 - [ ] 5. Chat/combat/macros: hyperlinks, remaining combat events and macro execution families.
 - [ ] 6. Maps: points of interest, tracking, interior minimaps and original map bootstrap.

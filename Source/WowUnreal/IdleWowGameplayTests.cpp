@@ -15,6 +15,22 @@ struct FWire
 };
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGameplayTalentRequests,"WowUnreal.Gameplay.TalentRequests",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FGameplayTalentRequests::RunTest(const FString&)
+{
+    const uint64 Pet=0xf140000000000123ULL;
+    const auto One=UWowConnectionManager::BuildLearnTalentPacket(124,2); FPacketReader R(One);
+    TestTrue(TEXT("Single player rank request uses two uint32 fields"),One.Num()==8 && R.ReadU32()==124 && R.ReadU32()==2);
+    const auto PetOne=UWowConnectionManager::BuildLearnTalentPacket(124,2,Pet); FPacketReader P(PetOne);
+    TestTrue(TEXT("Pet rank request prefixes the pet GUID"),PetOne.Num()==16 && P.ReadU64()==Pet && P.ReadU32()==124 && P.ReadU32()==2);
+    TArray<FWowTalentInfo> Talents={{124,2},{130,4}}; const auto Batch=UWowConnectionManager::BuildPreviewTalentsPacket(Talents); FPacketReader B(Batch);
+    TestTrue(TEXT("Preview batch retains full-width count and zero-based ranks"),Batch.Num()==20 && B.ReadU32()==2 && B.ReadU32()==124 && B.ReadU32()==2 && B.ReadU32()==130 && B.ReadU32()==4);
+    const auto PetBatch=UWowConnectionManager::BuildPreviewTalentsPacket(Talents,Pet); FPacketReader PB(PetBatch);
+    TestTrue(TEXT("Pet preview prefix precedes the batch count"),PetBatch.Num()==28 && PB.ReadU64()==Pet && PB.ReadU32()==2);
+    TestTrue(TEXT("Invalid ranks and empty batches cannot become packets"),UWowConnectionManager::BuildLearnTalentPacket(124,5).IsEmpty() && UWowConnectionManager::BuildPreviewTalentsPacket({}).IsEmpty());
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGameplayTalentPackets,"WowUnreal.Gameplay.TalentPackets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FGameplayTalentPackets::RunTest(const FString&)
 {

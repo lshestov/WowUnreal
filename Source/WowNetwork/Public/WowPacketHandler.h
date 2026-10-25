@@ -174,6 +174,7 @@ public:
     bool HasTalentInfo=false,HasPetTalentInfo=false;
     bool LastTalentPacketValid=false,LastTalentUpdateIsPet=false,LastTalentGroupChanged=false;
     uint64 TalentRevision=0;
+    uint64 PlayerTalentRevision=0,PetTalentRevision=0;
     TArray<FWowGlyphChange> LastGlyphChanges;
     void ResetTalentState();
 

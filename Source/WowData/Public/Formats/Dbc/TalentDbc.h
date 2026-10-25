@@ -13,6 +13,7 @@ struct FTalentDbcEntry
 	uint32 DependsOn;
 	uint32 DependsOnRank;
 	uint32 Flags;
+	uint32 Prerequisite[3]={},PrerequisiteRank[3]={},RequiredSpell=0,CategoryMask[2]={};
 };
 
 class WOWDATA_API FTalentDbc

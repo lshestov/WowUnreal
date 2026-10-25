@@ -1198,15 +1198,9 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 		// WoW frames do NOT clip their layer content by default.
 		// Layer textures (portraits, borders, decorations) regularly extend
 		// beyond the frame bounds. Only clip if XML explicitly sets clipsChildren.
-		// ScrollFrames are the exception - they must clip to provide scrolling behavior.
-		if (Def.Type == EWowFrameType::ScrollFrame)
-		{
-			Container->SetClipping(EWidgetClipping::ClipToBounds);
-		}
-		else
-		{
-			Container->SetClipping(EWidgetClipping::Inherit);
-		}
+        // Only the designated ScrollChild is clipped. Scroll bars and frame
+        // decorations often live outside a ScrollFrame's viewport.
+        Container->SetClipping(EWidgetClipping::Inherit);
 		Widget = Container;
 	}
 
@@ -1949,23 +1943,9 @@ void FWowFrameManager::AddMessage(int64 Handle,const FString& Text,FLinearColor 
 void FWowFrameManager::SetChecked(int64 Handle,bool Checked)
 {
 	if(Checked) CheckedFrames.Add(Handle); else CheckedFrames.Remove(Handle);
-	if(Checked && !CheckImages.Contains(Handle)) if(auto* Canvas=Cast<UCanvasPanel>(GetWidgetForHandle(Handle)))
-	{
-		auto* Image=NewObject<UImage>(Canvas); const auto* Def=GetFrameDef(Handle);
-		const FString Path=Def && !Def->CheckedTexture.IsEmpty()?Def->CheckedTexture:TEXT("Interface\\Buttons\\UI-CheckBox-Check");
-		if(auto* Texture=LoadUITexture(Path))
-		{
-			Image->SetBrushFromTexture(Texture);
-			if(auto* Base=LoadObject<UMaterialInterface>(nullptr,TEXT("/Game/Materials/M_WowUiImage.M_WowUiImage")))
-			{
-				auto* Material=UMaterialInstanceDynamic::Create(Base,Image); Material->SetTextureParameterValue(TEXT("Image"),Texture); Material->SetScalarParameterValue(TEXT("Circle"),0); Material->SetScalarParameterValue(TEXT("Additive"),1);
-				FSlateBrush Brush=Image->GetBrush(); Brush.SetResourceObject(Material); Image->SetBrush(Brush);
-			}
-		}
-		if(auto* Slot=Canvas->AddChildToCanvas(Image)) { Slot->SetAnchors(FAnchors(0,0,1,1)); Slot->SetOffsets(FMargin(0)); Slot->SetZOrder(400); }
-		CheckImages.Add(Handle,Image);
-	}
-	if(auto* Image=CheckImages.Find(Handle); Image && Image->IsValid()) (*Image)->SetVisibility(Checked?ESlateVisibility::HitTestInvisible:ESlateVisibility::Collapsed);
+    if(const auto* Def=GetFrameDef(Handle); Def && (!Def->CheckedTexture.IsEmpty() || Def->ButtonTextureRegions.Contains(TEXT("Checked"))))
+        EnsureButtonTexture(Handle,TEXT("Checked"));
+    RefreshButtonVisuals(Handle);
 }
 
 void FWowFrameManager::ScrollMessages(int64 Handle,int32 Offset,bool Absolute)
@@ -2092,15 +2072,15 @@ int64 FWowFrameManager::HitTestFrames(float ScreenX, float ScreenY) const
         const auto& Entry = Pair.Value;
         if ((!Entry.bMouseEnabled && !Entry.bMouseWheelEnabled) || !Entry.Widget.IsValid()) continue;
         bool Visible = true;
-        int64 Ancestor = Pair.Key;
+        int64 Ancestor = Pair.Key, Descendant=-1;
         for (int32 Depth = 0; Ancestor >= 0 && Depth < 64; ++Depth)
         {
             const auto* Parent = Frames.Find(Ancestor);
             if (!Parent) break;
             if (Parent->Def.bHidden || (Parent->Widget.IsValid() && Parent->Widget->GetVisibility() == ESlateVisibility::Collapsed)) { Visible = false; break; }
-            if(Parent->Def.Type==EWowFrameType::ScrollFrame)
+            if(Parent->Def.Type==EWowFrameType::ScrollFrame && GetScrollChild(Ancestor)==Descendant)
                 if(const auto* Clip=FrameRects.Find(Parent->Def.Name); Clip && (X<Clip->X || X>Clip->X+Clip->W || Y<Clip->Y || Y>Clip->Y+Clip->H)) { Visible=false; break; }
-            Ancestor = Parent->ParentHandle;
+            Descendant=Ancestor; Ancestor = Parent->ParentHandle;
         }
         if (!Visible) continue;
         const auto* Rect = FrameRects.Find(Entry.Def.Name);
@@ -2474,7 +2454,19 @@ void FWowFrameManager::SetScrollChild(int64 ScrollFrameHandle,int64 ChildHandle)
     ScrollChildHandles.Add(ScrollFrameHandle,ChildHandle);
     Child=Frames.Find(ChildHandle);
     if(Child->Def.Anchors.IsEmpty()) { FWowAnchor A; A.Point=A.RelativePoint=EWowAnchorPoint::TOPLEFT; Child->Def.Anchors.Add(A); }
-    if(Scroll->Widget.IsValid()) Scroll->Widget->SetClipping(EWidgetClipping::ClipToBoundsAlways);
+    auto* Canvas=Cast<UCanvasPanel>(Scroll->Widget.Get());
+    if(Canvas && Child->Widget.IsValid())
+    {
+        auto* Viewport=ScrollViewports.FindRef(ScrollFrameHandle).Get();
+        if(!Viewport)
+        {
+            Viewport=NewObject<UCanvasPanel>(Canvas); Viewport->SetClipping(EWidgetClipping::ClipToBoundsAlways);
+            Viewport->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+            if(auto* Slot=Canvas->AddChildToCanvas(Viewport)) { Slot->SetAnchors(FAnchors(0,0,1,1)); Slot->SetOffsets(FMargin(0)); Slot->SetZOrder(int32(Child->Def.Strata)*1000+Child->Def.FrameLevel); }
+            ScrollViewports.Add(ScrollFrameHandle,Viewport);
+        }
+        Child->Widget->RemoveFromParent(); Viewport->AddChildToCanvas(Child->Widget.Get());
+    }
     FrameRects.Reset(); bLayoutDirty=true;
 }
 int64 FWowFrameManager::GetScrollChild(int64 ScrollFrameHandle) const

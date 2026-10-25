@@ -81,22 +81,23 @@ FWowFrameManager::FFrameRect FWowFrameManager::CalculateFrameRect(const FWowFram
         return FVector2D(Relative.X, Relative.Y) + GetAnchorPointOffset(A.RelativePoint, Relative.W, Relative.H)
             + FVector2D(A.OffsetX, -A.OffsetY) * Scale;
     };
-    int32 FirstIndex=0; double Priority=-1;
-    for(int32 I=0;I<Def.Anchors.Num();++I) { const auto P=GetAnchorPointOffset(Def.Anchors[I].Point,1,1); const double Score=FMath::Abs(P.X-.5f)+FMath::Abs(P.Y-.5f); if(Score>Priority) { FirstIndex=I; Priority=Score; } }
-    const auto& First = Def.Anchors[FirstIndex];
-    const FVector2D P = Target(First), Fraction = GetAnchorPointOffset(First.Point, 1, 1);
-    // Each anchor constrains an axis. LEFT/RIGHT stretches width while preserving
-    // explicit height; TOPLEFT/BOTTOMRIGHT constrains both axes.
-    for (int32 I = 0; I < Def.Anchors.Num(); ++I)
+    // Edge anchors take precedence independently on each axis. LEFT/RIGHT
+    // provide horizontal constraints, while a third BOTTOM anchors the height.
+    for (int32 Axis=0; Axis<2; ++Axis)
     {
-        const FVector2D Q = Target(Def.Anchors[I]);
-        const FVector2D Other = GetAnchorPointOffset(Def.Anchors[I].Point, 1, 1);
-        if (FMath::Abs(Fraction.X-Other.X)>.99f) Rect.W = (Q.X - P.X) / (Other.X - Fraction.X);
-        if (FMath::Abs(Fraction.Y-Other.Y)>.99f) Rect.H = (Q.Y - P.Y) / (Other.Y - Fraction.Y);
+        int32 First=0;
+        for(int32 I=1;I<Def.Anchors.Num();++I)
+            if(FMath::Abs(GetAnchorPointOffset(Def.Anchors[I].Point,1,1)[Axis]-.5)>FMath::Abs(GetAnchorPointOffset(Def.Anchors[First].Point,1,1)[Axis]-.5)) First=I;
+        const double P=Target(Def.Anchors[First])[Axis],Fraction=GetAnchorPointOffset(Def.Anchors[First].Point,1,1)[Axis];
+        float& Size=Axis==0?Rect.W:Rect.H;
+        for(const auto& A:Def.Anchors)
+        {
+            const double Other=GetAnchorPointOffset(A.Point,1,1)[Axis];
+            if(FMath::Abs(Fraction-Other)>.99) Size=(Target(A)[Axis]-P)/(Other-Fraction);
+        }
+        Size=FMath::Max(0.f,Size);
+        (Axis==0?Rect.X:Rect.Y)=P-Fraction*Size;
     }
-    Rect.W = FMath::Max(0.f, Rect.W); Rect.H = FMath::Max(0.f, Rect.H);
-    Rect.X = P.X - Fraction.X * Rect.W;
-    Rect.Y = P.Y - Fraction.Y * Rect.H;
     if(Def.bClampedToScreen)
     {
         const auto Screen=GetFrameRect(TEXT("UIParent"));
@@ -343,6 +344,17 @@ void FWowFrameManager::RefreshLayout()
     }
     for(const auto& Pair:BackdropWidgets) if(Pair.Value.IsValid()) Pair.Value->SetUnitScale(UIScale);
     bLayoutDirty = false;
+    // Stock scroll children can declare a height of 50 while their buttons
+    // extend hundreds of units below it. Give Slate the content bounds so its
+    // visibility culling does not discard the whole child after scrolling.
+    for(const auto& Pair:ScrollChildHandles) if(IsFrameDrawn(Pair.Key))
+        if(auto* Child=GetWidgetForHandle(Pair.Value)) if(auto* Slot=Cast<UCanvasPanelSlot>(Child->Slot))
+        {
+            const auto Viewport=GetLayoutRect(Pair.Key);
+            const float ParentScale=GetEffectiveFrameScale(Pair.Key);
+            const float Height=(Viewport.W/ParentScale+GetVerticalScrollRange(Pair.Key))*UIScale/GetFrameScale(Pair.Value);
+            const auto Size=Slot->GetSize(); Slot->SetSize(FVector2D(Size.X,FMath::Max(Size.Y,double(Height))));
+        }
 }
 
 void FWowFrameManager::ApplyElementAnchors(UWidget* Widget, UCanvasPanel* Parent,
@@ -381,14 +393,17 @@ void FWowFrameManager::ApplyElementAnchors(UWidget* Widget, UCanvasPanel* Parent
     FVector2D Point(ParentWidth/2,ParentHeight/2), Fraction(.5,.5);
     if (!Anchors.IsEmpty())
     {
-        int32 FirstIndex=0; double Priority=-1;
-        for(int32 I=0;I<Anchors.Num();++I) { const auto P=GetAnchorPointOffset(Anchors[I].Point,1,1); const double Score=FMath::Abs(P.X-.5f)+FMath::Abs(P.Y-.5f); if(Score>Priority) { FirstIndex=I; Priority=Score; } }
-        Point=Target(Anchors[FirstIndex]); Fraction=GetAnchorPointOffset(Anchors[FirstIndex].Point,1,1);
-        for (int32 I=0; I<Anchors.Num(); ++I)
+        for(int32 Axis=0;Axis<2;++Axis)
         {
-            const auto Other=GetAnchorPointOffset(Anchors[I].Point,1,1), Q=Target(Anchors[I]);
-            if (FMath::Abs(Other.X-Fraction.X)>.99f) { Width=(Q.X-Point.X)/(Other.X-Fraction.X); bAutoSize=false; }
-            if (FMath::Abs(Other.Y-Fraction.Y)>.99f) { Height=(Q.Y-Point.Y)/(Other.Y-Fraction.Y); bAutoSize=false; }
+            int32 First=0;
+            for(int32 I=1;I<Anchors.Num();++I)
+                if(FMath::Abs(GetAnchorPointOffset(Anchors[I].Point,1,1)[Axis]-.5)>FMath::Abs(GetAnchorPointOffset(Anchors[First].Point,1,1)[Axis]-.5)) First=I;
+            Point[Axis]=Target(Anchors[First])[Axis]; Fraction[Axis]=GetAnchorPointOffset(Anchors[First].Point,1,1)[Axis];
+            for(const auto& A:Anchors)
+            {
+                const double Other=GetAnchorPointOffset(A.Point,1,1)[Axis];
+                if(FMath::Abs(Other-Fraction[Axis])>.99) { (Axis==0?Width:Height)=(Target(A)[Axis]-Point[Axis])/(Other-Fraction[Axis]); bAutoSize=false; }
+            }
         }
     }
     if(auto* Text=Cast<UTextBlock>(Widget))

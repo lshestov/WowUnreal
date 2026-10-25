@@ -117,6 +117,9 @@ void WowLuaApi::ApplySavedUiSettings(lua_State* L)
 }
 void WowLuaApi::RegisterSettingsApi(lua_State* L)
 {
+    // World playback currently has no cinematic camera mode. Stock modal
+    // dialogs still query this gate before displaying their confirmation.
+    Register(L,"InCinematic",[](lua_State* S)->int { lua_pushnil(S); return 1; });
     Register(L,"ShowingHelm",[](lua_State* S)->int { const auto* P=ResolveUnitToken(S); lua_pushboolean(S,P && P->IsPlayer() && !(P->GetField(PlayerField::FLAGS)&0x400)); return 1; });
     Register(L,"ShowingCloak",[](lua_State* S)->int { const auto* P=ResolveUnitToken(S); lua_pushboolean(S,P && P->IsPlayer() && !(P->GetField(PlayerField::FLAGS)&0x800)); return 1; });
     Register(L,"ShowHelm",[](lua_State* S)->int { auto* C=GetContext(S); if(C && C->ConnectionManager) C->ConnectionManager->SendRawPacket(0x2B9,{uint8(lua_toboolean(S,1)!=0)}); return 0; });

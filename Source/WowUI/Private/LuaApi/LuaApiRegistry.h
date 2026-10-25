@@ -13,6 +13,7 @@ class AActor;
 struct FWowEntity;
 struct FWowSpellBookView;
 struct FWowCombatLogView;
+struct FWowClassUiView;
 
 /** Context passed to Lua API functions so they can access game state */
 struct FWowLuaContext
@@ -23,6 +24,7 @@ struct FWowLuaContext
     FWowFrameManager* FrameManager = nullptr;
     TSharedPtr<FWowSpellBookView> SpellBook;
     TSharedPtr<FWowCombatLogView> CombatLog;
+    TSharedPtr<FWowClassUiView> ClassUi;
     TFunction<AActor*(uint64)> ResolveActor;
     TFunction<void()> ReloadUI;
     TMap<FName,int32> SelectedRows;
@@ -35,6 +37,8 @@ namespace WowLuaApi
     void RegisterStubs(lua_State* L);
     void RegisterItemApi(lua_State* L);
     void RegisterSpellApi(lua_State* L);
+    void RegisterClassApi(lua_State* L);
+    int SetTalentTooltip(lua_State* L);
     void RegisterUnitApi(lua_State* L);
     void RegisterPanelApi(lua_State* L);
     void RegisterReputationApi(lua_State* L);

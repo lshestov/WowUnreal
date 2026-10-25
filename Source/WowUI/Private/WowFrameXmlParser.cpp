@@ -1174,7 +1174,7 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 	for(pugi::xml_node Child=Node.first_child(); Child; Child=Child.next_sibling())
 	{
 		const FString Tag=UTF8_TO_TCHAR(Child.name());
-		if(Tag!=TEXT("NormalTexture") && Tag!=TEXT("PushedTexture") && Tag!=TEXT("DisabledTexture") && Tag!=TEXT("HighlightTexture")) continue;
+		if(Tag!=TEXT("NormalTexture") && Tag!=TEXT("PushedTexture") && Tag!=TEXT("DisabledTexture") && Tag!=TEXT("HighlightTexture") && Tag!=TEXT("CheckedTexture") && Tag!=TEXT("DisabledCheckedTexture")) continue;
 		// Reuse the ordinary texture parser, including size, anchors and UVs.
 		pugi::xml_document Document;
 		auto Frame=Document.append_child("Frame");
@@ -1350,7 +1350,7 @@ static FWowFrameDef ParseFrameNode(const FXmlNode* Node)
     for(const FXmlNode* Child:Node->GetChildrenNodes())
     {
         const FString Tag=Child->GetTag();
-        if(Tag==TEXT("NormalTexture") || Tag==TEXT("PushedTexture") || Tag==TEXT("DisabledTexture") || Tag==TEXT("HighlightTexture"))
+        if(Tag==TEXT("NormalTexture") || Tag==TEXT("PushedTexture") || Tag==TEXT("DisabledTexture") || Tag==TEXT("HighlightTexture") || Tag==TEXT("CheckedTexture") || Tag==TEXT("DisabledCheckedTexture"))
             Def.ButtonTextureRegions.Add(Tag.LeftChop(7),ParseTextureNode(Child));
     }
 

@@ -13,14 +13,14 @@ FString FSpellDbc::Description(uint32 Id,int32 Level,bool Aura) const
 {
     const auto* Spell=GetById(Id); if(!Spell) return {};
     const FString Text=Aura && !Spell->ToolTip.IsEmpty()?Spell->ToolTip:Spell->Description;
-    FRegexMatcher Match(FRegexPattern(TEXT("\\$(?:(\\d+))?([sSmMdDtTuUxXoOrRhH])([1-3])?")),Text);
+    FRegexMatcher Match(FRegexPattern(TEXT("\\$(?:([*/])([0-9]+(?:\\.[0-9]+)?);)?(?:(\\d+))?([sSmMdDtTuUxXoOrRhH])([1-3])?")),Text);
     FString Result; int32 Previous=0;
     while(Match.FindNext())
     {
         Result+=Text.Mid(Previous,Match.GetMatchBeginning()-Previous);
-        const auto* Referenced=Match.GetCaptureGroup(1).IsEmpty()?Spell:GetById(FCString::Atoi(*Match.GetCaptureGroup(1)));
-        const int32 Effect=FMath::Clamp(FCString::Atoi(*Match.GetCaptureGroup(3))-1,0,2);
-        const TCHAR Token=FChar::ToLower(Match.GetCaptureGroup(2)[0]); FString Value;
+        const auto* Referenced=Match.GetCaptureGroup(3).IsEmpty()?Spell:GetById(FCString::Atoi(*Match.GetCaptureGroup(3)));
+        const int32 Effect=FMath::Clamp(FCString::Atoi(*Match.GetCaptureGroup(5))-1,0,2);
+        const TCHAR Token=FChar::ToLower(Match.GetCaptureGroup(4)[0]); FString Value;
         if(Referenced)
         {
             const float Points=FMath::Abs(Referenced->EffectBasePoints[Effect]+(Referenced->EffectDieSides[Effect]?1:0)+Referenced->EffectPointsPerLevel[Effect]*FMath::Max(0,FMath::Min(Level,int32(Referenced->MaxLevel?Referenced->MaxLevel:Level))-int32(Referenced->SpellLevel)));
@@ -31,6 +31,13 @@ FString FSpellDbc::Description(uint32 Id,int32 Level,bool Aura) const
             else if(Token=='h') Value=FString::FromInt(Referenced->RecoveryTime/1000);
             else if(Token=='o') { const float Interval=Referenced->EffectAmplitude[Effect]/1000.f; Value=FString::Printf(TEXT("%g"),Interval>0?Points*Duration(Referenced->DurationIndex)/Interval:Points); }
             else if(Token=='r') { const auto* Range=GetRange(Referenced->RangeIndex); Value=FString::Printf(TEXT("%g"),Range?Range->Max[0]:0); }
+        }
+        if(!Value.IsEmpty() && !Match.GetCaptureGroup(1).IsEmpty() && Value.IsNumeric())
+        {
+            const double Factor=FCString::Atod(*Match.GetCaptureGroup(2));
+            if(Match.GetCaptureGroup(1)==TEXT("*")) Value=FString::Printf(TEXT("%g"),FCString::Atod(*Value)*Factor);
+            else if(Factor!=0) Value=FString::Printf(TEXT("%g"),FCString::Atod(*Value)/Factor);
+            else Value.Empty();
         }
         Result+=Value.IsEmpty()?Match.GetCaptureGroup(0):Value; Previous=Match.GetMatchEnding();
     }

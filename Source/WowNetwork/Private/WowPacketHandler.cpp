@@ -2026,7 +2026,7 @@ void FWowPacketHandler::ResetTalentState()
     Talents.Reset(); TalentGroups.Reset(); PetTalents.Reset(); LastGlyphChanges.Reset();
     FreeTalentPoints=PetFreeTalentPoints=0; ActiveTalentGroup=PreviousTalentGroup=0;
     HasTalentInfo=HasPetTalentInfo=LastTalentPacketValid=LastTalentUpdateIsPet=LastTalentGroupChanged=false;
-    ++TalentRevision;
+    ++TalentRevision; ++PlayerTalentRevision; ++PetTalentRevision;
 }
 void FWowPacketHandler::HandleTalentsInfo(FPacketReader& R)
 {
@@ -2052,7 +2052,7 @@ void FWowPacketHandler::HandleTalentsInfo(FPacketReader& R)
         TArray<FWowTalentInfo> Incoming;
         if(!ReadTalents(Incoming) || R.CanRead(1)) return;
         PetTalents=MoveTemp(Incoming); PetFreeTalentPoints=FreePoints; HasPetTalentInfo=true;
-        LastTalentUpdateIsPet=true; LastTalentPacketValid=true; LastTalentGroupChanged=false; LastGlyphChanges.Reset(); ++TalentRevision;
+        LastTalentUpdateIsPet=true; LastTalentPacketValid=true; LastTalentGroupChanged=false; LastGlyphChanges.Reset(); ++TalentRevision; ++PetTalentRevision;
         UE_LOG(LogWowPacket,Log,TEXT("TALENTS_INFO: pet, free=%u, %d talents"),FreePoints,PetTalents.Num());
         OnTalentsUpdated.Broadcast(); return;
     }
@@ -2079,7 +2079,7 @@ void FWowPacketHandler::HandleTalentsInfo(FPacketReader& R)
     PreviousTalentGroup=ActiveTalentGroup; LastTalentGroupChanged=HasTalentInfo && ActiveTalentGroup!=Active;
     TalentGroups=MoveTemp(Incoming); ActiveTalentGroup=Active; FreeTalentPoints=FreePoints;
     HasTalentInfo=true; LastTalentUpdateIsPet=false; LastTalentPacketValid=true;
-    Talents=TalentGroups.IsValidIndex(Active)?TalentGroups[Active].Talents:TArray<FWowTalentInfo>(); ++TalentRevision;
+    Talents=TalentGroups.IsValidIndex(Active)?TalentGroups[Active].Talents:TArray<FWowTalentInfo>(); ++TalentRevision; ++PlayerTalentRevision;
     UE_LOG(LogWowPacket,Log,TEXT("TALENTS_INFO: %d groups, active=%u, free=%u, %d talents"),TalentGroups.Num(),ActiveTalentGroup,FreeTalentPoints,Talents.Num());
     OnTalentsUpdated.Broadcast();
 }
@@ -2843,97 +2843,29 @@ void FWowPacketHandler::HandleMailListResult(FPacketReader& R)
 
 void FWowPacketHandler::HandlePetSpells(FPacketReader& R)
 {
-    if (!R.CanRead(8))
+    if(!R.CanRead(8)) return;
+    FWowPetActionBarState Incoming; Incoming.PetGuid=R.ReadU64();
+    if(Incoming.PetGuid)
     {
-        UE_LOG(LogWowPacket, Warning, TEXT("PET_SPELLS: packet too short"));
-        return;
-    }
-
-    const uint64 PetGuid = R.ReadU64();
-    PetActionBar.Clear();
-
-    if (PetGuid == 0)
-    {
-        UE_LOG(LogWowPacket, Log, TEXT("PET_SPELLS: cleared pet action bar"));
-        OnPetBarUpdated.Broadcast(PetActionBar);
-        return;
-    }
-
-    if (!R.CanRead(2 + 4 + 1 + 1 + 2))
-    {
-        UE_LOG(LogWowPacket, Warning, TEXT("PET_SPELLS: missing action bar header"));
-        return;
-    }
-
-    PetActionBar.PetGuid = PetGuid;
-    PetActionBar.Family = R.ReadU16();
-    PetActionBar.DurationMs = R.ReadU32();
-    PetActionBar.ReactState = R.ReadU8();
-    PetActionBar.CommandState = R.ReadU8();
-    PetActionBar.Flags = R.ReadU16();
-
-    for (int32 SlotIndex = 0; SlotIndex < WOW_PET_ACTION_SLOT_COUNT; ++SlotIndex)
-    {
-        if (!R.CanRead(4))
+        if(!R.CanRead(10+WOW_PET_ACTION_SLOT_COUNT*4+1)) return;
+        Incoming.Family=R.ReadU16(); Incoming.DurationMs=R.ReadU32(); Incoming.ReactState=R.ReadU8(); Incoming.CommandState=R.ReadU8(); Incoming.Flags=R.ReadU16();
+        for(int32 I=0;I<WOW_PET_ACTION_SLOT_COUNT;++I) Incoming.ActionSlots[I].SetPackedData(R.ReadU32());
+        const uint8 SpellCount=R.ReadU8(); if(!R.CanRead(int32(SpellCount)*4+1)) return;
+        for(uint32 I=0;I<SpellCount;++I) { const uint32 Id=R.ReadU32()&0x00ffffff; if(Id) Incoming.KnownSpells.Add(Id); }
+        const uint8 Count=R.ReadU8(); if(!R.CanRead(int32(Count)*14)) return;
+        for(uint32 I=0;I<Count;++I)
         {
-            UE_LOG(LogWowPacket, Warning, TEXT("PET_SPELLS: truncated action bar at slot %d"), SlotIndex);
-            break;
-        }
-
-        PetActionBar.ActionSlots[SlotIndex].SetPackedData(R.ReadU32());
-    }
-
-    if (!R.CanRead(1))
-    {
-        UE_LOG(LogWowPacket, Warning, TEXT("PET_SPELLS: missing spell count"));
-        OnPetBarUpdated.Broadcast(PetActionBar);
-        return;
-    }
-
-    const uint8 SpellCount = R.ReadU8();
-    PetActionBar.KnownSpells.Reserve(SpellCount);
-    for (uint8 SpellIndex = 0; SpellIndex < SpellCount && R.CanRead(4); ++SpellIndex)
-    {
-        const uint32 PackedSpell = R.ReadU32();
-        const uint32 SpellId = PackedSpell & 0x00FFFFFF;
-        if (SpellId != 0)
-        {
-            PetActionBar.KnownSpells.Add(SpellId);
+            const uint32 Id=R.ReadU32(); R.ReadU16(); const uint32 SpellMs=R.ReadU32(),CategoryMs=R.ReadU32(),Ms=FMath::Max(SpellMs,CategoryMs);
+            if(Id && Ms) Incoming.SpellCooldownExpirySeconds.Add(Id,FPlatformTime::Seconds()+Ms/1000.);
         }
     }
-
-    if (!R.CanRead(1))
+    if(R.CanRead(1)) return;
+    if(Incoming.PetGuid!=PetActionBar.PetGuid)
     {
-        UE_LOG(LogWowPacket, Warning, TEXT("PET_SPELLS: missing cooldown count"));
-        OnPetBarUpdated.Broadcast(PetActionBar);
-        return;
+        PetTalents.Reset(); PetFreeTalentPoints=0; HasPetTalentInfo=false; ++PetTalentRevision; ++TalentRevision;
     }
-
-    const uint8 CooldownCount = R.ReadU8();
-    const double NowSeconds = FPlatformTime::Seconds();
-    for (uint8 CooldownIndex = 0; CooldownIndex < CooldownCount; ++CooldownIndex)
-    {
-        if (!R.CanRead(4 + 2 + 4 + 4))
-        {
-            break;
-        }
-
-        const uint32 SpellId = R.ReadU32();
-        R.ReadU16(); // category
-        const uint32 CooldownMs = R.ReadU32();
-        const uint32 CategoryCooldownMs = R.ReadU32();
-        const uint32 EffectiveCooldownMs = FMath::Max(CooldownMs, CategoryCooldownMs);
-        if (SpellId != 0 && EffectiveCooldownMs > 0)
-        {
-            PetActionBar.SpellCooldownExpirySeconds.Add(
-                SpellId,
-                NowSeconds + static_cast<double>(EffectiveCooldownMs) / 1000.0);
-        }
-    }
-
-    UE_LOG(LogWowPacket, Log, TEXT("PET_SPELLS: pet=%llu family=%u actions=%d spells=%d cooldowns=%d"),
-        PetActionBar.PetGuid, PetActionBar.Family, PetActionBar.ActionSlots.Num(), PetActionBar.KnownSpells.Num(), CooldownCount);
-
+    PetActionBar=MoveTemp(Incoming);
+    UE_LOG(LogWowPacket,Log,TEXT("PET_SPELLS: pet=%llu family=%u actions=%d spells=%d"),PetActionBar.PetGuid,PetActionBar.Family,PetActionBar.ActionSlots.Num(),PetActionBar.KnownSpells.Num());
     OnPetBarUpdated.Broadcast(PetActionBar);
 }
 

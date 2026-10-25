@@ -1163,6 +1163,12 @@ void AWowGameplayController::OnOpcodeReceived(uint16 Opcode)
 		return;
 	}
 
+    if(Opcode==WowOpcode::SMSG_PET_SPELLS)
+    {
+        EventSystem->FireEvent(TEXT("UNIT_PET"),{TEXT("player")});
+        EventSystem->FireEvent(TEXT("PET_TALENT_UPDATE"));
+    }
+
 	FString EventName = FWowEventSystem::OpcodeToEvent(Opcode);
 	if (!EventName.IsEmpty())
 	{
@@ -4340,15 +4346,7 @@ void AWowGameplayController::CreateQuestLog()
 
 void AWowGameplayController::OnTalentKey()
 {
-	if (!TalentWindowWidget.IsValid())
-	{
-		CreateTalentWindow();
-	}
-
-	if (TalentWindowWidget.IsValid())
-	{
-		TalentWindowWidget->ToggleVisibility();
-	}
+    if(UIManager && UIManager->GetLuaVM()) UIManager->GetLuaVM()->ExecuteString(TEXT("ToggleTalentFrame()"),TEXT("=KeybindTalents"));
 }
 
 void AWowGameplayController::CreateTalentWindow()

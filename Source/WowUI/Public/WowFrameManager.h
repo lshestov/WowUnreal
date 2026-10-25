@@ -286,7 +286,6 @@ public:
 	void SetChecked(int64 Handle,bool Checked);
 	bool GetChecked(int64 Handle) const { return CheckedFrames.Contains(Handle); }
 	TSet<int64> CheckedFrames;
-	TMap<int64,TWeakObjectPtr<UImage>> CheckImages;
 	TMap<int64,int32> EditBoxMaxBytes,EditBoxMaxLetters;
 
 	/** Set the UI scale factor (typically calculated from viewport size vs WoW's base resolution) */
@@ -325,6 +324,7 @@ private:
 	TMap<int64, float> ScrollVerticalOffsets;
 	TMap<int64, float> ScrollHorizontalOffsets;
 	TMap<int64, int64> ScrollChildHandles;
+    TMap<int64,TWeakObjectPtr<UCanvasPanel>> ScrollViewports;
 
 	/** Cooldown state per frame */
 	struct FCooldownState

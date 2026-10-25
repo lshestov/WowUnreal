@@ -1456,23 +1456,35 @@ void UWowConnectionManager::SendTextEmote(int32 EmoteTextId, int64 InTargetGuid)
     UE_LOG(LogWowNet, Log, TEXT("Sent text emote: EmoteTextId=%d, Target=%lld"), EmoteTextId, InTargetGuid);
 }
 
-void UWowConnectionManager::SendLearnTalent(int32 TalentId, int32 RequestedRank)
+TArray<uint8> UWowConnectionManager::BuildLearnTalentPacket(uint32 TalentId,uint32 Rank,uint64 PetGuid)
 {
-    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
-
-    TArray<uint8> Data;
-    Data.Reserve(8);
-
-    // TalentId (uint32)
-    uint32 TId = static_cast<uint32>(TalentId);
-    Data.Append(reinterpret_cast<const uint8*>(&TId), 4);
-
-    // RequestedRank (uint32)
-    uint32 Rank = static_cast<uint32>(RequestedRank);
-    Data.Append(reinterpret_cast<const uint8*>(&Rank), 4);
-
-    WorldSocket->SendPacket(WowOpcode::CMSG_LEARN_TALENT, Data);
-    UE_LOG(LogWowNet, Log, TEXT("Sent learn talent: TalentId=%d, Rank=%d"), TalentId, RequestedRank);
+    TArray<uint8> Data; if(!TalentId || Rank>4) return Data;
+    if(PetGuid) Data.Append(reinterpret_cast<const uint8*>(&PetGuid),8);
+    Data.Append(reinterpret_cast<const uint8*>(&TalentId),4); Data.Append(reinterpret_cast<const uint8*>(&Rank),4); return Data;
+}
+TArray<uint8> UWowConnectionManager::BuildPreviewTalentsPacket(const TArray<FWowTalentInfo>& Talents,uint64 PetGuid)
+{
+    TArray<uint8> Data; if(Talents.IsEmpty() || Talents.Num()>128) return Data;
+    for(const auto& Talent:Talents) if(!Talent.TalentId || Talent.Rank>4) return Data;
+    if(PetGuid) Data.Append(reinterpret_cast<const uint8*>(&PetGuid),8);
+    const uint32 Count=Talents.Num(); Data.Append(reinterpret_cast<const uint8*>(&Count),4);
+    for(const auto& Talent:Talents) { const uint32 Rank=Talent.Rank; Data.Append(reinterpret_cast<const uint8*>(&Talent.TalentId),4); Data.Append(reinterpret_cast<const uint8*>(&Rank),4); }
+    return Data;
+}
+void UWowConnectionManager::SendLearnTalent(int32 TalentId,int32 RequestedRank)
+{
+    const auto Data=BuildLearnTalentPacket(TalentId,RequestedRank); if(Data.IsEmpty()) return;
+    SendRawPacket(WowOpcode::CMSG_LEARN_TALENT,Data);
+}
+void UWowConnectionManager::SendLearnPetTalent(uint32 TalentId,uint32 Rank)
+{
+    const uint64 Guid=PacketHandler.PetActionBar.PetGuid; if(!Guid) return;
+    const auto Data=BuildLearnTalentPacket(TalentId,Rank,Guid); if(!Data.IsEmpty()) SendRawPacket(0x47A,Data);
+}
+void UWowConnectionManager::SendLearnPreviewTalents(const TArray<FWowTalentInfo>& Talents,bool Pet)
+{
+    const uint64 Guid=Pet?PacketHandler.PetActionBar.PetGuid:0; if(Pet && !Guid) return;
+    const auto Data=BuildPreviewTalentsPacket(Talents,Guid); if(!Data.IsEmpty()) SendRawPacket(Pet?0x4C2:0x4C1,Data);
 }
 
 void UWowConnectionManager::Disconnect()

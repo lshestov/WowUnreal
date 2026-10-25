@@ -466,6 +466,7 @@ struct FWowGameplayProbe
             else if(Key==TEXT("B")) C.OnBagKey();
             else if(Key==TEXT("C")) C.OnCharacterKey();
             else if(Key==TEXT("P")) C.OnSpellbookKey();
+            else if(Key==TEXT("N")) C.OnTalentKey();
             else if(Key==TEXT("L")) C.OnQuestLogKey();
             else if(Key==TEXT("M")) C.OnToggleMap();
             else if(Key==TEXT("Enter")) C.OnEnterKey();

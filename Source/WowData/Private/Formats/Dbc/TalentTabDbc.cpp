@@ -19,8 +19,9 @@ bool FTalentTabDbc::Load(const FDbcParser& Parser)
 		E.TalentTabID = Parser.GetUInt(i, 0);
 		E.Name = Parser.GetString(i, 1);
 		// Skip columns 2-17 (Name localized)
-		E.NameFlags = Parser.GetUInt(i, 18);
-		E.SpellIcon = Parser.GetUInt(i, 19);
+		E.NameFlags = Parser.GetUInt(i, 17);
+		E.SpellIcon = Parser.GetUInt(i, 18);
+		E.RaceMask = Parser.GetUInt(i, 19);
 		E.ClassMask = Parser.GetUInt(i, 20);
 		E.PetTalentMask = Parser.GetUInt(i, 21);
 		E.TabPage = Parser.GetUInt(i, 22);
@@ -38,4 +39,11 @@ const FTalentTabDbcEntry* FTalentTabDbc::GetById(uint32 ID) const
 {
 	const int32* Idx = IdIndex.Find(ID);
 	return Idx ? &Entries[*Idx] : nullptr;
+}
+bool FTalentTabDbc::LoadPetFamilies(const FDbcParser& Parser)
+{
+    if(!Parser.IsValid() || Parser.GetFieldCount()<10) return false;
+    PetFamilies.Reset();
+    for(uint32 I=0;I<Parser.GetRecordCount();++I) PetFamilies.Add(Parser.GetUInt(I,0),{int32(Parser.GetUInt(I,8)),int32(Parser.GetUInt(I,9))});
+    return true;
 }

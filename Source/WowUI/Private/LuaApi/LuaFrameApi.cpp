@@ -3181,6 +3181,10 @@ static const luaL_Reg FrameMethods[] =
 	{"GetPushedTexture", [](lua_State* L) -> int { return PushButtonTexture(L,TEXT("Pushed")); }},
 	{"GetHighlightTexture", [](lua_State* L) -> int { return PushButtonTexture(L,TEXT("Highlight")); }},
 	{"GetDisabledTexture", [](lua_State* L) -> int { return PushButtonTexture(L,TEXT("Disabled")); }},
+    {"GetCheckedTexture", [](lua_State* L) -> int { return PushButtonTexture(L,TEXT("Checked")); }},
+    {"GetDisabledCheckedTexture", [](lua_State* L) -> int { return PushButtonTexture(L,TEXT("DisabledChecked")); }},
+    {"SetCheckedTexture", [](lua_State* L) -> int { return SetButtonTexture(L,TEXT("Checked")); }},
+    {"SetDisabledCheckedTexture", [](lua_State* L) -> int { return SetButtonTexture(L,TEXT("DisabledChecked")); }},
 	{"SetButtonState", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->SetButtonState(GetFrameHandle(L),UTF8_TO_TCHAR(luaL_checkstring(L,2)),lua_toboolean(L,3)!=0 && (!lua_isnumber(L,3) || lua_tonumber(L,3)!=0)); return 0; }},
 	{"GetButtonState", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); const FString State=C && C->FrameManager?C->FrameManager->GetButtonState(GetFrameHandle(L)):TEXT("NORMAL"); lua_pushstring(L,TCHAR_TO_UTF8(*State)); return 1; }},
 	{"RegisterForClicks", LF_RegisterForClicks},
@@ -3404,6 +3408,7 @@ static const luaL_Reg FrameMethods[] =
 	// Texture access (region globals use frame metatable)
 	{"SetTexture", LF_TextureSetTexture},
 	{"SetTexCoord", LF_TextureSetTexCoord},
+	{"SetTalent", WowLuaApi::SetTalentTooltip},
 	{"GetTexCoord", LF_GetTexCoord},
 	{"GetTexture", [](lua_State* L) -> int {
 		luaL_checktype(L, 1, LUA_TTABLE);

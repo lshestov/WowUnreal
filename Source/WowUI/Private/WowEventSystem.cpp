@@ -1646,7 +1646,7 @@ FString FWowEventSystem::OpcodeToEvent(uint16 Opcode)
 
 	// Spells and actions
 	case 0x012A: return TEXT("SPELLS_CHANGED");                  // SMSG_INITIAL_SPELLS (correct opcode)
-	case 0x012B: return FString(); // The learned-spell delegate refreshes the book.
+	case 0x012B: case 0x0203: return TEXT("SPELLS_CHANGED");
 	case 0x0130: return TEXT("SPELL_UPDATE_COOLDOWN");           // SMSG_SPELL_COOLDOWN (correct opcode)
 	case 0x0129: return TEXT("ACTIONBAR_SLOT_CHANGED");          // SMSG_ACTION_BUTTONS (correct opcode)
 

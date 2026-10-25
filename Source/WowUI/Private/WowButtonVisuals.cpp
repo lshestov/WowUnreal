@@ -63,7 +63,8 @@ FString FWowFrameManager::EnsureButtonTexture(int64 Handle,const FString& State)
     if(Texture.Name.IsEmpty()) Texture.Name=Entry->Def.Name+State+TEXT("Texture");
     Texture.Name.ReplaceInline(TEXT("$parent"),*Entry->Def.Name);
     for(auto& Anchor:Texture.Anchors) Anchor.RelativeTo.ReplaceInline(TEXT("$parent"),*Entry->Def.Name);
-    if(State==TEXT("Highlight")) Texture.bAdditive=true;
+    if(State==TEXT("Checked") && Texture.File.IsEmpty()) Texture.File=Entry->Def.CheckedTexture;
+    if(State==TEXT("Highlight") || State==TEXT("Checked")) Texture.bAdditive=true;
     const bool Hidden=Texture.bHidden; Texture.bHidden=false;
     FWowFrameDef RegionOwner; RegionOwner.Name=Entry->Def.Name;
     const auto Size=GetLayoutRect(Handle); RegionOwner.Width=Size.Z; RegionOwner.Height=Size.W;
@@ -72,7 +73,7 @@ FString FWowFrameManager::EnsureButtonTexture(int64 Handle,const FString& State)
     ButtonRegionHidden.Add(Texture.Name,Hidden);
     CreateLayerContent(Canvas,RegionOwner,Handle);
     if(auto* Image=GetNamedTexture(Texture.Name)) if(auto* Slot=Cast<UCanvasPanelSlot>(Image->Slot))
-        Slot->SetZOrder(State==TEXT("Highlight")?450:200);
+        Slot->SetZOrder(State==TEXT("Highlight")?450:State.Contains(TEXT("Checked"))?400:200);
     RefreshButtonVisuals(Handle);
     return Texture.Name;
 }
@@ -95,6 +96,8 @@ void FWowFrameManager::RefreshButtonVisuals(int64 Handle)
     {
         bool Show=Pair.Key==TEXT("Normal")?!((Pressed && HasResource(TEXT("Pushed"))) || (Disabled && HasResource(TEXT("Disabled")))):
             Pair.Key==TEXT("Pushed")?Pressed:Pair.Key==TEXT("Disabled")?Disabled:
+            Pair.Key==TEXT("Checked")?GetChecked(Handle) && !(Disabled && HasResource(TEXT("DisabledChecked"))):
+            Pair.Key==TEXT("DisabledChecked")?GetChecked(Handle) && Disabled:
             Pair.Key==TEXT("Highlight")?!Disabled && (HoverFrameHandle==Handle || Visual->HighlightLocked):false;
         if(Pair.Key==TEXT("Highlight")) if(auto* Texture=Cast<UTexture2D>(Image->GetBrush().GetResourceObject()))
             if(auto* Base=LoadObject<UMaterialInterface>(nullptr,TEXT("/Game/Materials/M_WowUiAdditive.M_WowUiAdditive")))
