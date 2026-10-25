@@ -206,6 +206,20 @@ and clearing). The MPQ case requires `-wowdata=<client Data directory>`.
 
 ### Running filters
 
+`WowUnreal.Lighting` checks day/night sun direction, movable local shadow
+cascades, contact shadows, actual abbey baked colors and bounded interior fill
+restricted to character lighting channels. The WMO material is generated with
+`Scripts/CreateWorldLightingMaterial.py`; it contains no game textures. Local
+ambient is an approximation based on MOCV, not a reconstruction of every WMO
+light or portal. Group flags follow [pywowlib's WMO definitions](https://github.com/wowdev/pywowlib/blob/master/file_formats/wmo_format_group.py).
+
+Development gameplay probes also support `time` (`minutes`, frozen locally) and
+`profile` (`seconds`, 1–30). A profile step records sample count, mean, median and
+95th percentile in milliseconds for the frame, game thread, render thread,
+GPU, Lua UI callbacks, hover, layout and widget work, plus Lua heap MiB. Use
+the same route, viewpoint, viewport and time for comparisons, let streaming
+settle first, and run without a concurrent editor build or automation suite.
+
 `WowUnreal.Traversal` checks ground, falling and swimming packet layouts and the
 shared millisecond clock used for movement and time sync. `WowUnreal.Collision`
 also verifies player-capsule impact normals on real abbey floor geometry and M2

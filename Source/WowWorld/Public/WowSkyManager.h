@@ -45,6 +45,7 @@ public:
 	int32 CurrentMapId = 0;
 
 	float GetTimeOfDay() const { return TimeOfDay; }
+	static FRotator SunRotationForTime(float Minutes);
 
 	/** Load light zones from Light.dbc for the given map */
 	void LoadLightZones(int32 MapId);

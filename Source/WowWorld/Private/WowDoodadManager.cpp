@@ -608,7 +608,8 @@ TArray<UInstancedStaticMeshComponent*> FWowDoodadManager::SpawnDoodadsInstanced(
         UInstancedStaticMeshComponent* ISM = NewObject<UInstancedStaticMeshComponent>(ParentActor, CompName);
         ISM->SetupAttachment(ParentActor->GetRootComponent());
         ISM->SetStaticMesh(SM);
-        ISM->SetCastShadow(false);
+        ISM->SetCastShadow(true);
+        ISM->SetCastContactShadow(true);
         ISM->SetCollisionEnabled(ECollisionEnabled::NoCollision);
         ISM->SetMobility(EComponentMobility::Static);
         ISM->bNeverDistanceCull = true;

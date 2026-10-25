@@ -84,6 +84,8 @@ private:
     TSharedPtr<struct FWowGameplayProbe> GameplayProbe;
     bool bGameplayProbeChecked=false;
     void TickGameplayProbe();
+    double LastUiMilliseconds=0;
+    double LastOnUpdateMilliseconds=0,LastHoverMilliseconds=0,LastLayoutMilliseconds=0,LastWidgetMilliseconds=0;
     uint32 LastSentMovementFlags=0;
     float LastSentOrientation=0;
     double MovementFallStarted=0;

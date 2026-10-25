@@ -90,12 +90,20 @@ void AWowViewerGameMode::SetupPostProcess(UWorld* World)
     SetCVar(TEXT("r.Lumen.TranslucencyReflections.FrontLayer.Allow"), 0);
     SetCVar(TEXT("r.DynamicGlobalIlluminationMethod"), 0); // None instead of Lumen
     SetCVar(TEXT("r.ReflectionMethod"), 0); // None instead of Lumen
-    SetCVar(TEXT("r.Shadow.CSM.MaxCascades"), 2); // Reduce shadow cascades
+    SetCVar(TEXT("r.Shadow.CSM.MaxCascades"), 3);
 
     APostProcessVolume* PPV = World->SpawnActor<APostProcessVolume>();
     if (PPV)
     {
         PPV->bUnbound = true;
+        PPV->Settings.bOverride_AmbientOcclusionIntensity=true;
+        PPV->Settings.AmbientOcclusionIntensity=.85f;
+        PPV->Settings.bOverride_AmbientOcclusionRadius=true;
+        PPV->Settings.AmbientOcclusionRadius=75;
+        PPV->Settings.bOverride_AmbientOcclusionRadiusInWS=true;
+        PPV->Settings.AmbientOcclusionRadiusInWS=true;
+        PPV->Settings.bOverride_AmbientOcclusionQuality=true;
+        PPV->Settings.AmbientOcclusionQuality=60;
         PPV->Settings.bOverride_AutoExposureMethod = true;
         PPV->Settings.AutoExposureMethod = AEM_Manual;
         PPV->Settings.bOverride_AutoExposureBias = true;

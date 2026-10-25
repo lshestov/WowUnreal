@@ -250,6 +250,7 @@ void FWowEquipmentManager::CopyEquipment(USkeletalMeshComponent* Source, USkelet
         Copy->SetRelativeTransform(Part->GetRelativeTransform());
         Copy->SetCollisionEnabled(ECollisionEnabled::NoCollision);
         Copy->SetCastShadow(Part->CastShadow);
+        Copy->SetLightingChannels(Part->LightingChannels.bChannel0,Part->LightingChannels.bChannel1,Part->LightingChannels.bChannel2);
         for (int32 Slot = 0; Slot < Part->GetNumMaterials(); ++Slot) Copy->SetMaterial(Slot, Part->GetMaterial(Slot));
         Copy->RegisterComponent();
     }
@@ -453,6 +454,7 @@ USceneComponent* FWowEquipmentManager::AttachEquipment(FMpqManager* Mpq, FWowAss
     WeaponComp->SetStaticMesh(WeaponMesh);
     WeaponComp->SetupAttachment(CharacterMesh, BoneName);
     WeaponComp->SetCastShadow(true);
+    WeaponComp->SetLightingChannels(true,true,false);
     WeaponComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
     WeaponComp->SetRelativeLocation(GetAttachmentOffset(CharacterM2, AttachPoint));

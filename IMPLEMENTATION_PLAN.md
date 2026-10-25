@@ -47,6 +47,7 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 - [x] Distance-based object streaming
 
 ### Sky & Atmosphere
+- [x] Packaged lighting polish: movable sun/moon cascades and world-space contact shadows, instanced foliage shadows, corrected day/night sun path and DBC diffuse/ambient balance, preserved WMO baked colors and bounded character-only interior fill. Verified six lighting/rendering/equipment regressions and a 22-step native day/night route with rendered outdoor/interior screenshots and GPU/UI profiles.
 - [x] Time-of-day sky with Light.dbc zone blending
 - [x] Sun/moon disc billboards
 - [x] Fog from LightFloatParams.dbc
@@ -104,6 +105,7 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 - [x] Zone detection from MCNK area IDs
 
 ### WoW UI System (Lua + FrameXML)
+- [ ] Profile native UI/game/render/GPU frame times, reduce recurring Lua GC work and routine log volume, and verify memory stability with live autologin.
 - [x] Lua 5.1 VM (sandboxed, memory limited 128MB, instruction limited)
 - [x] FrameXML parser (19 frame types, anchors, strata, templates)
 - [x] Addon/TOC loader with dependency resolution (Kahn's algorithm)

@@ -901,29 +901,37 @@ void AWowGameplayController::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 	TickGameplayProbe();
+	const uint64 UiStarted=FPlatformTime::Cycles64();
 
 	// Dispatch OnUpdate to all WoW UI frames each tick
 	if (UIManager && UIManager->GetEventSystem())
 	{
 		UIManager->GetEventSystem()->TickOnUpdate(DeltaTime);
 	}
+	LastOnUpdateMilliseconds=FPlatformTime::ToMilliseconds64(FPlatformTime::Cycles64()-UiStarted);
 
 	// Update mouse hover state for OnEnter/OnLeave events
 	if (UIManager && UIManager->GetFrameManager())
 	{
+		uint64 PartStarted=FPlatformTime::Cycles64();
 		float MX, MY;
 		if (GetMousePosition(MX, MY))
 		{
 			UIManager->GetFrameManager()->UpdateMouseHover(MX, MY);
 		}
+		LastHoverMilliseconds=FPlatformTime::ToMilliseconds64(FPlatformTime::Cycles64()-PartStarted);
+		PartStarted=FPlatformTime::Cycles64();
 
 		UIManager->GetFrameManager()->UpdateViewportLayout();
+		LastLayoutMilliseconds=FPlatformTime::ToMilliseconds64(FPlatformTime::Cycles64()-PartStarted);
+		PartStarted=FPlatformTime::Cycles64();
 
 		// Poll EditBox/Slider for value changes and dispatch Lua events
 		UIManager->GetFrameManager()->TickWidgetEvents();
 
 		// Update cooldown overlay animations
 		UIManager->GetFrameManager()->TickCooldowns();
+		LastWidgetMilliseconds=FPlatformTime::ToMilliseconds64(FPlatformTime::Cycles64()-PartStarted);
 
 
 	}
@@ -937,6 +945,7 @@ void AWowGameplayController::Tick(float DeltaTime)
 
 	MaybeApplyDebugDuelPreview();
 	RefreshDuelUi();
+	LastUiMilliseconds=FPlatformTime::ToMilliseconds64(FPlatformTime::Cycles64()-UiStarted);
 
 	if (!ConnectionManager) return;
 

@@ -891,6 +891,7 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
             SkelMesh->SetSkeletalMesh(SkeletalMesh);
             SkelMesh->SetWorldScale3D(FVector(Scale));
             SkelMesh->SetCastShadow(true);
+            SkelMesh->SetLightingChannels(true,true,false);
             SkelMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
             SkelMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
             SkelMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
@@ -955,6 +956,7 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
                         HairComp->SetSkeletalMesh(HairMesh);
                         HairComp->SetRelativeTransform(FTransform::Identity);
                         HairComp->SetCastShadow(true);
+                        HairComp->SetLightingChannels(true,true,false);
                         HairComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
                         HairComp->SetLeaderPoseComponent(SkelMesh); // Follow body animations
 
@@ -990,6 +992,7 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
     ProcMesh->SetupAttachment(Root);
     ProcMesh->SetWorldScale3D(FVector(Scale * FWowCoordinate::SCALE));
     ProcMesh->SetCastShadow(true);
+    ProcMesh->SetLightingChannels(true,true,false);
     ProcMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
     // Build mesh section from M2 vertex data

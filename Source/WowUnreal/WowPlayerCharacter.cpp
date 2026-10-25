@@ -36,6 +36,9 @@ AWowPlayerCharacter::AWowPlayerCharacter()
 
 	// Capsule defaults (roughly human-sized)
 	GetCapsuleComponent()->InitCapsuleSize(35.0f, 88.0f);
+	GetMesh()->SetCastShadow(true);
+	GetMesh()->SetCastContactShadow(true);
+	GetMesh()->SetLightingChannels(true,true,false);
 
 	// Standard UE5 third person setup
 	bUseControllerRotationPitch = false;
@@ -485,6 +488,7 @@ void AWowPlayerCharacter::SetCharacterModel(UWorld* World, FMpqManager* Mpq, FWo
 				NewMeshComp->SetupAttachment(GetMesh());
 				NewMeshComp->SetSkeletalMesh(ExtraMesh->GetSkeletalMeshAsset());
 				NewMeshComp->SetCastShadow(true);
+				NewMeshComp->SetLightingChannels(true,true,false);
 				NewMeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 				NewMeshComp->SetLeaderPoseComponent(GetMesh()); // Follow main mesh animations
 
@@ -737,6 +741,7 @@ void AWowPlayerCharacter::SetCharacterModelWithEquipment(UWorld* World, FMpqMana
 				NewMeshComp->SetupAttachment(GetMesh());
 				NewMeshComp->SetSkeletalMesh(ExtraMesh->GetSkeletalMeshAsset());
 				NewMeshComp->SetCastShadow(true);
+				NewMeshComp->SetLightingChannels(true,true,false);
 				NewMeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 				NewMeshComp->SetLeaderPoseComponent(GetMesh()); // Follow main mesh animations
 

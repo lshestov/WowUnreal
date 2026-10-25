@@ -1,5 +1,6 @@
 #include "WowWmoRenderer.h"
 #include "WowWorldCollision.h"
+#include "Components/PointLightComponent.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "WowRuntimeMeshMaterials.h"
 #include "WowWaterMaterial.h"
@@ -84,7 +85,7 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
     WmoActor->SetActorScale3D(FVector(ScaleVal));
     RootComp->SetMobility(EComponentMobility::Static);
 
-    int32 GroupsLoaded = 0;
+    int32 GroupsLoaded = 0, InteriorFills=0;
 
     // Load each group as UStaticMesh with Nanite support
     for (uint32 GroupIdx = 0; GroupIdx < RootData.NumGroups; ++GroupIdx)
@@ -105,6 +106,7 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
         }
 
         FWowWorldCollision::AddWmo(RootComp, *FString::Printf(TEXT("WmoCollision_%u"), GroupIdx), GroupData);
+        if (InteriorFills<4 && AddInteriorFill(RootComp,GroupData)) ++InteriorFills;
 
         // Create UStaticMesh with Nanite for this group
         UStaticMesh* GroupMesh = CreateStaticMeshFromWmoGroup(GroupData, RootData, WmoPath, GroupIdx, Mpq, Cache);
@@ -116,6 +118,7 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
         MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
         MeshComp->SetStaticMesh(GroupMesh);
         MeshComp->SetCastShadow(true);
+        MeshComp->bCastShadowAsTwoSided=true;
         MeshComp->RegisterComponent();
         ++GroupsLoaded;
 
@@ -293,6 +296,28 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
     return WmoActor;
 }
 
+UPointLightComponent* FWowWmoRenderer::AddInteriorFill(USceneComponent* Parent,const FWmoGroupData& Group)
+{
+    // MOGP Indoor and MOCV describe local ambient lighting. Keep the fill on
+    // characters only; architectural surfaces already carry their baked colors.
+    // Format reference: wowdev/pywowlib, file_formats/wmo_format_group.py.
+    if (!Parent || !(Group.Flags&0x2000) || Group.VertexColors.IsEmpty() || !Group.BoundingBox.IsValid) return nullptr;
+    FLinearColor Color=FLinearColor::Black;
+    for (const auto& Vertex:Group.VertexColors) Color+=FLinearColor(Vertex);
+    Color/=Group.VertexColors.Num(); Color=Color.GetClamped(.25f,.8f);
+    const FVector Center=Group.BoundingBox.GetCenter();
+    auto* Light=NewObject<UPointLightComponent>(Parent->GetOwner());
+    Light->SetupAttachment(Parent); Light->SetMobility(EComponentMobility::Movable);
+    Light->SetRelativeLocation(FVector(Center.Y,Center.X,Center.Z)*FWowCoordinate::SCALE);
+    Light->SetLightColor(Color); Light->SetIntensity(3.f);
+    Light->bUseInverseSquaredFalloff=false; Light->LightFalloffExponent=1;
+    Light->SetAttenuationRadius(FMath::Clamp(float(Group.BoundingBox.GetExtent().Size()*100),1000.f,3500.f));
+    Light->SetCastShadows(false); Light->SetLightingChannels(false,true,false);
+    Light->MaxDrawDistance=10000; Light->MaxDistanceFadeRange=1000;
+    Light->ComponentTags.Add(TEXT("WowInteriorFill")); Light->RegisterComponent();
+    return Light;
+}
+
 UStaticMesh* FWowWmoRenderer::CreateStaticMeshFromWmoGroup(
     const FWmoGroupData& GroupData, const FWmoRootData& RootData,
     const FString& WmoPath, int32 GroupIdx,
@@ -372,6 +397,7 @@ UStaticMesh* FWowWmoRenderer::CreateStaticMeshFromWmoGroup(
             FLinearColor LC(GroupData.VertexColors[i]);
             VertexInstanceColors[InstID] = FVector4f(LC.R, LC.G, LC.B, LC.A);
         }
+        else VertexInstanceColors[InstID]=FVector4f(1,1,1,1);
     }
 
     // Create triangles
@@ -409,7 +435,8 @@ UStaticMesh* FWowWmoRenderer::CreateStaticMeshFromWmoGroup(
     }
 
     // Build materials BEFORE mesh so sections are initialized correctly
-    UMaterial* BaseMat = FWowTerrainMaterial::GetSimpleObjectMaterial();
+    UMaterial* BaseMat = LoadObject<UMaterial>(nullptr,TEXT("/Game/Materials/M_WowWmo"));
+    if (!BaseMat) BaseMat=FWowTerrainMaterial::GetSimpleObjectMaterial();
     UMaterial* FallbackMat = LoadObject<UMaterial>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
 
     TArray<UMaterialInterface*> SectionMaterials;
@@ -433,6 +460,9 @@ UStaticMesh* FWowWmoRenderer::CreateStaticMeshFromWmoGroup(
                 {
                     UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, SM);
                     MID->SetTextureParameterValue(FName(TEXT("Layer0Texture")), Tex);
+                    const bool Baked=GroupData.VertexColors.Num()==GroupData.Vertices.Num();
+                    MID->SetScalarParameterValue(TEXT("BakedLightStrength"),Baked?.65f:0.f);
+                    MID->SetScalarParameterValue(TEXT("BakedFill"),Baked?.08f:0.f);
                     Mat = MID;
                 }
             }

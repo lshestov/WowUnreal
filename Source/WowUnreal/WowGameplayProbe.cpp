@@ -6,6 +6,11 @@
 #include "WowLuaVM.h"
 #include "WowFrameManager.h"
 #include "WowWorldCollision.h"
+#include "WowSkyManager.h"
+#include "Kismet/GameplayStatics.h"
+#include "Misc/App.h"
+#include "RenderTimer.h"
+#include "DynamicRHI.h"
 #include "Coord/WowCoordinate.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -34,6 +39,7 @@ struct FWowGameplayProbe
     uint32 LastEquippedItem=0;
     TWeakObjectPtr<UPrimitiveComponent> Avoiding;
     float AvoidSide=1;
+    TMap<FString,TArray<double>> Profile;
 
     explicit FWowGameplayProbe(const FString& Path)
     {
@@ -157,6 +163,25 @@ struct FWowGameplayProbe
         auto& Handler=Connection->PacketHandler;
         bool Done=false;
         if (Op==TEXT("wait")) Done=Now-StepStarted>=Step->GetNumberField(TEXT("seconds"));
+        else if (Op==TEXT("time"))
+        {
+            if (auto* Sky=Cast<AWowSkyManager>(UGameplayStatics::GetActorOfClass(C.GetWorld(),AWowSkyManager::StaticClass())))
+            { Sky->TimeOfDay=FMath::Clamp(float(Step->GetNumberField(TEXT("minutes"))),0.f,1439.9f); Sky->TimeSpeed=0; Done=true; }
+        }
+        else if (Op==TEXT("profile"))
+        {
+            Profile.FindOrAdd(TEXT("frameMs")).Add(FApp::GetDeltaTime()*1000);
+            Profile.FindOrAdd(TEXT("gameThreadMs")).Add(FPlatformTime::ToMilliseconds(GGameThreadTime));
+            Profile.FindOrAdd(TEXT("renderThreadMs")).Add(FPlatformTime::ToMilliseconds(GRenderThreadTime));
+            Profile.FindOrAdd(TEXT("gpuMs")).Add(FPlatformTime::ToMilliseconds(RHIGetGPUFrameCycles()));
+            Profile.FindOrAdd(TEXT("uiMs")).Add(C.LastUiMilliseconds);
+            Profile.FindOrAdd(TEXT("uiOnUpdateMs")).Add(C.LastOnUpdateMilliseconds);
+            Profile.FindOrAdd(TEXT("uiHoverMs")).Add(C.LastHoverMilliseconds);
+            Profile.FindOrAdd(TEXT("uiLayoutMs")).Add(C.LastLayoutMilliseconds);
+            Profile.FindOrAdd(TEXT("uiWidgetsMs")).Add(C.LastWidgetMilliseconds);
+            if (auto* Lua=C.UIManager->GetLuaVM()) Profile.FindOrAdd(TEXT("luaMiB")).Add(Lua->GetMemoryUsage()/(1024.0*1024));
+            Done=Now-StepStarted>=FMath::Clamp(Step->GetNumberField(TEXT("seconds")),1.0,30.0);
+        }
         else if (Op==TEXT("select_entry"))
         {
             const uint64 Guid=FindEntry(C,Step->GetIntegerField(TEXT("entry")));
@@ -294,6 +319,19 @@ struct FWowGameplayProbe
         if (Done)
         {
             const auto Result=MakeShared<FJsonObject>(); Result->SetStringField(TEXT("op"),Op);
+            if (Op==TEXT("profile"))
+            {
+                const auto Metrics=MakeShared<FJsonObject>();
+                for (auto& Column:Profile)
+                {
+                    auto& Values=Column.Value; Values.Sort(); double Sum=0; for (double Value:Values) Sum+=Value;
+                    const auto Metric=MakeShared<FJsonObject>();
+                    Metric->SetNumberField(TEXT("samples"),Values.Num()); Metric->SetNumberField(TEXT("mean"),Sum/Values.Num());
+                    Metric->SetNumberField(TEXT("median"),Values[Values.Num()/2]); Metric->SetNumberField(TEXT("p95"),Values[FMath::FloorToInt((Values.Num()-1)*.95)]);
+                    Metrics->SetObjectField(Column.Key,Metric);
+                }
+                Result->SetObjectField(TEXT("profile"),Metrics); Profile.Reset();
+            }
             Result->SetNumberField(TEXT("seconds"),Now-StepStarted); Result->SetStringField(TEXT("target"),FString::Printf(TEXT("%llu"),C.TargetGuid));
             Result->SetNumberField(TEXT("quests"),Handler.QuestLog.Num());
             if (LastEquippedItem) Result->SetNumberField(TEXT("equippedItem"),LastEquippedItem);

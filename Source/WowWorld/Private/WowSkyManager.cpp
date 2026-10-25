@@ -2,6 +2,7 @@
 #include "Components/DirectionalLightComponent.h"
 #include "Components/SkyAtmosphereComponent.h"
 #include "Components/SkyLightComponent.h"
+#include "Components/SceneComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Formats/Dbc/DbcStore.h"
 #include "Formats/Dbc/LightDbc.h"
@@ -13,6 +14,7 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/Material.h"
 #include "Engine/StaticMesh.h"
+#include "PhysicsEngine/BodySetup.h"
 #include "MeshDescription.h"
 #include "StaticMeshAttributes.h"
 #include "Components/StaticMeshComponent.h"
@@ -30,6 +32,7 @@ AWowSkyManager::AWowSkyManager()
 {
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.TickInterval = 0.1f; // update 10x/sec
+	SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("SkyRoot")));
 }
 
 void AWowSkyManager::BeginPlay()
@@ -38,6 +41,15 @@ void AWowSkyManager::BeginPlay()
 
 	// Create sun directional light
 	SunLight = NewObject<UDirectionalLightComponent>(this, TEXT("SunLight"));
+	SunLight->SetMobility(EComponentMobility::Movable);
+	SunLight->DynamicShadowDistanceMovableLight=15000;
+	SunLight->DynamicShadowCascades=3;
+	SunLight->CascadeDistributionExponent=3;
+	SunLight->CascadeTransitionFraction=.15f;
+	SunLight->ShadowBias=.3f;
+	SunLight->ShadowSlopeBias=.4f;
+	SunLight->ContactShadowLengthInWS=true;
+	SunLight->ContactShadowLength=50;
 	SunLight->RegisterComponent();
 	SunLight->AttachToComponent(GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
 	SunLight->SetIntensity(3.14f);
@@ -46,11 +58,16 @@ void AWowSkyManager::BeginPlay()
 
 	// Create moon directional light
 	MoonLight = NewObject<UDirectionalLightComponent>(this, TEXT("MoonLight"));
+	MoonLight->SetMobility(EComponentMobility::Movable);
+	MoonLight->DynamicShadowDistanceMovableLight=10000;
+	MoonLight->DynamicShadowCascades=2;
+	MoonLight->ContactShadowLengthInWS=true;
+	MoonLight->ContactShadowLength=50;
 	MoonLight->RegisterComponent();
 	MoonLight->AttachToComponent(GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
 	MoonLight->SetIntensity(0.5f);
 	MoonLight->SetLightColor(FLinearColor(0.5f, 0.55f, 0.7f));
-	MoonLight->SetCastShadows(false);
+	MoonLight->SetCastShadows(true);
 	MoonLight->SetVisibility(false);
 
 	// Create sky atmosphere
@@ -62,7 +79,7 @@ void AWowSkyManager::BeginPlay()
 	SkyLight = NewObject<USkyLightComponent>(this, TEXT("SkyLight"));
 	SkyLight->SetMobility(EComponentMobility::Movable);
 	SkyLight->bRealTimeCapture = true;
-	SkyLight->bLowerHemisphereIsBlack = false;
+	SkyLight->bLowerHemisphereIsBlack = true;
 	SkyLight->RegisterComponent();
 	SkyLight->AttachToComponent(GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
 	SkyLight->SetIntensity(1.0f);
@@ -167,6 +184,8 @@ static UStaticMesh* BuildDomeMesh(
 	}
 
 	UStaticMesh* SM = NewObject<UStaticMesh>(Outer);
+	SM->CreateBodySetup();
+	SM->GetBodySetup()->bNeverNeedsCookedCollisionData=true;
 	SM->GetStaticMaterials().Add(FStaticMaterial());
 	TArray<const FMeshDescription*> Descs = {&MeshDesc};
 	UStaticMesh::FBuildMeshDescriptionsParams Params;
@@ -680,22 +699,25 @@ void AWowSkyManager::Tick(float DeltaTime)
 	UpdateCelestialDiscs();
 }
 
+FRotator AWowSkyManager::SunRotationForTime(float Minutes)
+{
+	const float Phase=(Minutes-360.f)*(2.f*PI/1440.f);
+	return FRotator(-90.f*FMath::Sin(Phase),Minutes/4.f+180.f,0);
+}
+
 void AWowSkyManager::UpdateSunPosition()
 {
 	if (!SunLight) return;
 
-	float NormalizedTime = TimeOfDay / 1440.0f;
-	float SunPitch = -90.0f * FMath::Sin(NormalizedTime * PI);
-	float SunYaw = (NormalizedTime * 360.0f) + 180.0f;
+	const auto Rotation=SunRotationForTime(TimeOfDay);
+	SunLight->SetWorldRotation(Rotation);
 
-	SunLight->SetWorldRotation(FRotator(SunPitch, SunYaw, 0.0f));
-
-	bool bSunAboveHorizon = SunPitch < -5.0f;
+	bool bSunAboveHorizon = Rotation.Pitch < -5.0f;
 	SunLight->SetVisibility(bSunAboveHorizon);
 
 	if (MoonLight)
 	{
-		MoonLight->SetWorldRotation(FRotator(SunPitch + 180.0f, SunYaw + 180.0f, 0.0f));
+		MoonLight->SetWorldRotation(FRotator(-Rotation.Pitch,Rotation.Yaw+180.f,0));
 		MoonLight->SetVisibility(!bSunAboveHorizon);
 	}
 }
@@ -714,7 +736,7 @@ void AWowSkyManager::UpdateLightColors()
 			PlayerPos = Pawn->GetActorLocation();
 		}
 
-		FLinearColor SunColor = BlendZoneColor(LP_SunColor, PlayerPos);
+		FLinearColor SunColor = BlendZoneColor(LP_GlobalDiffuse, PlayerPos);
 		FLinearColor AmbientColor = BlendZoneColor(LP_GlobalAmbient, PlayerPos);
 
 		SunLight->SetLightColor(SunColor);
@@ -724,7 +746,7 @@ void AWowSkyManager::UpdateLightColors()
 		{
 			SkyLight->SetLightColor(AmbientColor);
 			// Keep minimum ambient so night is never pitch black (WoW always has some visibility)
-			SkyLight->SetIntensity(FMath::Lerp(0.5f, 1.5f, SunIntensity / 3.14f));
+			SkyLight->SetIntensity(FMath::Lerp(.4f,.65f,SunIntensity/3.14f));
 		}
 	}
 	else
@@ -734,7 +756,7 @@ void AWowSkyManager::UpdateLightColors()
 
 		if (SkyLight)
 		{
-			SkyLight->SetIntensity(FMath::Lerp(0.5f, 1.5f, SunIntensity / 3.14f));
+			SkyLight->SetIntensity(FMath::Lerp(.4f,.65f,SunIntensity/3.14f));
 		}
 	}
 }
