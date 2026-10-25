@@ -696,6 +696,7 @@ void FWowFrameManager::MergeTemplate(FWowFrameDef& Target, const FWowFrameDef& T
 
 	// Type-specific properties — use template values if target is empty
 	if (Target.ButtonText.IsEmpty()) Target.ButtonText = Template.ButtonText;
+	for(const auto& Pair:Template.ButtonTextureRegions) if(!Target.ButtonTextureRegions.Contains(Pair.Key)) Target.ButtonTextureRegions.Add(Pair.Key,Pair.Value);
 	if (Target.NormalTexture.IsEmpty()) { Target.NormalTexture = Template.NormalTexture; Target.NormalTextureName = Template.NormalTextureName; Target.NormalTextureParentKey = Template.NormalTextureParentKey; }
 	if (Target.PushedTexture.IsEmpty()) { Target.PushedTexture = Template.PushedTexture; Target.PushedTextureName = Template.PushedTextureName; Target.PushedTextureParentKey = Template.PushedTextureParentKey; }
 	if (Target.HighlightTexture.IsEmpty()) { Target.HighlightTexture = Template.HighlightTexture; Target.HighlightTextureName = Template.HighlightTextureName; Target.HighlightTextureParentKey = Template.HighlightTextureParentKey; }
@@ -1659,6 +1660,7 @@ int64 FWowFrameManager::CreateFrame(const FWowFrameDef& Def)
 			EventSystem->CreateTextureRegionGlobal(Resolved.HighlightTextureName, Handle, TEXT("Texture"));
 		if (!Resolved.DisabledTextureName.IsEmpty())
 			EventSystem->CreateTextureRegionGlobal(Resolved.DisabledTextureName, Handle, TEXT("Texture"));
+		for(const auto& Pair:Resolved.ButtonTextureRegions) EnsureButtonTexture(Handle,Pair.Key);
 
 		for (const FString& NamedObject : Resolved.NamedObjectGlobals)
 		{
@@ -2257,8 +2259,11 @@ bool FWowFrameManager::IsMouseOverFrame(int64 Handle, float TopOffset, float Bot
 		return false;
 	}
 
-	const FFrameRect* Rect = FrameRects.Find(Entry->Def.Name);
-	if (!Rect || Rect->W <= 0.f || Rect->H <= 0.f || RawViewportScale <= 0.f)
+	// Mouse handlers may move a child region before asking IsMouseOver().
+	// Resolve this frame again after that cache invalidation.
+	const FFrameRect CurrentRect=const_cast<FWowFrameManager*>(this)->GetFrameRect(Entry->Def.Name);
+	const FFrameRect* Rect=&CurrentRect;
+	if (Rect->W <= 0.f || Rect->H <= 0.f || RawViewportScale <= 0.f)
 	{
 		return false;
 	}
@@ -2385,7 +2390,9 @@ void FWowFrameManager::UpdateMouseHover(float ScreenX, float ScreenY)
 			EventSystem->RunFrameScript(HoverFrameHandle, TEXT("OnLeave"), {TEXT("0")});
 		}
 
+		const int64 OldHover=HoverFrameHandle;
 		HoverFrameHandle = NewHover;
+		RefreshButtonVisuals(OldHover); RefreshButtonVisuals(NewHover);
 
 		// Dispatch OnEnter for the new frame
 		if (HoverFrameHandle >= 0 && EventSystem)
@@ -2398,6 +2405,11 @@ void FWowFrameManager::UpdateMouseHover(float ScreenX, float ScreenY)
 void FWowFrameManager::DispatchMouseDown(int64 Handle, const FString& Button)
 {
 	if (!EventSystem || Handle < 0) return;
+	if(auto* Widget=GetButtonWidget(Handle))
+	{
+		if(!Widget->GetIsEnabled()) return;
+		ButtonVisualStates.FindOrAdd(Handle).MousePressed=true; RefreshButtonVisuals(Handle);
+	}
 	EventSystem->RunFrameScript(Handle, TEXT("OnMouseDown"), {Button});
 }
 
@@ -2425,6 +2437,8 @@ bool FWowFrameManager::DispatchMouseWheel(int64 Handle,float Delta)
 void FWowFrameManager::DispatchMouseUp(int64 Handle, const FString& Button)
 {
 	if (!EventSystem || Handle < 0) return;
+	if(auto* Visual=ButtonVisualStates.Find(Handle)) { Visual->MousePressed=false; if(!Visual->PressLocked) Visual->ForcedPressed=false; RefreshButtonVisuals(Handle); }
+	if(auto* Widget=GetButtonWidget(Handle); Widget && !Widget->GetIsEnabled()) return;
 	EventSystem->RunFrameScript(Handle, TEXT("OnMouseUp"), {Button});
 }
 

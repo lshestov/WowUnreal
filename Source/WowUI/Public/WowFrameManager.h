@@ -166,6 +166,13 @@ public:
 
 	/** Get the UButton child widget for a frame (nullptr if not found or invalid) */
 	UButton* GetButtonWidget(int64 Handle) const;
+	FString EnsureButtonTexture(int64 Handle, const FString& State);
+	void RefreshButtonVisuals(int64 Handle);
+	void SetButtonEnabled(int64 Handle, bool Enabled);
+	void SetButtonState(int64 Handle, const FString& State, bool Locked=false);
+	FString GetButtonState(int64 Handle) const;
+	void LockButtonHighlight(int64 Handle, bool Locked);
+	bool SetButtonRegionShown(const FString& Name, bool Shown);
 
 	/** Get the UEditableTextBox child widget for a frame (nullptr if not found or invalid) */
 	UEditableTextBox* GetEditBoxWidget(int64 Handle) const;
@@ -344,6 +351,13 @@ private:
 
 	/** Interactive control widgets owned by frame containers */
 	TMap<int64, TWeakObjectPtr<UButton>> ButtonWidgets;
+	struct FButtonVisualState
+	{
+		TMap<FString,FString> Regions;
+		bool MousePressed=false, ForcedPressed=false, PressLocked=false, HighlightLocked=false;
+	};
+	TMap<int64,FButtonVisualState> ButtonVisualStates;
+	TMap<FString,bool> ButtonRegionHidden;
 	TMap<int64, TWeakObjectPtr<UEditableTextBox>> EditBoxWidgets;
 	TMap<int64, TWeakObjectPtr<USlider>> SliderWidgets;
 	TMap<int64, TWeakObjectPtr<UTextBlock>> PrimaryTextWidgets;

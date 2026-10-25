@@ -1132,6 +1132,19 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 
 	AppendInlineTexturesToLayers(Def, InlineTextures);
 
+	for(pugi::xml_node Child=Node.first_child(); Child; Child=Child.next_sibling())
+	{
+		const FString Tag=UTF8_TO_TCHAR(Child.name());
+		if(Tag!=TEXT("NormalTexture") && Tag!=TEXT("PushedTexture") && Tag!=TEXT("DisabledTexture") && Tag!=TEXT("HighlightTexture")) continue;
+		// Reuse the ordinary texture parser, including size, anchors and UVs.
+		pugi::xml_document Document;
+		auto Frame=Document.append_child("Frame");
+		auto Texture=Frame.append_child("Layers").append_child("Layer").append_copy(Child);
+		Texture.set_name("Texture");
+		const auto Parsed=ParseFrameNode_Pugi(Frame);
+		if(Parsed.Layers.Num() && Parsed.Layers[0].Textures.Num()) Def.ButtonTextureRegions.Add(Tag.LeftChop(7),Parsed.Layers[0].Textures[0]);
+	}
+
 	return Def;
 }
 #endif
@@ -1282,6 +1295,13 @@ static FWowFrameDef ParseFrameNode(const FXmlNode* Node)
 	}
 
 	AppendInlineTexturesToLayers(Def, InlineTextures);
+
+    for(const FXmlNode* Child:Node->GetChildrenNodes())
+    {
+        const FString Tag=Child->GetTag();
+        if(Tag==TEXT("NormalTexture") || Tag==TEXT("PushedTexture") || Tag==TEXT("DisabledTexture") || Tag==TEXT("HighlightTexture"))
+            Def.ButtonTextureRegions.Add(Tag.LeftChop(7),ParseTextureNode(Child));
+    }
 
 	return Def;
 }

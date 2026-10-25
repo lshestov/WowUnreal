@@ -445,6 +445,8 @@ static int LF_Show(lua_State* L)
 {
 	if (TableRepresentsRegion(L, 1))
 	{
+		lua_getfield(L,1,"__name"); const FString Name=UTF8_TO_TCHAR(luaL_optstring(L,-1,"")); lua_pop(L,1);
+		if(auto* C=WowLuaApi::GetContext(L); C && C->FrameManager && C->FrameManager->SetButtonRegionShown(Name,true)) return 0;
 		if (UImage* Image = GetTextureImage(L, 1))
 		{
 			Image->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
@@ -471,6 +473,8 @@ static int LF_Hide(lua_State* L)
 {
 	if (TableRepresentsRegion(L, 1))
 	{
+		lua_getfield(L,1,"__name"); const FString Name=UTF8_TO_TCHAR(luaL_optstring(L,-1,"")); lua_pop(L,1);
+		if(auto* C=WowLuaApi::GetContext(L); C && C->FrameManager && C->FrameManager->SetButtonRegionShown(Name,false)) return 0;
 		if (UImage* Image = GetTextureImage(L, 1))
 		{
 			Image->SetVisibility(ESlateVisibility::Collapsed);
@@ -1438,6 +1442,8 @@ static int LF_TextureSetAlpha(lua_State* L)
 static int LF_TextureShow(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
+	lua_getfield(L,1,"__name"); const FString Name=UTF8_TO_TCHAR(luaL_optstring(L,-1,"")); lua_pop(L,1);
+	if(auto* C=WowLuaApi::GetContext(L); C && C->FrameManager && C->FrameManager->SetButtonRegionShown(Name,true)) return 0;
 	UImage* Img = GetTextureImage(L, 1);
 	if (Img)
 	{
@@ -1450,6 +1456,8 @@ static int LF_TextureShow(lua_State* L)
 static int LF_TextureHide(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
+	lua_getfield(L,1,"__name"); const FString Name=UTF8_TO_TCHAR(luaL_optstring(L,-1,"")); lua_pop(L,1);
+	if(auto* C=WowLuaApi::GetContext(L); C && C->FrameManager && C->FrameManager->SetButtonRegionShown(Name,false)) return 0;
 	UImage* Img = GetTextureImage(L, 1);
 	if (Img)
 	{
@@ -2256,204 +2264,34 @@ static int LF_GetBottom(lua_State* L)
 	return 1;
 }
 
-// frame:SetTexture(texture) — for Button Normal/Pushed/etc textures
-static int LF_SetNormalTexture(lua_State* L)
+// Button state textures are real regions, shared by XML and Lua setters.
+static int PushButtonTexture(lua_State* L,const FString& State)
 {
-	luaL_checktype(L, 1, LUA_TTABLE);
-	if (lua_isnil(L, 2) || lua_isnone(L, 2)) return 0;
-
-	const char* TexturePath = "";
-	if (lua_isstring(L, 2)) {
-		TexturePath = lua_tostring(L, 2);
-	} else if (lua_istable(L, 2)) {
-		// Handle texture object tables - extract path if available
-		lua_getfield(L, 2, "__texturePath");
-		if (lua_isstring(L, -1)) {
-			TexturePath = lua_tostring(L, -1);
-		}
-		lua_pop(L, 1);
-		// If no path, silently accept the texture table
-		if (!TexturePath || !TexturePath[0]) return 0;
-	} else {
-		// Silently ignore other types to prevent errors
-		return 0;
-	}
-
-	// Store in Lua table
-	lua_pushstring(L, TexturePath);
-	lua_setfield(L, 1, "__normalTexture");
-
-	// Update UMG widget
-	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-	if (Ctx && Ctx->FrameManager)
-	{
-		int64 Handle = GetFrameHandle(L);
-		if (UButton* Button = GetButtonWidgetForTable(L))
-		{
-			UTexture2D* Texture = Ctx->FrameManager->LoadUITexture(UTF8_TO_TCHAR(TexturePath));
-			if (Texture)
-			{
-				FSlateBrush NormalBrush;
-				NormalBrush.SetResourceObject(Texture);
-				NormalBrush.DrawAs = ESlateBrushDrawType::Image;
-				FButtonStyle ButtonStyle = Button->GetStyle();
-				ButtonStyle.Normal = NormalBrush;
-				Button->SetStyle(ButtonStyle);
-			}
-		}
-	}
-
-	return 0;
+    auto* C=WowLuaApi::GetContext(L);
+    const FString Name=C && C->FrameManager?C->FrameManager->EnsureButtonTexture(GetFrameHandle(L),State):FString();
+    if(Name.IsEmpty()) lua_pushnil(L); else lua_getglobal(L,TCHAR_TO_UTF8(*Name));
+    return 1;
 }
-
-static int LF_SetPushedTexture(lua_State* L)
+static int SetButtonTexture(lua_State* L,const FString& State)
 {
-	luaL_checktype(L, 1, LUA_TTABLE);
-	if (lua_isnil(L, 2) || lua_isnone(L, 2)) return 0;
-
-	const char* TexturePath = "";
-	if (lua_isstring(L, 2)) {
-		TexturePath = lua_tostring(L, 2);
-	} else if (lua_istable(L, 2)) {
-		// Handle texture object tables - extract path if available
-		lua_getfield(L, 2, "__texturePath");
-		if (lua_isstring(L, -1)) {
-			TexturePath = lua_tostring(L, -1);
-		}
-		lua_pop(L, 1);
-		// If no path, silently accept the texture table
-		if (!TexturePath || !TexturePath[0]) return 0;
-	} else {
-		// Silently ignore other types to prevent errors
-		return 0;
-	}
-
-	// Store in Lua table
-	lua_pushstring(L, TexturePath);
-	lua_setfield(L, 1, "__pushedTexture");
-
-	// Update UMG widget
-	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-	if (Ctx && Ctx->FrameManager)
-	{
-		int64 Handle = GetFrameHandle(L);
-		if (UButton* Button = GetButtonWidgetForTable(L))
-		{
-			UTexture2D* Texture = Ctx->FrameManager->LoadUITexture(UTF8_TO_TCHAR(TexturePath));
-			if (Texture)
-			{
-				FSlateBrush PressedBrush;
-				PressedBrush.SetResourceObject(Texture);
-				PressedBrush.DrawAs = ESlateBrushDrawType::Image;
-				FButtonStyle ButtonStyle = Button->GetStyle();
-				ButtonStyle.Pressed = PressedBrush;
-				Button->SetStyle(ButtonStyle);
-			}
-		}
-	}
-
-	return 0;
+    auto* C=WowLuaApi::GetContext(L); if(!C || !C->FrameManager) return 0;
+    const int64 Handle=GetFrameHandle(L);
+    const FString Name=C->FrameManager->EnsureButtonTexture(Handle,State); if(Name.IsEmpty()) return 0;
+    lua_getglobal(L,TCHAR_TO_UTF8(*Name)); lua_replace(L,1);
+    if(lua_istable(L,2))
+    {
+        if(auto* Source=GetTextureImage(L,2)) if(auto* Target=C->FrameManager->GetNamedTexture(Name))
+        { Target->SetBrush(Source->GetBrush()); Target->SetRenderOpacity(Source->GetRenderOpacity()); }
+    }
+    else LF_TextureSetTexture(L);
+    C->FrameManager->RefreshButtonVisuals(Handle);
+    return 0;
 }
+static int LF_SetNormalTexture(lua_State* L) { return SetButtonTexture(L,TEXT("Normal")); }
+static int LF_SetPushedTexture(lua_State* L) { return SetButtonTexture(L,TEXT("Pushed")); }
+static int LF_SetHighlightTexture(lua_State* L) { return SetButtonTexture(L,TEXT("Highlight")); }
+static int LF_SetDisabledTexture(lua_State* L) { return SetButtonTexture(L,TEXT("Disabled")); }
 
-static int LF_SetHighlightTexture(lua_State* L)
-{
-	luaL_checktype(L, 1, LUA_TTABLE);
-	if (lua_isnil(L, 2) || lua_isnone(L, 2)) return 0;
-
-	const char* TexturePath = "";
-	if (lua_isstring(L, 2)) {
-		TexturePath = lua_tostring(L, 2);
-	} else if (lua_istable(L, 2)) {
-		// Handle texture object tables - extract path if available
-		lua_getfield(L, 2, "__texturePath");
-		if (lua_isstring(L, -1)) {
-			TexturePath = lua_tostring(L, -1);
-		}
-		lua_pop(L, 1);
-		// If no path, silently accept the texture table
-		if (!TexturePath || !TexturePath[0]) return 0;
-	} else {
-		// Silently ignore other types to prevent errors
-		return 0;
-	}
-
-	// Store in Lua table
-	lua_pushstring(L, TexturePath);
-	lua_setfield(L, 1, "__highlightTexture");
-
-	// Update UMG widget
-	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-	if (Ctx && Ctx->FrameManager)
-	{
-		int64 Handle = GetFrameHandle(L);
-		if (UButton* Button = GetButtonWidgetForTable(L))
-		{
-			UTexture2D* Texture = Ctx->FrameManager->LoadUITexture(UTF8_TO_TCHAR(TexturePath));
-			if (Texture)
-			{
-				FSlateBrush HoveredBrush;
-				HoveredBrush.SetResourceObject(Texture);
-				HoveredBrush.DrawAs = ESlateBrushDrawType::Image;
-				FButtonStyle ButtonStyle = Button->GetStyle();
-				ButtonStyle.Hovered = HoveredBrush;
-				Button->SetStyle(ButtonStyle);
-			}
-		}
-	}
-
-	return 0;
-}
-
-static int LF_SetDisabledTexture(lua_State* L)
-{
-	luaL_checktype(L, 1, LUA_TTABLE);
-	if (lua_isnil(L, 2) || lua_isnone(L, 2)) return 0;
-
-	const char* TexturePath = "";
-	if (lua_isstring(L, 2)) {
-		TexturePath = lua_tostring(L, 2);
-	} else if (lua_istable(L, 2)) {
-		// Handle texture object tables - extract path if available
-		lua_getfield(L, 2, "__texturePath");
-		if (lua_isstring(L, -1)) {
-			TexturePath = lua_tostring(L, -1);
-		}
-		lua_pop(L, 1);
-		// If no path, silently accept the texture table
-		if (!TexturePath || !TexturePath[0]) return 0;
-	} else {
-		// Silently ignore other types to prevent errors
-		return 0;
-	}
-
-	// Store in Lua table
-	lua_pushstring(L, TexturePath);
-	lua_setfield(L, 1, "__disabledTexture");
-
-	// Update UMG widget
-	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-	if (Ctx && Ctx->FrameManager)
-	{
-		int64 Handle = GetFrameHandle(L);
-		if (UButton* Button = GetButtonWidgetForTable(L))
-		{
-			UTexture2D* Texture = Ctx->FrameManager->LoadUITexture(UTF8_TO_TCHAR(TexturePath));
-			if (Texture)
-			{
-				FSlateBrush DisabledBrush;
-				DisabledBrush.SetResourceObject(Texture);
-				DisabledBrush.DrawAs = ESlateBrushDrawType::Image;
-				FButtonStyle ButtonStyle = Button->GetStyle();
-				ButtonStyle.Disabled = DisabledBrush;
-				Button->SetStyle(ButtonStyle);
-			}
-		}
-	}
-
-	return 0;
-}
-
-// Button methods
 static int LF_SetText(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
@@ -2530,7 +2368,7 @@ static int LF_Disable(lua_State* L)
 	luaL_checktype(L, 1, LUA_TTABLE);
 	lua_pushboolean(L, 0);
 	lua_setfield(L, 1, "__enabled");
-	if (UButton* Button = GetButtonWidgetForTable(L, 1)) Button->SetIsEnabled(false);
+	if (auto* C=WowLuaApi::GetContext(L); C && C->FrameManager) C->FrameManager->SetButtonEnabled(GetFrameHandle(L),false);
 	if (UEditableTextBox* EditBox = GetEditBoxWidgetForTable(L, 1)) EditBox->SetIsEnabled(false);
 	return 0;
 }
@@ -2540,7 +2378,7 @@ static int LF_Enable(lua_State* L)
 	luaL_checktype(L, 1, LUA_TTABLE);
 	lua_pushboolean(L, 1);
 	lua_setfield(L, 1, "__enabled");
-	if (UButton* Button = GetButtonWidgetForTable(L, 1)) Button->SetIsEnabled(true);
+	if (auto* C=WowLuaApi::GetContext(L); C && C->FrameManager) C->FrameManager->SetButtonEnabled(GetFrameHandle(L),true);
 	if (UEditableTextBox* EditBox = GetEditBoxWidgetForTable(L, 1)) EditBox->SetIsEnabled(true);
 	return 0;
 }
@@ -2548,11 +2386,8 @@ static int LF_Enable(lua_State* L)
 static int LF_IsEnabled(lua_State* L)
 {
 	lua_getfield(L, 1, "__enabled");
-	if (lua_isnil(L, -1))
-	{
-		lua_pop(L, 1);
-		lua_pushboolean(L, 1);
-	}
+	const bool Enabled=lua_isnil(L,-1) || lua_toboolean(L,-1)!=0;
+	lua_pop(L,1); lua_pushinteger(L,Enabled?1:0);
 	return 1;
 }
 
@@ -3544,48 +3379,14 @@ static const luaL_Reg FrameMethods[] =
 	{"SetNormalFontObject", [](lua_State* L) -> int { return 0; }},
 	{"SetHighlightFontObject", [](lua_State* L) -> int { return 0; }},
 	{"SetDisabledFontObject", [](lua_State* L) -> int { return 0; }},
-	{"LockHighlight", [](lua_State* L) -> int { return 0; }},
-	{"UnlockHighlight", [](lua_State* L) -> int { return 0; }},
-	{"GetNormalTexture", [](lua_State* L) -> int {
-		// Try to find the named texture global: FrameNameNormalTexture
-		luaL_checktype(L, 1, LUA_TTABLE);
-		lua_getfield(L, 1, "__name");
-		const char* frameName = lua_isstring(L, -1) ? lua_tostring(L, -1) : nullptr;
-		lua_pop(L, 1);
-		if (frameName)
-		{
-			char globalName[256];
-			snprintf(globalName, sizeof(globalName), "%sNormalTexture", frameName);
-			lua_getglobal(L, globalName);
-			if (!lua_isnil(L, -1)) return 1;
-			lua_pop(L, 1);
-		}
-		// Fallback: return a stub texture table with frame metatable
-		lua_newtable(L);
-		luaL_getmetatable(L, WowLuaApi::FRAME_METATABLE);
-		if (!lua_isnil(L, -1)) lua_setmetatable(L, -2); else lua_pop(L, 1);
-		return 1;
-	}},
-	{"GetPushedTexture", [](lua_State* L) -> int {
-		lua_newtable(L);
-		luaL_getmetatable(L, WowLuaApi::FRAME_METATABLE);
-		if (!lua_isnil(L, -1)) lua_setmetatable(L, -2); else lua_pop(L, 1);
-		return 1;
-	}},
-	{"GetHighlightTexture", [](lua_State* L) -> int {
-		lua_newtable(L);
-		luaL_getmetatable(L, WowLuaApi::FRAME_METATABLE);
-		if (!lua_isnil(L, -1)) lua_setmetatable(L, -2); else lua_pop(L, 1);
-		return 1;
-	}},
-	{"GetDisabledTexture", [](lua_State* L) -> int {
-		lua_newtable(L);
-		luaL_getmetatable(L, WowLuaApi::FRAME_METATABLE);
-		if (!lua_isnil(L, -1)) lua_setmetatable(L, -2); else lua_pop(L, 1);
-		return 1;
-	}},
-	{"SetButtonState", [](lua_State* L) -> int { return 0; }},
-	{"GetButtonState", [](lua_State* L) -> int { lua_pushstring(L, "NORMAL"); return 1; }},
+	{"LockHighlight", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->LockButtonHighlight(GetFrameHandle(L),true); return 0; }},
+	{"UnlockHighlight", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->LockButtonHighlight(GetFrameHandle(L),false); return 0; }},
+	{"GetNormalTexture", [](lua_State* L) -> int { return PushButtonTexture(L,TEXT("Normal")); }},
+	{"GetPushedTexture", [](lua_State* L) -> int { return PushButtonTexture(L,TEXT("Pushed")); }},
+	{"GetHighlightTexture", [](lua_State* L) -> int { return PushButtonTexture(L,TEXT("Highlight")); }},
+	{"GetDisabledTexture", [](lua_State* L) -> int { return PushButtonTexture(L,TEXT("Disabled")); }},
+	{"SetButtonState", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->SetButtonState(GetFrameHandle(L),UTF8_TO_TCHAR(luaL_checkstring(L,2)),lua_toboolean(L,3)!=0); return 0; }},
+	{"GetButtonState", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); const FString State=C && C->FrameManager?C->FrameManager->GetButtonState(GetFrameHandle(L)):TEXT("NORMAL"); lua_pushstring(L,TCHAR_TO_UTF8(*State)); return 1; }},
 	{"RegisterForClicks", LF_RegisterForClicks},
 
 	// Layout/Hit testing

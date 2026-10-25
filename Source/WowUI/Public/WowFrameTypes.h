@@ -167,6 +167,7 @@ struct WOWUI_API FWowFrameDef
 
 	// Type-specific properties
 	FString ButtonText;
+	TMap<FString, FWowTextureElement> ButtonTextureRegions;
 	FString NormalTexture, PushedTexture, HighlightTexture, DisabledTexture;
 	FString CheckedTexture;
 	FString NormalTextureName, PushedTextureName, HighlightTextureName, DisabledTextureName;

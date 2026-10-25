@@ -30,14 +30,18 @@ compatibility work.
 The UI bridge also supports anonymous frame identity, frame and region
 reparenting, font objects, positional formatting, typed wheel/scroll callbacks,
 numeric slider values, clipping, additive highlights and wrapped text geometry.
+Button normal, pushed, disabled and highlight textures are real editable
+regions. XML dimensions, anchors and UVs are retained, and custom mouse routing
+updates their state. Micro-menu icons and panel clicks are verified natively.
 
 ## Verification
 
 The Windows Editor and packaged Development client are built from the same
 source tree. `WowUnreal.Hud`, `WowUnreal.UI`, `WowUnreal.Gameplay` and the related
 player, collision, equipment, lighting, rendering, traversal and performance
-suites currently comprise 57 passing tests. Two existing optional character
-texture-layout DBC warnings remain.
+suites cover both isolated controls and live protocol state. The button-state
+change passed 45 targeted UI, HUD, gameplay and performance tests. Two existing
+optional character texture-layout DBC warnings remain.
 
 Native gameplay probes exercise live server state and rendered UI at 1280x720
 and 1920x1080. Tests restore moved inventory items, temporary action slots and

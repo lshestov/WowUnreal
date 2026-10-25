@@ -417,6 +417,46 @@ bool FUiStatefulControls::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FButtonStateRegions,"WowUnreal.Hud.ButtonStateRegions",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FButtonStateRegions::RunTest(const FString&)
+{
+    FHudFixture F;
+    const FString Xml=TEXT("<Ui><Button name='MenuTest'><Size x='28' y='58'/><Anchors><Anchor point='CENTER'/></Anchors><NormalTexture name='$parentNormalTexture'><Size x='64' y='64'/><Anchors><Anchor point='CENTER'/></Anchors><TexCoords left='.1' right='.9' top='.2' bottom='.8'/></NormalTexture></Button></Ui>");
+    const FTCHARToUTF8 Utf8(*Xml); TArray<uint8> Bytes; Bytes.Append(reinterpret_cast<const uint8*>(Utf8.Get()),Utf8.Length());
+    const auto Parsed=FWowFrameXmlParser::ParseXml(Bytes,TEXT("ButtonStates"));
+    if(!TestEqual(TEXT("Button state fixture parses"),Parsed.Num(),1)) return false;
+    const auto* Region=Parsed[0].FrameDef.ButtonTextureRegions.Find(TEXT("Normal"));
+    TestTrue(TEXT("Button textures retain their XML rectangle and UVs"),Region && Region->Width==64 && Region->Left==.1f && Region->Bottom==.8f);
+    const int64 Handle=F.Frames.CreateFrame(Parsed[0].FrameDef);
+    TestTrue(TEXT("State getters expose canonical editable texture regions"),F.Lua.ExecuteString(TEXT(R"LUA(
+        assert(MenuTest:GetNormalTexture()==MenuTestNormalTexture and MenuTest:GetNormalTexture()==MenuTest:GetNormalTexture())
+        MenuTest:GetNormalTexture():SetTexture(1,0,0,1)
+        MenuTest:GetPushedTexture():SetTexture(0,1,0,1)
+        MenuTest:GetDisabledTexture():SetTexture(0,0,1,1)
+        MenuTest:GetHighlightTexture():SetTexture(1,1,1,.5)
+        MenuTest:SetButtonState('NORMAL')
+        MenuDisabled=0; MenuTest:SetScript('OnDisable',function() MenuDisabled=MenuDisabled+1 end)
+    )LUA")));
+    F.Frames.RefreshLayout();
+    auto* Normal=F.Frames.GetNamedTexture(TEXT("MenuTestNormalTexture"));
+    auto* Pushed=F.Frames.GetNamedTexture(TEXT("MenuTestPushedTexture"));
+    auto* Disabled=F.Frames.GetNamedTexture(TEXT("MenuTestDisabledTexture"));
+    TestTrue(TEXT("Normal state renders an opaque region with its explicit size"),Normal && Normal->GetRenderOpacity()==1 && Normal->GetVisibility()!=ESlateVisibility::Collapsed && Cast<UCanvasPanelSlot>(Normal->Slot)->GetSize().X>60);
+    const auto Rect=F.Frames.GetLayoutRect(Handle);
+    F.Frames.UpdateMouseHover((Rect.X+Rect.Z*.5f)*F.Frames.GetScreenScale(),(Rect.Y+Rect.W*.5f)*F.Frames.GetScreenScale());
+    TestTrue(TEXT("Reanchoring a child during a mouse handler preserves mouse-over queries"),F.Lua.ExecuteString(TEXT("MenuTest:GetNormalTexture():SetPoint('CENTER',MenuTest,'CENTER',0,0); assert(MenuTest:IsMouseOver())")));
+    F.Frames.DispatchMouseDown(Handle,TEXT("LeftButton"));
+    TestTrue(TEXT("Custom mouse routing switches to the pushed texture"),F.Frames.GetButtonState(Handle)==TEXT("PUSHED") && Pushed && Pushed->GetVisibility()!=ESlateVisibility::Collapsed && Normal->GetVisibility()==ESlateVisibility::Collapsed);
+    F.Frames.DispatchMouseUp(Handle,TEXT("LeftButton"));
+    TestTrue(TEXT("Release restores the normal state"),F.Frames.GetButtonState(Handle)==TEXT("NORMAL") && Normal->GetVisibility()!=ESlateVisibility::Collapsed);
+    TestTrue(TEXT("Locked pushed state survives release and disabled callbacks are idempotent"),F.Lua.ExecuteString(TEXT("MenuTest:SetButtonState('PUSHED',true); MenuTest:Disable(); MenuTest:Disable(); assert(MenuTest:IsEnabled()==0 and MenuDisabled==1)")));
+    TestTrue(TEXT("Disabled texture replaces the normal texture"),Disabled && Disabled->GetVisibility()!=ESlateVisibility::Collapsed && Normal->GetVisibility()==ESlateVisibility::Collapsed);
+    TestTrue(TEXT("Explicitly hidden button regions remain hidden on refresh"),F.Lua.ExecuteString(TEXT("MenuTest:Enable(); MenuTest:SetButtonState('NORMAL'); MenuTest:GetNormalTexture():Hide()")));
+    F.Frames.RefreshButtonVisuals(Handle);
+    TestTrue(TEXT("State refresh respects region visibility"),Normal->GetVisibility()==ESlateVisibility::Collapsed);
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUiIncrementalGc,"WowUnreal.Performance.UiTransientMemory",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FUiIncrementalGc::RunTest(const FString&)
 {
