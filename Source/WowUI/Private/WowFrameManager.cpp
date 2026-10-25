@@ -1,3 +1,4 @@
+#include "WowBackdropWidget.h"
 #include "WowFrameManager.h"
 #include "WowEventSystem.h"
 #include "WowFontManager.h"
@@ -1061,53 +1062,34 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 
 void FWowFrameManager::SetFrameBackdropColor(int64 Handle,const FLinearColor& Color)
 {
-	if(auto* Image=BackdropImages.Find(Handle); Image && Image->IsValid()) (*Image)->SetColorAndOpacity(Color);
+    auto* Entry=Frames.Find(Handle); if(!Entry || !Entry->Def.Backdrop.IsSet()) return;
+    auto& Backdrop=Entry->Def.Backdrop.GetValue(); Backdrop.Color=Color.GetClamped();
+    if(auto* Widget=BackdropWidgets.Find(Handle); Widget && Widget->IsValid()) (*Widget)->SetColors(Backdrop.Color,Backdrop.BorderColor);
 }
-
-void FWowFrameManager::CreateBackdrop(UCanvasPanel* Container, const FWowBackdrop& Backdrop,int64 Handle)
+void FWowFrameManager::SetFrameBackdropBorderColor(int64 Handle,const FLinearColor& Color)
 {
-	if (!Container) return;
-
-	UObject* Outer = Container->GetOuter();
-	if (!Outer) Outer = GetTransientPackage();
-
-	// For now, implement a simple backdrop that just renders the background texture
-	// A full 9-slice implementation would be more complex
-	if (!Backdrop.BgFile.IsEmpty())
-	{
-		UTexture2D* BgTexture = LoadUITexture(Backdrop.BgFile);
-		if (BgTexture)
-		{
-			UImage* BgImage = NewObject<UImage>(Outer);
-
-			FSlateBrush SlateBrush;
-			SlateBrush.SetResourceObject(BgTexture);
-			SlateBrush.DrawAs = ESlateBrushDrawType::Image;
-			BgImage->SetBrush(SlateBrush);
-			BgImage->SetVisibility(ESlateVisibility::HitTestInvisible);
-			BackdropImages.Add(Handle,BgImage);
-
-			// Add as first child (lowest Z order) so it appears behind other content
-			UCanvasPanelSlot* Slot = Container->AddChildToCanvas(BgImage);
-			if (Slot)
-			{
-				Slot->SetZOrder(-1000); // Behind all other elements
-				// Fill the entire frame (insets are in WoW coords, scale them)
-				Slot->SetAnchors(FAnchors(0.0f, 0.0f, 1.0f, 1.0f));
-				Slot->SetOffsets(FMargin(
-					Backdrop.InsetLeft * UIScale,
-					Backdrop.InsetTop * UIScale,
-					-Backdrop.InsetRight * UIScale,
-					-Backdrop.InsetBottom * UIScale
-				));
-			}
-
-			UE_LOG(LogWowFrame, Verbose, TEXT("Created backdrop with background: %s"), *Backdrop.BgFile);
-		}
-	}
-
-	// TODO: Implement edge textures for proper 9-slice rendering
-	// For now, we just render the background texture
+    auto* Entry=Frames.Find(Handle); if(!Entry || !Entry->Def.Backdrop.IsSet()) return;
+    auto& Backdrop=Entry->Def.Backdrop.GetValue(); Backdrop.BorderColor=Color.GetClamped();
+    if(auto* Widget=BackdropWidgets.Find(Handle); Widget && Widget->IsValid()) (*Widget)->SetColors(Backdrop.Color,Backdrop.BorderColor);
+}
+void FWowFrameManager::SetFrameBackdrop(int64 Handle,const TOptional<FWowBackdrop>& Backdrop)
+{
+    auto* Entry=Frames.Find(Handle); if(!Entry) return;
+    if(auto* Existing=BackdropWidgets.Find(Handle); Existing && Existing->IsValid()) (*Existing)->RemoveFromParent();
+    BackdropWidgets.Remove(Handle); Entry->Def.Backdrop=Backdrop;
+    if(Backdrop.IsSet()) CreateBackdrop(Cast<UCanvasPanel>(Entry->Widget.Get()),Backdrop.GetValue(),Handle);
+}
+void FWowFrameManager::CreateBackdrop(UCanvasPanel* Container,const FWowBackdrop& Backdrop,int64 Handle)
+{
+    if(!Container) return;
+    auto* Widget=NewObject<UWowBackdropWidget>(Container);
+    Widget->Configure(Backdrop,LoadUITexture(Backdrop.BgFile),LoadUITexture(Backdrop.EdgeFile),UIScale);
+    Widget->SetVisibility(ESlateVisibility::HitTestInvisible);
+    if(auto* Slot=Container->AddChildToCanvas(Widget))
+    {
+        Slot->SetZOrder(-1000); Slot->SetAnchors(FAnchors(0,0,1,1)); Slot->SetOffsets(FMargin(0));
+    }
+    BackdropWidgets.Add(Handle,Widget);
 }
 
 // ── Widget Creation ──────────────────────────────────────────────────────────

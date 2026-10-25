@@ -1998,40 +1998,41 @@ static int LF_CreateFont(lua_State* L)
 // frame:SetBackdrop(backdrop)
 static int LF_SetBackdrop(lua_State* L)
 {
-	luaL_checktype(L, 1, LUA_TTABLE);
-
-	// Store the backdrop table for reference
-	if (lua_isnil(L, 2))
-	{
-		// Clear backdrop
-		lua_pushnil(L);
-		lua_setfield(L, 1, "__backdrop");
-	}
-	else if (lua_istable(L, 2))
-	{
-		// Store backdrop table
-		lua_pushvalue(L, 2);
-		lua_setfield(L, 1, "__backdrop");
-
-		// Basic backdrop implementation - apply background texture
-		FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-		if (Ctx && Ctx->FrameManager)
-		{
-			int64 Handle = GetFrameHandle(L);
-
-			// Get bgFile from backdrop table
-			lua_getfield(L, 2, "bgFile");
-			if (lua_isstring(L, -1))
-			{
-				const char* BgFile = lua_tostring(L, -1);
-				// TODO: Apply background texture to frame
-				// This requires creating or modifying background image widget
-			}
-			lua_pop(L, 1);
-		}
-	}
-
-	return 0;
+    luaL_checktype(L,1,LUA_TTABLE);
+    auto* C=WowLuaApi::GetContext(L); if(!C || !C->FrameManager) return 0;
+    TOptional<FWowBackdrop> Value;
+    if(lua_istable(L,2))
+    {
+        FWowBackdrop D;
+        auto String=[&](const char* Key) { lua_getfield(L,2,Key); FString V=UTF8_TO_TCHAR(luaL_optstring(L,-1,"")); lua_pop(L,1); return V; };
+        auto Number=[&](int32 Table,const char* Key) { lua_getfield(L,Table,Key); const float V=luaL_optnumber(L,-1,0); lua_pop(L,1); return FMath::IsFinite(V)?V:0.f; };
+        D.BgFile=String("bgFile"); D.EdgeFile=String("edgeFile"); D.EdgeSize=Number(2,"edgeSize"); D.TileSize=Number(2,"tileSize");
+        lua_getfield(L,2,"tile"); D.Tile=lua_toboolean(L,-1)!=0; lua_pop(L,1);
+        lua_getfield(L,2,"insets"); if(lua_istable(L,-1))
+        {
+            const int32 Index=lua_gettop(L); D.InsetLeft=Number(Index,"left"); D.InsetRight=Number(Index,"right"); D.InsetTop=Number(Index,"top"); D.InsetBottom=Number(Index,"bottom");
+        }
+        lua_pop(L,1); Value=D;
+    }
+    else if(!lua_isnoneornil(L,2)) return luaL_argerror(L,2,"expected backdrop table or nil");
+    C->FrameManager->SetFrameBackdrop(GetFrameHandle(L),Value); return 0;
+}
+static int LF_GetBackdrop(lua_State* L)
+{
+    auto* C=WowLuaApi::GetContext(L); const auto* Def=C && C->FrameManager?C->FrameManager->GetFrameDef(GetFrameHandle(L)):nullptr;
+    if(!Def || !Def->Backdrop.IsSet()) { lua_pushnil(L); return 1; }
+    const auto& D=Def->Backdrop.GetValue(); lua_newtable(L);
+    auto Number=[&](const char* Key,float V) { lua_pushnumber(L,V); lua_setfield(L,-2,Key); };
+    if(!D.BgFile.IsEmpty()) { lua_pushstring(L,TCHAR_TO_UTF8(*D.BgFile)); lua_setfield(L,-2,"bgFile"); }
+    if(!D.EdgeFile.IsEmpty()) { lua_pushstring(L,TCHAR_TO_UTF8(*D.EdgeFile)); lua_setfield(L,-2,"edgeFile"); }
+    Number("edgeSize",D.EdgeSize); Number("tileSize",D.TileSize); lua_pushboolean(L,D.Tile); lua_setfield(L,-2,"tile");
+    lua_newtable(L); Number("left",D.InsetLeft); Number("right",D.InsetRight); Number("top",D.InsetTop); Number("bottom",D.InsetBottom); lua_setfield(L,-2,"insets"); return 1;
+}
+static int PushBackdropColor(lua_State* L,bool Border)
+{
+    auto* C=WowLuaApi::GetContext(L); const auto* Def=C && C->FrameManager?C->FrameManager->GetFrameDef(GetFrameHandle(L)):nullptr;
+    const FLinearColor Color=Def && Def->Backdrop.IsSet()?(Border?Def->Backdrop->BorderColor:Def->Backdrop->Color):FLinearColor::White;
+    lua_pushnumber(L,Color.R); lua_pushnumber(L,Color.G); lua_pushnumber(L,Color.B); lua_pushnumber(L,Color.A); return 4;
 }
 
 // Helper: read a color value from the stack, tolerating tables at any position
@@ -2100,6 +2101,9 @@ static int LF_SetBackdropBorderColor(lua_State* L)
 		lua_pushnumber(L, SafeColorArg(L, 5, 1.0)); lua_rawseti(L, -2, 4);
 	}
 
+    FLinearColor Color; float* Components[]={&Color.R,&Color.G,&Color.B,&Color.A};
+    for(int32 I=0;I<4;++I) { lua_rawgeti(L,-1,I+1); *Components[I]=lua_tonumber(L,-1); lua_pop(L,1); }
+    if(auto* C=WowLuaApi::GetContext(L); C && C->FrameManager) C->FrameManager->SetFrameBackdropBorderColor(GetFrameHandle(L),Color);
 	lua_setfield(L, 1, "__backdropBorderColor");
 	return 0;
 }
@@ -3303,6 +3307,9 @@ static const luaL_Reg FrameMethods[] =
 	{"SetAlpha", LF_SetAlpha},
 	{"GetAlpha", LF_GetAlpha},
 	{"SetBackdrop", LF_SetBackdrop},
+    {"GetBackdrop", LF_GetBackdrop},
+    {"GetBackdropColor", [](lua_State* L)->int { return PushBackdropColor(L,false); }},
+    {"GetBackdropBorderColor", [](lua_State* L)->int { return PushBackdropColor(L,true); }},
 	{"SetBackdropColor", LF_SetBackdropColor},
 	{"SetBackdropBorderColor", LF_SetBackdropBorderColor},
 

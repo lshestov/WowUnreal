@@ -9,6 +9,7 @@
 #include "WowMacros.h"
 #include "WowCombatLogUi.h"
 #include "WowMultiLineEditBox.h"
+#include "WowBackdropWidget.h"
 #include "WowSavedVariables.h"
 #include "WowAddonLoader.h"
 #include "Misc/Paths.h"
@@ -345,6 +346,36 @@ bool FHudOptionAnchors::RunTest(const FString&)
     TestEqual(TEXT("XML icon markup does not print an asset path"),F.Frames.GetNamedFontString(TEXT("DecoratedTitle"))->GetText().ToString(),FString(TEXT("Objectives")));
     TestTrue(TEXT("Lua retains original inline markup"),F.Lua.ExecuteString(TEXT("assert(DecoratedTitle:GetText()=='Objectives|TInterface/OptionsFrame/Icon:0:0|t'); DecoratedTitle:SetText('|cffff0000Updated|r'); assert(DecoratedTitle:GetText()=='|cffff0000Updated|r')")));
     TestEqual(TEXT("Runtime markup also paints plain labels"),F.Frames.GetNamedFontString(TEXT("DecoratedTitle"))->GetText().ToString(),FString(TEXT("Updated")));
+    return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudBackdrop,"WowUnreal.Hud.StockBackdrops",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudBackdrop::RunTest(const FString&)
+{
+    FHudFixture F;
+    const char* Xml="<Ui><Frame name='BackdropFixture' parent='UIParent'><Size x='300' y='200'/><Anchors><Anchor point='CENTER'/></Anchors><Backdrop bgFile='Background' edgeFile='Border' tile='true'><EdgeSize><AbsValue val='32'/></EdgeSize><TileSize><AbsValue val='16'/></TileSize><BackgroundInsets><AbsInset left='11' right='12' top='13' bottom='14'/></BackgroundInsets><Color r='0.2' g='0.3' b='0.4' a='0.8'/></Backdrop></Frame></Ui>";
+    TArray<uint8> Bytes; Bytes.Append(reinterpret_cast<const uint8*>(Xml),FCStringAnsi::Strlen(Xml));
+    const auto Parsed=FWowFrameXmlParser::ParseXml(Bytes,TEXT("BackdropFixture"));
+    if(!TestTrue(TEXT("Stock XML backdrop parsed"),Parsed.Num()==1 && Parsed[0].FrameDef.Backdrop.IsSet())) return false;
+    const auto& D=Parsed[0].FrameDef.Backdrop.GetValue();
+    TestTrue(TEXT("Nested dimensions and all four insets retained"),D.EdgeSize==32 && D.TileSize==16 && D.InsetLeft==11 && D.InsetRight==12 && D.InsetTop==13 && D.InsetBottom==14);
+    F.Frames.CreateFrame(Parsed[0].FrameDef);
+    TestTrue(TEXT("Native XML backdrop and Lua mutations share state"),F.Lua.ExecuteString(TEXT(R"LUA(
+        local d=BackdropFixture:GetBackdrop(); assert(d.edgeFile=='Border' and d.edgeSize==32 and d.insets.top==13)
+        local r,g,b,a=BackdropFixture:GetBackdropColor(); assert(math.abs(r-.2)<.001 and math.abs(a-.8)<.001)
+        BackdropFixture:SetBackdropBorderColor(.4,.5,.6,.7); r,g,b,a=BackdropFixture:GetBackdropBorderColor(); assert(math.abs(g-.5)<.001 and math.abs(a-.7)<.001)
+        BackdropFixture:SetBackdrop(nil); assert(BackdropFixture:GetBackdrop()==nil)
+        BackdropFixture:SetBackdrop({bgFile='Replacement',edgeFile='Edge',edgeSize=8.5,tile=true,tileSize=4,insets={left=2,right=3,top=4,bottom=5}})
+        d=BackdropFixture:GetBackdrop(); assert(d.bgFile=='Replacement' and d.edgeSize==8.5 and d.insets.bottom==5)
+    )LUA")));
+    const auto Quads=UWowBackdropWidget::BuildQuads(D,FVector2f(300,200),1);
+    int32 Background=0,Border=0;
+    for(const auto& Q:Quads)
+    {
+        if(Q.Border) ++Border; else { ++Background; TestTrue(TEXT("Background honors XML insets"),Q.Rect.X>=11 && Q.Rect.Y>=13 && Q.Rect.X+Q.Rect.Z<=288.01f && Q.Rect.Y+Q.Rect.W<=186.01f); }
+        TestTrue(TEXT("Backdrop atlas UVs do not cross neighboring strips"),Q.UV[0].X>=0 && Q.UV[3].X<=1 && Q.UV[0].Y>=0 && Q.UV[3].Y<=1);
+    }
+    TestTrue(TEXT("Background tiles and complete border geometry exist"),Background>1 && Border>8);
+    TestTrue(TEXT("Tiny addon tile sizes have bounded geometry"),UWowBackdropWidget::BuildQuads(D,FVector2f(100000,100000),1).Num()<4500);
     return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudInventoryItems,"WowUnreal.Hud.InventoryItems",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)

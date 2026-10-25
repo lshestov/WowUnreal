@@ -146,6 +146,8 @@ public:
 	/** Set frame alpha */
 	void SetFrameAlpha(int64 Handle, float Alpha);
 	void SetFrameBackdropColor(int64 Handle,const FLinearColor& Color);
+	void SetFrameBackdropBorderColor(int64 Handle,const FLinearColor& Color);
+	void SetFrameBackdrop(int64 Handle,const TOptional<FWowBackdrop>& Backdrop);
 
 	/** Set frame strata and level */
 	void SetFrameStrata(int64 Handle, EWowFrameStrata Strata);
@@ -457,5 +459,5 @@ private:
 
 	/** Create backdrop (9-slice background) for a frame */
 	void CreateBackdrop(UCanvasPanel* Container, const FWowBackdrop& Backdrop,int64 Handle);
-	TMap<int64,TWeakObjectPtr<UImage>> BackdropImages;
+	TMap<int64,TWeakObjectPtr<class UWowBackdropWidget>> BackdropWidgets;
 };

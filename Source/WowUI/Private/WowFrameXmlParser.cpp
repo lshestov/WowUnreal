@@ -661,13 +661,15 @@ static FWowBackdrop ParseBackdropNode(const FXmlNode* Node)
 	BD.EdgeFile = Node->GetAttribute(TEXT("edgeFile"));
 
 	FString ES = Node->GetAttribute(TEXT("edgeSize"));
-	if (!ES.IsEmpty()) BD.EdgeSize = FCString::Atoi(*ES);
+	if (!ES.IsEmpty()) BD.EdgeSize = FCString::Atof(*ES);
+    if(const auto* Size=Node->FindChildNode(TEXT("EdgeSize"))) if(const auto* Abs=Size->FindChildNode(TEXT("AbsValue"))) BD.EdgeSize=FCString::Atof(*Abs->GetAttribute(TEXT("val")));
 
 	FString Tile = Node->GetAttribute(TEXT("tile"));
 	BD.Tile = Tile.Equals(TEXT("true"), ESearchCase::IgnoreCase);
 
 	FString TS = Node->GetAttribute(TEXT("tileSize"));
-	if (!TS.IsEmpty()) BD.TileSize = FCString::Atoi(*TS);
+	if (!TS.IsEmpty()) BD.TileSize = FCString::Atof(*TS);
+    if(const auto* Size=Node->FindChildNode(TEXT("TileSize"))) if(const auto* Abs=Size->FindChildNode(TEXT("AbsValue"))) BD.TileSize=FCString::Atof(*Abs->GetAttribute(TEXT("val")));
 
 	// BackgroundInsets
 	const FXmlNode* Insets = Node->FindChildNode(TEXT("BackgroundInsets"));
@@ -688,6 +690,8 @@ static FWowBackdrop ParseBackdropNode(const FXmlNode* Node)
 		}
 	}
 
+    if(const auto* Color=Node->FindChildNode(TEXT("Color"))) BD.Color=ParseColor(Color);
+    if(const auto* Color=Node->FindChildNode(TEXT("BorderColor"))) BD.BorderColor=ParseColor(Color);
 	return BD;
 }
 
@@ -1031,9 +1035,17 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 			BD.EdgeFile = UTF8_TO_TCHAR(Child.attribute("edgeFile").as_string());
 			BD.Tile = Child.attribute("tile").as_bool(false);
 			pugi::xml_node ES = Child.child("EdgeSize");
-			if (ES) BD.EdgeSize = ES.attribute("val").as_int(0);
+			if (ES) BD.EdgeSize = (ES.child("AbsValue")?ES.child("AbsValue"):ES).attribute("val").as_float(0);
 			pugi::xml_node TS = Child.child("TileSize");
-			if (TS) BD.TileSize = TS.attribute("val").as_int(0);
+			if (TS) BD.TileSize = (TS.child("AbsValue")?TS.child("AbsValue"):TS).attribute("val").as_float(0);
+			auto Insets=Child.child("BackgroundInsets"); if(Insets.child("AbsInset")) Insets=Insets.child("AbsInset");
+			BD.InsetLeft=Insets.attribute("left").as_float(); BD.InsetRight=Insets.attribute("right").as_float();
+			BD.InsetTop=Insets.attribute("top").as_float(); BD.InsetBottom=Insets.attribute("bottom").as_float();
+			for(const char* Name:{"Color","BorderColor"}) if(auto Color=Child.child(Name))
+			{
+				FLinearColor Value(Color.attribute("r").as_float(1),Color.attribute("g").as_float(1),Color.attribute("b").as_float(1),Color.attribute("a").as_float(1));
+				if(FCStringAnsi::Strcmp(Name,"Color")==0) BD.Color=Value; else BD.BorderColor=Value;
+			}
 			Def.Backdrop = BD;
 		}
 		else if (Tag == TEXT("NormalTexture"))

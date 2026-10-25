@@ -1,3 +1,4 @@
+#include "WowBackdropWidget.h"
 #include "WowFrameManager.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
@@ -262,6 +263,7 @@ void FWowFrameManager::RefreshLayout()
         if (Parent && Parent->Def.bAnonymous)
             GroupLevels.FindOrAdd(Entry.ParentHandle)=FMath::Max(GroupLevels.FindRef(Entry.ParentHandle),Level);
     }
+    for(const auto& Pair:BackdropWidgets) if(Pair.Value.IsValid()) Pair.Value->SetUnitScale(UIScale);
     bLayoutDirty = false;
 }
 

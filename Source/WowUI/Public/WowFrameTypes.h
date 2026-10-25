@@ -102,10 +102,11 @@ struct FWowBackdrop
 {
 	FString BgFile;
 	FString EdgeFile;
-	int32 EdgeSize = 0;
-	int32 TileSize = 0;
+	float EdgeSize = 0;
+	float TileSize = 0;
 	bool Tile = false;
 	float InsetLeft = 0, InsetRight = 0, InsetTop = 0, InsetBottom = 0;
+	FLinearColor Color=FLinearColor::White,BorderColor=FLinearColor::White;
 };
 
 /** Frame types */

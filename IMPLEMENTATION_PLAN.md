@@ -241,6 +241,21 @@ Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 - [ ] Shadow flickering fix on WMOs
 
 ### P8: Full WoW UI Boot
+
+Requested stock-interface sequence (complete in this order; each stage needs
+build, automation, native autologin and rendered screenshot verification):
+
+- [ ] 1. Stock window rendering: backdrop edges/corners/tiling, fonts and inline icons.
+  - [x] Shared backdrop renderer: XML dimensions/insets/colors, tiled backgrounds,
+    complete border atlas, runtime replacement/clear/color APIs. Verified 65 tests
+    and native original options/menu plus resized/scaled/colorized frames.
+- [ ] 2. Control behavior: movement/clamping, text alignment, region APIs and button states.
+- [ ] 3. Spellbook/class windows: hidden spells, ranks/tabs, talents, glyphs and specializations.
+- [ ] 4. Inventory: split/delete, compare/try-on, merchant/bank/mail/trade round trips.
+- [ ] 5. Chat/combat/macros: hyperlinks, remaining combat events and macro execution families.
+- [ ] 6. Maps: points of interest, tracking, interior minimaps and original map bootstrap.
+- [ ] 7. Group/special windows: party/loot, PvP, dungeon finder and achievements.
+
 - [x] Stock options category placement and text: numeric-offset SetPoint overloads, runtime $parent references, constrained description wrapping, and XML markup rendered without asset paths while Lua keeps original strings. Verified 64 automation tests and native category clicks, character/spellbook windows and rendered screenshots.
 - [x] Stock FrameXML visibility: preserve hidden branches during parent Show/layout, respect explicit hidden=false, remove frame-name and Flash overrides. Verified 63 automation tests, native action-bar options/window clicks and rendered screenshots at 1280x720 and 1920x1080.
 - [x] Load real Blizzard FrameXML from MPQ (action bars, minimap, chat, unit frames, buffs, bags)
