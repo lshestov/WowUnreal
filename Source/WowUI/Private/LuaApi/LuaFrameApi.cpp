@@ -599,10 +599,11 @@ static int LF_SetPoint(lua_State* L)
 			Anchor.RelativeTo = UTF8_TO_TCHAR(lua_tostring(L, -1));
 		lua_pop(L, 1);
 
-		// When relativeTo is a frame, arg4 = relativePoint, arg5 = x, arg6 = y
-		Anchor.RelativePoint = ParseAnchorPoint(luaL_optstring(L, 4, PointStr));
-		Anchor.OffsetX = static_cast<float>(luaL_optnumber(L, 5, 0));
-		Anchor.OffsetY = static_cast<float>(luaL_optnumber(L, 6, 0));
+		// The relative point may be omitted: SetPoint(point, frame, x, y).
+		const bool HasOffsets=lua_isnumber(L,4)!=0;
+		Anchor.RelativePoint = HasOffsets ? Anchor.Point : ParseAnchorPoint(luaL_optstring(L,4,PointStr));
+		Anchor.OffsetX = static_cast<float>(luaL_optnumber(L,HasOffsets?4:5,0));
+		Anchor.OffsetY = static_cast<float>(luaL_optnumber(L,HasOffsets?5:6,0));
 	}
 	else if (lua_isstring(L, 3) && !lua_isnumber(L, 3))
 	{
@@ -622,9 +623,10 @@ static int LF_SetPoint(lua_State* L)
 		{
 			// SetPoint("POINT", "frameName", "RELATIVEPOINT", x, y)
 			Anchor.RelativeTo = UTF8_TO_TCHAR(Arg3);
-			Anchor.RelativePoint = ParseAnchorPoint(luaL_optstring(L, 4, PointStr));
-			Anchor.OffsetX = static_cast<float>(luaL_optnumber(L, 5, 0));
-			Anchor.OffsetY = static_cast<float>(luaL_optnumber(L, 6, 0));
+			const bool HasOffsets=lua_isnumber(L,4)!=0;
+			Anchor.RelativePoint = HasOffsets ? Anchor.Point : ParseAnchorPoint(luaL_optstring(L,4,PointStr));
+			Anchor.OffsetX = static_cast<float>(luaL_optnumber(L,HasOffsets?4:5,0));
+			Anchor.OffsetY = static_cast<float>(luaL_optnumber(L,HasOffsets?5:6,0));
 		}
 	}
 	else
@@ -643,7 +645,13 @@ static int LF_SetPoint(lua_State* L)
 		}
 	}
 
-	if(TableRepresentsRegion(L,1))
+	const bool IsRegion=TableRepresentsRegion(L,1);
+	if(Anchor.RelativeTo.Contains(TEXT("$parent")))
+	{
+		const auto* Self=Ctx->FrameManager->GetFrameDef(IsRegion?GetMouseQueryHandle(L):Handle);
+		if(Self) Anchor.RelativeTo.ReplaceInline(TEXT("$parent"),IsRegion?*Self->Name:*Self->Parent);
+	}
+	if(IsRegion)
 	{
 		lua_getfield(L,1,"__name"); const FString Name=UTF8_TO_TCHAR(lua_tostring(L,-1)?lua_tostring(L,-1):""); lua_pop(L,1);
 		Ctx->FrameManager->SetRegionPoint(Name,Anchor); return 0;
@@ -2352,6 +2360,13 @@ static int LF_SetText(lua_State* L)
 static int LF_GetText(lua_State* L)
 {
 	if(auto* Edit=GetMultiLineEditor(L)) { const FString Text=Edit->LuaText(); lua_pushstring(L,TCHAR_TO_UTF8(*Text)); return 1; }
+	// Lua reads the original markup; the native text widget paints plain glyphs.
+	if(TableRepresentsRegion(L,1))
+	{
+		lua_getfield(L,1,"__text");
+		if(lua_isstring(L,-1)) return 1;
+		lua_pop(L,1);
+	}
 	// Try to get text from widget first
 	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
 	if (UTextBlock* TextBlock = GetTextBlockWidgetForTable(L, 1))

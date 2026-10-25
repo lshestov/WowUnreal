@@ -241,6 +241,7 @@ Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 - [ ] Shadow flickering fix on WMOs
 
 ### P8: Full WoW UI Boot
+- [x] Stock options category placement and text: numeric-offset SetPoint overloads, runtime $parent references, constrained description wrapping, and XML markup rendered without asset paths while Lua keeps original strings. Verified 64 automation tests and native category clicks, character/spellbook windows and rendered screenshots.
 - [x] Stock FrameXML visibility: preserve hidden branches during parent Show/layout, respect explicit hidden=false, remove frame-name and Flash overrides. Verified 63 automation tests, native action-bar options/window clicks and rendered screenshots at 1280x720 and 1920x1080.
 - [x] Load real Blizzard FrameXML from MPQ (action bars, minimap, chat, unit frames, buffs, bags)
 - [x] Full addon loading from Interface/AddOns/

@@ -314,6 +314,39 @@ bool FHudStockVisibility::RunTest(const FString&)
     TestTrue(TEXT("Explicit XML visibility overrides a hidden template"),F.Lua.ExecuteString(TEXT("assert(ExplicitVisible:IsShown() and not InheritedHidden:IsShown())")));
     return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudOptionAnchors,"WowUnreal.Hud.StockOptionsAnchors",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudOptionAnchors::RunTest(const FString&)
+{
+    FHudFixture F;
+    TestTrue(TEXT("Original options-list SetPoint overloads"),F.Lua.ExecuteString(TEXT(R"LUA(
+        OptionPanel=CreateFrame('Frame','OptionPanel',UIParent); OptionPanel:SetSize(300,400); OptionPanel:SetPoint('TOPLEFT',UIParent,'TOPLEFT',100,-70)
+        OptionRow=CreateFrame('Button','OptionRow',OptionPanel); OptionRow:SetSize(175,18); OptionRow:SetPoint('TOPLEFT',OptionPanel,0,-8)
+        OptionRowText=OptionRow:CreateFontString('OptionRowText'); OptionRowText:SetText('Controls'); OptionRowText:SetPoint('LEFT',8,2)
+        OptionRowToggle=CreateFrame('Button','OptionRowToggle',OptionRow); OptionRowToggle:SetSize(14,14); OptionRowToggle:SetPoint('TOPRIGHT',OptionRow,'TOPRIGHT',-6,-1)
+        OptionRowText:SetPoint('RIGHT','$parentToggle','LEFT',-2,0)
+        OptionNext=CreateFrame('Button','OptionNext',OptionPanel); OptionNext:SetSize(175,18); OptionNext:SetPoint('TOPLEFT','OptionRow',0,-18)
+        OptionLabel=OptionPanel:CreateFontString('OptionLabel'); OptionLabel:SetSize(160,20); OptionLabel:SetPoint('TOPLEFT',OptionPanel,12,-60)
+        OptionLabel:SetText('A long options description should wrap inside its explicitly sized text region instead of running beyond the window.')
+    )LUA")));
+    F.Frames.RefreshLayout();
+    const auto Row=F.Frames.GetLayoutRect(F.Frames.FindFrame(TEXT("OptionRow")));
+    const auto Next=F.Frames.GetLayoutRect(F.Frames.FindFrame(TEXT("OptionNext")));
+    const auto Caption=F.Frames.GetRegionRect(TEXT("OptionRowText"));
+    TestTrue(TEXT("Relative frame and numeric offsets retain TOPLEFT"),FMath::IsNearlyEqual(Row.X,100.) && FMath::IsNearlyEqual(Row.Y,78.));
+    TestTrue(TEXT("Named relative frame accepts omitted relativePoint"),FMath::IsNearlyEqual(Next.X,100.) && FMath::IsNearlyEqual(Next.Y,96.));
+    TestTrue(TEXT("Caption stays within its moving owner"),FMath::IsNearlyEqual(Caption.X,Row.X+8,0.1) && Caption.Y>=Row.Y-20 && Caption.Y<Row.Y+18);
+    TestTrue(TEXT("Runtime $parent anchors resolve to the region's owner"),Caption.Z>100 && Caption.Z<175);
+    const auto* Label=F.Frames.GetNamedFontString(TEXT("OptionLabel"));
+    TestTrue(TEXT("Descriptions wrap even with an explicit height"),Label && Label->GetWrapTextAt()>0 && F.Frames.GetRegionRect(TEXT("OptionLabel")).W>20);
+    FWowFrameDef Title; Title.Name=TEXT("DecoratedTitleFrame"); Title.Parent=TEXT("UIParent"); Title.Width=200; Title.Height=40;
+    Title.Anchors.Add({EWowAnchorPoint::CENTER,TEXT("UIParent"),EWowAnchorPoint::CENTER,0,0});
+    FWowLayer Layer; FWowFontStringElement Text; Text.Name=TEXT("DecoratedTitle"); Text.Text=TEXT("Objectives|TInterface/OptionsFrame/Icon:0:0|t"); Layer.FontStrings.Add(Text); Title.Layers.Add(Layer);
+    F.Frames.CreateFrame(Title);
+    TestEqual(TEXT("XML icon markup does not print an asset path"),F.Frames.GetNamedFontString(TEXT("DecoratedTitle"))->GetText().ToString(),FString(TEXT("Objectives")));
+    TestTrue(TEXT("Lua retains original inline markup"),F.Lua.ExecuteString(TEXT("assert(DecoratedTitle:GetText()=='Objectives|TInterface/OptionsFrame/Icon:0:0|t'); DecoratedTitle:SetText('|cffff0000Updated|r'); assert(DecoratedTitle:GetText()=='|cffff0000Updated|r')")));
+    TestEqual(TEXT("Runtime markup also paints plain labels"),F.Frames.GetNamedFontString(TEXT("DecoratedTitle"))->GetText().ToString(),FString(TEXT("Updated")));
+    return true;
+}
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudInventoryItems,"WowUnreal.Hud.InventoryItems",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FHudInventoryItems::RunTest(const FString&)
 {

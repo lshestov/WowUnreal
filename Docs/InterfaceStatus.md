@@ -49,6 +49,13 @@ Frame visibility follows the original FrameXML, including hidden intermediate
 ancestors, explicit XML visibility overrides and action-bar grid options.
 Bootstrap and layout refresh no longer force named buttons or flash textures
 into a different state. See [stock interface references](StockInterfaceReference.md).
+Runtime anchors accept an omitted relative point with frame/name arguments,
+and resolve `$parent` references for frames and regions. Options category labels
+stay inside their rows, and descriptions wrap inside explicit text widths even
+when the original XML also supplies a height.
+XML labels use the same plain-glyph rendering as runtime text, so inline texture
+markup no longer prints asset paths. Lua FontString `GetText` retains the
+original markup for category identity and script comparisons.
 
 ## Verification
 
@@ -56,7 +63,7 @@ The Windows Editor and packaged Development client are built from the same
 source tree. `WowUnreal.Hud`, `WowUnreal.UI`, `WowUnreal.Gameplay` and the related
 player, collision, equipment, lighting, rendering, traversal and performance
 suites cover both isolated controls and live protocol state. The interface
-regression set contains 63 tests. Existing optional character texture-layout
+regression set contains 64 tests. Existing optional character texture-layout
 DBC and test-fixture size warnings remain.
 
 Native gameplay probes exercise live server state and rendered UI at 1280x720
@@ -70,6 +77,9 @@ may use NullRHI; visual checks require a rendered client.
 
 Full WoW UI compatibility is **not complete**. In particular:
 
+- Remaining stock window presentation, including full backdrop edge/tile
+  rendering, inline icon painting and additional frame/region API behavior. Visible panels and
+  readable category lists do not establish complete visual parity.
 - Advanced macro commands such as cast sequences, complete conditional syntax,
   additional combat event families and clickable chat links. See
   [macro support](Macros.md) and [combat-log support](CombatLog.md).

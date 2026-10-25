@@ -39,7 +39,12 @@ screenshot. In particular:
   Additional bars follow their options, and empty slots follow grid visibility.
 - Texture names such as `Flash` do not imply a fixed visibility state.
 - An explicit XML `hidden="false"` overrides a hidden inherited template.
+- Runtime `SetPoint` calls may omit `relativePoint` while specifying a relative
+  frame and offsets. `$parent` in a region's anchor names its owning frame.
+- A FontString's explicit height does not disable wrapping at its width.
 
 `WowUnreal.Hud.StockFrameVisibility` covers the hierarchy, stock frame names,
 flash regions and explicit template overrides. Native probes additionally check
 the original action-bar option controls, window clicks and rendered screenshots.
+`WowUnreal.Hud.StockOptionsAnchors` covers option-row placement, runtime parent
+references and constrained description text.

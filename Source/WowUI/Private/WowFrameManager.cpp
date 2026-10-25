@@ -970,9 +970,10 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 
 			const bool IsCaption=FS.Name==Def.Name+TEXT("Text") || FS.Name==Def.Name+TEXT("NormalText") || FS.ParentKey==TEXT("normalText");
 			const FString Caption=FS.Text.IsEmpty() && IsCaption?Def.ButtonText:FS.Text;
+			const FString ResolvedCaption=EventSystem?EventSystem->ResolveText(Caption):Caption;
 			if (!Caption.IsEmpty())
 			{
-				TextWidget->SetText(FText::FromString(EventSystem ? EventSystem->ResolveText(Caption) : Caption));
+				TextWidget->SetText(FText::FromString(WowUiPlainText(ResolvedCaption)));
 			}
 
 			// Apply color
@@ -1019,7 +1020,7 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 				// Create a Lua global for this fontstring so scripts can access it
 				if (EventSystem)
 				{
-					EventSystem->CreateTextureRegionGlobal(FS.Name, OwnerHandle, TEXT("FontString"));
+					EventSystem->CreateTextureRegionGlobal(FS.Name, OwnerHandle, TEXT("FontString"),ResolvedCaption);
 				}
 				NamedFontStringWidgets.Add(FS.Name, TextWidget);
 				if(EventSystem && !FS.Inherits.IsEmpty()) EventSystem->ApplyRegionFont(FS.Name,FS.Inherits);
@@ -1241,7 +1242,8 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 			if (!HasCaptionRegion)
 			{
 				UTextBlock* ButtonText = NewObject<UTextBlock>(ContainerWidget);
-				ButtonText->SetText(FText::FromString(EventSystem?EventSystem->ResolveText(Def.ButtonText):Def.ButtonText));
+				const FString Caption=EventSystem?EventSystem->ResolveText(Def.ButtonText):Def.ButtonText;
+				ButtonText->SetText(FText::FromString(WowUiPlainText(Caption)));
 				ButtonText->SetJustification(ETextJustify::Center);
 				ButtonText->SetColorAndOpacity(FLinearColor(1,.82f,0));
 				FSlateFontInfo FontInfo = FontManager?FontManager->GetDefaultFont(FMath::RoundToInt(12.f*UIScale)):ButtonText->GetFont();
@@ -1259,7 +1261,7 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 					RegionLayouts.Add({ButtonText,Def.Name,{{EWowAnchorPoint::CENTER,TEXT(""),EWowAnchorPoint::CENTER,0,0}},0,0,false});
 					if (EventSystem)
 					{
-						EventSystem->CreateTextureRegionGlobal(ButtonTextName, Handle, TEXT("FontString"));
+						EventSystem->CreateTextureRegionGlobal(ButtonTextName, Handle, TEXT("FontString"),Caption);
 					}
 				}
 			}

@@ -45,7 +45,7 @@ public:
 	bool PushFrameObject(int64 Handle);
 
 	/** Create a Lua global table for a named texture/fontstring region */
-	void CreateTextureRegionGlobal(const FString& RegionName, int64 ParentHandle = -1, const FString& ObjectType = TEXT("Texture"));
+	void CreateTextureRegionGlobal(const FString& RegionName, int64 ParentHandle = -1, const FString& ObjectType = TEXT("Texture"), const FString& InitialText = FString());
 	void ApplyRegionFont(const FString& RegionName,const FString& FontName);
 
 	/** Alias an existing named Lua global object to another global name. */

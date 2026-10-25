@@ -642,7 +642,7 @@ void FWowEventSystem::AliasGlobalObject(const FString& ExistingName, const FStri
 #endif
 }
 
-void FWowEventSystem::CreateTextureRegionGlobal(const FString& RegionName, int64 ParentHandle, const FString& ObjectType)
+void FWowEventSystem::CreateTextureRegionGlobal(const FString& RegionName, int64 ParentHandle, const FString& ObjectType, const FString& InitialText)
 {
 #if HAS_LUA
 	if (!LuaVM || RegionName.IsEmpty()) return;
@@ -671,6 +671,11 @@ void FWowEventSystem::CreateTextureRegionGlobal(const FString& RegionName, int64
 		lua_setfield(L, -2, "__objectType");
 	}
 
+	if (!InitialText.IsEmpty())
+	{
+		lua_pushstring(L,TCHAR_TO_UTF8(*InitialText));
+		lua_setfield(L,-2,"__text");
+	}
 	// Set the frame metatable so region:SetTexture() etc work
 	luaL_getmetatable(L, WowLuaApi::FRAME_METATABLE);
 	if (!lua_isnil(L, -1))
