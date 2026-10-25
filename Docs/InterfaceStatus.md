@@ -26,6 +26,12 @@ compatibility work.
   VSync and frame limit. Cancel restores the tested audio settings.
 - Keyboard binding editor, save/cancel/reset and native routing, including
   releasing a remapped key after an edit box takes focus.
+- Account and character macro creation, editing, icon selection, deletion,
+  action-bar placement and execution through the original chat command path.
+  Stable identities preserve action assignments when another macro is deleted.
+  Macro changes save immediately and survive ReloadUI, including UTF-8 text.
+  The multiline editor supports caret placement, insertion, wrapping and scroll
+  notifications. Engine font fallback renders Cyrillic absent from enUS fonts.
 
 The UI bridge also supports anonymous frame identity, frame and region
 reparenting, font objects, positional formatting, typed wheel/scroll callbacks,
@@ -54,7 +60,8 @@ may use NullRHI; visual checks require a rendered client.
 
 Full WoW UI compatibility is **not complete**. In particular:
 
-- Macro editing and execution, combat-log history and clickable chat links.
+- Advanced macro commands such as cast sequences, complete conditional syntax,
+  combat-log history and clickable chat links. See [macro support](Macros.md).
 - Complete PvP/battleground, LFG and achievement panels and protocol support.
 - World-map points of interest, indoor minimap tiles and tracking markers.
 - Legacy options without an engine-side implementation; persisting a CVar

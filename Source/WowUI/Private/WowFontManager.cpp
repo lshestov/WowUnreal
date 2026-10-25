@@ -4,6 +4,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Fonts/CompositeFont.h"
+#include "Styling/CoreStyle.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowFont, Log, All);
 
@@ -201,6 +202,9 @@ FSlateFontInfo FWowFontManager::CreateFontFromFile(const FString& FilePath, int3
 	TypefaceEntry.Font = FFontData(FilePath, EFontHinting::Default, EFontLoadingPolicy::LazyLoad);
 
 	CompositeFont->DefaultTypeface.Fonts.Add(TypefaceEntry);
+	// enUS MPQ fonts omit Cyrillic. Use the engine's packaged font for missing
+	// glyphs so user text remains readable without replacing the WoW typeface.
+	CompositeFont->FallbackTypeface.Typeface=FCoreStyle::GetDefaultFont()->DefaultTypeface;
 
 	FontInfo.CompositeFont = CompositeFont;
 	FontInfo.TypefaceFontName = FName(*FontName);

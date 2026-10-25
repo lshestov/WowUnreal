@@ -148,7 +148,10 @@ void FWowSavedVariables::SaveForAddon(lua_State* L, const FString& AddonName, co
 			FString DirPath = GetAccountSVPath();
 			IFileManager::Get().MakeDirectory(*DirPath, true);
 			FString FilePath = FPaths::Combine(DirPath, AddonName + TEXT(".lua"));
-			FFileHelper::SaveStringToFile(Output, *FilePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+			const FString Temporary=FilePath+TEXT(".tmp");
+            if(!FFileHelper::SaveStringToFile(Output,*Temporary,FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM) ||
+               !IFileManager::Get().Move(*FilePath,*Temporary,true,true))
+            { UE_LOG(LogWowSV,Error,TEXT("Failed to save %s"),*FilePath); return; }
 			UE_LOG(LogWowSV, Log, TEXT("Saved %d SavedVariables for %s"), Toc.SavedVariables.Num(), *AddonName);
 		}
 	}
@@ -175,7 +178,10 @@ void FWowSavedVariables::SaveForAddon(lua_State* L, const FString& AddonName, co
 			FString DirPath = GetCharacterSVPath();
 			IFileManager::Get().MakeDirectory(*DirPath, true);
 			FString FilePath = FPaths::Combine(DirPath, AddonName + TEXT(".lua"));
-			FFileHelper::SaveStringToFile(Output, *FilePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+			const FString Temporary=FilePath+TEXT(".tmp");
+            if(!FFileHelper::SaveStringToFile(Output,*Temporary,FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM) ||
+               !IFileManager::Get().Move(*FilePath,*Temporary,true,true))
+            { UE_LOG(LogWowSV,Error,TEXT("Failed to save %s"),*FilePath); return; }
 			UE_LOG(LogWowSV, Log, TEXT("Saved %d SavedVariablesPerCharacter for %s"),
 				Toc.SavedVariablesPerCharacter.Num(), *AddonName);
 		}
@@ -240,32 +246,19 @@ void FWowSavedVariables::SerializeLuaValue(lua_State* L, int Idx, FString& Out, 
 
 	case LUA_TSTRING:
 	{
-		const char* Str = lua_tostring(L, Idx);
-		Out += TEXT("\"");
-		// Escape special characters
-		for (const char* p = Str; *p; p++)
-		{
-			switch (*p)
-			{
-			case '\\': Out += TEXT("\\\\"); break;
-			case '"':  Out += TEXT("\\\""); break;
-			case '\n': Out += TEXT("\\n"); break;
-			case '\r': Out += TEXT("\\r"); break;
-			case '\t': Out += TEXT("\\t"); break;
-			case '\0': Out += TEXT("\\0"); break;
-			default:
-				if ((uint8)*p < 32)
-				{
-					Out += FString::Printf(TEXT("\\%d"), (int)(uint8)*p);
-				}
-				else
-				{
-					Out += (TCHAR)*p;
-				}
-				break;
-			}
-		}
-		Out += TEXT("\"");
+        size_t Length=0; const char* Str=lua_tolstring(L,Idx,&Length);
+        Out+=TEXT("\"");
+        // Preserve Lua's UTF-8/binary bytes exactly. Fixed-width decimal escapes
+        // also prevent an escaped byte from consuming a following ASCII digit.
+        for(size_t I=0;I<Length;++I)
+        {
+            const uint8 Byte=static_cast<uint8>(Str[I]);
+            if(Byte=='\\') Out+=TEXT("\\\\");
+            else if(Byte=='"') Out+=TEXT("\\\"");
+            else if(Byte<32 || Byte>=127) Out+=FString::Printf(TEXT("\\%03u"),Byte);
+            else Out+=static_cast<TCHAR>(Byte);
+        }
+        Out+=TEXT("\"");
 		break;
 	}
 
@@ -319,39 +312,9 @@ void FWowSavedVariables::SerializeLuaValue(lua_State* L, int Idx, FString& Out, 
 			// Key
 			if (lua_type(L, -2) == LUA_TSTRING)
 			{
-				const char* KeyStr = lua_tostring(L, -2);
-				// Check if key is a valid Lua identifier
-				bool bValidIdent = true;
-				if (KeyStr[0] == '\0' || (KeyStr[0] != '_' && !FChar::IsAlpha(KeyStr[0])))
-					bValidIdent = false;
-				for (const char* p = KeyStr + 1; *p && bValidIdent; p++)
-				{
-					if (*p != '_' && !FChar::IsAlnum(*p))
-						bValidIdent = false;
-				}
-
-				if (bValidIdent)
-				{
-					Out += TEXT("[\"");
-					Out += UTF8_TO_TCHAR(KeyStr);
-					Out += TEXT("\"]");
-				}
-				else
-				{
-					Out += TEXT("[\"");
-					// Escape the key string
-					for (const char* p = KeyStr; *p; p++)
-					{
-						switch (*p)
-						{
-						case '\\': Out += TEXT("\\\\"); break;
-						case '"':  Out += TEXT("\\\""); break;
-						case '\n': Out += TEXT("\\n"); break;
-						default: Out += (TCHAR)*p; break;
-						}
-					}
-					Out += TEXT("\"]");
-				}
+                Out+=TEXT("[");
+                SerializeLuaValue(L,lua_gettop(L)-1,Out,NewIndent);
+                Out+=TEXT("]");
 			}
 			else if (lua_type(L, -2) == LUA_TNUMBER)
 			{

@@ -425,6 +425,14 @@ void UWowConnectionManager::PickupSpellCursor(int32 SpellId, const FString& Book
     OnCursorChanged.Broadcast();
 }
 
+void UWowConnectionManager::PickupMacroCursor(uint32 Id)
+{
+    if(!Id || Id>=0x1000000u) return;
+    CursorPayload=FCursorPayloadState(); CursorPayload.Type=ECursorPayloadType::Action;
+    CursorPayload.PrimaryId=Id; CursorPayload.ActionType=0x40; CursorPayload.SourceActionSlot=-1;
+    OnCursorChanged.Broadcast();
+}
+
 void UWowConnectionManager::PickupActionCursor(int32 SlotIndex)
 {
     if (SlotIndex < 0 || SlotIndex >= 144 || !PacketHandler.ActionButtons.IsValidIndex(SlotIndex))
@@ -795,9 +803,7 @@ bool UWowConnectionManager::UseActionSlot(int32 SlotIndex)
     }
 
     case EWowActionInvocationKind::Macro:
-        UE_LOG(LogWowNet, Log, TEXT("UseActionSlot: macro use not implemented (slot=%d macro=%u)"),
-            SlotIndex, Invocation.ActionId);
-        return false;
+        return OnMacroUse.IsBound() && OnMacroUse.Execute(Invocation.ActionId);
 
     case EWowActionInvocationKind::None:
     default:
@@ -953,16 +959,27 @@ void UWowConnectionManager::SendSwapItem(uint8 SourceBag,uint8 SourceSlot,uint8 
     WorldSocket->SendPacket(WowOpcode::CMSG_SWAP_ITEM,{DestinationBag,DestinationSlot,SourceBag,SourceSlot});
 }
 
-void UWowConnectionManager::SendUseItem(uint8 Bag,uint8 Slot,uint64 ItemGuid,uint32 SpellId)
+TArray<uint8> UWowConnectionManager::BuildUseItemPacket(uint8 Bag,uint8 Slot,uint64 ItemGuid,uint32 SpellId,uint64 ExplicitTargetGuid)
 {
-    if(!WorldSocket.IsValid() || State!=EWowSessionState::WorldInGame || !ItemGuid || !SpellId) return;
     TArray<uint8> Data={Bag,Slot,0}; // bag, slot, cast count
     Data.Append(reinterpret_cast<const uint8*>(&SpellId),4);
     Data.Append(reinterpret_cast<const uint8*>(&ItemGuid),8);
-    const uint32 Glyph=0,TargetMask=0; // explicit self/no target; never infer a hostile target for consumables
+    const uint32 Glyph=0,TargetMask=ExplicitTargetGuid?2:0; // no inferred hostile target for consumables
     Data.Append(reinterpret_cast<const uint8*>(&Glyph),4); Data.Add(0);
     Data.Append(reinterpret_cast<const uint8*>(&TargetMask),4);
-    WorldSocket->SendPacket(WowOpcode::CMSG_USE_ITEM,Data);
+    if(ExplicitTargetGuid)
+    {
+        uint8 Mask=0; TArray<uint8> Bytes;
+        for(int32 I=0;I<8;++I) { const uint8 Byte=ExplicitTargetGuid>>(I*8); if(Byte) { Mask|=1<<I; Bytes.Add(Byte); } }
+        Data.Add(Mask); Data.Append(Bytes);
+    }
+    return Data;
+}
+
+void UWowConnectionManager::SendUseItem(uint8 Bag,uint8 Slot,uint64 ItemGuid,uint32 SpellId,uint64 ExplicitTargetGuid)
+{
+    if(!WorldSocket.IsValid() || State!=EWowSessionState::WorldInGame || !ItemGuid || !SpellId) return;
+    WorldSocket->SendPacket(WowOpcode::CMSG_USE_ITEM,BuildUseItemPacket(Bag,Slot,ItemGuid,SpellId,ExplicitTargetGuid));
 }
 
 void UWowConnectionManager::SendSetTitle(int32 TitleIndex)

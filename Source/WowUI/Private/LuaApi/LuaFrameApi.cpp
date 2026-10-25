@@ -4,6 +4,7 @@
 #include "WowEventSystem.h"
 #include "WowFrameManager.h"
 #include "WowFrameTypes.h"
+#include "WowMultiLineEditBox.h"
 #include "WowFontManager.h"
 #include "Components/ProgressBar.h"
 #include "Components/Button.h"
@@ -14,6 +15,8 @@
 #include "Components/CanvasPanel.h"
 #include "Slate/WidgetTransform.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Widgets/Input/SEditableTextBox.h"
+#include "Framework/Text/TextLayout.h"
 #include "Engine/Texture2D.h"
 #include "Slate/SlateBrushAsset.h"
 
@@ -151,6 +154,11 @@ static UTextBlock* GetTextBlockWidgetForTable(lua_State* L, int Idx = 1)
 	}
 
 	return nullptr;
+}
+
+static UWowMultiLineEditBox* GetMultiLineEditor(lua_State* L,int32 Index=1)
+{
+    auto* C=WowLuaApi::GetContext(L); return C && C->FrameManager?C->FrameManager->GetMultiLineEditBoxWidget(GetOptionalFrameHandle(L,Index)):nullptr;
 }
 
 static bool TableRepresentsRegion(lua_State* L, int Idx = 1)
@@ -2051,6 +2059,10 @@ static int LF_SetBackdropColor(lua_State* L)
 		lua_pushnumber(L, SafeColorArg(L, 5, 1.0)); lua_rawseti(L, -2, 4);
 	}
 
+	FLinearColor Color;
+	float* Components[]={&Color.R,&Color.G,&Color.B,&Color.A};
+	for(int32 I=0;I<4;++I) { lua_rawgeti(L,-1,I+1); *Components[I]=lua_tonumber(L,-1); lua_pop(L,1); }
+	if(auto* C=WowLuaApi::GetContext(L); C && C->FrameManager) C->FrameManager->SetFrameBackdropColor(GetFrameHandle(L),Color);
 	lua_setfield(L, 1, "__backdropColor");
 	return 0;
 }
@@ -2318,6 +2330,7 @@ static int LF_SetText(lua_State* L)
 	}
 
 	// Update UMG widget for other frame types
+	if(auto* Edit=GetMultiLineEditor(L)) { Edit->SetText(FText::FromString(UTF8_TO_TCHAR(Text))); return 0; }
 	if (UTextBlock* TextBlock = GetTextBlockWidgetForTable(L, 1))
 	{
 		FText TextContent = FText::FromString(WowUiPlainText(UTF8_TO_TCHAR(Text)));
@@ -2338,6 +2351,7 @@ static int LF_SetText(lua_State* L)
 
 static int LF_GetText(lua_State* L)
 {
+	if(auto* Edit=GetMultiLineEditor(L)) { const FString Text=Edit->LuaText(); lua_pushstring(L,TCHAR_TO_UTF8(*Text)); return 1; }
 	// Try to get text from widget first
 	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
 	if (UTextBlock* TextBlock = GetTextBlockWidgetForTable(L, 1))
@@ -2370,6 +2384,7 @@ static int LF_Disable(lua_State* L)
 	lua_setfield(L, 1, "__enabled");
 	if (auto* C=WowLuaApi::GetContext(L); C && C->FrameManager) C->FrameManager->SetButtonEnabled(GetFrameHandle(L),false);
 	if (UEditableTextBox* EditBox = GetEditBoxWidgetForTable(L, 1)) EditBox->SetIsEnabled(false);
+	if(auto* Edit=GetMultiLineEditor(L)) Edit->SetIsEnabled(false);
 	return 0;
 }
 
@@ -2380,6 +2395,7 @@ static int LF_Enable(lua_State* L)
 	lua_setfield(L, 1, "__enabled");
 	if (auto* C=WowLuaApi::GetContext(L); C && C->FrameManager) C->FrameManager->SetButtonEnabled(GetFrameHandle(L),true);
 	if (UEditableTextBox* EditBox = GetEditBoxWidgetForTable(L, 1)) EditBox->SetIsEnabled(true);
+	if(auto* Edit=GetMultiLineEditor(L)) Edit->SetIsEnabled(true);
 	return 0;
 }
 
@@ -2627,6 +2643,7 @@ static int LF_SetAutoFocus(lua_State* L)
 
 static int LF_ClearFocus(lua_State* L)
 {
+	if(auto* Edit=GetMultiLineEditor(L); Edit && Edit->HasEditFocus()) { if(FSlateApplication::IsInitialized()) FSlateApplication::Get().SetAllUserFocusToGameViewport(); return 0; }
 	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
 	if (Ctx && Ctx->FrameManager)
 	{
@@ -2642,6 +2659,7 @@ static int LF_ClearFocus(lua_State* L)
 
 static int LF_SetFocus(lua_State* L)
 {
+	if(auto* Edit=GetMultiLineEditor(L)) { Edit->SetKeyboardFocus(); return 0; }
 	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
 	if (Ctx && Ctx->FrameManager)
 	{
@@ -2657,6 +2675,7 @@ static int LF_SetFocus(lua_State* L)
 
 static int LF_HasFocus(lua_State* L)
 {
+	if(auto* Edit=GetMultiLineEditor(L)) { lua_pushboolean(L,Edit->HasEditFocus()); return 1; }
 	bool HasFocus = false;
 
 	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
@@ -2672,7 +2691,12 @@ static int LF_HasFocus(lua_State* L)
 	return 1;
 }
 static int LF_HighlightText(lua_State* L) { return 0; }
-static int LF_SetCursorPosition(lua_State* L) { return 0; }
+static int LF_SetCursorPosition(lua_State* L)
+{
+    if(auto* Edit=GetMultiLineEditor(L)) Edit->SetCursorOffset(luaL_checkinteger(L,2));
+    else if(auto* Single=GetEditBoxWidgetForTable(L)) StaticCastSharedRef<SEditableTextBox>(Single->TakeWidget())->GoTo(FTextLocation(0,FMath::Clamp(int32(luaL_checkinteger(L,2)),0,Single->GetText().ToString().Len())));
+    return 0;
+}
 static int LF_SetTextInsets(lua_State* L) { return 0; }
 static int LF_SetMultiLine(lua_State* L) { return 0; }
 static int LF_SetFontObject(lua_State* L)
@@ -3335,6 +3359,10 @@ static const luaL_Reg FrameMethods[] =
 	{"HasFocus", LF_HasFocus},
 	{"HighlightText", LF_HighlightText},
 	{"SetCursorPosition", LF_SetCursorPosition},
+	{"GetCursorPosition", [](lua_State* L)->int { if(auto* Edit=GetMultiLineEditor(L)) { lua_pushinteger(L,Edit->CursorOffset()); return 1; } return luaL_error(L,"Cursor queries are not supported by this input widget"); }},
+	{"Insert", [](lua_State* L)->int { if(auto* Edit=GetMultiLineEditor(L)) { Edit->InsertAtCursor(UTF8_TO_TCHAR(luaL_checkstring(L,2))); return 0; } return luaL_error(L,"Cursor insertion is not supported by this input widget"); }},
+	{"GetNumLetters", [](lua_State* L)->int { LF_GetText(L); const FString Text=UTF8_TO_TCHAR(lua_tostring(L,-1)); lua_pushinteger(L,Text.Len()); return 1; }},
+	{"IsMultiLine", [](lua_State* L)->int { lua_pushboolean(L,GetMultiLineEditor(L)!=nullptr); return 1; }},
 	{"SetTextInsets", LF_SetTextInsets},
 	{"SetMultiLine", LF_SetMultiLine},
 	{"SetFontObject", LF_SetFontObject},
@@ -3374,7 +3402,7 @@ static const luaL_Reg FrameMethods[] =
 		if (!lua_isnil(L, -1)) lua_setmetatable(L, -2); else lua_pop(L, 1);
 		return 1;
 	}},
-	{"SetChecked", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->SetChecked(GetFrameHandle(L),lua_toboolean(L,2)!=0); return 0; }},
+	{"SetChecked", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->SetChecked(GetFrameHandle(L),lua_toboolean(L,2)!=0 && (!lua_isnumber(L,2) || lua_tonumber(L,2)!=0)); return 0; }},
 	{"GetChecked", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); lua_pushboolean(L,C && C->FrameManager && C->FrameManager->GetChecked(GetFrameHandle(L))); return 1; }},
 	{"SetNormalFontObject", [](lua_State* L) -> int { return 0; }},
 	{"SetHighlightFontObject", [](lua_State* L) -> int { return 0; }},
@@ -3385,7 +3413,7 @@ static const luaL_Reg FrameMethods[] =
 	{"GetPushedTexture", [](lua_State* L) -> int { return PushButtonTexture(L,TEXT("Pushed")); }},
 	{"GetHighlightTexture", [](lua_State* L) -> int { return PushButtonTexture(L,TEXT("Highlight")); }},
 	{"GetDisabledTexture", [](lua_State* L) -> int { return PushButtonTexture(L,TEXT("Disabled")); }},
-	{"SetButtonState", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->SetButtonState(GetFrameHandle(L),UTF8_TO_TCHAR(luaL_checkstring(L,2)),lua_toboolean(L,3)!=0); return 0; }},
+	{"SetButtonState", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->SetButtonState(GetFrameHandle(L),UTF8_TO_TCHAR(luaL_checkstring(L,2)),lua_toboolean(L,3)!=0 && (!lua_isnumber(L,3) || lua_tonumber(L,3)!=0)); return 0; }},
 	{"GetButtonState", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); const FString State=C && C->FrameManager?C->FrameManager->GetButtonState(GetFrameHandle(L)):TEXT("NORMAL"); lua_pushstring(L,TCHAR_TO_UTF8(*State)); return 1; }},
 	{"RegisterForClicks", LF_RegisterForClicks},
 

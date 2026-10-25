@@ -362,6 +362,8 @@ void FWowEventSystem::SetFrameScript(int64 Handle, const FString& ScriptName, co
 		Params = TEXT("self, offset, ...");
 	else if (ScriptName == TEXT("OnChar"))
 		Params = TEXT("self, text, ...");
+	else if (ScriptName == TEXT("OnCursorChanged"))
+		Params=TEXT("self, x, y, width, height, ...");
 	else if (ScriptName == TEXT("OnSizeChanged"))
 		Params = TEXT("self, w, h, ...");
 	else if (ScriptName == TEXT("OnScrollRangeChanged"))
@@ -754,7 +756,7 @@ bool FWowEventSystem::RunFrameScript(int64 Handle, const FString& ScriptName, co
 	// Preserve the numeric/boolean contracts used by FrameXML controls.
 	for (const FString& Arg : StringArgs)
 	{
-		if(ScriptName==TEXT("OnMouseWheel") || ScriptName==TEXT("OnVerticalScroll") || ScriptName==TEXT("OnHorizontalScroll") || ScriptName==TEXT("OnValueChanged") || ScriptName==TEXT("OnSizeChanged") || ScriptName==TEXT("OnScrollRangeChanged")) lua_pushnumber(L,FCString::Atod(*Arg));
+		if(ScriptName==TEXT("OnCursorChanged") || ScriptName==TEXT("OnMouseWheel") || ScriptName==TEXT("OnVerticalScroll") || ScriptName==TEXT("OnHorizontalScroll") || ScriptName==TEXT("OnValueChanged") || ScriptName==TEXT("OnSizeChanged") || ScriptName==TEXT("OnScrollRangeChanged")) lua_pushnumber(L,FCString::Atod(*Arg));
 		else if(ScriptName==TEXT("OnEnter") || ScriptName==TEXT("OnLeave") || ScriptName==TEXT("OnTextChanged")) lua_pushboolean(L,FCString::Atoi(*Arg)!=0);
 		else { FTCHARToUTF8 UTF8Arg(*Arg); lua_pushstring(L,UTF8Arg.Get()); }
 	}

@@ -22,6 +22,7 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Formats/Dbc/DbcStore.h"
 #include "WowUiText.h"
+#include "WowMultiLineEditBox.h"
 DEFINE_LOG_CATEGORY_STATIC(LogWowFrame, Log, All);
 
 namespace
@@ -243,6 +244,8 @@ void FWowFrameManager::SetFrameVisible(int64 Handle, bool bVisible)
 		{
 			for(int64 Parent=Edit.Key; Parent>=0; Parent=GetParentHandle(Parent)) if(Parent==Handle) { FSlateApplication::Get().SetAllUserFocusToGameViewport(); break; }
 		}
+		for(const auto& Edit:MultiLineEditBoxWidgets) if(Edit.Value.IsValid() && Edit.Value->HasEditFocus())
+			for(int64 Parent=Edit.Key;Parent>=0;Parent=GetParentHandle(Parent)) if(Parent==Handle) { FSlateApplication::Get().SetAllUserFocusToGameViewport(); break; }
 	}
 	FFrameEntry* Entry = Frames.Find(Handle);
 	if (!Entry) return;
@@ -510,6 +513,11 @@ USlider* FWowFrameManager::GetSliderWidget(int64 Handle) const
 	return (Found && Found->IsValid()) ? Found->Get() : nullptr;
 }
 
+UWowMultiLineEditBox* FWowFrameManager::GetMultiLineEditBoxWidget(int64 Handle) const
+{
+    const auto* Found=MultiLineEditBoxWidgets.Find(Handle); return Found?Found->Get():nullptr;
+}
+
 UTextBlock* FWowFrameManager::GetPrimaryTextWidget(int64 Handle) const
 {
 	const TWeakObjectPtr<UTextBlock>* Found = PrimaryTextWidgets.Find(Handle);
@@ -696,6 +704,8 @@ void FWowFrameManager::MergeTemplate(FWowFrameDef& Target, const FWowFrameDef& T
 
 	// Type-specific properties — use template values if target is empty
 	if (Target.ButtonText.IsEmpty()) Target.ButtonText = Template.ButtonText;
+	Target.bMultiLine|=Template.bMultiLine;
+	if(!Target.EditBoxLetters) Target.EditBoxLetters=Template.EditBoxLetters;
 	for(const auto& Pair:Template.ButtonTextureRegions) if(!Target.ButtonTextureRegions.Contains(Pair.Key)) Target.ButtonTextureRegions.Add(Pair.Key,Pair.Value);
 	if (Target.NormalTexture.IsEmpty()) { Target.NormalTexture = Template.NormalTexture; Target.NormalTextureName = Template.NormalTextureName; Target.NormalTextureParentKey = Template.NormalTextureParentKey; }
 	if (Target.PushedTexture.IsEmpty()) { Target.PushedTexture = Template.PushedTexture; Target.PushedTextureName = Template.PushedTextureName; Target.PushedTextureParentKey = Template.PushedTextureParentKey; }
@@ -1076,7 +1086,12 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 
 // ── Backdrop Creation ────────────────────────────────────────────────────────
 
-void FWowFrameManager::CreateBackdrop(UCanvasPanel* Container, const FWowBackdrop& Backdrop)
+void FWowFrameManager::SetFrameBackdropColor(int64 Handle,const FLinearColor& Color)
+{
+	if(auto* Image=BackdropImages.Find(Handle); Image && Image->IsValid()) (*Image)->SetColorAndOpacity(Color);
+}
+
+void FWowFrameManager::CreateBackdrop(UCanvasPanel* Container, const FWowBackdrop& Backdrop,int64 Handle)
 {
 	if (!Container) return;
 
@@ -1096,6 +1111,8 @@ void FWowFrameManager::CreateBackdrop(UCanvasPanel* Container, const FWowBackdro
 			SlateBrush.SetResourceObject(BgTexture);
 			SlateBrush.DrawAs = ESlateBrushDrawType::Image;
 			BgImage->SetBrush(SlateBrush);
+			BgImage->SetVisibility(ESlateVisibility::HitTestInvisible);
+			BackdropImages.Add(Handle,BgImage);
 
 			// Add as first child (lowest Z order) so it appears behind other content
 			UCanvasPanelSlot* Slot = Container->AddChildToCanvas(BgImage);
@@ -1275,6 +1292,17 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 				}
 			}
 		}
+		else if (Def.Type == EWowFrameType::EditBox && Def.bMultiLine)
+		{
+			auto* Edit=NewObject<UWowMultiLineEditBox>(ContainerWidget);
+			FTextBlockStyle Style=Edit->WidgetStyle; Style.SetColorAndOpacity(FLinearColor::White);
+			if(FontManager) Style.SetFont(FontManager->GetDefaultFont(FMath::RoundToInt(12.f*UIScale)));
+			Edit->SetWidgetStyle(Style); Edit->SetAutoWrapText(true); Edit->SetSelectAllTextWhenFocused(false);
+			Edit->SetClearKeyboardFocusOnCommit(false); Edit->SetRevertTextOnEscape(false);
+			AddFillChild(Edit,50,ESlateVisibility::Visible); MultiLineEditBoxWidgets.Add(Handle,Edit);
+			EditBoxMinimumHeight.Add(Handle,Def.Height);
+			if(Def.EditBoxLetters>0) EditBoxMaxLetters.Add(Handle,Def.EditBoxLetters);
+		}
 		else if (Def.Type == EWowFrameType::EditBox)
 		{
 			UEditableTextBox* EditBox = NewObject<UEditableTextBox>(ContainerWidget);
@@ -1290,6 +1318,7 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 			EditBox->SetWidgetStyle(BoxStyle);
 			AddFillChild(EditBox, 50, ESlateVisibility::Visible);
 			EditBoxWidgets.Add(Handle, EditBox);
+			if(Def.EditBoxLetters>0) EditBoxMaxLetters.Add(Handle,Def.EditBoxLetters);
 		}
 		else if (Def.Type == EWowFrameType::Slider)
 		{
@@ -1372,6 +1401,9 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 	if (Slot)
 	{
 		int32 ZOrder = static_cast<int32>(Def.Strata) * 1000 + Def.FrameLevel;
+		// Background-only frames share their siblings' frame level in FrameXML.
+		// Paint decoration before content, including nested scroll editors.
+		if(Def.Backdrop.IsSet() && Def.Layers.IsEmpty() && Def.Children.IsEmpty() && !Def.bEnableMouse && Def.Type==EWowFrameType::Frame) --ZOrder;
 		Slot->SetZOrder(ZOrder);
 		UE_LOG(LogWowFrame, Verbose, TEXT("  Added to canvas: slot=%p ZOrder=%d"), Slot, ZOrder);
 	}
@@ -1428,7 +1460,7 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 	// Create backdrop (9-slice background) if specified
 	if (UCanvasPanel* BackdropCanvas = Cast<UCanvasPanel>(Widget); Def.Backdrop.IsSet() && BackdropCanvas)
 	{
-		CreateBackdrop(BackdropCanvas, Def.Backdrop.GetValue());
+		CreateBackdrop(BackdropCanvas, Def.Backdrop.GetValue(),Handle);
 	}
 
 	// Create layer content (textures and fontstrings) inside the frame
@@ -2098,7 +2130,7 @@ void FWowFrameManager::SetChecked(int64 Handle,bool Checked)
 				FSlateBrush Brush=Image->GetBrush(); Brush.SetResourceObject(Material); Image->SetBrush(Brush);
 			}
 		}
-		if(auto* Slot=Canvas->AddChildToCanvas(Image)) { Slot->SetAnchors(FAnchors(0,0,1,1)); Slot->SetOffsets(FMargin(0)); Slot->SetZOrder(180); }
+		if(auto* Slot=Canvas->AddChildToCanvas(Image)) { Slot->SetAnchors(FAnchors(0,0,1,1)); Slot->SetOffsets(FMargin(0)); Slot->SetZOrder(400); }
 		CheckImages.Add(Handle,Image);
 	}
 	if(auto* Image=CheckImages.Find(Handle); Image && Image->IsValid()) (*Image)->SetVisibility(Checked?ESlateVisibility::HitTestInvisible:ESlateVisibility::Collapsed);
@@ -2321,6 +2353,31 @@ void FWowFrameManager::TickWidgetEvents()
 		}
 	}
 
+	TArray<int64> Editors; MultiLineEditBoxWidgets.GetKeys(Editors);
+	for(const int64 Handle:Editors)
+	{
+		auto* Edit=GetMultiLineEditBoxWidget(Handle); if(!Edit || !IsFrameHierarchyShown(Handle)) continue;
+		FString Text=Edit->LuaText();
+		if(const auto* Limit=EditBoxMaxLetters.Find(Handle); Limit && *Limit>0 && Text.Len()>*Limit) Text.LeftInline(*Limit);
+		if(const auto* Limit=EditBoxMaxBytes.Find(Handle); Limit && *Limit>0) while(Text.Len() && FTCHARToUTF8(*Text).Length()>*Limit) Text.LeftChopInline(1);
+		if(Text!=Edit->LuaText()) Edit->SetText(FText::FromString(Text));
+		const bool Changed=!EditBoxLastText.Contains(Handle) || EditBoxLastText[Handle]!=Text;
+		EditBoxLastText.Add(Handle,Text);
+		FVector4 Cursor; float TextHeight=0;
+		if(Edit->MeasureEditor(Cursor,TextHeight))
+		{
+			const float Scale=FMath::Max(UIScale,.001f); Cursor/=Scale;
+			const auto Rect=GetLayoutRect(Handle); const float LocalScale=GetEffectiveFrameScale(Handle);
+			SetFrameSize(Handle,Rect.Z/LocalScale,FMath::Max(EditBoxMinimumHeight.FindRef(Handle),TextHeight/Scale));
+			if(Changed || !EditBoxLastCursor.Contains(Handle) || !EditBoxLastCursor[Handle].Equals(Cursor,.1f))
+			{
+				EditBoxLastCursor.Add(Handle,Cursor);
+				if(EventSystem) EventSystem->RunFrameScript(Handle,TEXT("OnCursorChanged"),{FString::SanitizeFloat(Cursor.X),FString::SanitizeFloat(Cursor.Y),FString::SanitizeFloat(Cursor.Z),FString::SanitizeFloat(Cursor.W)});
+			}
+		}
+		if(Changed && EventSystem) EventSystem->RunFrameScript(Handle,TEXT("OnTextChanged"),{TEXT("1")});
+	}
+
 	// Poll Slider widgets for value changes
 	for (auto& Pair : SliderWidgets)
 	{
@@ -2345,6 +2402,7 @@ void FWowFrameManager::TickWidgetEvents()
 
 bool FWowFrameManager::DispatchEditBoxEnterPressed()
 {
+	for(const auto& Pair:MultiLineEditBoxWidgets) if(Pair.Value.IsValid() && IsFrameHierarchyShown(Pair.Key) && Pair.Value->HasEditFocus()) return true;
 	for (const auto& Pair : EditBoxWidgets)
 	{
 		if (!Pair.Value.IsValid()) continue;
@@ -2362,6 +2420,10 @@ bool FWowFrameManager::DispatchEditBoxEnterPressed()
 
 bool FWowFrameManager::DispatchEditBoxEscapePressed()
 {
+	for(const auto& Pair:MultiLineEditBoxWidgets) if(Pair.Value.IsValid() && IsFrameHierarchyShown(Pair.Key) && Pair.Value->HasEditFocus())
+	{
+		if(EventSystem) EventSystem->RunFrameScript(Pair.Key,TEXT("OnEscapePressed")); return true;
+	}
 	for (const auto& Pair : EditBoxWidgets)
 	{
 		if (!Pair.Value.IsValid()) continue;

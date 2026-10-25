@@ -19,6 +19,7 @@
 #include "Engine/UserInterfaceSettings.h"
 #include "Engine/GameViewportClient.h"
 #include "WowSavedVariables.h"
+#include "WowMacros.h"
 
 #if __has_include("lua.h")
 extern "C" {
@@ -201,6 +202,13 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 	FWowSavedVariables::RegisterAddon(TEXT("IdleWowUI"),Preferences);
 	FWowSavedVariables::LoadForAddon(LuaVM->GetState(),TEXT("IdleWowUI"),Preferences);
 	WowLuaApi::ApplySavedUiSettings(LuaVM->GetState());
+	FWowMacros::LoadSavedVariables(LuaVM->GetState());
+	if(ConnectionManager) ConnectionManager->OnMacroUse.BindWeakLambda(this,[this](uint32 Id)
+	{
+		if(!LuaVM) return false;
+		LuaVM->BeginCallback();
+		return FWowMacros::RunWireMacro(LuaVM->GetState(),Id);
+	});
 
 	// 1. Load FrameXML (Interface/FrameXML/FrameXML.toc) — the core UI system
 	TArray<FWowXmlDirective> FrameXmlDirectives = FWowFrameXmlParser::LoadFrameXml(Mpq);

@@ -1,5 +1,6 @@
 #include "LuaApiRegistry.h"
 #include "WowKeyBindings.h"
+#include "WowMacros.h"
 
 #if __has_include("lua.h")
 extern "C" {
@@ -29,6 +30,7 @@ void WowLuaApi::RegisterAll(lua_State* L)
     RegisterReputationApi(L);
     RegisterSettingsApi(L);
     FWowKeyBindings::RegisterApi(L);
+    FWowMacros::RegisterApi(L);
     RegisterFrameApi(L);
 #endif
 }

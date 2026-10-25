@@ -33,9 +33,10 @@
 class FWowProbeInputGuard final : public IInputProcessor
 {
 public:
+    bool SyntheticText=false;
     void Tick(float,FSlateApplication&,TSharedRef<ICursor>) override {}
-    bool HandleKeyDownEvent(FSlateApplication&,const FKeyEvent&) override { return true; }
-    bool HandleKeyUpEvent(FSlateApplication&,const FKeyEvent&) override { return true; }
+    bool HandleKeyDownEvent(FSlateApplication&,const FKeyEvent&) override { return !SyntheticText; }
+    bool HandleKeyUpEvent(FSlateApplication&,const FKeyEvent&) override { return !SyntheticText; }
     bool HandleAnalogInputEvent(FSlateApplication&,const FAnalogInputEvent&) override { return true; }
     bool HandleMouseMoveEvent(FSlateApplication&,const FPointerEvent&) override { return true; }
     bool HandleMouseButtonDownEvent(FSlateApplication&,const FPointerEvent&) override { return true; }
@@ -380,6 +381,7 @@ struct FWowGameplayProbe
                 const float DX=(DestRect.X+DestRect.Z*.5f)*Scale,DY=(DestRect.Y+DestRect.W*.5f)*Scale;
                 if(Frames->HitTestFrames(DX,DY)!=Destination) { Failure=TEXT("UI drop destination is obscured"); Finish(C,false); return; }
                 Frames->UpdateMouseHover(DX,DY); Frames->DispatchReceiveDrag(Destination); Frames->DispatchDragStop(Handle,Button);
+                Frames->DispatchMouseUp(Handle,Button);
                 C.GameplayProbePointer=FVector2D(DX,DY);
             }
             else
@@ -412,6 +414,22 @@ struct FWowGameplayProbe
         {
             const FKey Key(*Step->GetStringField(TEXT("name")));
             if(C.IsInputKeyDown(Key)!=Step->GetBoolField(TEXT("down"))) { Failure=TEXT("Unexpected routed key state"); Finish(C,false); return; } Done=true;
+        }
+        else if(Op==TEXT("input_text"))
+        {
+            const auto Focused=FSlateApplication::IsInitialized()?FSlateApplication::Get().GetKeyboardFocusedWidget():nullptr;
+            if(!Focused || !Focused->GetType().ToString().Contains(TEXT("EditableText"))) { Failure=TEXT("Text input requires a focused editor"); Finish(C,false); return; }
+            TGuardValue<bool> Synthetic(C.bProbeSyntheticKeyboard,true);
+            TGuardValue<bool> AllowText(InputGuard->SyntheticText,true);
+            auto& Slate=FSlateApplication::Get();
+            for(const TCHAR Ch:Step->GetStringField(TEXT("text")))
+                if(Ch=='\n')
+                {
+                    const FKeyEvent Enter(EKeys::Enter,FModifierKeysState(),0,false,0,0);
+                    Slate.ProcessKeyDownEvent(Enter); Slate.ProcessKeyUpEvent(Enter);
+                }
+                else Slate.ProcessKeyCharEvent(FCharacterEvent(Ch,FModifierKeysState(),uint32(0),false));
+            Done=true;
         }
         else if(Op==TEXT("input_key"))
         {

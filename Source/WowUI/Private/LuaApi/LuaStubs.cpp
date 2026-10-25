@@ -2279,6 +2279,12 @@ static int L_CastSpellByName(lua_State* L)
     if (FoundSpellId != 0)
     {
         int64 TargetGuid = Ctx->ConnectionManager->GetTargetGuid();
+        if(lua_isstring(L,2))
+        {
+            const auto* Target=WowLuaApi::ResolveUnitToken(L,2);
+            if(!Target) return 0;
+            TargetGuid=Target->Guid;
+        }
         Ctx->ConnectionManager->SendCastSpell(FoundSpellId, TargetGuid);
     }
 

@@ -6,6 +6,12 @@
 #include "../LuaApi/LuaApiRegistry.h"
 #include "WowEntityManager.h"
 #include "WowConnectionManager.h"
+#include "WowMacros.h"
+#include "WowMultiLineEditBox.h"
+#include "WowSavedVariables.h"
+#include "WowAddonLoader.h"
+#include "Misc/Paths.h"
+#include "HAL/FileManager.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/Image.h"
@@ -394,7 +400,7 @@ bool FUiStatefulControls::RunTest(const FString&)
         CaptionButtonText:SetFontObject(FixtureFont); assert(CaptionButtonText:GetFontObject()==FixtureFont)
         local r,g,b=CaptionButtonText:GetTextColor(); assert(math.abs(r-.2)<.0001 and math.abs(g-.4)<.0001 and math.abs(b-.6)<.0001)
         Control:SetSize(24,24); Control:SetPoint('TOPLEFT',UIParent,'TOPLEFT',20,-20)
-        Control:SetChecked(true); assert(Control:GetChecked()); Control:SetChecked(false); assert(not Control:GetChecked())
+        Control:SetChecked(true); assert(Control:GetChecked()); Control:SetChecked(0); assert(not Control:GetChecked())
         Control:RegisterForDrag('LeftButton')
         Dragged=0; Dropped=0
         Control:SetScript('OnDragStart',function(self,button) assert(button=='LeftButton'); Dragged=Dragged+1 end)
@@ -421,7 +427,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FButtonStateRegions,"WowUnreal.Hud.ButtonStateR
 bool FButtonStateRegions::RunTest(const FString&)
 {
     FHudFixture F;
-    const FString Xml=TEXT("<Ui><Button name='MenuTest'><Size x='28' y='58'/><Anchors><Anchor point='CENTER'/></Anchors><NormalTexture name='$parentNormalTexture'><Size x='64' y='64'/><Anchors><Anchor point='CENTER'/></Anchors><TexCoords left='.1' right='.9' top='.2' bottom='.8'/></NormalTexture></Button></Ui>");
+    const FString Xml=TEXT("<Ui><Button name='MenuTest'><Size x='28' y='58'/><Anchors><Anchor point='CENTER'/></Anchors><Layers><Layer level='BACKGROUND'><Texture name='MenuBackground'/></Layer></Layers><NormalTexture name='$parentNormalTexture'><Size x='64' y='64'/><Anchors><Anchor point='CENTER'/></Anchors><TexCoords left='.1' right='.9' top='.2' bottom='.8'/></NormalTexture></Button></Ui>");
     const FTCHARToUTF8 Utf8(*Xml); TArray<uint8> Bytes; Bytes.Append(reinterpret_cast<const uint8*>(Utf8.Get()),Utf8.Length());
     const auto Parsed=FWowFrameXmlParser::ParseXml(Bytes,TEXT("ButtonStates"));
     if(!TestEqual(TEXT("Button state fixture parses"),Parsed.Num(),1)) return false;
@@ -442,6 +448,7 @@ bool FButtonStateRegions::RunTest(const FString&)
     auto* Pushed=F.Frames.GetNamedTexture(TEXT("MenuTestPushedTexture"));
     auto* Disabled=F.Frames.GetNamedTexture(TEXT("MenuTestDisabledTexture"));
     TestTrue(TEXT("Normal state renders an opaque region with its explicit size"),Normal && Normal->GetRenderOpacity()==1 && Normal->GetVisibility()!=ESlateVisibility::Collapsed && Cast<UCanvasPanelSlot>(Normal->Slot)->GetSize().X>60);
+    TestTrue(TEXT("Button icons draw above the empty-slot background"),Cast<UCanvasPanelSlot>(Normal->Slot)->GetZOrder()>Cast<UCanvasPanelSlot>(F.Frames.GetNamedTexture(TEXT("MenuBackground"))->Slot)->GetZOrder());
     const auto Rect=F.Frames.GetLayoutRect(Handle);
     F.Frames.UpdateMouseHover((Rect.X+Rect.Z*.5f)*F.Frames.GetScreenScale(),(Rect.Y+Rect.W*.5f)*F.Frames.GetScreenScale());
     TestTrue(TEXT("Reanchoring a child during a mouse handler preserves mouse-over queries"),F.Lua.ExecuteString(TEXT("MenuTest:GetNormalTexture():SetPoint('CENTER',MenuTest,'CENTER',0,0); assert(MenuTest:IsMouseOver())")));
@@ -454,6 +461,113 @@ bool FButtonStateRegions::RunTest(const FString&)
     TestTrue(TEXT("Explicitly hidden button regions remain hidden on refresh"),F.Lua.ExecuteString(TEXT("MenuTest:Enable(); MenuTest:SetButtonState('NORMAL'); MenuTest:GetNormalTexture():Hide()")));
     F.Frames.RefreshButtonVisuals(Handle);
     TestTrue(TEXT("State refresh respects region visibility"),Normal->GetVisibility()==ESlateVisibility::Collapsed);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudMacroFlow,"WowUnreal.Hud.MacroFlow",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudMacroFlow::RunTest(const FString&)
+{
+    FString DataPath; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),DataPath)) return false;
+    FMpqManager Mpq; if(!Mpq.Initialize(DataPath)) return false;
+    if(!FDbcStore::Get().IsLoaded()) FDbcStore::Get().LoadAll(Mpq);
+    if(!FDbcStore::Get().IsDeferredLoaded()) FDbcStore::Get().LoadDeferred(Mpq);
+    FHudFixture F;
+    TStrongObjectPtr<UWowConnectionManager> Connection(NewObject<UWowConnectionManager>());
+    F.Context.ConnectionManager=Connection.Get(); F.Context.EntityManager=&Connection->PacketHandler.EntityManager;
+    auto& H=Connection->PacketHandler; H.KnownSpells.Add(78); H.ActionButtons.SetNumZeroed(144);
+    Connection->OnMacroUse.BindLambda([&F](uint32 Id) { return FWowMacros::RunWireMacro(F.Lua.GetState(),Id); });
+    TestTrue(TEXT("Account and character macros support editing, display indices and action pickup"),F.Lua.ExecuteString(TEXT(R"LUA(
+        assert(GetNumMacros()==0 and select(2,GetNumMacros())==0)
+        MacroActionListener=CreateFrame('Frame'); MacroActionListener:RegisterEvent('ACTIONBAR_SLOT_CHANGED')
+        assert(GetNumMacroIcons()>20)
+        AccountMacro=CreateMacro('First',1,'/run MacroTrace=1',false)
+        assert(AccountMacro==1 and CreateMacro('Second',2,'',false)==2)
+        CharacterMacro=CreateMacro('Character',1,'#showtooltip '..GetSpellInfo(6603)..'\n/run MacroTrace=(MacroTrace or 0)+10',true)
+        assert(CharacterMacro==37 and GetMacroIndexByName('Character')==37)
+        assert(select(3,GetMacroSpell(CharacterMacro))==6603)
+        PickupMacro(CharacterMacro); assert(GetCursorInfo()=='macro' and select(2,GetCursorInfo())==37)
+        PlaceAction(84); assert(not GetCursorInfo())
+        local kind,id=GetActionInfo(84); assert(kind=='macro' and id==37 and GetActionText(84)=='Character')
+        assert(GetActionTexture(84)==select(3,GetSpellInfo(6603)))
+        MacroLines={}; MacroRecorder=CreateFrame('Frame','MacroRecorder',UIParent)
+        MacroRecorder:RegisterEvent('EXECUTE_CHAT_LINE')
+        MacroRecorder:SetScript('OnEvent',function(self,event,line)
+            MacroLines[#MacroLines+1]=line
+            if line:sub(1,5)=='/run ' then RunScript(line:sub(6)) end
+            if line=='/stopmacro' then StopMacro() end
+        end)
+    )LUA")));
+    const uint32 Wire=H.ActionButtons[83]&0xffffff;
+    TestTrue(TEXT("Network invocation resolves an opaque macro identity"),Wire>=4096 && Connection->UseActionSlot(83));
+    TestTrue(TEXT("Deleting another macro cannot retarget an existing action"),F.Lua.ExecuteString(TEXT(R"LUA(
+        assert(MacroTrace==10 and #MacroLines==1)
+        DeleteMacro(AccountMacro); assert(GetMacroInfo(1)=='Second' and select(2,GetActionInfo(84))==37)
+        assert(EditMacro(37,'Renamed',nil,'/run MacroTrace=MacroTrace+4')==37)
+        assert(GetActionText(84)=='Renamed')
+        RunMacro(37); assert(MacroTrace==14)
+        RunMacroText('/run MacroTrace=MacroTrace+1\n/stopmacro\n/run MacroTrace=999')
+        assert(MacroTrace==15 and GetRunningMacro()==nil)
+        UnitExists=function(unit) return unit=='player' end
+        UnitCanAssist=function(a,b) return b=='player' end
+        UnitCanAttack=function() return false end
+        UnitIsDeadOrGhost=function() return false end
+        IsShiftKeyDown=function() return false end
+        local action,target=SecureCmdOptionParse('[mod:shift][@player,help,nodead] Heal; Fallback')
+        assert(action=='Heal' and target=='player')
+        action,target=SecureCmdOptionParse('[harm] Strike; [@player,help] Heal')
+        assert(action=='Heal' and target=='player')
+        assert(SecureCmdOptionParse('[unknown] Hidden')==nil and SecureCmdOptionParse('[nounknown] Hidden')==nil)
+        for i=2,36 do CreateMacro('Slot'..i,1,'',false) end
+        assert(GetNumMacros()==36 and not pcall(CreateMacro,'Overflow',1,'',false))
+        DeleteMacro(37); assert(not HasAction(84) and GetActionInfo(84)==nil)
+    )LUA")));
+    TestTrue(TEXT("Deleting a macro clears only actions that reference its stable identity"),H.ActionButtons[83]==0);
+    const auto Packet=UWowConnectionManager::BuildUseItemPacket(255,23,0x400000000000000aULL,8690,0x0102000000000003ULL);
+    FPacketReader R(Packet);
+    TestTrue(TEXT("Targeted item macros encode the full WotLK use-item layout"),R.ReadU8()==255 && R.ReadU8()==23 && R.ReadU8()==0 && R.ReadU32()==8690 && R.ReadU64()==0x400000000000000aULL && R.ReadU32()==0 && R.ReadU8()==0 && R.ReadU32()==2 && R.ReadPackedGuid()==0x0102000000000003ULL && R.Remaining()==0);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudMacroPersistence,"WowUnreal.Hud.MacroPersistence",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudMacroPersistence::RunTest(const FString&)
+{
+    FHudFixture F;
+    FWowSavedVariables::SetIdentity(TEXT("IdleWowAutomation"),TEXT("Offline"),TEXT("MacroFixture"));
+    FWowTocData Toc; Toc.SavedVariables.Add(TEXT("MacroRoundTrip"));
+    const FString File=FPaths::Combine(FPaths::ProjectSavedDir(),TEXT("WTF/Account/IdleWowAutomation/SavedVariables/MacroRoundTripTest.lua"));
+    TestTrue(TEXT("UTF-8 and binary macro data initialize"),F.Lua.ExecuteString(TEXT(R"LUA(
+        MacroExpected='Проверка\n/run print("Привет")'..string.char(0,1,31)..'123'
+        MacroKey='Имя'..string.char(0)..'0'
+        MacroRoundTrip={body=MacroExpected,[MacroKey]=MacroExpected}
+    )LUA")));
+    FWowSavedVariables::SaveForAddon(F.Lua.GetState(),TEXT("MacroRoundTripTest"),Toc);
+    F.Lua.ExecuteString(TEXT("MacroRoundTrip=nil"));
+    FWowSavedVariables::LoadForAddon(F.Lua.GetState(),TEXT("MacroRoundTripTest"),Toc);
+    TestTrue(TEXT("Macro text and keys retain exact bytes through disk persistence"),F.Lua.ExecuteString(TEXT("assert(MacroRoundTrip.body==MacroExpected and MacroRoundTrip[MacroKey]==MacroExpected)")));
+    TestFalse(TEXT("Completed save leaves no temporary file"),IFileManager::Get().FileExists(*(File+TEXT(".tmp"))));
+    IFileManager::Get().Delete(*File);
+    FWowSavedVariables::SetIdentity(TEXT("WowTestUser"));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudMultiLineEditor,"WowUnreal.Hud.MultiLineEditor",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudMultiLineEditor::RunTest(const FString&)
+{
+    FHudFixture F;
+    const FString Xml=TEXT("<Ui><EditBox name='MacroEditorTest' multiLine='true' letters='255'><Size x='180' y='64'/><Anchors><Anchor point='CENTER'/></Anchors><Scripts><OnCursorChanged>assert(type(x)=='number' and type(y)=='number' and height>0); CursorEvents=(CursorEvents or 0)+1</OnCursorChanged><OnTextChanged>TextEvents=(TextEvents or 0)+1</OnTextChanged></Scripts></EditBox></Ui>");
+    const FTCHARToUTF8 Utf8(*Xml); TArray<uint8> Bytes; Bytes.Append(reinterpret_cast<const uint8*>(Utf8.Get()),Utf8.Length());
+    const auto Parsed=FWowFrameXmlParser::ParseXml(Bytes,TEXT("MacroEditor"));
+    if(!TestEqual(TEXT("Multiline edit box parses"),Parsed.Num(),1)) return false;
+    const int64 Handle=F.Frames.CreateFrame(Parsed[0].FrameDef);
+    TestNotNull(TEXT("XML creates a native multiline editor"),F.Frames.GetMultiLineEditBoxWidget(Handle));
+    TestTrue(TEXT("Lua text, cursor placement and insertion operate on real multiline text"),F.Lua.ExecuteString(TEXT(R"LUA(
+        assert(MacroEditorTest:IsMultiLine())
+        MacroEditorTest:SetText('one\ntwo'); MacroEditorTest:SetCursorPosition(4)
+        MacroEditorTest:Insert('M\n')
+        assert(MacroEditorTest:GetText()=='one\nM\ntwo' and MacroEditorTest:GetCursorPosition()==6 and MacroEditorTest:GetNumLetters()==9, string.format('text=%q position=%s letters=%s',MacroEditorTest:GetText(),MacroEditorTest:GetCursorPosition(),MacroEditorTest:GetNumLetters()))
+    )LUA")));
+    F.Frames.TickWidgetEvents();
+    TestTrue(TEXT("Measured cursor notifications precede the text-change handler"),F.Lua.ExecuteString(TEXT("assert(CursorEvents>0 and TextEvents==1)")));
     return true;
 }
 

@@ -3,6 +3,7 @@
 #include "WowEntityManager.h"
 #include "WowEventSystem.h"
 #include "WowFrameManager.h"
+#include "WowMacros.h"
 #include "Formats/Dbc/DbcStore.h"
 #include "Components/Image.h"
 #include "Engine/Texture2D.h"
@@ -262,6 +263,7 @@ int WowLuaApi::SetActionTooltip(lua_State* L)
 {
     auto* C=GetContext(L); const int32 Slot=luaL_checkinteger(L,2)-1; if(!C || !C->ConnectionManager || !C->FrameManager || !C->ConnectionManager->PacketHandler.ActionButtons.IsValidIndex(Slot)) return 0;
     const uint32 Packed=C->ConnectionManager->PacketHandler.ActionButtons[Slot],Id=Packed&0xffffff;
+    if((Packed>>24)==64) { lua_pushboolean(L,FWowMacros::SetActionTooltip(L,Handle(L),Id)); return 1; }
     if((Packed>>24)==128) ItemTooltip(C,Handle(L),Template(C,Id),Id);
     else { const auto* P=C->EntityManager?C->EntityManager->GetLocalPlayer():nullptr; C->FrameManager->TooltipSetSpell(Handle(L),Id,P?P->GetLevel():1); }
     lua_pushboolean(L,Id!=0); return 1;

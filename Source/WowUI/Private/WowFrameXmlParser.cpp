@@ -717,6 +717,8 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 	Def.Type = FWowFrameXmlParser::ParseFrameType(UTF8_TO_TCHAR(Node.name()));
 	Def.Name = UTF8_TO_TCHAR(Node.attribute("name").as_string());
 	Def.ButtonText = UTF8_TO_TCHAR(Node.attribute("text").as_string());
+	Def.bMultiLine=Node.attribute("multiLine").as_bool(false);
+	Def.EditBoxLetters=Node.attribute("letters").as_int(0);
 	Def.ParentKey = UTF8_TO_TCHAR(Node.attribute("parentKey").as_string());
 	Def.Parent = UTF8_TO_TCHAR(Node.attribute("parent").as_string());
 	Def.Inherits = UTF8_TO_TCHAR(Node.attribute("inherits").as_string());
@@ -1157,6 +1159,8 @@ static FWowFrameDef ParseFrameNode(const FXmlNode* Node)
 	Def.Type = FWowFrameXmlParser::ParseFrameType(Node->GetTag());
 	Def.Name = Node->GetAttribute(TEXT("name"));
 	Def.ButtonText = Node->GetAttribute(TEXT("text"));
+	Def.bMultiLine=Node->GetAttribute(TEXT("multiLine")).Equals(TEXT("true"),ESearchCase::IgnoreCase);
+	Def.EditBoxLetters=FCString::Atoi(*Node->GetAttribute(TEXT("letters")));
 	Def.ParentKey = Node->GetAttribute(TEXT("parentKey"));
 	Def.Parent = Node->GetAttribute(TEXT("parent"));
 	Def.Inherits = Node->GetAttribute(TEXT("inherits"));

@@ -15,6 +15,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCharCreateResult, uint8, ResultCo
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnLogoutResponse, uint32, bool);
 DECLARE_MULTICAST_DELEGATE(FOnLogoutComplete);
 DECLARE_MULTICAST_DELEGATE(FOnWowCursorChanged);
+DECLARE_DELEGATE_RetVal_OneParam(bool,FOnWowMacroUse,uint32);
 
 enum class EWowActionInvocationKind : uint8
 {
@@ -79,6 +80,8 @@ public:
 
     /** Cursor payload helpers for spell/action pickup flows */
     void PickupSpellCursor(int32 SpellId, const FString& BookType = TEXT("spell"));
+    void PickupMacroCursor(uint32 Id);
+    FOnWowMacroUse OnMacroUse;
     void PickupActionCursor(int32 SlotIndex);
     void PickupBagItemCursor(uint8 SourceBag, uint8 SourceSlot, int32 ItemId, const FString& ItemLink = TEXT(""), uint32 SplitCount = 0);
     void PickupInventoryItemCursor(uint8 InventorySlot, int32 ItemId, const FString& ItemLink = TEXT(""));
@@ -126,7 +129,8 @@ public:
     /** Auto-equip an inventory item from the specified bag/slot. */
     void SendAutoEquipItem(uint8 SourceBag, uint8 SourceSlot);
     void SendSwapItem(uint8 SourceBag,uint8 SourceSlot,uint8 DestinationBag,uint8 DestinationSlot);
-    void SendUseItem(uint8 Bag,uint8 Slot,uint64 ItemGuid,uint32 SpellId);
+    void SendUseItem(uint8 Bag,uint8 Slot,uint64 ItemGuid,uint32 SpellId,uint64 ExplicitTargetGuid=0);
+    static TArray<uint8> BuildUseItemPacket(uint8 Bag,uint8 Slot,uint64 ItemGuid,uint32 SpellId,uint64 ExplicitTargetGuid=0);
     void SendSetTitle(int32 TitleIndex);
 
     /** Auto-store an equipped or bag item into the requested destination bag. */

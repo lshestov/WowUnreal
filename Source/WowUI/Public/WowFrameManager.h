@@ -10,6 +10,7 @@ class UButton;
 class UEditableTextBox;
 class UProgressBar;
 class USlider;
+class UWowMultiLineEditBox;
 class UTextBlock;
 class FWowEventSystem;
 class FWowFontManager;
@@ -144,6 +145,7 @@ public:
 
 	/** Set frame alpha */
 	void SetFrameAlpha(int64 Handle, float Alpha);
+	void SetFrameBackdropColor(int64 Handle,const FLinearColor& Color);
 
 	/** Set frame strata and level */
 	void SetFrameStrata(int64 Handle, EWowFrameStrata Strata);
@@ -176,6 +178,7 @@ public:
 
 	/** Get the UEditableTextBox child widget for a frame (nullptr if not found or invalid) */
 	UEditableTextBox* GetEditBoxWidget(int64 Handle) const;
+	UWowMultiLineEditBox* GetMultiLineEditBoxWidget(int64 Handle) const;
 
 	/** Get the USlider child widget for a frame (nullptr if not found or invalid) */
 	USlider* GetSliderWidget(int64 Handle) const;
@@ -359,6 +362,9 @@ private:
 	TMap<int64,FButtonVisualState> ButtonVisualStates;
 	TMap<FString,bool> ButtonRegionHidden;
 	TMap<int64, TWeakObjectPtr<UEditableTextBox>> EditBoxWidgets;
+	TMap<int64,TWeakObjectPtr<UWowMultiLineEditBox>> MultiLineEditBoxWidgets;
+	TMap<int64,FVector4> EditBoxLastCursor;
+	TMap<int64,float> EditBoxMinimumHeight;
 	TMap<int64, TWeakObjectPtr<USlider>> SliderWidgets;
 	TMap<int64, TWeakObjectPtr<UTextBlock>> PrimaryTextWidgets;
 
@@ -449,5 +455,6 @@ private:
 	FFrameRect GetFrameRect(const FString& FrameName);
 
 	/** Create backdrop (9-slice background) for a frame */
-	void CreateBackdrop(UCanvasPanel* Container, const FWowBackdrop& Backdrop);
+	void CreateBackdrop(UCanvasPanel* Container, const FWowBackdrop& Backdrop,int64 Handle);
+	TMap<int64,TWeakObjectPtr<UImage>> BackdropImages;
 };
