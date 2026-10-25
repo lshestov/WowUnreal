@@ -124,7 +124,7 @@ void UWowConnectionManager::SelectRealm(int32 I)
             TArray<uint64> Guids; PacketHandler.EntityManager.GetAll().GetKeys(Guids);
             for(uint64 Guid:Guids) PacketHandler.EntityManager.Remove(Guid);
             PacketHandler.EntityManager.LocalPlayerGuid=0; TargetGuid=0; CursorPayload=FCursorPayloadState();
-            PacketHandler.KnownSpells.Reset(); PacketHandler.ActionButtons.Reset(); PacketHandler.QuestLog.Reset(); PacketHandler.Talents.Reset(); PacketHandler.Reputations.Reset();
+            PacketHandler.KnownSpells.Reset(); PacketHandler.ActionButtons.Reset(); PacketHandler.QuestLog.Reset(); PacketHandler.ResetTalentState(); PacketHandler.Reputations.Reset();
             PacketHandler.SpellCooldowns.Reset(); PacketHandler.SpellCooldownInfo.Reset(); PacketHandler.CombatHistory.Reset();
             PacketHandler.GroupInfo=FWowGroupInfo(); PacketHandler.PetActionBar=FWowPetActionBarState();
             RequestCharacterList(); return;

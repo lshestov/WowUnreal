@@ -1064,7 +1064,17 @@ struct FWowQuestTemplate
 struct FWowTalentInfo
 {
     uint32 TalentId = 0;
-    uint8 Rank = 0; // 0-5
+    uint8 Rank = 0; // Wire rank, zero-based (0-4).
+};
+struct FWowTalentGroup
+{
+    TArray<FWowTalentInfo> Talents;
+    uint16 Glyphs[6]={};
+};
+struct FWowGlyphChange
+{
+    uint8 Slot=0;
+    uint16 Before=0,After=0;
 };
 
 // Friend information for the social system

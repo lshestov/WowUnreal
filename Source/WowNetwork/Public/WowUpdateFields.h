@@ -175,6 +175,10 @@ namespace PlayerField
     inline constexpr uint16 XP            = BASE + 0x01E6;
     inline constexpr uint16 NEXT_LEVEL_XP = BASE + 0x01E7;
     inline constexpr uint16 SKILL_INFO = BASE + 0x01E8; // 128 triples: id, rank/max, temporary/permanent bonus
+    inline constexpr uint16 CHARACTER_POINTS1 = BASE + 0x0368;
+    inline constexpr uint16 GLYPH_SLOTS_1 = BASE + 0x048C; // Six GlyphSlot.dbc IDs.
+    inline constexpr uint16 GLYPHS_1 = BASE + 0x0492; // Six active GlyphProperties.dbc IDs.
+    inline constexpr uint16 GLYPHS_ENABLED = BASE + 0x0498;
     inline constexpr uint16 COINAGE       = BASE + 0x03FE;
 
     // Combat ratings (crit, hit, haste, etc.) - 25 values starting at offset from UNIT_END
@@ -240,7 +244,7 @@ namespace PlayerField
     inline constexpr uint16 BANKBAG_SLOT_1 = BASE + 0x0136; // 14 uint32s (7 GUIDs)
     inline constexpr uint16 BANKBAG_SLOT_END = BANKBAG_SLOT_1 + 13;
 
-    inline constexpr uint16 END = BASE + 0x0474;
+    inline constexpr uint16 END = BASE + 0x049A;
 }
 
 // GameObject fields (offset from OBJECT_END)

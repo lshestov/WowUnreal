@@ -2020,50 +2020,67 @@ void FWowPacketHandler::HandleQuestUpdateComplete(FPacketReader& R)
 }
 
 // ── SMSG_TALENTS_INFO ────────────────────────────────────────────────────
-// uint8 talentGroupCount, uint8 activeTalentGroup, then for each group:
-// uint32 pointsSpent[3], uint8 talentCount, then for each talent: uint32 talentId + uint8 rank
-
+// uint8 isPet, uint32 freePoints, then player groups or the pet talent list.
+void FWowPacketHandler::ResetTalentState()
+{
+    Talents.Reset(); TalentGroups.Reset(); PetTalents.Reset(); LastGlyphChanges.Reset();
+    FreeTalentPoints=PetFreeTalentPoints=0; ActiveTalentGroup=PreviousTalentGroup=0;
+    HasTalentInfo=HasPetTalentInfo=LastTalentPacketValid=LastTalentUpdateIsPet=LastTalentGroupChanged=false;
+    ++TalentRevision;
+}
 void FWowPacketHandler::HandleTalentsInfo(FPacketReader& R)
 {
-    if (!R.CanRead(2)) return;
-
-    uint8 TalentGroupCount = R.ReadU8();
-    uint8 ActiveTalentGroup = R.ReadU8();
-
-    Talents.Empty();
-
-    for (int32 Group = 0; Group < TalentGroupCount; ++Group)
+    LastTalentPacketValid=false;
+    if(!R.CanRead(5)) return;
+    const uint8 IsPet=R.ReadU8(); if(IsPet>1) return;
+    const uint32 FreePoints=R.ReadU32();
+    const auto ReadTalents=[&](TArray<FWowTalentInfo>& Result)
     {
-        // Points spent in each tree (3 trees total)
-        if (!R.CanRead(12)) return;
-        uint32 PointsSpent[3];
-        PointsSpent[0] = R.ReadU32();
-        PointsSpent[1] = R.ReadU32();
-        PointsSpent[2] = R.ReadU32();
-
-        if (!R.CanRead(1)) return;
-        uint8 TalentCount = R.ReadU8();
-
-        for (int32 i = 0; i < TalentCount; ++i)
+        if(!R.CanRead(1)) return false;
+        const uint8 Count=R.ReadU8(); if(!R.CanRead(int32(Count)*5)) return false;
+        for(uint32 I=0;I<Count;++I)
         {
-            if (!R.CanRead(5)) break;
-
-            uint32 TalentId = R.ReadU32();
-            uint8 Rank = R.ReadU8();
-
-            // Only store active talent group for now
-            if (Group == ActiveTalentGroup)
-            {
-                FWowTalentInfo Talent;
-                Talent.TalentId = TalentId;
-                Talent.Rank = Rank;
-                Talents.Add(Talent);
-            }
+            FWowTalentInfo Entry; Entry.TalentId=R.ReadU32(); Entry.Rank=R.ReadU8();
+            if(!Entry.TalentId || Entry.Rank>4) return false;
+            if(auto* Prior=Result.FindByPredicate([&](const auto& T){return T.TalentId==Entry.TalentId;})) Prior->Rank=FMath::Max(Prior->Rank,Entry.Rank);
+            else Result.Add(Entry);
         }
+        return true;
+    };
+    if(IsPet)
+    {
+        TArray<FWowTalentInfo> Incoming;
+        if(!ReadTalents(Incoming) || R.CanRead(1)) return;
+        PetTalents=MoveTemp(Incoming); PetFreeTalentPoints=FreePoints; HasPetTalentInfo=true;
+        LastTalentUpdateIsPet=true; LastTalentPacketValid=true; LastTalentGroupChanged=false; LastGlyphChanges.Reset(); ++TalentRevision;
+        UE_LOG(LogWowPacket,Log,TEXT("TALENTS_INFO: pet, free=%u, %d talents"),FreePoints,PetTalents.Num());
+        OnTalentsUpdated.Broadcast(); return;
     }
-
-    UE_LOG(LogWowPacket, Log, TEXT("TALENTS_INFO: %d groups, active=%d, %d talents"),
-           TalentGroupCount, ActiveTalentGroup, Talents.Num());
+    if(!R.CanRead(2)) return;
+    const uint8 Count=R.ReadU8(),Active=R.ReadU8();
+    if(Count>2 || (Count?Active>=Count:Active!=0)) return;
+    TArray<FWowTalentGroup> Incoming;
+    for(uint32 I=0;I<Count;++I)
+    {
+        FWowTalentGroup Group;
+        if(!ReadTalents(Group.Talents) || !R.CanRead(1)) return;
+        const uint8 GlyphCount=R.ReadU8(); if(GlyphCount>6 || !R.CanRead(int32(GlyphCount)*2)) return;
+        for(uint32 J=0;J<GlyphCount;++J) Group.Glyphs[J]=R.ReadU16();
+        Incoming.Add(MoveTemp(Group));
+    }
+    if(R.CanRead(1)) return;
+    LastGlyphChanges.Reset();
+    for(uint8 I=0;I<6;++I)
+    {
+        const uint16 Before=TalentGroups.IsValidIndex(ActiveTalentGroup)?TalentGroups[ActiveTalentGroup].Glyphs[I]:0;
+        const uint16 After=Incoming.IsValidIndex(Active)?Incoming[Active].Glyphs[I]:0;
+        if(Before!=After) LastGlyphChanges.Add({I,Before,After});
+    }
+    PreviousTalentGroup=ActiveTalentGroup; LastTalentGroupChanged=HasTalentInfo && ActiveTalentGroup!=Active;
+    TalentGroups=MoveTemp(Incoming); ActiveTalentGroup=Active; FreeTalentPoints=FreePoints;
+    HasTalentInfo=true; LastTalentUpdateIsPet=false; LastTalentPacketValid=true;
+    Talents=TalentGroups.IsValidIndex(Active)?TalentGroups[Active].Talents:TArray<FWowTalentInfo>(); ++TalentRevision;
+    UE_LOG(LogWowPacket,Log,TEXT("TALENTS_INFO: %d groups, active=%u, free=%u, %d talents"),TalentGroups.Num(),ActiveTalentGroup,FreeTalentPoints,Talents.Num());
     OnTalentsUpdated.Broadcast();
 }
 

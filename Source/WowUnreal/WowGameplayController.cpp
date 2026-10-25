@@ -1151,6 +1151,18 @@ void AWowGameplayController::OnOpcodeReceived(uint16 Opcode)
 	FWowEventSystem* EventSystem = UIManager->GetEventSystem();
 	if (!EventSystem) return;
 
+	if(Opcode==WowOpcode::SMSG_TALENTS_INFO && ConnectionManager)
+	{
+		const auto& Info=ConnectionManager->PacketHandler; if(!Info.LastTalentPacketValid) return;
+		EventSystem->FireEvent(Info.LastTalentUpdateIsPet?TEXT("PET_TALENT_UPDATE"):TEXT("PLAYER_TALENT_UPDATE"));
+		if(!Info.LastTalentUpdateIsPet)
+		{
+			if(Info.LastTalentGroupChanged) EventSystem->FireEventNumbers(TEXT("ACTIVE_TALENT_GROUP_CHANGED"),{double(Info.ActiveTalentGroup+1),double(Info.PreviousTalentGroup+1)});
+			for(const auto& Change:Info.LastGlyphChanges) EventSystem->FireEventNumbers(Change.After==0?TEXT("GLYPH_REMOVED"):Change.Before==0?TEXT("GLYPH_ADDED"):TEXT("GLYPH_UPDATED"),{double(Change.Slot+1)});
+		}
+		return;
+	}
+
 	FString EventName = FWowEventSystem::OpcodeToEvent(Opcode);
 	if (!EventName.IsEmpty())
 	{

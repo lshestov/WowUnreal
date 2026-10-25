@@ -15,6 +15,39 @@ struct FWire
 };
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGameplayTalentPackets,"WowUnreal.Gameplay.TalentPackets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FGameplayTalentPackets::RunTest(const FString&)
+{
+    FWowPacketHandler H; int32 Updates=0; H.OnTalentsUpdated.AddLambda([&](){++Updates;});
+    FWire Player; Player.Add(uint8(0)).Add(uint32(7)).Add(uint8(2)).Add(uint8(1));
+    Player.Add(uint8(2)).Add(uint32(123)).Add(uint8(0)).Add(uint32(456)).Add(uint8(4)).Add(uint8(6));
+    for(uint16 I=101;I<=106;++I) Player.Add(I);
+    Player.Add(uint8(1)).Add(uint32(123)).Add(uint8(1)).Add(uint8(6));
+    for(const uint16 I:{201,0,203,0,205,0}) Player.Add(I);
+    H.HandlePacket(WowOpcode::SMSG_TALENTS_INFO,Player.Data);
+    TestTrue(TEXT("Player header identifies two specs, active spec and authoritative free points"),H.LastTalentPacketValid && H.HasTalentInfo && H.TalentGroups.Num()==2 && H.ActiveTalentGroup==1 && H.FreeTalentPoints==7);
+    if(H.TalentGroups.Num()!=2) return false;
+    TestTrue(TEXT("Both talent lists and each spec's six glyphs survive parsing"),H.TalentGroups[0].Talents.Num()==2 && H.TalentGroups[1].Talents.Num()==1 && H.TalentGroups[0].Glyphs[5]==106 && H.TalentGroups[1].Glyphs[2]==203);
+    TestTrue(TEXT("Legacy active view uses zero-based wire ranks"),H.Talents.Num()==1 && H.Talents[0].TalentId==123 && H.Talents[0].Rank==1 && H.LastGlyphChanges.Num()==3);
+    FWire Pet; Pet.Add(uint8(1)).Add(uint32(3)).Add(uint8(1)).Add(uint32(70)).Add(uint8(2)); H.HandlePacket(WowOpcode::SMSG_TALENTS_INFO,Pet.Data);
+    TestTrue(TEXT("Pet updates preserve both player specs and player points"),H.HasPetTalentInfo && H.LastTalentUpdateIsPet && H.PetFreeTalentPoints==3 && H.PetTalents.Num()==1 && H.PetTalents[0].Rank==2 && H.ActiveTalentGroup==1 && H.FreeTalentPoints==7 && H.Talents.Num()==1);
+    const uint64 Revision=H.TalentRevision; const int32 ValidUpdates=Updates;
+    auto Truncated=Player.Data; Truncated.SetNum(Truncated.Num()-1); H.HandlePacket(WowOpcode::SMSG_TALENTS_INFO,Truncated);
+    TestTrue(TEXT("Truncated glyph tail cannot replace valid state or fire its delegate"),!H.LastTalentPacketValid && H.TalentRevision==Revision && Updates==ValidUpdates && H.TalentGroups[1].Glyphs[2]==203);
+    auto InvalidGroup=Player.Data; InvalidGroup[6]=2; H.HandlePacket(WowOpcode::SMSG_TALENTS_INFO,InvalidGroup);
+    TestTrue(TEXT("Out-of-range active spec is rejected transactionally"),!H.LastTalentPacketValid && H.TalentRevision==Revision);
+    FWire InvalidRank; InvalidRank.Add(uint8(1)).Add(uint32(4)).Add(uint8(1)).Add(uint32(70)).Add(uint8(5)); H.HandlePacket(WowOpcode::SMSG_TALENTS_INFO,InvalidRank.Data);
+    TestTrue(TEXT("Invalid ranks cannot corrupt the pet cache"),!H.LastTalentPacketValid && H.PetFreeTalentPoints==3 && H.PetTalents[0].Rank==2);
+    auto Switch=Player.Data; Switch[6]=0; H.HandlePacket(WowOpcode::SMSG_TALENTS_INFO,Switch);
+    TestTrue(TEXT("Spec switches retain the previous group and changed glyph slots"),H.LastTalentPacketValid && H.LastTalentGroupChanged && H.PreviousTalentGroup==1 && H.ActiveTalentGroup==0 && H.Talents.Num()==2 && H.LastGlyphChanges.Num()==6);
+    FWire Duplicate; Duplicate.Add(uint8(0)).Add(uint32(0)).Add(uint8(1)).Add(uint8(0)).Add(uint8(2)).Add(uint32(55)).Add(uint8(0)).Add(uint32(55)).Add(uint8(3)).Add(uint8(0));
+    H.HandlePacket(WowOpcode::SMSG_TALENTS_INFO,Duplicate.Data);
+    TestTrue(TEXT("Duplicate rank records coalesce to the highest rank"),H.LastTalentPacketValid && H.Talents.Num()==1 && H.Talents[0].Rank==3);
+    H.ResetTalentState();
+    TestTrue(TEXT("Character changes clear player, pet and glyph state together"),!H.HasTalentInfo && !H.HasPetTalentInfo && H.TalentGroups.IsEmpty() && H.PetTalents.IsEmpty() && H.Talents.IsEmpty() && !H.FreeTalentPoints && !H.PetFreeTalentPoints && H.LastGlyphChanges.IsEmpty());
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGameplayChatAndFaction,"WowUnreal.Gameplay.ChatAndReputation",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FGameplayChatAndFaction::RunTest(const FString&)
 {

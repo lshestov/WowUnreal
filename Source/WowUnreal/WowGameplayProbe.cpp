@@ -349,6 +349,20 @@ struct FWowGameplayProbe
             const int32 Slot=Step->GetIntegerField(TEXT("slot"));
             Done=Inventory.IsValid() && Slot>=0 && Slot<19 && Inventory->GetEquippedItem(Slot)->IsEmpty();
         }
+        else if(Op==TEXT("talent_state"))
+        {
+            const auto& Info=Connection->PacketHandler; const auto* TalentPlayer=Info.EntityManager.GetLocalPlayer();
+            bool Valid=TalentPlayer && Info.HasTalentInfo && Info.TalentGroups.Num()>0 && Info.TalentGroups.IsValidIndex(Info.ActiveTalentGroup);
+            if(Valid)
+            {
+                Valid=Info.FreeTalentPoints==TalentPlayer->GetField(PlayerField::CHARACTER_POINTS1);
+                for(uint32 I=0;I<6;++I) Valid&=Info.TalentGroups[Info.ActiveTalentGroup].Glyphs[I]==TalentPlayer->GetField(PlayerField::GLYPHS_1+I);
+            }
+            if(!Valid) { Failure=TEXT("Talent packet state disagrees with player update fields"); Finish(C,false); return; }
+            auto Row=MakeShared<FJsonObject>(); Row->SetNumberField(TEXT("groups"),Info.TalentGroups.Num()); Row->SetNumberField(TEXT("active"),Info.ActiveTalentGroup+1);
+            Row->SetNumberField(TEXT("freePoints"),Info.FreeTalentPoints); Row->SetNumberField(TEXT("talents"),Info.Talents.Num()); Row->SetNumberField(TEXT("glyphsEnabled"),TalentPlayer->GetField(PlayerField::GLYPHS_ENABLED));
+            Inspections->SetObjectField(TEXT("talent-state"),Row); Done=true;
+        }
         else if (Op==TEXT("bags")) { C.UIManager->ToggleBagWindow(); C.UIManager->ToggleCharacterPanel(); Done=true; }
         else if (Op==TEXT("lua")) { Done=C.UIManager->GetLuaVM()->ExecuteString(Step->GetStringField(TEXT("code")),TEXT("=GameplayProbe")); if (!Done) { Failure=TEXT("Lua assertion failed"); Finish(C,false); return; } }
         else if(Op==TEXT("drop_action_cursor")) { Done=Connection->DropActionCursor(); if(!Done) { Failure=TEXT("No action is held by the cursor"); Finish(C,false); return; } }

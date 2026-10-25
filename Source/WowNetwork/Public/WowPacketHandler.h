@@ -167,6 +167,15 @@ public:
 
     /** Known talents */
     TArray<FWowTalentInfo> Talents;
+    TArray<FWowTalentGroup> TalentGroups;
+    TArray<FWowTalentInfo> PetTalents;
+    uint32 FreeTalentPoints=0,PetFreeTalentPoints=0;
+    uint8 ActiveTalentGroup=0,PreviousTalentGroup=0;
+    bool HasTalentInfo=false,HasPetTalentInfo=false;
+    bool LastTalentPacketValid=false,LastTalentUpdateIsPet=false,LastTalentGroupChanged=false;
+    uint64 TalentRevision=0;
+    TArray<FWowGlyphChange> LastGlyphChanges;
+    void ResetTalentState();
 
     /** Warden anti-cheat handler */
     FWowWardenHandler WardenHandler;

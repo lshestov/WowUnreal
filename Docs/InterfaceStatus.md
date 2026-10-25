@@ -75,6 +75,9 @@ Spellbook entries filter hidden/internal spells, crafting recipes and companion
 summons. SkillRaceClassInfo flags place general/profession actions correctly;
 skill tabs sort by their display names. Known-rank and highest-rank offsets use
 separate views, with an explicit mapping back to the real spellbook slots.
+The network cache decodes player and pet talent packets separately, retains both
+specializations and six glyph IDs per group, and rejects incomplete updates
+transactionally. Active-spec and glyph notifications preserve numeric arguments.
 
 ## Verification
 
@@ -82,7 +85,7 @@ The Windows Editor and packaged Development client are built from the same
 source tree. `WowUnreal.Hud`, `WowUnreal.UI`, `WowUnreal.Gameplay` and the related
 player, collision, equipment, lighting, rendering, traversal and performance
 suites cover both isolated controls and live protocol state. The interface
-regression set contains 71 tests. Existing optional character texture-layout
+regression set contains 72 tests. Existing optional character texture-layout
 DBC and test-fixture size warnings remain.
 
 Native gameplay probes exercise live server state and rendered UI at 1280x720
@@ -96,6 +99,7 @@ may use NullRHI; visual checks require a rendered client.
 
 Full WoW UI compatibility is **not complete**. In particular:
 
+- Original talent/glyph/specialization panel API integration.
 - Specialized legacy frame/region methods and broader addon compatibility. Visible panels and
   readable category lists do not establish complete visual parity.
 - Advanced macro commands such as cast sequences, complete conditional syntax,
