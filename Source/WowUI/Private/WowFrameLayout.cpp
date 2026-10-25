@@ -169,7 +169,9 @@ FVector4 FWowFrameManager::GetRegionRect(const FString& Name)
 
 FVector2D FWowFrameManager::GetRegionSize(const FString& Name)
 {
-    if(bLayoutDirty) RefreshLayout();
+    // GetFrameRect measures the requested region and its anchor dependencies.
+    // Rebuilding thousands of unrelated frames for every FontString query
+    // makes FrameXML bootstrap and panel OnShow handlers stall for seconds.
     const auto R=GetFrameRect(Name);
     const float Scale=GetEffectiveFrameScale(FindFrame(RegionOwners.FindRef(Name)));
     return FVector2D(R.W,R.H)/FMath::Max(Scale,.001f);

@@ -118,8 +118,10 @@ void WowLuaApi::RegisterSettingsApi(lua_State* L)
     lua_getglobal(L,"SetCVar"); lua_pushcclosure(L,SetCvar,1); lua_setglobal(L,"SetCVar");
     lua_getglobal(L,"GetCVarDefault"); lua_pushcclosure(L,[](lua_State* S)->int { const FString Name=FString(UTF8_TO_TCHAR(luaL_checkstring(S,1))).ToLower(); if(Name==TEXT("gamma") || Name==TEXT("gxwindow")) { lua_pushstring(S,"1"); return 1; } lua_pushvalue(S,lua_upvalueindex(1)); lua_pushvalue(S,1); lua_call(S,1,1); return 1; },1); lua_setglobal(L,"GetCVarDefault");
     Register(L,"GetCVarBool",[](lua_State* S)->int { lua_getglobal(S,"GetCVar"); lua_pushvalue(S,1); lua_call(S,1,1); const FString Value=UTF8_TO_TCHAR(lua_tostring(S,-1)); lua_pushboolean(S,Value.ToBool() || FCString::Atof(*Value)!=0); return 1; });
-    Register(L,"GetGamma",[](lua_State* S)->int { FString Value; lua_pushnumber(S,NativeValue(S,TEXT("gamma"),Value)?FCString::Atof(*Value):1); return 1; });
-    Register(L,"SetGamma",[](lua_State* S)->int { return SetNamedValue(S,"gamma"); });
+    // FrameXML uses a signed brightness offset (-0.5..0.5), while the CVar
+    // and engine bridge store a multiplier with neutral value 1.
+    Register(L,"GetGamma",[](lua_State* S)->int { lua_getglobal(S,"GetCVar"); lua_pushstring(S,"gamma"); lua_call(S,1,1); const float Gain=lua_tonumber(S,-1); lua_pop(S,1); lua_pushnumber(S,Gain-1.f); return 1; });
+    Register(L,"SetGamma",[](lua_State* S)->int { const float Gain=1.f+FMath::Clamp(float(luaL_checknumber(S,1)),-.5f,.5f); lua_pushnumber(S,Gain); lua_replace(S,1); return SetNamedValue(S,"gamma"); });
     Register(L,"GetTerrainMip",[](lua_State* S)->int { FString Value; lua_pushnumber(S,NativeValue(S,TEXT("terrainmip"),Value)?FCString::Atoi(*Value):0); return 1; });
     Register(L,"SetTerrainMip",[](lua_State* S)->int { return SetNamedValue(S,"terrainMip"); });
     Register(L,"GetScreenResolutions",[](lua_State* S)->int { const auto Values=Resolutions(); for(const auto& Size:Values) lua_pushstring(S,TCHAR_TO_UTF8(*FString::Printf(TEXT("%dx%d"),Size.X,Size.Y))); return Values.Num(); });
