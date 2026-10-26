@@ -35,6 +35,10 @@ bool FItemUiDbc::Load(FMpqManager& Mpq)
         MailBodies.Empty(); MailSubjects.Empty();
         for(uint32 I=0;I<Parser.GetRecordCount();++I) { const uint32 Id=Parser.GetUInt(I,0); MailBodies.Add(Id,Parser.GetString(I,18)); MailSubjects.Add(Id,Parser.GetString(I,1)); }
     }
+    if(Read(TEXT("SpellItemEnchantment.dbc"),38))
+    {
+        Enchants.Empty(); for(uint32 I=0;I<Parser.GetRecordCount();++I) { FEnchant Row; Row.Name=Parser.GetString(I,14); Row.Gem=Parser.GetUInt(I,33); Enchants.Add(Parser.GetUInt(I,0),MoveTemp(Row)); }
+    }
     return Complete;
 }
 uint32 FItemUiDbc::RepairCost(uint32 Level,uint32 Quality,uint32 Class,uint32 Subclass,uint32 Lost,float Discount) const

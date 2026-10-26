@@ -47,6 +47,10 @@ namespace WowLuaApi
     void UpdateBank(lua_State* L);
     void RegisterMailApi(lua_State* L);
     void UpdateMail(lua_State* L);
+    void RegisterTradeApi(lua_State* L);
+    void UpdateTrade(lua_State* L);
+    int SetTradePlayerItemTooltip(lua_State* L);
+    int SetTradeTargetItemTooltip(lua_State* L);
     int SetInboxItemTooltip(lua_State* L);
     int SetSendMailItemTooltip(lua_State* L);
     const FWowItemTemplate* QueryItemTemplate(FWowLuaContext* Context,uint32 Id);

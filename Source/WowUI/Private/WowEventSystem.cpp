@@ -234,6 +234,12 @@ void FWowEventSystem::FireEventStringNumber(const FString& EventName,const FStri
     FireEventTyped(EventName,[&](lua_State* L) { lua_pushstring(L,TCHAR_TO_UTF8(*Text)); lua_pushnumber(L,Number); return 2; });
 #endif
 }
+void FWowEventSystem::FireEventBoolean(const FString& EventName,bool Value)
+{
+#if HAS_LUA
+    FireEventTyped(EventName,[&](lua_State* L){lua_pushboolean(L,Value); return 1;});
+#endif
+}
 
 void FWowEventSystem::FireEventTyped(const FString& EventName,TFunctionRef<int32(lua_State*)> PushArguments)
 {
@@ -1726,8 +1732,7 @@ FString FWowEventSystem::OpcodeToEvent(uint16 Opcode)
 	case 0x0060: case 0x0061: return FString(); // Creature queries are not UI error messages.
 
 	// Trade / economy
-	case 0x010E: return TEXT("TRADE_SHOW");
-	case 0x010F: return TEXT("TRADE_CLOSED");
+    // Validated trade callbacks bind the stock window and typed slot/accept events.
 	case 0x0257: return TEXT("PLAYER_MONEY");
 
 	// Guild

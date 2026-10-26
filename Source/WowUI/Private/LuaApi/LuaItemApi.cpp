@@ -146,7 +146,7 @@ int BagInfo(lua_State* L)
     if(!Item) { lua_pushnil(L); return 1; }
     const auto* T=Template(C,Item->Entry);
     const auto* Held=C->ConnectionManager?C->ConnectionManager->GetCursorItem():nullptr;
-    lua_pushstring(L,TCHAR_TO_UTF8(*Icon(T))); lua_pushinteger(L,FMath::Max(Item->GetStackCount(),1)); lua_pushboolean(L,(Held && Held->Guid==Item->Guid) || (C->ConnectionManager && C->ConnectionManager->IsItemInOutgoingMail(Item->Guid)));
+    lua_pushstring(L,TCHAR_TO_UTF8(*Icon(T))); lua_pushinteger(L,FMath::Max(Item->GetStackCount(),1)); lua_pushboolean(L,(Held && Held->Guid==Item->Guid) || (C->ConnectionManager && (C->ConnectionManager->IsItemInOutgoingMail(Item->Guid) || C->ConnectionManager->IsItemInTrade(Item->Guid))));
     if(T) lua_pushinteger(L,T->Quality); else lua_pushnil(L);
     lua_pushboolean(L,0); lua_pushboolean(L,0); lua_pushstring(L,TCHAR_TO_UTF8(*Link(T,Item->Entry))); return 7;
 }
@@ -201,6 +201,7 @@ int Pickup(lua_State* L)
     const int32 Bag=luaL_checkinteger(L,1),Slot=luaL_checkinteger(L,2); uint8 B,S;
     if(!Position(C,Bag,Slot,B,S)) return 0;
     auto* Connection=C->ConnectionManager;
+    if(Connection->HasPendingItemSpell()) {if(const auto* Item=BagItem(C,Bag,Slot)) Connection->TargetItemSpell(Item->Guid); return 0;}
     if(Connection->IsRepairMode()) { if(auto* Item=BagItem(C,Bag,Slot)) Connection->SendRepairItems(Item->Guid); return 0; }
     if(Connection->HasCursorItemPayload() || Connection->HasCursorMerchantPayload()) Connection->PlaceCursorIntoContainerSlot(B,S);
     else if(auto* Item=BagItem(C,Bag,Slot)) Connection->PickupBagItemCursor(B,S,Item->Entry,Link(Template(C,Item->Entry),Item->Entry));
@@ -211,6 +212,7 @@ int PickupEquipment(lua_State* L)
     auto* C=WowLuaApi::GetContext(L); const int32 Slot=luaL_checkinteger(L,1);
     if(!C || !C->ConnectionManager || Slot<1 || Slot>23) return 0;
     auto* Connection=C->ConnectionManager;
+    if(Connection->HasPendingItemSpell()) {if(const auto* Item=Equipped(C,Slot)) Connection->TargetItemSpell(Item->Guid); return 0;}
     if(Connection->IsRepairMode()) { if(auto* Item=Equipped(C,Slot)) Connection->SendRepairItems(Item->Guid); return 0; }
     if(Connection->HasCursorItemPayload() || Connection->HasCursorMerchantPayload()) Connection->PlaceCursorIntoContainerSlot(255,Slot-1);
     else if(auto* Item=Equipped(C,Slot)) Connection->PickupInventoryItemCursor(Slot-1,Item->Entry,Link(Template(C,Item->Entry),Item->Entry));
@@ -223,7 +225,14 @@ int Use(lua_State* L)
     if(!Position(C,Bag,Slot,B,S)) return 0;
     auto* Item=BagItem(C,Bag,Slot); const auto* T=Item?Template(C,Item->Entry):nullptr;
     if((Bag==-1 || (Bag>=5 && Bag<=11)) && !C->ConnectionManager->PacketHandler.CurrentBankerGuid) return 0;
-    if(Item && C->ConnectionManager->IsItemInOutgoingMail(Item->Guid)) return 0;
+    if(Item && (C->ConnectionManager->IsItemInOutgoingMail(Item->Guid) || C->ConnectionManager->IsItemInTrade(Item->Guid))) return 0;
+    if(Item && C->ConnectionManager->PacketHandler.CurrentTrade.bTradeOpen)
+    {
+        const auto& Trade=C->ConnectionManager->PacketHandler.CurrentTrade; if(Trade.PendingKind) return 0;
+        int32 Index=0; while(Index<6 && Trade.LocalGuids[Index]) ++Index;
+        if(Index<6) { C->ConnectionManager->PickupBagItemCursor(B,S,Item->Entry,Link(T,Item->Entry)); C->ConnectionManager->ClickTradeItem(Index); }
+        return 0;
+    }
     if(Item && C->ConnectionManager->PacketHandler.CurrentMailboxGuid && C->ConnectionManager->PacketHandler.MailComposer.Showing)
     {
         const auto& Mail=C->ConnectionManager->PacketHandler.MailComposer; if(Mail.Sending || Mail.Pending.Index>=0 || Mail.LockIndex>=0) return 0;
@@ -339,6 +348,21 @@ int WowLuaApi::SetSendMailItemTooltip(lua_State* L)
     const auto* Item=C->ConnectionManager->GetOutgoingMailItem(luaL_optinteger(L,2,1)-1);
     if(Item) ItemTooltip(L,C,Handle(L),Template(C,Item->Entry),Item->Entry,Item);
     else { C->FrameManager->TooltipClearLines(Handle(L)); C->FrameManager->SetFrameVisible(Handle(L),false); } return 0;
+}
+int WowLuaApi::SetTradePlayerItemTooltip(lua_State* L)
+{
+    auto* C=GetContext(L); if(!C || !C->ConnectionManager || !C->FrameManager) return 0;
+    const auto* Item=C->ConnectionManager->GetLocalTradeItem(luaL_checkinteger(L,2)-1);
+    if(Item) ItemTooltip(L,C,Handle(L),Template(C,Item->Entry),Item->Entry,Item);
+    else { C->FrameManager->TooltipClearLines(Handle(L)); C->FrameManager->SetFrameVisible(Handle(L),false); } return 0;
+}
+int WowLuaApi::SetTradeTargetItemTooltip(lua_State* L)
+{
+    auto* C=GetContext(L); if(!C || !C->ConnectionManager || !C->FrameManager) return 0;
+    const int32 Index=luaL_checkinteger(L,2)-1; const auto& T=C->ConnectionManager->PacketHandler.CurrentTrade;
+    if(!T.bTradeOpen || !T.TargetItems.IsValidIndex(Index) || !T.TargetItems[Index].ItemId) {C->FrameManager->TooltipClearLines(Handle(L)); C->FrameManager->SetFrameVisible(Handle(L),false); return 0;}
+    const auto& R=T.TargetItems[Index]; FWowItemEntity Item; Item.Entry=R.ItemId; Item.SetField(ItemField::STACK_COUNT,R.Count); Item.SetField(ItemField::MAX_DURABILITY,R.MaxDurability); Item.SetField(ItemField::DURABILITY,R.Durability);
+    ItemTooltip(L,C,Handle(L),Template(C,R.ItemId),R.ItemId,&Item); return 0;
 }
 int WowLuaApi::SetMerchantItemTooltip(lua_State* L)
 {
@@ -566,7 +590,7 @@ void WowLuaApi::RegisterItemApi(lua_State* L)
     });
     RegisterItem(L,"SetCurrencyUnused",[](lua_State* S)->int { auto* C=GetContext(S); const auto Rows=CurrencyRows(C); const int32 I=luaL_checkinteger(S,1)-1; if(Rows.IsValidIndex(I)) { SetUiPreference(S,FString::Printf(TEXT("currencyUnused%u"),Rows[I]),lua_toboolean(S,2) && (!lua_isnumber(S,2) || lua_tonumber(S,2)!=0)); if(C && C->EventSystem) C->EventSystem->FireEvent(TEXT("CURRENCY_DISPLAY_UPDATE")); } return 0; });
     RegisterItem(L,"PickupContainerItem",Pickup); RegisterItem(L,"PickupInventoryItem",PickupEquipment); RegisterItem(L,"UseContainerItem",Use); RegisterItem(L,"SplitContainerItem",Split);
-    RegisterItem(L,"IsInventoryItemLocked",[](lua_State* S)->int { auto* C=GetContext(S); const auto* Item=Equipped(C,luaL_checkinteger(S,1)); const auto* Held=C && C->ConnectionManager?C->ConnectionManager->GetCursorItem():nullptr; lua_pushboolean(S,Item && ((Held && Item->Guid==Held->Guid) || (C->ConnectionManager && C->ConnectionManager->IsItemInOutgoingMail(Item->Guid)))); return 1; });
+    RegisterItem(L,"IsInventoryItemLocked",[](lua_State* S)->int { auto* C=GetContext(S); const auto* Item=Equipped(C,luaL_checkinteger(S,1)); const auto* Held=C && C->ConnectionManager?C->ConnectionManager->GetCursorItem():nullptr; lua_pushboolean(S,Item && ((Held && Item->Guid==Held->Guid) || (C->ConnectionManager && (C->ConnectionManager->IsItemInOutgoingMail(Item->Guid) || C->ConnectionManager->IsItemInTrade(Item->Guid))))); return 1; });
     RegisterItem(L,"PutItemInBackpack",[](lua_State* S)->int { auto* C=GetContext(S); lua_pushboolean(S,C && C->ConnectionManager && C->ConnectionManager->PlaceCursorIntoFirstFreeContainerSlot(255)); return 1; });
     RegisterItem(L,"PutItemInBag",[](lua_State* S)->int { auto* C=GetContext(S); const int32 Slot=luaL_checkinteger(S,1); lua_pushboolean(S,C && C->ConnectionManager && Slot>=20 && Slot<=23 && C->ConnectionManager->PlaceCursorIntoFirstFreeContainerSlot(Slot-1)); return 1; });
     RegisterItem(L,"GetContainerItemID",[](lua_State* S)->int { auto* Item=BagItem(GetContext(S),luaL_checkinteger(S,1),luaL_checkinteger(S,2)); if(Item) lua_pushinteger(S,Item->Entry); else lua_pushnil(S); return 1; });
@@ -602,6 +626,8 @@ FString WowLuaApi::ItemIconForUi(FWowLuaContext*,uint32,uint32) { return {}; }
 int WowLuaApi::SetMerchantItemTooltip(lua_State*) { return 0; }
 int WowLuaApi::SetInboxItemTooltip(lua_State*) { return 0; }
 int WowLuaApi::SetSendMailItemTooltip(lua_State*) { return 0; }
+int WowLuaApi::SetTradePlayerItemTooltip(lua_State*) { return 0; }
+int WowLuaApi::SetTradeTargetItemTooltip(lua_State*) { return 0; }
 int WowLuaApi::SetBuybackItemTooltip(lua_State*) { return 0; }
 int WowLuaApi::SetActionTooltip(lua_State*) { return 0; }
 #endif

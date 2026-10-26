@@ -176,6 +176,12 @@ public:
     bool GlyphMatchesSocket(uint32 Socket) const;
     bool PlaceGlyph(uint32 Socket);
     void CancelGlyphUse();
+    struct FPendingItemSpell { uint32 Spell=0; uint64 Source=0; uint8 Bag=255,Slot=0; };
+    FPendingItemSpell PendingItemSpell;
+    bool BeginItemSpell(uint32 Spell,uint64 Source=0,uint8 Bag=255,uint8 Slot=0);
+    bool HasPendingItemSpell() const;
+    void CancelItemSpell();
+    bool TargetItemSpell(uint64 ItemGuid,bool Trade=false);
     void SendRemoveGlyph(uint32 Socket);
     static TArray<uint8> BuildUseItemPacket(uint8 Bag,uint8 Slot,uint64 ItemGuid,uint32 SpellId,uint64 ExplicitTargetGuid=0,uint32 GlyphSocket=0);
     void SendSetTitle(int32 TitleIndex);
@@ -206,6 +212,14 @@ public:
 
     /** Set the amount of gold offered in the current trade */
     UFUNCTION(BlueprintCallable) void SendSetTradeGold(int32 CopperAmount);
+    bool ClickTradeItem(int32 Index,bool Remove=false);
+    bool IsItemInTrade(uint64 Guid) const;
+    const FWowItemEntity* GetLocalTradeItem(int32 Index) const;
+    void TickTradeState();
+    void ResetTradeState();
+    uint32 GetCursorMoney() const;
+    void PickupCursorMoney(int32 Amount,bool FromTrade=false);
+    void AddCursorTradeMoney();
 
     /** Accept the currently pending duel request */
     void SendAcceptDuel(int64 ArbiterGuid);
@@ -319,6 +333,7 @@ private:
     enum class ECursorPayloadType : uint8
     {
         None,
+        Money,
         Spell,
         Action,
         Item,

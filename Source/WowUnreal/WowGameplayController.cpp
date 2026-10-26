@@ -464,36 +464,85 @@ void AWowGameplayController::BindEntityEvents()
         FireUIEvent(TEXT("UI_ERROR_MESSAGE"),{Message});
     });
 
-	ConnectionManager->PacketHandler.OnTradeUpdated.AddLambda(
-		[this](const FWowTradeState& TradeState)
-		{
-			if (!GameUI)
-			{
-				return;
-			}
-
-			const bool bShowTrade = TradeState.bTradeOpen
-				|| TradeState.Status == WowTradeStatus::BEGIN_TRADE
-				|| TradeState.Status == WowTradeStatus::BACK_TO_TRADE
-				|| TradeState.Status == WowTradeStatus::TRADE_ACCEPT;
-
-			if (bShowTrade)
-			{
-				GameUI->ShowTradeWindow(TradeState);
-				if (UIManager && UIManager->GetEventSystem())
-				{
-					UIManager->GetEventSystem()->FireEvent(TEXT("TRADE_SHOW"));
-				}
-			}
-			else
-			{
-				GameUI->HideTradeWindow();
-				if (UIManager && UIManager->GetEventSystem())
-				{
-					UIManager->GetEventSystem()->FireEvent(TEXT("TRADE_CLOSED"));
-				}
-			}
-		});
+    ConnectionManager->PacketHandler.OnTradeUpdated.AddLambda([this,LastPartner=uint64(0)](const FWowTradeState& Trade) mutable
+    {
+        if(Trade.TraderGuid) LastPartner=Trade.TraderGuid;
+        if(Trade.Status==WowTradeStatus::BEGIN_TRADE)
+        {
+            ConnectionManager->SendNameQuery(int64(Trade.TraderGuid));
+            ConnectionManager->SendBeginTrade(); return;
+        }
+        auto* Events=UIManager?UIManager->GetEventSystem():nullptr;
+        auto* Frames=UIManager?UIManager->GetFrameManager():nullptr;
+        if(UIManager && UIManager->IsUILoaded() && Events && Frames)
+        {
+            if(Trade.bTradeOpen)
+            {
+                if(!Frames->IsFrameDrawn(Frames->FindFrame(TEXT("TradeFrame"))))
+                {
+                    if(ConnectionManager->PacketHandler.Merchant.Open) { ConnectionManager->CloseMerchant(); FireUIEvent(TEXT("MERCHANT_CLOSED")); }
+                    if(ConnectionManager->PacketHandler.CurrentBankerGuid) { ConnectionManager->CloseBank(); FireUIEvent(TEXT("BANKFRAME_CLOSED")); }
+                    if(ConnectionManager->PacketHandler.CurrentMailboxGuid) { ConnectionManager->CloseMail(); FireUIEvent(TEXT("MAIL_CLOSED")); }
+                    FireUIEvent(TEXT("TRADE_SHOW"));
+                }
+                for(const auto& Item:Trade.PlayerItems) if(Item.ItemId) ConnectionManager->RequestItemTemplate(Item.ItemId);
+                for(const auto& Item:Trade.TargetItems) if(Item.ItemId) ConnectionManager->RequestItemTemplate(Item.ItemId);
+                for(int32 I=1;I<=7;++I)
+                {
+                    Events->FireEventNumbers(TEXT("TRADE_PLAYER_ITEM_CHANGED"),{double(I)});
+                    Events->FireEventNumbers(TEXT("TRADE_TARGET_ITEM_CHANGED"),{double(I)});
+                }
+                FireUIEvent(TEXT("PLAYER_TRADE_MONEY")); FireUIEvent(TEXT("TRADE_MONEY_CHANGED"));
+                Events->FireEventNumbers(TEXT("TRADE_ACCEPT_UPDATE"),{Trade.bLocalAccepted?1.:0.,Trade.bTargetAccepted?1.:0.});
+                const auto* ServiceItem=ConnectionManager->GetLocalTradeItem(6);
+                const bool Bound=ServiceItem && (ServiceItem->GetField(ItemField::FLAGS)&1) && !(ServiceItem->GetField(ItemField::FLAGS)&0x100);
+                if(Bound!=Trade.BindWarningShown)
+                {
+                    ConnectionManager->PacketHandler.CurrentTrade.BindWarningShown=Bound;
+                    Events->FireEventBoolean(TEXT("TRADE_POTENTIAL_BIND_ENCHANT"),Bound);
+                }
+            }
+            else FireUIEvent(TEXT("TRADE_CLOSED"));
+            for(int32 Bag=0;Bag<=4;++Bag) Events->FireEventNumbers(TEXT("BAG_UPDATE"),{double(Bag)});
+        }
+        else if(GameUI)
+        {
+            if(Trade.bTradeOpen) GameUI->ShowTradeWindow(Trade); else GameUI->HideTradeWindow();
+        }
+        const TCHAR* Key=nullptr;
+        switch(Trade.Status)
+        {
+        case 0: Key=TEXT("ERR_PLAYER_BUSY_S"); break;
+        case 3: case 13: Key=TEXT("ERR_TRADE_CANCELLED"); break;
+        case 5: Key=TEXT("ERR_ALREADY_TRADING"); break;
+        case 6: Key=TEXT("ERR_GENERIC_NO_TARGET"); break;
+        case 8: Key=TEXT("ERR_TRADE_COMPLETE"); break;
+        case 10: Key=TEXT("ERR_TRADE_TOO_FAR"); break;
+        case 11: Key=TEXT("ERR_PLAYER_WRONG_FACTION"); break;
+        case 12: Key=Trade.Result==4?TEXT("ERR_BAG_FULL"):Trade.Result==50?TEXT("ERR_INV_FULL"):Trade.Result==29?TEXT("ERR_NOT_ENOUGH_MONEY"):TEXT("ERR_TRADE_CANCELLED"); break;
+        case 14: Key=TEXT("ERR_IGNORING_YOU_S"); break;
+        case 15: Key=TEXT("ERR_GENERIC_STUNNED"); break;
+        case 16: Key=TEXT("ERR_TARGET_STUNNED"); break;
+        case 17: Key=TEXT("ERR_PLAYER_DEAD"); break;
+        case 18: Key=TEXT("ERR_TRADE_TARGET_DEAD"); break;
+        case 19: Key=TEXT("ERR_LOGGING_OUT"); break;
+        case 20: Key=TEXT("ERR_TARGET_LOGGING_OUT"); break;
+        case 21: Key=TEXT("ERR_RESTRICTED_ACCOUNT"); break;
+        case 22: Key=TEXT("ERR_TRADE_WRONG_REALM"); break;
+        case 23: Key=TEXT("ERR_TRADE_NOT_ON_TAPLIST"); break;
+        }
+        if(Key)
+        {
+            FString Message=Events?Events->ResolveText(Key):Key;
+            Message.ReplaceInline(TEXT("%s"),*GetPlayerDisplayName(LastPartner?LastPartner:uint64(ConnectionManager->GetTargetGuid())));
+            FireUIEvent(Trade.Status==8?TEXT("UI_INFO_MESSAGE"):TEXT("UI_ERROR_MESSAGE"),{Message});
+        }
+    });
+    ConnectionManager->PacketHandler.OnTradeClientError.AddLambda([this](const FString& Key)
+    {
+        const auto* Events=UIManager?UIManager->GetEventSystem():nullptr;
+        FireUIEvent(TEXT("UI_ERROR_MESSAGE"),{Events?Events->ResolveText(Key):Key});
+    });
 
 	ConnectionManager->PacketHandler.OnMailboxShown.AddLambda(
 		[this](uint64 MailboxGuid)
@@ -525,7 +574,7 @@ void AWowGameplayController::BindEntityEvents()
             const TCHAR* Key=TEXT("ERR_MAIL_DATABASE_ERROR");
             switch(Result.Error)
             {
-            case 1: Key=Result.EquipError==4?TEXT("ERR_BAG_FULL"):Result.EquipError==50?TEXT("ERR_INV_FULL"):Result.EquipError==31?TEXT("ERR_CAN_ONLY_DO_WITH_EMPTY_BAGS"):Result.EquipError==72?TEXT("ERR_MAIL_BOUND_ITEM"):Result.EquipError==82?TEXT("ERR_MAIL_TO_SELF"):TEXT("ERR_MAIL_INVALID_ATTACHMENT"); break;
+            case 1: Key=Result.EquipError==4?TEXT("ERR_BAG_FULL"):Result.EquipError==50?TEXT("ERR_INV_FULL"):Result.EquipError==31?TEXT("ERR_CAN_ONLY_DO_WITH_EMPTY_BAGS"):Result.EquipError==72?TEXT("ERR_MAIL_BOUND_ITEM"):Result.EquipError==82?TEXT("ERR_NOT_SAME_ACCOUNT"):TEXT("ERR_MAIL_INVALID_ATTACHMENT"); break;
             case 2: Key=TEXT("ERR_MAIL_TO_SELF"); break;
             case 3: Key=TEXT("ERR_NOT_ENOUGH_MONEY"); break;
             case 4: Key=TEXT("ERR_MAIL_TARGET_NOT_FOUND"); break;
@@ -3930,6 +3979,11 @@ void AWowGameplayController::ExecuteActionSlot(int32 SlotIndex)
 
 void AWowGameplayController::OnPlayerNameReceived(uint64 Guid, const FString& Name)
 {
+    if(ConnectionManager && ConnectionManager->PacketHandler.CurrentTrade.bTradeOpen && ConnectionManager->PacketHandler.CurrentTrade.TraderGuid==Guid)
+    {
+        FireUIEvent(TEXT("TRADE_UPDATE"));
+        if(UIManager && UIManager->GetEventSystem()) { const auto& T=ConnectionManager->PacketHandler.CurrentTrade; UIManager->GetEventSystem()->FireEventNumbers(TEXT("TRADE_ACCEPT_UPDATE"),{T.bLocalAccepted?1.:0.,T.bTargetAccepted?1.:0.}); }
+    }
     if(ConnectionManager && ConnectionManager->PacketHandler.CurrentMailboxGuid) FireUIEvent(TEXT("MAIL_INBOX_UPDATE"));
 	// TODO: Update nameplate for matching entity
 	UE_LOG(LogWowGameplay, Log, TEXT("Received player name: GUID=%llu Name=%s"), Guid, *Name);
@@ -4657,6 +4711,11 @@ void AWowGameplayController::OnPlayerInventoryUpdated()
 	FireUIEvent(TEXT("UNIT_INVENTORY_CHANGED"),{TEXT("player")});
 	FireUIEvent(TEXT("UPDATE_INVENTORY_DURABILITY"));
     if(ConnectionManager && ConnectionManager->PacketHandler.Merchant.Open) FireUIEvent(TEXT("MERCHANT_UPDATE"));
+    if(ConnectionManager && ConnectionManager->PacketHandler.CurrentTrade.bTradeOpen && UIManager && UIManager->GetEventSystem()) for(int32 I=1;I<=7;++I)
+    {
+        UIManager->GetEventSystem()->FireEventNumbers(TEXT("TRADE_PLAYER_ITEM_CHANGED"),{double(I)});
+        UIManager->GetEventSystem()->FireEventNumbers(TEXT("TRADE_TARGET_ITEM_CHANGED"),{double(I)});
+    }
     if(ConnectionManager && ConnectionManager->PacketHandler.CurrentMailboxGuid)
     {
         FireUIEvent(TEXT("MAIL_SEND_INFO_UPDATE")); FireUIEvent(TEXT("MAIL_INBOX_UPDATE"));
@@ -5252,9 +5311,9 @@ void AWowGameplayController::OnEscapeKey()
 		return; // Don't process escape when typing in chat
 	}
 
-    if(ConnectionManager && ConnectionManager->HasPendingGlyph())
+    if(ConnectionManager && (ConnectionManager->HasPendingGlyph() || ConnectionManager->HasPendingItemSpell()))
     {
-        ConnectionManager->CancelGlyphUse(); return;
+        ConnectionManager->CancelGlyphUse(); ConnectionManager->CancelItemSpell(); return;
     }
     if(ConnectionManager && ConnectionManager->IsRepairMode()) { ConnectionManager->SetRepairMode(false); return; }
     if(ConnectionManager && ConnectionManager->HasCursorPayload())

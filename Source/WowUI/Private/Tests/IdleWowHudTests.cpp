@@ -698,6 +698,40 @@ bool FHudEditBoxFonts::RunTest(const FString&)
     TestTrue(TEXT("Runtime SetFont changes native editor rendering"),F.Lua.ExecuteString(TEXT("SingleEditor:SetFont('Fonts\\\\FRIZQT__.TTF',20); MultiEditor:SetFont('Fonts\\\\FRIZQT__.TTF',16)")));
     TestTrue(TEXT("Single and multiline use WoW pixel-to-point sizing"),Single && Multi && Single->GetWidgetStyle().TextStyle.Font.Size==15 && Multi->WidgetStyle.Font.Size==12);
     TestTrue(TEXT("Parchment editor colors inherit from the original font object"),Multi && FMath::IsNearlyEqual(Multi->WidgetStyle.ColorAndOpacity.GetSpecifiedColor().R,.18f));
+    TestTrue(TEXT("Stock money editors retain numeric values and treat empty text as zero"),F.Lua.ExecuteString(TEXT("SingleEditor:SetNumber(123.5); assert(SingleEditor:GetText()=='123.5' and SingleEditor:GetNumber()==123.5); SingleEditor:SetText(''); assert(SingleEditor:GetNumber()==0); MultiEditor:SetNumber(99); assert(MultiEditor:GetNumber()==99)")));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudTradeApi,"WowUnreal.Hud.TradeApi",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudTradeApi::RunTest(const FString&)
+{
+    FHudFixture F; TStrongObjectPtr<UWowConnectionManager> C(NewObject<UWowConnectionManager>());
+    auto& H=C->PacketHandler; auto& E=H.EntityManager; E.LocalPlayerGuid=1;
+    auto& P=E.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER); P.SetField(PlayerField::COINAGE,1000); P.SetField(UnitField::BYTES_0,0x101); P.SetField(UnitField::LEVEL,20);
+    E.PromoteToTyped(2,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER); H.PlayerNameCache.Add(2,TEXT("Trader"));
+    F.Context.ConnectionManager=C.Get(); F.Context.EntityManager=&E;
+    auto& T=H.CurrentTrade; T.TraderGuid=2; T.bTradeOpen=true; T.PlayerMoney=75; T.TargetMoney=125; T.PlayerItems.SetNum(7); T.TargetItems.SetNum(7);
+    FWowItemTemplate Item; Item.Id=2589; Item.Name=TEXT("Trade cloth"); Item.Quality=1; H.ItemTemplates.Add(Item.Id,Item);
+    T.PlayerItems[0].ItemId=T.TargetItems[6].ItemId=2589; T.PlayerItems[0].Count=5; T.TargetItems[6].Count=2; T.TargetItems[6].Slot=6;
+    auto& Stack=E.PromoteToTyped(101,WowTypeMask::OBJECT|WowTypeMask::ITEM); Stack.Entry=2589; Stack.SetField(ItemField::STACK_COUNT,5); P.SetField(PlayerField::PACK_SLOT_START,101); T.LocalGuids[0]=101;
+    TestTrue(TEXT("Stock trade tuples, counterpart unit and item locks are available"),F.Lua.ExecuteString(TEXT(R"LUA(
+        assert(UnitName('NPC')=='Trader' and GetPlayerTradeMoney()==75 and GetTargetTradeMoney()==125)
+        local name,icon,count,quality,enchant=GetTradePlayerItemInfo(1)
+        assert(name=='Trade cloth' and icon and count==5 and quality==-1 and enchant==nil)
+        assert(select('#',GetTradePlayerItemInfo(1))==5 and select('#',GetTradeTargetItemInfo(7))==6)
+        local name,icon,count,quality,usable,enchant=GetTradeTargetItemInfo(7)
+        assert(name=='Trade cloth' and icon and count==2 and quality==-1 and usable and not enchant)
+        assert(GetTradePlayerItemLink(1):find('item:2589:') and GetTradeTargetItemLink(7):find('item:2589:'))
+        assert(GetTradeTargetItemInfo(1)==nil and GetTradePlayerItemInfo(8)==nil)
+        assert(select(3,GetContainerItemInfo(0,1)))
+        PickupContainerItem(0,1); assert(not CursorHasItem())
+        PickupPlayerMoney(50); assert(GetCursorMoney()==50 and select(1,GetCursorInfo())=='money'); ClearCursor(); assert(GetCursorMoney()==0)
+        TradeBindFixture=CreateFrame('Frame'); TradeBindFixture:RegisterEvent('TRADE_POTENTIAL_BIND_ENCHANT')
+        TradeBindFixture:SetScript('OnEvent',function(self,event,bound) assert(type(bound)=='boolean'); self.bound=bound end)
+    )LUA")));
+    F.Events.FireEventBoolean(TEXT("TRADE_POTENTIAL_BIND_ENCHANT"),true); TestTrue(TEXT("Binding warning receives a real boolean"),F.Lua.ExecuteString(TEXT("assert(TradeBindFixture.bound==true)")));
+    F.Events.FireEventBoolean(TEXT("TRADE_POTENTIAL_BIND_ENCHANT"),false); TestTrue(TEXT("A false binding warning is false in Lua"),F.Lua.ExecuteString(TEXT("assert(TradeBindFixture.bound==false)")));
+    C->ResetTradeState(); TestTrue(TEXT("Closed APIs cannot show stale remote offers"),F.Lua.ExecuteString(TEXT("assert(GetTradeTargetItemInfo(7)==nil and GetTradeTargetItemLink(7)==nil and GetTargetTradeMoney()==0 and not select(3,GetContainerItemInfo(0,1)))")));
     return true;
 }
 

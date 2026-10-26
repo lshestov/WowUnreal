@@ -1,5 +1,6 @@
 #include "WowGameplayController.h"
 #include "WowConnectionManager.h"
+#include "WowUiTestPeer.h"
 #include "WowGameUI.h"
 #include "WowUIManager.h"
 #include "WowInventoryManager.h"
@@ -50,7 +51,8 @@ public:
 
 // Explicit development probe. It invokes the same controller/UI callbacks as
 // ordinary input, waits for server state, captures rendered frames and exits.
-// It never creates characters, grants items or modifies server databases.
+// The opt-in QA peer can create/delete its own coordinator-owned character.
+// Database setup and restoration are performed by the external coordinator.
 struct FWowGameplayProbe
 {
     TSharedPtr<FJsonObject> Spec;
@@ -68,6 +70,9 @@ struct FWowGameplayProbe
     TMap<FString,TArray<double>> Profile;
     TSharedPtr<FJsonObject> Inspections=MakeShared<FJsonObject>();
     TSharedPtr<FWowProbeInputGuard> InputGuard;
+    TUniquePtr<FWowUiTestPeer> Peer;
+    TSharedPtr<FJsonObject> FinalReport;
+    int32 PeerExitCode=-1;
 
     explicit FWowGameplayProbe(const FString& Path)
     {
@@ -116,6 +121,12 @@ struct FWowGameplayProbe
         FString Text; FJsonSerializer::Serialize(Report,TJsonWriterFactory<>::Create(&Text));
         if (!Output.IsEmpty()) FFileHelper::SaveStringToFile(Text,*(Output/TEXT("probe.json")));
         UE_LOG(LogTemp,Log,TEXT("GameplayProbe: %s step=%d reason=%s"),Passed?TEXT("PASS"):TEXT("FAIL"),Index,*Failure);
+        if(Peer)
+        {
+            FinalReport=Report; PeerExitCode=Passed?0:3; Peer->Stop();
+            if(!Passed && !Output.IsEmpty()) FScreenshotRequest::RequestScreenshot(Output/TEXT("failure.png"),true,false);
+            FailureExitAt=FPlatformTime::Seconds()+(Passed?0:2); return;
+        }
         if (Passed) FPlatformMisc::RequestExitWithStatus(false,0);
         else
         {
@@ -175,12 +186,22 @@ struct FWowGameplayProbe
 
     void Tick(AWowGameplayController& C)
     {
+        if(Peer) Peer->Tick();
         if (bFinished)
         {
+            if(Peer && PeerExitCode>=0)
+            {
+                if(!Peer->Complete() || FPlatformTime::Seconds()<FailureExitAt) return;
+                FinalReport->SetBoolField(TEXT("peerCleanup"),Peer->Error().IsEmpty());
+                if(!Peer->Error().IsEmpty()) {FinalReport->SetBoolField(TEXT("passed"),false); FinalReport->SetStringField(TEXT("failure"),Peer->Error()); PeerExitCode=3;}
+                FString Text; FJsonSerializer::Serialize(FinalReport.ToSharedRef(),TJsonWriterFactory<>::Create(&Text)); FFileHelper::SaveStringToFile(Text,*(Output/TEXT("probe.json")));
+                FPlatformMisc::RequestExitWithStatus(false,uint8(PeerExitCode)); return;
+            }
             if (FailureExitAt>0 && FPlatformTime::Seconds()>=FailureExitAt) FPlatformMisc::RequestExitWithStatus(false,3);
             return;
         }
         const double Now=FPlatformTime::Seconds();
+        if(Peer && !Peer->Error().IsEmpty()) Failure=Peer->Error();
         if (!Failure.IsEmpty()) { Finish(C,false); return; }
         if (Now-Started>600) { Failure=TEXT("Overall timeout"); Finish(C,false); return; }
         auto* Connection=C.ConnectionManager.Get();
@@ -200,7 +221,36 @@ struct FWowGameplayProbe
         if (Now-StepStarted>Timeout) { Failure=FString::Printf(TEXT("Step %d timed out: %s"),Index,*Op); Finish(C,false); return; }
         auto& Handler=Connection->PacketHandler;
         bool Done=false;
-        if (Op==TEXT("wait")) Done=Now-StepStarted>=Step->GetNumberField(TEXT("seconds"));
+        if(Op==TEXT("peer_start") || Op==TEXT("peer_cleanup"))
+        {
+            if(!Peer)
+            {
+                Peer=MakeUnique<FWowUiTestPeer>();
+                if(!Peer->Start(Spec->GetStringField(TEXT("peerFixture")),Handler.EntityManager.LocalPlayerGuid,Op==TEXT("peer_cleanup"))) {Failure=TEXT("Invalid coordinator-owned QA peer fixture"); Finish(C,false); return;}
+            }
+            Done=Op==TEXT("peer_cleanup")?Peer->Complete():Peer->Ready();
+            if(Done && Op==TEXT("peer_start"))
+            {
+                Connection->SendNameQuery(int64(Peer->Guid()));
+                C.UIManager->GetLuaVM()->ExecuteString(FString::Printf(TEXT("QAUiPeerGuid=%llu; QAUiPeerName='%s'"),Peer->Guid(),*Peer->Get()->GetCharacterName()));
+            }
+        }
+        else if(Op==TEXT("peer_target")) {if(Peer && Peer->Ready() && Handler.EntityManager.Find(Peer->Guid())) {C.SetTarget(Peer->Guid()); Done=true;}}
+        else if(Op==TEXT("peer_trade"))
+        {
+            if(Peer) {double Slot=0,Value=0; Step->TryGetNumberField(TEXT("slot"),Slot); Step->TryGetNumberField(TEXT("value"),Value); Done=Peer->Command(Step->GetStringField(TEXT("action")),int32(Slot),uint32(Value));}
+        }
+        else if(Op==TEXT("peer_assert"))
+        {
+            if(!Peer || !Peer->Ready()) {Failure=TEXT("QA peer is not ready"); Finish(C,false); return;}
+            const auto* N=Peer->Get(); const FString Field=Step->GetStringField(TEXT("field")); int64 Value=-1;
+            if(Field==TEXT("money")) {if(const auto* P=N->PacketHandler.EntityManager.GetLocalPlayer()) Value=P->GetCoinage();}
+            else if(Field==TEXT("trade_open")) Value=N->PacketHandler.CurrentTrade.bTradeOpen?1:0;
+            else if(Field==TEXT("accepted")) Value=N->PacketHandler.CurrentTrade.bLocalAccepted?1:0;
+            else if(Field==TEXT("item_count")) {Value=0; const uint32 Entry=Step->GetIntegerField(TEXT("entry")); for(const auto* Item:N->PacketHandler.EntityManager.GetInventoryItems()) if(Item->Entry==Entry) Value+=Item->GetStackCount();}
+            if(Value!=int64(Step->GetNumberField(TEXT("value")))) {Failure=TEXT("QA peer assertion differs from server state"); Finish(C,false); return;} Done=true;
+        }
+        else if (Op==TEXT("wait")) Done=Now-StepStarted>=Step->GetNumberField(TEXT("seconds"));
         else if(Op==TEXT("wait_character_select")) Done=Connection->GetState()==EWowSessionState::WorldHaveCharList;
         else if(Op==TEXT("enter_character"))
         {

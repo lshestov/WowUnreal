@@ -890,6 +890,56 @@ bool FMailPackets::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTradePackets,"WowUnreal.UI.TradePackets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FTradePackets::RunTest(const FString&)
+{
+    auto* C=NewObject<UWowConnectionManager>(); const auto Socket=WowTestUtils::AttachTestWorldSocket(*C,0);
+    auto& H=C->PacketHandler; auto& E=H.EntityManager; E.LocalPlayerGuid=1;
+    H.OnSendPacket.BindLambda([&](uint32 Opcode,const TArray<uint8>& Data){Socket->SendPacket(Opcode,Data);});
+    auto& P=E.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER); P.SetField(PlayerField::COINAGE,1000); P.SetField(UnitField::HEALTH,100);
+    constexpr uint64 Guid=0x4000000000000088ull;
+    auto& Item=E.PromoteToTyped(Guid,WowTypeMask::OBJECT|WowTypeMask::ITEM); Item.Entry=2589; Item.SetField(ItemField::STACK_COUNT,5); WowTestUtils::SetGuidField64(P,PlayerField::PACK_SLOT_START,Guid);
+    FWowItemTemplate Template; Template.Id=2589; Template.Name=TEXT("Cloth"); H.ItemTemplates.Add(2589,Template);
+    const auto Put=[](TArray<uint8>& B,const auto Value){const int32 At=B.AddUninitialized(sizeof(Value)); FMemory::Memcpy(B.GetData()+At,&Value,sizeof(Value));};
+    uint32 Revision=1;
+    const auto Snapshot=[&](bool Target,uint32 Money,int32 Slot=-1,uint32 Count=5,uint32 State=321)
+    {
+        TArray<uint8> Data; Put(Data,uint8(Target)); Put(Data,uint32(0)); Put(Data,++Revision); Put(Data,State); Put(Data,Money); Put(Data,uint32(0));
+        if(Slot>=0) {Put(Data,uint8(Slot)); Put(Data,uint32(2589)); Put(Data,uint32(0)); Put(Data,Count); Put(Data,uint32(0)); Put(Data,uint64(0)); for(int32 I=0;I<4;++I) Put(Data,uint32(0)); Put(Data,uint64(0)); for(int32 I=0;I<6;++I) Put(Data,uint32(0));}
+        H.HandlePacket(WowOpcode::SMSG_TRADE_STATUS_EXTENDED,Data);
+    };
+    uint32 Op=0; TArray<uint8> Data;
+    C->SendInitiateTrade(2); TestTrue(TEXT("Initiation includes full partner GUID"),WowTestUtils::DequeueClientPacket(*Socket,Op,Data) && Op==0x0116 && Data==TArray<uint8>({2,0,0,0,0,0,0,0}));
+    TArray<uint8> Begin; Put(Begin,uint32(1)); Put(Begin,uint64(2)); H.HandlePacket(WowOpcode::SMSG_TRADE_STATUS,Begin); C->SendBeginTrade();
+    TestTrue(TEXT("A validated invitation can begin the trade"),WowTestUtils::DequeueClientPacket(*Socket,Op,Data) && Op==0x0117 && Data.IsEmpty());
+    H.HandlePacket(WowOpcode::SMSG_TRADE_STATUS,{2,0,0,0,0,0,0,0}); Snapshot(true,200);
+    C->SendAcceptTrade(); TestTrue(TEXT("Acceptance includes the target state index"),WowTestUtils::DequeueClientPacket(*Socket,Op,Data) && Op==0x011A && Data==TArray<uint8>({65,1,0,0}) && H.CurrentTrade.bLocalAccepted);
+    C->SendUnacceptTrade(); TestTrue(TEXT("Unaccept sends an empty request"),WowTestUtils::DequeueClientPacket(*Socket,Op,Data) && Op==0x011B && Data.IsEmpty());
+    C->PickupBagItemCursor(255,23,2589); H.ItemTemplates.Remove(2589); C->ClickTradeItem(2);
+    while(WowTestUtils::DequeueClientPacket(*Socket,Op,Data)) {}
+    TestTrue(TEXT("A cold item template retains the intended slot without sending an unchecked offer"),H.CurrentTrade.PendingKind==5 && C->HasCursorItemPayload());
+    H.ItemTemplates.Add(2589,Template); C->TickTradeState();
+    TestTrue(TEXT("The retained offer sends once its template arrives and locks the offered identity"),WowTestUtils::DequeueClientPacket(*Socket,Op,Data) && Op==0x011D && Data==TArray<uint8>({2,255,23}) && C->IsItemInTrade(Guid) && H.CurrentTrade.LocalGuids[2]==Guid);
+    C->SendAcceptTrade(); TestTrue(TEXT("Stock acceptance does not wait for a nonexistent own-side acknowledgement"),WowTestUtils::DequeueClientPacket(*Socket,Op,Data) && Op==0x011A && H.CurrentTrade.bLocalAccepted); C->SendUnacceptTrade(); WowTestUtils::DequeueClientPacket(*Socket,Op,Data);
+    Snapshot(false,0,2); TestTrue(TEXT("Optional own-side snapshots preserve the matching physical item identity"),H.CurrentTrade.LocalGuids[2]==Guid && !H.CurrentTrade.PendingKind);
+    C->PickupBagItemCursor(255,23,2589); TestFalse(TEXT("Offered inventory cannot be picked for a second operation"),C->HasCursorItemPayload());
+    TestTrue(TEXT("Removing an item sends only the trade slot"),C->ClickTradeItem(2,true) && WowTestUtils::DequeueClientPacket(*Socket,Op,Data) && Op==0x011E && Data==TArray<uint8>({2}));
+    TestFalse(TEXT("The stock local offer releases its lock on removal"),C->IsItemInTrade(Guid)); Snapshot(false,0);
+    Snapshot(true,200,6); C->PendingItemSpell={3330,0,255,0};
+    TestTrue(TEXT("A service enchant targets the nontraded slot, not the partner unit"),C->TargetItemSpell(0,true) && WowTestUtils::DequeueClientPacket(*Socket,Op,Data) && Op==WowOpcode::CMSG_CAST_SPELL && Data.Num()==12 && Data[6]==0 && Data[7]==0x10 && Data[10]==1 && Data[11]==6 && !C->HasPendingItemSpell() && H.CurrentTrade.PlayerSpell==0);
+    C->PendingItemSpell={3330,Guid,255,23};
+    TestTrue(TEXT("Item-applied enchant retains the real use-item prefix"),C->TargetItemSpell(0,true) && WowTestUtils::DequeueClientPacket(*Socket,Op,Data) && Op==WowOpcode::CMSG_USE_ITEM && Data.Num()==26 && Data[0]==255 && Data[1]==23 && Data[20]==0 && Data[21]==0x10 && Data[24]==1 && Data[25]==6);
+    for(int32 Amount:{1,10,100}) {C->SendSetTradeGold(Amount); TestTrue(TEXT("Rapid money edits queue their latest value"),WowTestUtils::DequeueClientPacket(*Socket,Op,Data) && Op==0x011F && Data.Num()==4 && Data[0]==Amount);}
+    TestTrue(TEXT("Local money editing retains the offer without changing authoritative coinage"),!H.CurrentTrade.PendingKind && H.CurrentTrade.PlayerMoney==100 && P.GetField(PlayerField::COINAGE)==1000);
+    C->SendAcceptTrade(); WowTestUtils::DequeueClientPacket(*Socket,Op,Data); Snapshot(true,300);
+    TestTrue(TEXT("Changed offers revoke local consent over the protocol"),!H.CurrentTrade.bLocalAccepted && WowTestUtils::DequeueClientPacket(*Socket,Op,Data) && Op==0x011B);
+    C->PickupCursorMoney(50); TestTrue(TEXT("Money is a distinct cursor payload and cannot replace actions"),C->GetCursorMoney()==50 && !C->PlaceCursorIntoActionSlot(0)); C->AddCursorTradeMoney();
+    TestTrue(TEXT("Dropping cursor money adds it to the local offer"),!C->GetCursorMoney() && H.CurrentTrade.PlayerMoney==150 && WowTestUtils::DequeueClientPacket(*Socket,Op,Data) && Op==0x011F);
+    Snapshot(false,150); C->SendCancelTrade(); TestTrue(TEXT("Cancel closes and releases all selections"),!H.CurrentTrade.bTradeOpen && !H.CurrentTrade.TraderGuid && !C->IsItemInTrade(Guid) && WowTestUtils::DequeueClientPacket(*Socket,Op,Data) && Op==0x011C);
+    C->SendCancelTrade(); C->SendAcceptTrade(); TestFalse(TEXT("Closed trades cannot emit repeat cancel or accept"),WowTestUtils::DequeueClientPacket(*Socket,Op,Data));
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMerchantGuildState,"WowUnreal.UI.MerchantGuildState",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FMerchantGuildState::RunTest(const FString&)
 {
@@ -2456,6 +2506,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTradeStatusExtendedParsesOffers, "WowUnreal.Ne
 bool FTradeStatusExtendedParsesOffers::RunTest(const FString& Parameters)
 {
     FWowPacketHandler PacketHandler;
+    PacketHandler.HandlePacket(WowOpcode::SMSG_TRADE_STATUS,{2,0,0,0,0,0,0,0});
 
     auto AppendU8 = [](TArray<uint8>& Buffer, uint8 Value)
     {
@@ -2633,6 +2684,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTradeStatusExtendedParsesBothSides, "WowUnreal
 bool FTradeStatusExtendedParsesBothSides::RunTest(const FString& Parameters)
 {
     FWowPacketHandler PacketHandler;
+    PacketHandler.HandlePacket(WowOpcode::SMSG_TRADE_STATUS,{2,0,0,0,0,0,0,0});
 
     auto AppendU8 = [](TArray<uint8>& Buffer, uint8 Value)
     {
@@ -2711,6 +2763,22 @@ bool FTradeStatusExtendedParsesBothSides::RunTest(const FString& Parameters)
     TestEqual(TEXT("Own side item count parsed"), PacketHandler.CurrentTrade.PlayerItems[0].Count, 2u);
     TestEqual(TEXT("Trader side item entry parsed"), PacketHandler.CurrentTrade.TargetItems[1].ItemId, 17031u);
     TestEqual(TEXT("Trader side item count parsed"), PacketHandler.CurrentTrade.TargetItems[1].Count, 1u);
+
+    auto Partial=BuildExtendedPacket(true,1u,0u,0u,25u,111u,1u); Partial.Pop();
+    PacketHandler.CurrentTrade.bLocalAccepted=true; PacketHandler.HandlePacket(WowOpcode::SMSG_TRADE_STATUS_EXTENDED,Partial);
+    TestTrue(TEXT("Incomplete slot cannot replace the offer or acceptance"),PacketHandler.CurrentTrade.TargetMoney==54321u && PacketHandler.CurrentTrade.bLocalAccepted);
+    auto Sparse=BuildExtendedPacket(true,45u,0u,6u,25u,111u,1u); Sparse.RemoveAt(21,6*73);
+    const uint32 Revision=88,State=99; FMemory::Memcpy(Sparse.GetData()+5,&Revision,4); FMemory::Memcpy(Sparse.GetData()+9,&State,4);
+    PacketHandler.HandlePacket(WowOpcode::SMSG_TRADE_STATUS_EXTENDED,Sparse);
+    TestTrue(TEXT("State indices are independent of the number of sparse slots"),PacketHandler.CurrentTrade.TargetItems[6].ItemId==25 && PacketHandler.CurrentTrade.StateIndex[1]==99 && PacketHandler.CurrentTrade.TargetMoney==45 && !PacketHandler.CurrentTrade.bLocalAccepted);
+    auto Stale=BuildExtendedPacket(true,999u,0u,0u,25u,111u,1u); PacketHandler.HandlePacket(WowOpcode::SMSG_TRADE_STATUS_EXTENDED,Stale);
+    TestEqual(TEXT("Older revisions cannot replace a newer offer"),PacketHandler.CurrentTrade.TargetMoney,45u);
+    Sparse[1]=1; PacketHandler.HandlePacket(WowOpcode::SMSG_TRADE_STATUS_EXTENDED,Sparse); TestEqual(TEXT("A different trade ID cannot change this window"),PacketHandler.CurrentTrade.TargetMoney,45u);
+    Sparse[1]=0; TArray<uint8> Duplicate; Duplicate.Append(Sparse.GetData()+21,73); Sparse.Append(Duplicate);
+    PacketHandler.CurrentTrade.bLocalAccepted=true; PacketHandler.HandlePacket(WowOpcode::SMSG_TRADE_STATUS_EXTENDED,Sparse);
+    TestTrue(TEXT("Duplicate slot records cannot replace the accepted snapshot"),PacketHandler.CurrentTrade.TargetMoney==45u && PacketHandler.CurrentTrade.bLocalAccepted);
+    PacketHandler.HandlePacket(WowOpcode::SMSG_TRADE_STATUS,{3,0,0,0}); PacketHandler.HandlePacket(WowOpcode::SMSG_TRADE_STATUS_EXTENDED,Stale);
+    TestFalse(TEXT("Late snapshots cannot reopen a closed trade"),PacketHandler.CurrentTrade.bTradeOpen);
 
     return true;
 }

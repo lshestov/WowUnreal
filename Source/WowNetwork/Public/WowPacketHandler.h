@@ -26,6 +26,7 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FOnMailResult,const FWowMailResult&);
 DECLARE_MULTICAST_DELEGATE(FOnMailStateChanged);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnMailLockItems,int32,uint64);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnMailClientError,const FString&);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnTradeClientError,const FString&);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnMailboxShown, uint64 /*MailboxGuid*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnTradeUpdated, const FWowTradeState& /*TradeState*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnDuelUpdated, const FWowDuelState& /*DuelState*/);
@@ -298,6 +299,7 @@ public:
     FOnMailClientError OnMailClientError;
     FOnMailboxShown OnMailboxShown;
     FOnTradeUpdated OnTradeUpdated;
+    FOnTradeClientError OnTradeClientError;
     FOnDuelUpdated OnDuelUpdated;
     FOnPetBarUpdated OnPetBarUpdated;
     FOnBankOpened OnBankOpened;

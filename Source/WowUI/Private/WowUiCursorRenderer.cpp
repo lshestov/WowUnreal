@@ -48,11 +48,13 @@ void FWowUiCursorRenderer::Tick(lua_State* L)
         Held=true;
         if(Type==TEXT("item")) { Path=WowLuaApi::ItemIconForUi(&Context,Id); Count=Connection->GetCursorItemCount(); }
         else if(Type==TEXT("merchant")) Path=WowLuaApi::ItemIconForUi(&Context,Connection->GetCursorMerchantItemId());
+        else if(Type==TEXT("money")) Path=ApiIcon(L,"GetCoinIcon",Id);
         else if(Type==TEXT("action")) Path=ApiIcon(L,"GetActionTexture",Id);
         else if(Type==TEXT("spell")) Path=ApiIcon(L,"GetSpellTexture",Id);
         else if(Type==TEXT("macro")) Path=ApiIcon(L,"GetMacroInfo",Id,2,3);
         if(Path.IsEmpty()) Path=TEXT("Interface\\Icons\\INV_Misc_QuestionMark");
     }
+    else if(Connection && Connection->HasPendingItemSpell()) Path=TEXT("Interface\\Cursor\\Cast");
     else if(Connection && Connection->IsRepairMode()) Path=TEXT("Interface\\Cursor\\Repair");
     else Path=Context.CursorTexture;
     const FVector2D Pointer=Frames.GetPointerPosition();

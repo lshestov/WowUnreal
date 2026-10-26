@@ -455,6 +455,7 @@ void UWowUIManager::TickWorldImages(UWorld* World)
         WowLuaApi::UpdateMerchant(LuaVM->GetState());
         WowLuaApi::UpdateBank(LuaVM->GetState());
         WowLuaApi::UpdateMail(LuaVM->GetState());
+        WowLuaApi::UpdateTrade(LuaVM->GetState());
     }
 }
 
@@ -466,7 +467,7 @@ void UWowUIManager::ProcessPendingReload()
     bReloadRequested=false;
     if(ConnectionManager) ConnectionManager->CloseMerchant();
     if(ConnectionManager) ConnectionManager->CloseBank();
-    if(ConnectionManager) ConnectionManager->CloseMail();
+    if(ConnectionManager) { ConnectionManager->CloseMail(); ConnectionManager->SendCancelTrade(); }
     // Recreate the VM only after its active callback has returned to the game loop.
     FWowSavedVariables::SaveAll(LuaVM->GetState());
     auto Resolver=UIContext->ResolveActor;

@@ -304,7 +304,7 @@ build, automation, native autologin and rendered screenshot verification):
     auxiliary and paged bars. Verified 82 automation checks, native learning and
     saved upgraded actions after relog, then removal of the QA rank and restored
     rank-one button, talents and glyphs. Five rendered before/after screenshots.
-- [ ] 4. Inventory: split/delete, compare/try-on, merchant/bank/mail/trade round trips.
+- [?] 4. Inventory: split/delete, compare/try-on, merchant/bank/mail/trade round trips.
   - [x] Stock split-control text input and XML texture defaults: native viewport
     character events reach the top visible keyboard frame without stealing editor
     input. Digits, arrows, backspace, Enter and cancellation use original Lua.
@@ -373,7 +373,7 @@ build, automation, native autologin and rendered screenshot verification):
     purchase/full-slot updates are tested in isolation; the live bankSlots value
     remains zero. Server DB confirms all original item GUIDs, counts, durability
     and money unchanged, with an empty bank after the round trip.
-  - [?] Original mailbox and authoritative send/read/take/return/delete handling.
+  - [x] Original mailbox and authoritative send/read/take/return/delete handling.
     Original inbox/composer, stationery and template subjects/bodies, sender names,
     currencies, attachment icons/tooltips, reply/invoice metadata and pending-mail
     notification. Serialize commands by message/item GUID and apply complete
@@ -388,7 +388,18 @@ build, automation, native autologin and rendered screenshot verification):
     goes only to the test character itself. Original inbox message, item GUIDs,
     counts, durability and money are preserved; temporary QA mail is removed.
     See [mail support](Docs/Mail.md).
-  - [ ] Original trade window and authoritative offer/accept/cancel round trips.
+  - [?] Original trade window, local offers and authoritative transfer/accept/cancel.
+    Match the original client: local offers/locks update after validated requests;
+    AzerothCore sends extended snapshots to the counterpart. Inventory and money
+    only change on server updates. Parse complete sparse records/state indices,
+    preserve physical item identity, wait for real split stacks and cold metadata,
+    revoke consent on changes and support money cursors/service-target packets.
+    Original fields, counts, icons, tooltips, binding/replacement warnings and
+    cancel/results are wired to FrameXML. Verified Windows build, 99 automation
+    tests (two existing warnings), a native 74-step/seven-image completed exchange
+    and return, then 27-step and 31-step final split/cancel/count/geometry checks.
+    QA peers use native authentication/Warden and are deleted through the server;
+    original inventory and zero money are verified after each run. See Docs/Trade.md.
 - [ ] 5. Chat/combat/macros: hyperlinks, remaining combat events and macro execution families.
 - [ ] 6. Maps: points of interest, tracking, interior minimaps and original map bootstrap.
   - [ ] Server near teleports: handle the actual 12340 MSG_MOVE_TELEPORT_ACK

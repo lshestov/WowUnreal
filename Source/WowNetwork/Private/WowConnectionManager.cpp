@@ -128,7 +128,7 @@ void UWowConnectionManager::SelectRealm(int32 I)
             PacketHandler.KnownSpells.Reset(); PacketHandler.ActionButtons.Reset(); PacketHandler.QuestLog.Reset(); PacketHandler.ResetTalentState(); PacketHandler.Reputations.Reset();
             PacketHandler.SpellCooldowns.Reset(); PacketHandler.SpellCooldownInfo.Reset(); PacketHandler.CombatHistory.Reset();
             PacketHandler.GroupInfo=FWowGroupInfo(); PacketHandler.PetActionBar=FWowPetActionBarState();
-            PacketHandler.Merchant.Clear(); PacketHandler.CurrentBankerGuid=0; ResetMailState();
+            PacketHandler.Merchant.Clear(); PacketHandler.CurrentBankerGuid=0; ResetMailState(); ResetTradeState();
             RepairCursor=false; PacketHandler.GuildCanRepair=false; PacketHandler.GuildRepairRequested=false; PacketHandler.GuildRepairId=0; PacketHandler.GuildWithdrawMoney=0; PacketHandler.GuildRoster.Reset(); PacketHandler.GuildRankAccess.Reset(); PacketHandler.GuildInfoText.Empty(); PacketHandler.ItemRefunds.Empty(); PacketHandler.RequestedItemRefunds.Empty(); PacketHandler.TotalPlayedTime=0; PacketHandler.PlayedTimeReceived=0; PacketHandler.PlayedTimeRequested=false;
             PacketHandler.WeaponProficiency=PacketHandler.ArmorProficiency=0; PacketHandler.HasWeaponProficiency=PacketHandler.HasArmorProficiency=false;
             RequestCharacterList(); return;
@@ -137,8 +137,9 @@ void UWowConnectionManager::SelectRealm(int32 I)
         {
             uint8 Result = Data.Num() > 0 ? Data[0] : 0xFF;
             OnCharCreateResult.Broadcast(Result);
-            // Auto-refresh character list on success (0x2F = CHAR_CREATE_SUCCESS, 0x3A = CHAR_DELETE_SUCCESS)
-            if (Result == 0x2F || Result == 0x3A)
+            // Result values differ from the SMSG opcodes (12340 SharedDefines).
+            if ((Opcode == WowOpcode::SMSG_CHAR_CREATE && Result == 0x2F) ||
+                (Opcode == WowOpcode::SMSG_CHAR_DELETE && Result == 0x47))
             {
                 RequestCharacterList();
             }
@@ -319,6 +320,7 @@ void UWowConnectionManager::SendCastSpell(int32 SpellId, int64 InTargetGuid)
     if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
 
     // Most UI callers pass 0 to mean "use the current selection".
+    if(BeginItemSpell(uint32(SpellId))) return;
     const int64 ResolvedTargetGuid = (InTargetGuid != 0) ? InTargetGuid : TargetGuid;
 
     // Auto Attack (spell 6603) is not cast via CMSG_CAST_SPELL in 3.3.5.
@@ -465,8 +467,8 @@ void UWowConnectionManager::PickupActionCursor(int32 SlotIndex)
 void UWowConnectionManager::PickupBagItemCursor(uint8 SourceBag, uint8 SourceSlot, int32 ItemId, const FString& ItemLink, uint32 SplitCount)
 {
     const auto* Item=ResolveCursorSource(SourceBag,SourceSlot);
-    if(!Item || IsItemInOutgoingMail(Item->Guid) || Item->Entry!=uint32(ItemId) || Item->GetStackCount()<=0 || SplitCount>=uint32(Item->GetStackCount())) return;
-    CancelGlyphUse(); CursorPayload=FCursorPayloadState(); CursorPayload.SourceItemGuid=Item->Guid;
+    if(!Item || IsItemInOutgoingMail(Item->Guid) || IsItemInTrade(Item->Guid) || Item->Entry!=uint32(ItemId) || Item->GetStackCount()<=0 || SplitCount>=uint32(Item->GetStackCount())) return;
+    CancelGlyphUse(); CancelItemSpell(); CursorPayload=FCursorPayloadState(); CursorPayload.SourceItemGuid=Item->Guid;
     CursorPayload.Type = ECursorPayloadType::Item;
     CursorPayload.PrimaryId = ItemId;
     CursorPayload.Detail = ItemLink;
@@ -483,8 +485,8 @@ void UWowConnectionManager::PickupBagItemCursor(uint8 SourceBag, uint8 SourceSlo
 void UWowConnectionManager::PickupInventoryItemCursor(uint8 InventorySlot, int32 ItemId, const FString& ItemLink)
 {
     const auto* Item=InventorySlot<23?ResolveCursorSource(255,InventorySlot):nullptr;
-    if(!Item || IsItemInOutgoingMail(Item->Guid) || Item->Entry!=uint32(ItemId) || Item->GetStackCount()<=0) return;
-    CancelGlyphUse(); CursorPayload=FCursorPayloadState(); CursorPayload.SourceItemGuid=Item->Guid;
+    if(!Item || IsItemInOutgoingMail(Item->Guid) || IsItemInTrade(Item->Guid) || Item->Entry!=uint32(ItemId) || Item->GetStackCount()<=0) return;
+    CancelGlyphUse(); CancelItemSpell(); CursorPayload=FCursorPayloadState(); CursorPayload.SourceItemGuid=Item->Guid;
     CursorPayload.Type = ECursorPayloadType::Item;
     CursorPayload.PrimaryId = ItemId;
     CursorPayload.Detail = ItemLink;
@@ -529,6 +531,7 @@ bool UWowConnectionManager::HasCursorItemPayload() const
 
 bool UWowConnectionManager::GetCursorInfo(FString& OutType, int32& OutId, FString& OutDetail) const
 {
+    if(CursorPayload.Type==ECursorPayloadType::Money) { OutType=TEXT("money"); OutId=CursorPayload.PrimaryId; OutDetail.Empty(); return OutId>0; }
     if(HasCursorMerchantPayload()) { OutType=TEXT("merchant"); OutId=CursorPayload.SourceActionSlot+1; OutDetail.Empty(); return true; }
     if (CursorPayload.Type == ECursorPayloadType::Spell)
     {
@@ -568,7 +571,7 @@ bool UWowConnectionManager::GetCursorInfo(FString& OutType, int32& OutId, FStrin
 bool UWowConnectionManager::PlaceCursorIntoActionSlot(int32 SlotIndex)
 {
     // Vendor selections are not owned inventory and cannot replace an action.
-    if(CursorPayload.Type==ECursorPayloadType::Merchant) return false;
+    if(CursorPayload.Type==ECursorPayloadType::Merchant || CursorPayload.Type==ECursorPayloadType::Money) return false;
     if(CursorPayload.Type==ECursorPayloadType::Item && !HasCursorItemPayload()) { RefreshItemCursor(); return false; }
     if (SlotIndex < 0 || SlotIndex >= 144 || CursorPayload.Type == ECursorPayloadType::None)
     {
@@ -1012,7 +1015,8 @@ TArray<uint8> UWowConnectionManager::BuildUseItemPacket(uint8 Bag,uint8 Slot,uin
 
 void UWowConnectionManager::SendUseItem(uint8 Bag,uint8 Slot,uint64 ItemGuid,uint32 SpellId,uint64 ExplicitTargetGuid,int32 GlyphSocket)
 {
-    if(!WorldSocket.IsValid() || State!=EWowSessionState::WorldInGame || !ItemGuid || !SpellId || IsItemInOutgoingMail(ItemGuid)) return;
+    if(!WorldSocket.IsValid() || State!=EWowSessionState::WorldInGame || !ItemGuid || !SpellId || IsItemInOutgoingMail(ItemGuid) || IsItemInTrade(ItemGuid)) return;
+    if(GlyphSocket<0 && BeginItemSpell(SpellId,ItemGuid,Bag,Slot)) return;
     if(GlyphSocket<0) if(const auto* Spell=FDbcStore::Get().Spells().GetById(SpellId)) for(const uint32 Effect:Spell->Effect) if(Effect==74) { BeginGlyphUse(Bag,Slot,ItemGuid,SpellId); return; }
     if(GlyphSocket>=6) return;
     WorldSocket->SendPacket(WowOpcode::CMSG_USE_ITEM,BuildUseItemPacket(Bag,Slot,ItemGuid,SpellId,ExplicitTargetGuid,GlyphSocket<0?0:GlyphSocket));
@@ -1095,12 +1099,15 @@ void UWowConnectionManager::SendInitiateTrade(int64 TargetGuidToTrade)
     WorldSocket->SendPacket(WowOpcode::CMSG_INITIATE_TRADE, Data);
     PacketHandler.CurrentTrade = FWowTradeState{};
     PacketHandler.CurrentTrade.TraderGuid = Guid;
+    PacketHandler.CurrentTrade.UseCursorOnOpen=HasCursorItemPayload();
     UE_LOG(LogWowNet, Log, TEXT("Sent CMSG_INITIATE_TRADE for player %llu"), Guid);
 }
 
 void UWowConnectionManager::SendBeginTrade()
 {
     if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+    if(PacketHandler.CurrentTrade.Status!=WowTradeStatus::BEGIN_TRADE || !PacketHandler.CurrentTrade.TraderGuid || PacketHandler.CurrentTrade.BeginSent) return;
+    PacketHandler.CurrentTrade.BeginSent=true;
 
     WorldSocket->SendPacket(WowOpcode::CMSG_BEGIN_TRADE, {});
     UE_LOG(LogWowNet, Log, TEXT("Sent CMSG_BEGIN_TRADE"));
@@ -1109,8 +1116,10 @@ void UWowConnectionManager::SendBeginTrade()
 void UWowConnectionManager::SendAcceptTrade()
 {
     if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
-
-    WorldSocket->SendPacket(WowOpcode::CMSG_ACCEPT_TRADE, {});
+    const auto& Trade=PacketHandler.CurrentTrade;
+    if(!Trade.bTradeOpen || Trade.PendingKind || Trade.bLocalAccepted) return;
+    TArray<uint8> Data; const uint32 Revision=Trade.StateIndex[1]; Data.Append(reinterpret_cast<const uint8*>(&Revision),4);
+    WorldSocket->SendPacket(WowOpcode::CMSG_ACCEPT_TRADE,Data);
     PacketHandler.CurrentTrade.bLocalAccepted = true;
     PacketHandler.OnTradeUpdated.Broadcast(PacketHandler.CurrentTrade);
     UE_LOG(LogWowNet, Log, TEXT("Sent CMSG_ACCEPT_TRADE"));
@@ -1119,6 +1128,7 @@ void UWowConnectionManager::SendAcceptTrade()
 void UWowConnectionManager::SendUnacceptTrade()
 {
     if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+    if(!PacketHandler.CurrentTrade.bTradeOpen || !PacketHandler.CurrentTrade.bLocalAccepted) return;
 
     WorldSocket->SendPacket(WowOpcode::CMSG_UNACCEPT_TRADE, {});
     PacketHandler.CurrentTrade.bLocalAccepted = false;
@@ -1129,18 +1139,11 @@ void UWowConnectionManager::SendUnacceptTrade()
 void UWowConnectionManager::SendCancelTrade()
 {
     if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+    if(!PacketHandler.CurrentTrade.bTradeOpen && !PacketHandler.CurrentTrade.TraderGuid) return;
 
     WorldSocket->SendPacket(WowOpcode::CMSG_CANCEL_TRADE, {});
-    PacketHandler.CurrentTrade.Status = WowTradeStatus::TRADE_CANCELED;
-    PacketHandler.CurrentTrade.bTradeOpen = false;
-    PacketHandler.CurrentTrade.bLocalAccepted = false;
-    PacketHandler.CurrentTrade.bTargetAccepted = false;
-    PacketHandler.CurrentTrade.PlayerMoney = 0;
-    PacketHandler.CurrentTrade.TargetMoney = 0;
-    PacketHandler.CurrentTrade.PlayerSpell = 0;
-    PacketHandler.CurrentTrade.TargetSpell = 0;
-    PacketHandler.CurrentTrade.PlayerItems.Reset();
-    PacketHandler.CurrentTrade.TargetItems.Reset();
+    // The cancellation result is reported by the server; do not print it twice.
+    ResetTradeState(); PacketHandler.CurrentTrade.Status=MAX_uint32;
     PacketHandler.OnTradeUpdated.Broadcast(PacketHandler.CurrentTrade);
     UE_LOG(LogWowNet, Log, TEXT("Sent CMSG_CANCEL_TRADE"));
 }
@@ -1148,6 +1151,9 @@ void UWowConnectionManager::SendCancelTrade()
 void UWowConnectionManager::SendSetTradeGold(int32 CopperAmount)
 {
     if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+    auto& Trade=PacketHandler.CurrentTrade; const auto* Player=PacketHandler.EntityManager.GetLocalPlayer();
+    if(!Trade.bTradeOpen || CopperAmount<0 || !Player || uint32(CopperAmount)>Player->GetCoinage()) return;
+    if(Trade.PendingKind || uint32(CopperAmount)==Trade.PlayerMoney) return;
 
     TArray<uint8> Data;
     Data.SetNumUninitialized(4);
@@ -1155,7 +1161,7 @@ void UWowConnectionManager::SendSetTradeGold(int32 CopperAmount)
     FMemory::Memcpy(Data.GetData(), &Gold, 4);
 
     WorldSocket->SendPacket(WowOpcode::CMSG_SET_TRADE_GOLD, Data);
-    PacketHandler.CurrentTrade.PlayerMoney = Gold;
+    Trade.PlayerMoney=Gold; ++Trade.StateIndex[0];
     PacketHandler.CurrentTrade.bLocalAccepted = false;
     PacketHandler.CurrentTrade.bTargetAccepted = false;
     PacketHandler.OnTradeUpdated.Broadcast(PacketHandler.CurrentTrade);
@@ -1541,7 +1547,7 @@ void UWowConnectionManager::Disconnect()
     }
 
     PacketHandler.EntityManager.Clear();
-    PacketHandler.Merchant.Clear(); PacketHandler.CurrentBankerGuid=0; ResetMailState();
+            PacketHandler.Merchant.Clear(); PacketHandler.CurrentBankerGuid=0; ResetMailState(); ResetTradeState();
     RepairCursor=false; PacketHandler.GuildCanRepair=false; PacketHandler.GuildRepairRequested=false; PacketHandler.GuildRepairId=0; PacketHandler.GuildWithdrawMoney=0; PacketHandler.GuildRoster.Reset(); PacketHandler.GuildRankAccess.Reset(); PacketHandler.GuildInfoText.Empty(); PacketHandler.ItemRefunds.Empty(); PacketHandler.RequestedItemRefunds.Empty(); PacketHandler.TotalPlayedTime=0; PacketHandler.PlayedTimeReceived=0; PacketHandler.PlayedTimeRequested=false;
     PacketHandler.WeaponProficiency=PacketHandler.ArmorProficiency=0; PacketHandler.HasWeaponProficiency=PacketHandler.HasArmorProficiency=false;
     PacketHandler.CombatHistory.Reset();

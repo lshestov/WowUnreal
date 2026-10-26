@@ -212,6 +212,25 @@ struct FWowTradeItem
 struct FWowTradeState
 {
     uint64 TraderGuid = 0;
+    uint32 TradeId=0,StateIndex[2]={1,1},SnapshotRevision[2]={0,0};
+    uint64 LocalGuids[7]={};
+    int32 PendingKind=0,PendingSlot=-1; // 4 physical split, 5 item template.
+    uint64 PendingGuid=0;
+    uint64 ReturnCursorGuid=0;
+    bool BindWarningShown=false;
+    bool UseCursorOnOpen=false;
+    bool BeginSent=false;
+    struct FSplit
+    {
+        int32 Index=-1;
+        uint64 SourceGuid=0;
+        uint32 Entry=0,Count=0,SourceCount=0;
+        uint8 Bag=255,Slot=0;
+    } Split;
+    double PendingDeadline=0;
+    uint32 Result=0,LimitedItem=0;
+    bool TargetResult=false;
+    uint8 ErrorSlot=255;
     uint32 Status = 0;
     bool bTradeOpen = false;
     bool bLocalAccepted = false;
@@ -355,6 +374,7 @@ namespace WowTradeStatus
     inline constexpr uint32 NO_TARGET      = 6;
     inline constexpr uint32 BACK_TO_TRADE  = 7;
     inline constexpr uint32 TRADE_COMPLETE = 8;
+    inline constexpr uint32 UNACCEPTED     = 9;
     inline constexpr uint32 TARGET_TO_FAR  = 10;
     inline constexpr uint32 WRONG_FACTION  = 11;
     inline constexpr uint32 CLOSE_WINDOW   = 12;

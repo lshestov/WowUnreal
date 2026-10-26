@@ -17,6 +17,13 @@ compatibility work.
 - Quest journal selection, objectives, formatted paragraphs, rewards and watch
   state. Reparented text measures and scrolls with the journal; the scrollbar
   uses the same units in Lua and native widgets.
+- Original merchant, bank, mailbox and player-trade windows, including real
+  inventory moves and stack splitting. Purchases, sales, repair, bank storage,
+  mail operations and completed trades use the server protocol. Local trade
+  offers follow the original client's rules; inventory and balances remain
+  server-owned. See [mail](Mail.md) and [trade](Trade.md) for verification scope.
+- Talent previews/learning, two specializations and six glyph sockets per spec,
+  with original panels and separate player/pet wire state.
 - UTF-8 chat, channel and recipient fields, bounded message history and input
   focus. A native round-trip test uses an otherwise empty local realm.
 - Outdoor minimap and zone/continent map textures, player position and zoom.
@@ -85,7 +92,7 @@ The Windows Editor and packaged Development client are built from the same
 source tree. `WowUnreal.Hud`, `WowUnreal.UI`, `WowUnreal.Gameplay` and the related
 player, collision, equipment, lighting, rendering, traversal and performance
 suites cover both isolated controls and live protocol state. The interface
-regression set contains 72 tests. Existing optional character texture-layout
+regression set contains 99 tests. Existing optional character texture-layout
 DBC and test-fixture size warnings remain.
 
 Native gameplay probes exercise live server state and rendered UI at 1280x720
@@ -99,7 +106,6 @@ may use NullRHI; visual checks require a rendered client.
 
 Full WoW UI compatibility is **not complete**. In particular:
 
-- Original talent/glyph/specialization panel API integration.
 - Specialized legacy frame/region methods and broader addon compatibility. Visible panels and
   readable category lists do not establish complete visual parity.
 - Advanced macro commands such as cast sequences, complete conditional syntax,
