@@ -100,12 +100,6 @@ void FWowFrameManager::RefreshButtonVisuals(int64 Handle)
             Pair.Key==TEXT("Checked")?GetChecked(Handle) && !(Disabled && HasResource(TEXT("DisabledChecked"))):
             Pair.Key==TEXT("DisabledChecked")?GetChecked(Handle) && Disabled:
             Pair.Key==TEXT("Highlight")?!Disabled && (HoverFrameHandle==Handle || Visual->HighlightLocked):false;
-        if(Pair.Key==TEXT("Highlight")) if(auto* Texture=Cast<UTexture2D>(Image->GetBrush().GetResourceObject()))
-            if(auto* Base=LoadObject<UMaterialInterface>(nullptr,TEXT("/Game/Materials/M_WowUiAdditive.M_WowUiAdditive")))
-            {
-                auto* Material=UMaterialInstanceDynamic::Create(Base,Image); Material->SetTextureParameterValue(TEXT("Image"),Texture);
-                auto Brush=Image->GetBrush(); Brush.SetResourceObject(Material); Image->SetBrush(Brush);
-            }
         Image->SetVisibility(Show && !ButtonRegionHidden.FindRef(Pair.Value)?(IsRegionAnchored(Pair.Value)?ESlateVisibility::HitTestInvisible:ESlateVisibility::Hidden):ESlateVisibility::Collapsed);
     }
     if(const auto* Entry=Frames.Find(Handle); Entry && EventSystem)

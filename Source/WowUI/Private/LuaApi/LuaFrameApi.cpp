@@ -19,6 +19,7 @@
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Framework/Text/TextLayout.h"
 #include "Engine/Texture2D.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Slate/SlateBrushAsset.h"
 
 #if __has_include("lua.h")
@@ -1095,6 +1096,58 @@ static UImage* GetTextureImage(lua_State* L, int idx)
 	return nullptr;
 }
 
+static bool TextureCoordinates(lua_State* L,int32 Index,double V[8])
+{
+    Index=Index<0?lua_gettop(L)+Index+1:Index;
+    double Rect[4]={0,1,0,1}; const char* Keys[]={"__texLeft","__texRight","__texTop","__texBottom"};
+    for(int32 I=0;I<4;++I) { lua_getfield(L,Index,Keys[I]); Rect[I]=luaL_optnumber(L,-1,Rect[I]); lua_pop(L,1); }
+    const int32 Order[]={0,2,0,3,1,2,1,3}; for(int32 I=0;I<8;++I) V[I]=Rect[Order[I]];
+    lua_getfield(L,Index,"__texCoords"); const bool Arbitrary=lua_istable(L,-1)!=0;
+    if(Arbitrary) for(int32 I=0;I<8;++I) { lua_rawgeti(L,-1,I+1); V[I]=luaL_optnumber(L,-1,V[I]); lua_pop(L,1); }
+    lua_pop(L,1); return Arbitrary;
+}
+static bool ApplyTextureStyle(lua_State* L,int32 Index=1)
+{
+    auto* Image=GetTextureImage(L,Index); if(!Image) return false;
+    auto Brush=Image->GetBrush(); auto* Texture=Cast<UTexture>(Brush.GetResourceObject());
+    auto* Instance=Cast<UMaterialInstanceDynamic>(Brush.GetResourceObject());
+    if(!Texture && Instance) Texture=Instance->K2_GetTextureParameterValue(TEXT("Image"));
+    if(!Texture) return false;
+    double UV[8]; const bool Arbitrary=TextureCoordinates(L,Index,UV);
+    lua_getfield(L,Index,"__desaturated"); const bool Gray=lua_toboolean(L,-1)!=0; lua_pop(L,1);
+    lua_getfield(L,Index,"__blendMode"); const bool Additive=lua_isstring(L,-1) && FCStringAnsi::Stricmp(lua_tostring(L,-1),"ADD")==0; lua_pop(L,1);
+    const FString Parent=Instance && Instance->Parent?Instance->Parent->GetName():FString();
+    const bool Shared=Parent==TEXT("M_WowUiRegion") || Parent==TEXT("M_WowUiRegionAdd");
+    float Circle=0,Opaque=Parent==TEXT("M_WowUiImage")?1:0;
+    if(Instance) { Instance->GetScalarParameterValue(FMaterialParameterInfo(TEXT("Circle")),Circle); if(Shared) Instance->GetScalarParameterValue(FMaterialParameterInfo(TEXT("OpaqueImage")),Opaque); }
+    if(Gray || Arbitrary || Additive || (Shared && (Circle>0 || Opaque>0)))
+    {
+        const TCHAR* Path=Additive?TEXT("/Game/Materials/M_WowUiRegionAdd.M_WowUiRegionAdd"):TEXT("/Game/Materials/M_WowUiRegion.M_WowUiRegion");
+        auto* Base=LoadObject<UMaterialInterface>(nullptr,Path); if(!Base) return false;
+        auto* Material=Instance && Instance->Parent==Base?Instance:UMaterialInstanceDynamic::Create(Base,Image);
+        Material->SetTextureParameterValue(TEXT("Image"),Texture); Material->SetScalarParameterValue(TEXT("Desaturation"),Gray?1:0);
+        Material->SetScalarParameterValue(TEXT("Circle"),Circle); Material->SetScalarParameterValue(TEXT("OpaqueImage"),Opaque);
+        const TCHAR* Corners[]={TEXT("UVTL"),TEXT("UVBL"),TEXT("UVTR"),TEXT("UVBR")};
+        for(int32 I=0;I<4;++I) Material->SetVectorParameterValue(Corners[I],FLinearColor(UV[I*2],UV[I*2+1],0,0));
+        Brush.SetResourceObject(Material); Brush.SetUVRegion(FBox2D(FVector2D::ZeroVector,FVector2D(1,1))); Image->SetRenderTransform(FWidgetTransform());
+    }
+    else
+    {
+        if(!Instance || Shared) Brush.SetResourceObject(Texture); Brush.SetUVRegion(FBox2D(FVector2D(FMath::Min(UV[0],UV[4]),FMath::Min(UV[1],UV[3])),FVector2D(FMath::Max(UV[0],UV[4]),FMath::Max(UV[1],UV[3]))));
+        Image->SetRenderTransformPivot(FVector2D(.5,.5)); Image->SetRenderTransform(FWidgetTransform(FVector2D::ZeroVector,FVector2D(UV[0]>UV[4]?-1:1,UV[1]>UV[3]?-1:1),FVector2D::ZeroVector,0));
+    }
+    Image->SetBrush(Brush); return true;
+}
+static int LF_TextureDesaturated(lua_State* L)
+{
+    const bool Value=lua_toboolean(L,2)!=0 && (!lua_isnumber(L,2) || lua_tonumber(L,2)!=0);
+    lua_pushboolean(L,Value); lua_setfield(L,1,"__desaturated"); ApplyTextureStyle(L); lua_pushboolean(L,1); return 1;
+}
+static int LF_TextureBlendMode(lua_State* L)
+{
+    const char* Mode=luaL_checkstring(L,2); lua_pushstring(L,Mode); lua_setfield(L,1,"__blendMode"); ApplyTextureStyle(L); return 0;
+}
+
 // Texture region methods
 static int LF_TextureSetTexture(lua_State* L)
 {
@@ -1204,7 +1257,7 @@ static int LF_TextureSetTexture(lua_State* L)
 					Slot->SetSize(FVector2D(Brush.ImageSize.X * UIScale, Brush.ImageSize.Y * UIScale));
 				}
 			}
-			return 0;
+			ApplyTextureStyle(L); return 0;
 		}
 
 		// Fallback: try parent handle approach (dynamic textures from CreateTexture)
@@ -1356,50 +1409,19 @@ static int LF_TextureSetTexture(lua_State* L)
 
 static int LF_TextureSetTexCoord(lua_State* L)
 {
-	luaL_checktype(L, 1, LUA_TTABLE);
-	float Left = static_cast<float>(luaL_checknumber(L, 2));
-	float Right = static_cast<float>(luaL_checknumber(L, 3));
-	float Top = static_cast<float>(luaL_checknumber(L, 4));
-	float Bottom = static_cast<float>(luaL_checknumber(L, 5));
-
-	// Store in Lua table
-	lua_pushnumber(L, Left); lua_setfield(L, 1, "__texLeft");
-	lua_pushnumber(L, Right); lua_setfield(L, 1, "__texRight");
-	lua_pushnumber(L, Top); lua_setfield(L, 1, "__texTop");
-	lua_pushnumber(L, Bottom); lua_setfield(L, 1, "__texBottom");
-
-	// Apply UV region to the UImage widget
-	// WoW uses Left > Right for horizontal flip and Top > Bottom for vertical flip.
-	// Normalize UVs for FBox2D and apply render transform for flipping.
-	UImage* Img = GetTextureImage(L, 1);
-	if (Img)
-	{
-		float UVL = FMath::Min(Left, Right);
-		float UVR = FMath::Max(Left, Right);
-		float UVT = FMath::Min(Top, Bottom);
-		float UVB = FMath::Max(Top, Bottom);
-
-		FSlateBrush Brush = Img->GetBrush();
-		FBox2D UVRegion(FVector2D(UVL, UVT), FVector2D(UVR, UVB));
-		Brush.SetUVRegion(UVRegion);
-		Img->SetBrush(Brush);
-
-		bool bFlipH = Left > Right;
-		bool bFlipV = Top > Bottom;
-		if (bFlipH || bFlipV)
-		{
-			FVector2D Scale(bFlipH ? -1.0f : 1.0f, bFlipV ? -1.0f : 1.0f);
-			Img->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
-			Img->SetRenderTransform(FWidgetTransform(FVector2D::ZeroVector, Scale, FVector2D::ZeroVector, 0.0f));
-		}
-		else
-		{
-			// Clear any previous flip transform
-			Img->SetRenderTransform(FWidgetTransform());
-		}
-	}
-
-	return 0;
+    luaL_checktype(L,1,LUA_TTABLE); const int32 Count=lua_gettop(L)-1;
+    if(Count!=4 && Count!=8) return luaL_error(L,"SetTexCoord expects 4 or 8 coordinates");
+    for(int32 I=2;I<=Count+1;++I) luaL_checknumber(L,I);
+    if(Count==8)
+    {
+        lua_createtable(L,8,0); for(int32 I=0;I<8;++I) { lua_pushvalue(L,I+2); lua_rawseti(L,-2,I+1); } lua_setfield(L,1,"__texCoords");
+    }
+    else
+    {
+        lua_pushnil(L); lua_setfield(L,1,"__texCoords"); const char* Keys[]={"__texLeft","__texRight","__texTop","__texBottom"};
+        for(int32 I=0;I<4;++I) { lua_pushvalue(L,I+2); lua_setfield(L,1,Keys[I]); }
+    }
+    ApplyTextureStyle(L); return 0;
 }
 
 static int LF_TextureSetVertexColor(lua_State* L)
@@ -1657,9 +1679,7 @@ static int LF_DrawLayer(lua_State* L,bool Get)
 }
 static int LF_GetTexCoord(lua_State* L)
 {
-    double V[4]={0,1,0,1}; const char* Keys[]={"__texLeft","__texRight","__texTop","__texBottom"};
-    for(int32 I=0;I<4;++I) { lua_getfield(L,1,Keys[I]); V[I]=luaL_optnumber(L,-1,V[I]); lua_pop(L,1); }
-    for(const int32 I:{0,2,0,3,1,2,1,3}) lua_pushnumber(L,V[I]); return 8;
+    double UV[8]; TextureCoordinates(L,1,UV); for(const double Value:UV) lua_pushnumber(L,Value); return 8;
 }
 
 // frame:CreateFontString(name, layer, inherits)
@@ -2007,7 +2027,7 @@ static int SetButtonTexture(lua_State* L,const FString& State)
         { Target->SetBrush(Source->GetBrush()); Target->SetRenderOpacity(Source->GetRenderOpacity()); }
     }
     else LF_TextureSetTexture(L);
-    C->FrameManager->RefreshButtonVisuals(Handle);
+    ApplyTextureStyle(L); C->FrameManager->RefreshButtonVisuals(Handle);
     return 0;
 }
 static int LF_SetNormalTexture(lua_State* L) { return SetButtonTexture(L,TEXT("Normal")); }
@@ -3224,9 +3244,10 @@ static const luaL_Reg FrameMethods[] =
 	// Texture methods on frames
 	{"SetRotation", [](lua_State* L) -> int { return 0; }},
 	{"SetSequence", [](lua_State* L) -> int { return 0; }},
-	{"SetDesaturated", [](lua_State* L) -> int { return 0; }},
-	{"IsDesaturated", [](lua_State* L) -> int { lua_pushboolean(L, 0); return 1; }},
-	{"SetBlendMode", [](lua_State* L) -> int { return 0; }},
+	{"SetDesaturated", LF_TextureDesaturated},
+	{"IsDesaturated", [](lua_State* L) -> int { lua_getfield(L,1,"__desaturated"); lua_pushboolean(L,lua_toboolean(L,-1)); return 1; }},
+	{"SetBlendMode", LF_TextureBlendMode},
+    {"GetBlendMode", [](lua_State* L) -> int { lua_getfield(L,1,"__blendMode"); if(lua_isnil(L,-1)) { lua_pop(L,1); lua_pushstring(L,"BLEND"); } return 1; }},
 	{"SetNonBlocking", [](lua_State* L) -> int { return 0; }},
 	{"SetDrawLayer", [](lua_State* L)->int { return LF_DrawLayer(L,false); }},
 	{"GetDrawLayer", [](lua_State* L)->int { return LF_DrawLayer(L,true); }},

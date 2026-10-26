@@ -128,7 +128,64 @@ additive_texture.set_editor_property('texture', unreal.load_asset('/Engine/Engin
 edit.connect_material_property(additive_texture, 'RGB', unreal.MaterialProperty.MP_EMISSIVE_COLOR)
 edit.connect_material_property(additive_texture, 'A', unreal.MaterialProperty.MP_OPACITY)
 
-for asset in [image, cooldown, additive]:
+# Shared texture regions retain atlas coordinates and alpha while the GPU
+# desaturates their pixels. Corners also support the stock 8-coordinate API.
+regions = []
+for name, blend_mode in [('M_WowUiRegion', unreal.BlendMode.BLEND_TRANSLUCENT),
+                         ('M_WowUiRegionAdd', unreal.BlendMode.BLEND_ADDITIVE)]:
+    region = material(name)
+    region.set_editor_property('blend_mode', blend_mode)
+    uv = node(region, unreal.MaterialExpressionTextureCoordinate)
+    axes = []
+    for axis in ['r', 'g']:
+        mask = node(region, unreal.MaterialExpressionComponentMask)
+        mask.set_editor_property(axis, True)
+        link(uv, mask, 'Input')
+        axes.append(mask)
+    corners = []
+    for key, x, y in [('UVTL', 0, 0), ('UVBL', 0, 1), ('UVTR', 1, 0), ('UVBR', 1, 1)]:
+        vector = node(region, unreal.MaterialExpressionVectorParameter)
+        vector.set_editor_property('parameter_name', key)
+        vector.set_editor_property('default_value', unreal.LinearColor(x, y, 0, 0))
+        mask = node(region, unreal.MaterialExpressionComponentMask)
+        mask.set_editor_property('r', True)
+        mask.set_editor_property('g', True)
+        link(vector, mask, 'Input')
+        corners.append(mask)
+    sides = []
+    for top, bottom in [(0, 1), (2, 3)]:
+        side = node(region, unreal.MaterialExpressionLinearInterpolate)
+        link(corners[top], side, 'A'); link(corners[bottom], side, 'B'); link(axes[1], side, 'Alpha')
+        sides.append(side)
+    coordinates = node(region, unreal.MaterialExpressionLinearInterpolate)
+    link(sides[0], coordinates, 'A'); link(sides[1], coordinates, 'B'); link(axes[0], coordinates, 'Alpha')
+    sample = node(region, unreal.MaterialExpressionTextureSampleParameter2D)
+    sample.set_editor_property('parameter_name', 'Image')
+    sample.set_editor_property('texture', unreal.load_asset('/Engine/EngineResources/WhiteSquareTexture'))
+    link(coordinates, sample, 'UVs')
+    desaturation = node(region, unreal.MaterialExpressionDesaturation)
+    link(sample, desaturation, 'None', 'RGB')
+    link(parameter(region, 'Desaturation', 0), desaturation, 'Fraction')
+    edit.connect_material_property(desaturation, '', unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    image_alpha = node(region, unreal.MaterialExpressionLinearInterpolate)
+    link(sample, image_alpha, 'A', 'A'); link(number(region, 1), image_alpha, 'B')
+    link(parameter(region, 'OpaqueImage', 0), image_alpha, 'Alpha')
+    delta = centered_uv(region)
+    distance = node(region, unreal.MaterialExpressionDotProduct)
+    link(delta, distance, 'A'); link(delta, distance, 'B')
+    inside = node(region, unreal.MaterialExpressionSubtract)
+    link(number(region, .25), inside, 'A'); link(distance, inside, 'B')
+    edge = node(region, unreal.MaterialExpressionMultiply)
+    link(inside, edge, 'A'); link(number(region, 256), edge, 'B')
+    circle = node(region, unreal.MaterialExpressionSaturate); link(edge, circle, 'Input')
+    shape = node(region, unreal.MaterialExpressionLinearInterpolate)
+    link(number(region, 1), shape, 'A'); link(circle, shape, 'B'); link(parameter(region, 'Circle', 0), shape, 'Alpha')
+    alpha = node(region, unreal.MaterialExpressionMultiply)
+    link(image_alpha, alpha, 'A'); link(shape, alpha, 'B')
+    edit.connect_material_property(alpha, '', unreal.MaterialProperty.MP_OPACITY)
+    regions.append(region)
+
+for asset in [image, cooldown, additive] + regions:
     edit.layout_material_expressions(asset)
     edit.recompile_material(asset)
     if not unreal.EditorAssetLibrary.save_loaded_asset(asset):

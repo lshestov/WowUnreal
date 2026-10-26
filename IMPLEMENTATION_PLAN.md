@@ -283,7 +283,11 @@ build, automation, native autologin and rendered screenshot verification):
     default and step inheritance, exact numeric callbacks, native pointer drag,
     disabled input and editable/replaced/removed thumb regions. Verified 76 tests,
     targeted regressions and 46 native steps/10 screenshots at 720p and 1080p.
-  - [ ] Shared texture desaturation and arbitrary UV coordinates for class panels.
+  - [x] Shared texture desaturation and arbitrary UV coordinates: preserve styles,
+    alpha, cropped/flipped/rotated coordinates, additive modes and portrait masks
+    through texture replacement. Own reproducible UI materials contain no game
+    images. Verified 77 tests, focused highlight regression, 14 native steps and
+    four screenshots including grayscale locked talents and circular portraits.
   - [ ] Glyph metadata/socket APIs, targeting/application/removal and original panel.
   - [ ] Live spell-rank replacement and complete class-window regression.
 - [ ] 4. Inventory: split/delete, compare/try-on, merchant/bank/mail/trade round trips.

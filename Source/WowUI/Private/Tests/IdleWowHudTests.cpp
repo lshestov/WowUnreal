@@ -18,6 +18,7 @@
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/Image.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Components/ProgressBar.h"
 #include "Components/Slider.h"
 #include "Components/TextBlock.h"
@@ -1038,6 +1039,50 @@ bool FUiIncrementalGc::RunTest(const FString&)
     TestTrue(TEXT("Incremental collection bounds transient memory"),Peak<F.Lua.GetMemoryLimit()*9/10);
     return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudTextureStyles,"WowUnreal.Hud.TextureStyles",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudTextureStyles::RunTest(const FString&)
+{
+    FString Path; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false;
+    FMpqManager Mpq; if(!Mpq.Initialize(Path)) return false;
+    FHudFixture F; F.Frames.SetMpqManager(&Mpq); FWowAssetCache Cache; F.Frames.SetAssetCache(&Cache);
+    TestTrue(TEXT("Desaturation keeps the editable region and crop state"),F.Lua.ExecuteString(TEXT(R"LUA(
+        StyleOwner=CreateFrame('Frame','StyleOwner',UIParent); StyleOwner:SetSize(100,100); StyleOwner:SetPoint('CENTER')
+        StyledIcon=StyleOwner:CreateTexture('StyledIcon','ARTWORK'); StyledIcon:SetSize(64,64); StyledIcon:SetPoint('CENTER')
+        StyledIcon:SetTexture('Interface\\Icons\\Ability_Kick'); StyledIcon:SetTexCoord(.1,.9,.2,.8); StyledIcon:SetAlpha(.4)
+        assert(StyledIcon:SetDesaturated(true) and StyledIcon:IsDesaturated())
+    )LUA")));
+    auto* Image=F.Frames.GetNamedTexture(TEXT("StyledIcon")); auto* Material=Image?Cast<UMaterialInstanceDynamic>(Image->GetBrush().GetResourceObject()):nullptr;
+    if(!TestNotNull(TEXT("Desaturation uses a real UI shader"),Material)) return false;
+    float Gray=0; FLinearColor Corner;
+    TestTrue(TEXT("Shader retains crop coordinates and desaturation"),Material->GetScalarParameterValue(FMaterialParameterInfo(TEXT("Desaturation")),Gray) && Gray==1 && Material->GetVectorParameterValue(FMaterialParameterInfo(TEXT("UVTL")),Corner) && Corner.Equals(FLinearColor(.1,.2,0,0),.001));
+    TestTrue(TEXT("Texture replacement retains style and eight-coordinate UVs round-trip"),F.Lua.ExecuteString(TEXT(R"LUA(
+        StyledIcon:SetTexture('Interface\\Icons\\INV_Misc_QuestionMark'); assert(StyledIcon:IsDesaturated() and math.abs(StyledIcon:GetAlpha()-.4)<.00001)
+        StyledIcon:SetTexCoord(0,1,1,1,0,0,1,0); local a,b,c,d,e,f,g,h=StyledIcon:GetTexCoord(); assert(a==0 and b==1 and c==1 and d==1 and e==0 and f==0 and g==1 and h==0)
+        StyledIcon:SetDesaturated(false); assert(not StyledIcon:IsDesaturated())
+    )LUA")));
+    Material=Cast<UMaterialInstanceDynamic>(Image->GetBrush().GetResourceObject());
+    TestTrue(TEXT("Arbitrary UVs stay active when desaturation is disabled"),Material && Material->GetScalarParameterValue(FMaterialParameterInfo(TEXT("Desaturation")),Gray) && Gray==0 && Material->GetVectorParameterValue(FMaterialParameterInfo(TEXT("UVTL")),Corner) && Corner==FLinearColor(0,1,0,0));
+    TestTrue(TEXT("Returning to rectangular coordinates restores direct texture rendering"),F.Lua.ExecuteString(TEXT("StyledIcon:SetTexCoord(1,0,0,1); assert(select(1,StyledIcon:GetTexCoord())==1)")) && Cast<UTexture2D>(Image->GetBrush().GetResourceObject()) && Image->GetRenderTransform().Scale.X==-1);
+    TestTrue(TEXT("Additive mode survives texture replacement"),F.Lua.ExecuteString(TEXT("StyledIcon:SetBlendMode('ADD'); StyledIcon:SetTexture('Interface\\\\Icons\\\\Ability_Kick'); assert(StyledIcon:GetBlendMode()=='ADD')")));
+    Material=Cast<UMaterialInstanceDynamic>(Image->GetBrush().GetResourceObject());
+    TestTrue(TEXT("Additive regions use the additive material without losing alpha"),Material && Material->Parent->GetName()==TEXT("M_WowUiRegionAdd") && FMath::IsNearlyEqual(Image->GetRenderOpacity(),.4f));
+    F.Lua.ExecuteString(TEXT("StyledIcon:SetBlendMode('BLEND')"));
+    auto* PortraitBase=LoadObject<UMaterialInterface>(nullptr,TEXT("/Game/Materials/M_WowUiImage.M_WowUiImage"));
+    auto* Portrait=UMaterialInstanceDynamic::Create(PortraitBase,Image); Portrait->SetTextureParameterValue(TEXT("Image"),F.Frames.LoadUITexture(TEXT("Interface\\Icons\\Ability_Kick"))); Portrait->SetScalarParameterValue(TEXT("Circle"),1);
+    auto Brush=Image->GetBrush(); Brush.SetResourceObject(Portrait); Image->SetBrush(Brush);
+    TestTrue(TEXT("Ordinary crop changes preserve existing portrait materials"),F.Lua.ExecuteString(TEXT("StyledIcon:SetTexCoord(0,1,0,1)")) && Image->GetBrush().GetResourceObject()==Portrait);
+    TestTrue(TEXT("A desaturated portrait preserves its circle and opaque render target"),F.Lua.ExecuteString(TEXT("StyledIcon:SetDesaturated(true)")));
+    Material=Cast<UMaterialInstanceDynamic>(Image->GetBrush().GetResourceObject()); float Circle=0,Opaque=0;
+    TestTrue(TEXT("Portrait mask remains in the shared material"),Material && Material->GetScalarParameterValue(FMaterialParameterInfo(TEXT("Circle")),Circle) && Circle==1 && Material->GetScalarParameterValue(FMaterialParameterInfo(TEXT("OpaqueImage")),Opaque) && Opaque==1);
+    TestTrue(TEXT("Button highlight blending remains editable after hover refresh"),F.Lua.ExecuteString(TEXT(R"LUA(
+        StyleButton=CreateFrame('Button','StyleButton',UIParent); StyleButton:SetSize(64,64); StyleButton:SetPoint('CENTER')
+        StyleButton:SetHighlightTexture('Interface\\Icons\\Ability_Kick'); StyleButton:GetHighlightTexture():SetBlendMode('BLEND'); StyleButton:LockHighlight()
+    )LUA")));
+    F.Frames.RefreshButtonVisuals(F.Frames.FindFrame(TEXT("StyleButton")));
+    TestTrue(TEXT("Hover state does not force an explicitly normal highlight back to additive"),Cast<UTexture2D>(F.Frames.GetNamedTexture(TEXT("StyleButtonHighlightTexture"))->GetBrush().GetResourceObject())!=nullptr);
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudSliderControls,"WowUnreal.Hud.SliderControls",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FHudSliderControls::RunTest(const FString&)
 {
