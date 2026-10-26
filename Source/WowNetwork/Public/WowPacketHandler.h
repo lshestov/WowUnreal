@@ -7,6 +7,8 @@
 
 DECLARE_DELEGATE_OneParam(FOnWowCombatLog,const FWowCombatEntry&);
 DECLARE_DELEGATE_RetVal_OneParam(uint32,FOnWowCombatFlags,uint64);
+DECLARE_DELEGATE_FourParams(FOnWowCastResult,uint64,uint32,uint8,bool);
+DECLARE_DELEGATE_ThreeParams(FOnWowCastState,uint64,uint32,uint8);
 
 DECLARE_MULTICAST_DELEGATE_FiveParams(FOnLoginVerifyWorld, uint32 /*MapId*/, float /*X*/, float /*Y*/, float /*Z*/, float /*Orientation*/);
 DECLARE_MULTICAST_DELEGATE_SixParams(FOnChatMessage, uint8 /*Type*/, uint32 /*Language*/, uint64 /*SenderGuid*/, const FString& /*SenderName*/, const FString& /*Message*/, const FString& /*Channel*/);
@@ -159,6 +161,13 @@ public:
     FWowCombatHistory CombatHistory;
     FOnWowCombatLog OnCombatLog;
     FOnWowCombatFlags OnResolveCombatFlags;
+    FOnWowCastResult OnCastResult;
+    FOnWowCastState OnCastState;
+    struct FCast {uint32 Spell=0; uint8 Counter=0; double Started=0,Ends=0; bool Channel=false;};
+    TMap<uint64,FCast> Casts;
+    TMap<uint8,uint32> LocalCastRequests;
+    uint8 PendingAttackCounter=0;
+    bool HasPendingAttackCast=false;
     void RecordCombat(FWowCombatEntry Entry);
 
     /** Known spell IDs (populated from SMSG_INITIAL_SPELLS) */

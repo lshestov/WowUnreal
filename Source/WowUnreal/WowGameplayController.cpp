@@ -2362,7 +2362,6 @@ void AWowGameplayController::OnSpellStart(uint64 CasterGuid, uint32 SpellId, uin
 		AddCombatMessage(Message, FLinearColor::Yellow);
 
 		// Fire spell casting events
-		FireUIEvent(TEXT("UNIT_SPELLCAST_START"), {TEXT("player")});
 		FireUIEvent(TEXT("CURRENT_SPELL_CAST_CHANGED"));
 
 		// Spawn hand glow effects for local player
@@ -2440,7 +2439,6 @@ void AWowGameplayController::OnSpellGo(uint64 CasterGuid, uint32 SpellId, uint32
 		RemoveCastGlowEffects();
 
 		// Fire spell completion events
-		FireUIEvent(TEXT("UNIT_SPELLCAST_SUCCEEDED"), {TEXT("player")});
 		FireUIEvent(TEXT("SPELL_UPDATE_COOLDOWN"));
 		FireUIEvent(TEXT("ACTIONBAR_UPDATE_COOLDOWN"));
 	}
@@ -4038,7 +4036,6 @@ void AWowGameplayController::OnSpellFailure(uint64 CasterGuid, uint32 SpellId, u
 		RemoveCastGlowEffects();
 
 		// Fire spell failure event
-		FireUIEvent(TEXT("UNIT_SPELLCAST_FAILED"), {TEXT("player")});
 
 		// TODO: Show error message based on failure reason
 	}

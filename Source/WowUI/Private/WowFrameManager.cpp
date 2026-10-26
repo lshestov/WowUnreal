@@ -2417,6 +2417,7 @@ void FWowFrameManager::DispatchClick(int64 Handle, const FString& Button, bool b
 
 	const FFrameEntry* Entry = Frames.Find(Handle);
 	if(Entry && Entry->Def.Type==EWowFrameType::CheckButton && Button==TEXT("LeftButton")) SetChecked(Handle,!GetChecked(Handle));
+    const FString PreviousButton=CurrentMouseButton; CurrentMouseButton=Button;
 
 	// Native secure action dispatch — emulates WoW's C++ SecureActionButton behavior.
 	// The FrameXML OnLoad for SecureActionButtonTemplate sets type="action" via Lua,
@@ -2512,6 +2513,7 @@ void FWowFrameManager::DispatchClick(int64 Handle, const FString& Button, bool b
 	}
 
 	EventSystem->RunFrameClickScript(Handle, TEXT("OnClick"), Button, bMouseDown);
+    CurrentMouseButton=PreviousButton;
 }
 
 bool FWowFrameManager::DispatchReceiveDrag(int64 Handle)

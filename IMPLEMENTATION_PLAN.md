@@ -400,7 +400,7 @@ build, automation, native autologin and rendered screenshot verification):
     and return, then 27-step and 31-step final split/cancel/count/geometry checks.
     QA peers use native authentication/Warden and are deleted through the server;
     original inventory and zero money are verified after each run. See Docs/Trade.md.
-- [ ] 5. Chat/combat/macros: hyperlinks, remaining combat events and macro execution families.
+- [?] 5. Chat/combat/macros: hyperlinks, remaining combat events and macro execution families.
   - [x] Native chat hyperlink areas from real text blocks, original click/hover
     signatures and default hyperlink-only mouse input, including wrapped links.
     Original item/spell references and player whisper editor; real GetSpell tuple,
@@ -415,7 +415,7 @@ build, automation, native autologin and rendered screenshot verification):
     Windows build, 103-test regression, focused geometry/API checks and native
     private-channel round trips with rendered roster/chat/menu captures.
     Zone channel selection depends on the actual area resolver in stage 6.
-  - [?] Remaining combat-log event families and original formatter integration.
+  - [x] Remaining combat-log event families and original formatter integration.
     Periodic/resource/aura/cast/failure/miss/interrupt/dispel/shield/split/execute,
     enchantment/party-kill/instant-kill and building events, plus actual totem and
     gas-cloud death types. Atomic multi-effect/aura records, full spell-go target
@@ -423,7 +423,14 @@ build, automation, native autologin and rendered screenshot verification):
     Localized failure tokens and DBC named description formulas. Verified Windows
     build, 104-test regression, focused families/filter/metadata cases and native
     periodic healing, application/refresh/removal, cast rejection, links and reload.
-  - [ ] Advanced macro execution families and acknowledgement-driven sequences.
+  - [?] Advanced macro execution families and acknowledgement-driven sequences.
+    Original MPQ sequence/random managers, matching spell/counter acknowledgements,
+    target/combat/time/modifier resets, dynamic action icons and additional
+    conditions. Native item-target/equipment/aura/form/cast/channel commands,
+    typed cast events and distinct channel cancellation packets. Verified Windows
+    build, 106-test regression (two existing warnings), focused request/reset
+    checks and a native 35-step/five-image round trip with exact fixture cleanup.
+    See Docs/Macros.md.
 - [ ] 6. Maps: points of interest, tracking, interior minimaps and original map bootstrap.
   - [ ] Resolve actual zone/subzone from streamed terrain areas and join/replace
     built-in zone channels using their real DBC definitions and server replies.

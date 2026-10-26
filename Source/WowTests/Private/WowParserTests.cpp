@@ -23,20 +23,13 @@
 #include "WowInventoryManager.h"
 #include "WowOpcodes.h"
 #include "Components/CanvasPanel.h"
+#include "../../WowUI/Private/LuaApi/LuaApiRegistry.h"
 
 #if __has_include("lua.h")
 extern "C" {
 #include "lua.h"
 }
 #endif
-
-struct FWowLuaContext
-{
-    class FWowEntityManager* EntityManager = nullptr;
-    class UWowConnectionManager* ConnectionManager = nullptr;
-    class FWowEventSystem* EventSystem = nullptr;
-    class FWowFrameManager* FrameManager = nullptr;
-};
 
 // ---- Helper: shared MPQ manager for data-driven tests ----
 namespace WowTestUtils
@@ -890,6 +883,36 @@ bool FMailPackets::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMacroCastPackets,"WowUnreal.UI.MacroCastPackets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FMacroCastPackets::RunTest(const FString&)
+{
+    TStrongObjectPtr<UWowConnectionManager> C(NewObject<UWowConnectionManager>()); auto Socket=WowTestUtils::AttachTestWorldSocket(*C,2); auto& H=C->PacketHandler; H.EntityManager.LocalPlayerGuid=1;
+    TArray<TPair<uint32,uint8>> Sent; struct FResult {uint64 Caster; uint32 Spell; uint8 Counter; bool Success;}; TArray<FResult> Results;
+    C->OnLocalCastSent.BindLambda([&](uint32 Spell,uint8 Count){Sent.Add({Spell,Count});}); H.OnCastResult.BindLambda([&](uint64 Caster,uint32 Spell,uint8 Count,bool Success){Results.Add({Caster,Spell,Count,Success});});
+    uint32 Opcode=0; TArray<uint8> Payload;
+    C->SendCastSpell(78,2); TestTrue(TEXT("Cast request exposes the exact serialized counter"),WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload) && Opcode==WowOpcode::CMSG_CAST_SPELL && Payload[0]==0 && Sent.Num()==1 && Sent[0].Key==78 && Sent[0].Value==0);
+    C->SendUseItem(255,23,0x400000000000000aULL,8690,1); TestTrue(TEXT("Item use shares the session counter and retains full item identity"),WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload) && Opcode==WowOpcode::CMSG_USE_ITEM && Payload[2]==1 && Sent.Num()==2 && Sent[1].Key==8690 && Sent[1].Value==1);
+    C->SendAttackSwing(2); TestTrue(TEXT("Attack start reserves a confirmation identity"),WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload) && Opcode==WowOpcode::CMSG_ATTACKSWING && Sent.Last().Key==6603 && Sent.Last().Value==2);
+    TArray<uint8> P; const auto U32=[&](uint32 V){P.Append(reinterpret_cast<const uint8*>(&V),4);}; const auto U64=[&](uint64 V){P.Append(reinterpret_cast<const uint8*>(&V),8);}; const auto Guid=[&](uint64 V){uint8 Mask=0; TArray<uint8> Bytes; for(int32 I=0;I<8;++I) if(uint8 B=V>>(8*I)) {Mask|=1<<I; Bytes.Add(B);} P.Add(Mask); P.Append(Bytes);};
+    U64(3); U64(2); H.HandlePacket(WowOpcode::SMSG_ATTACKSTART,P); TestEqual(TEXT("Other units do not acknowledge the local attack"),Results.Num(),0);
+    P.Reset(); U64(1); U64(2); H.HandlePacket(WowOpcode::SMSG_ATTACKSTART,P); TestTrue(TEXT("Server attack start confirms the exact local request"),Results.Num()==1 && Results[0].Spell==6603 && Results[0].Counter==2 && Results[0].Success);
+    P.Reset(); Guid(1); Guid(1); P.Add(0); U32(78); U32(0); U32(123); P.Add(1); U64(2); P.Add(0); U32(2); Guid(2);
+    auto Short=P; Short.Pop(); H.HandlePacket(WowOpcode::SMSG_SPELL_GO,Short); TestEqual(TEXT("A partial success packet cannot advance a macro"),Results.Num(),1);
+    H.HandlePacket(WowOpcode::SMSG_SPELL_GO,P); TestTrue(TEXT("Spell success retains cast counter zero"),Results.Num()==2 && Results[1].Caster==1 && Results[1].Spell==78 && Results[1].Counter==0 && Results[1].Success);
+    P.Reset(); P.Add(1); U32(8690); P.Add(85); H.HandlePacket(0x130,P); TestTrue(TEXT("Authoritative rejection retains its counter and failure bit"),Results.Num()==3 && Results[2].Spell==8690 && Results[2].Counter==1 && !Results[2].Success);
+    P.Reset(); Guid(1); U32(740); U32(8000); H.HandlePacket(0x139,P); TestTrue(TEXT("Real channel start populates cast state"),H.Casts.Contains(1) && H.Casts[1].Channel && H.Casts[1].Spell==740);
+    FWowLuaVM Lua; Lua.Initialize(); FWowLuaContext Context; Context.ConnectionManager=C.Get(); Context.EntityManager=&H.EntityManager;
+    lua_pushlightuserdata(Lua.GetState(),&Context); lua_setfield(Lua.GetState(),LUA_REGISTRYINDEX,"WowLuaContext");
+    TestTrue(TEXT("Cancel channel uses its separate four-byte native request"),Lua.ExecuteString(TEXT("SpellStopCasting()")) && WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload) && Opcode==0x13B && Payload.Num()==4 && Payload[0]==(740&0xff) && Payload[1]==(740>>8));
+    P.Reset(); Guid(1); U32(0); H.HandlePacket(0x13A,P); TestFalse(TEXT("Server channel stop clears active state"),H.Casts.Contains(1));
+    H.Casts.Add(1,{78,7,0,5,false});
+    TestTrue(TEXT("Cancel cast keeps its request counter and spell identity"),Lua.ExecuteString(TEXT("SpellStopCasting()")) && WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload) && Opcode==0x12F && Payload.Num()==5 && Payload[0]==7 && Payload[1]==78);
+    lua_pushnil(Lua.GetState()); lua_setfield(Lua.GetState(),LUA_REGISTRYINDEX,"WowLuaContext"); Lua.Shutdown();
+    C->NextSpellCastCount=255; C->SendCastSpell(78,2); C->SendCastSpell(78,2);
+    TestTrue(TEXT("Session cast counter wraps as one unsigned byte"),Sent[Sent.Num()-2].Value==255 && Sent.Last().Value==0);
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChannelPackets,"WowUnreal.UI.ChannelPackets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FChannelPackets::RunTest(const FString&)
 {
@@ -1437,6 +1460,18 @@ bool FLuaTargetUnitResolvesTargetTarget::RunTest(const FString& Parameters)
         }
     }
 
+    FWowFrameManager Frames; FWowEventSystem Events;
+    UCanvasPanel* Canvas=NewObject<UCanvasPanel>(); Frames.Initialize(Canvas);
+    Events.SetLuaVM(&LuaVM); Events.SetFrameManager(&Frames); Frames.SetEventSystem(&Events);
+    Context.FrameManager=&Frames; Context.EventSystem=&Events;
+    Events.CreateFrameObject(Frames.FindFrame(TEXT("UIParent")),TEXT("UIParent"));
+    TestTrue(TEXT("Only actual selection changes emit target events"),LuaVM.ExecuteString(TEXT(R"LUA(
+        TargetChanges=0; local f=CreateFrame('Frame'); f:RegisterEvent('PLAYER_TARGET_CHANGED')
+        f:SetScript('OnEvent',function() TargetChanges=TargetChanges+1 end)
+        TargetUnit('target'); assert(TargetChanges==0)
+        ClearTarget(); assert(TargetChanges==1); ClearTarget(); assert(TargetChanges==1)
+    )LUA")));
+    TestEqual(TEXT("ClearTarget updates the native selection"),Connection->GetTargetGuid(),int64(0));
     lua_pushnil(LuaVM.GetState());
     lua_setfield(LuaVM.GetState(), LUA_REGISTRYINDEX, "WowLuaContext");
     LuaVM.Shutdown();

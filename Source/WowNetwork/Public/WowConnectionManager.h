@@ -16,6 +16,7 @@ DECLARE_MULTICAST_DELEGATE_TwoParams(FOnLogoutResponse, uint32, bool);
 DECLARE_MULTICAST_DELEGATE(FOnLogoutComplete);
 DECLARE_MULTICAST_DELEGATE(FOnWowCursorChanged);
 DECLARE_DELEGATE_RetVal_OneParam(bool,FOnWowMacroUse,uint32);
+DECLARE_DELEGATE_TwoParams(FOnWowLocalCastSent,uint32,uint8);
 
 enum class EWowActionInvocationKind : uint8
 {
@@ -86,6 +87,7 @@ public:
     void PickupSpellCursor(int32 SpellId, const FString& BookType = TEXT("spell"));
     void PickupMacroCursor(uint32 Id);
     FOnWowMacroUse OnMacroUse;
+    FOnWowLocalCastSent OnLocalCastSent;
     void PickupActionCursor(int32 SlotIndex);
     void PickupBagItemCursor(uint8 SourceBag, uint8 SourceSlot, int32 ItemId, const FString& ItemLink = TEXT(""), uint32 SplitCount = 0);
     void PickupInventoryItemCursor(uint8 InventorySlot, int32 ItemId, const FString& ItemLink = TEXT(""));
@@ -187,7 +189,7 @@ public:
     void CancelItemSpell();
     bool TargetItemSpell(uint64 ItemGuid,bool Trade=false);
     void SendRemoveGlyph(uint32 Socket);
-    static TArray<uint8> BuildUseItemPacket(uint8 Bag,uint8 Slot,uint64 ItemGuid,uint32 SpellId,uint64 ExplicitTargetGuid=0,uint32 GlyphSocket=0);
+    static TArray<uint8> BuildUseItemPacket(uint8 Bag,uint8 Slot,uint64 ItemGuid,uint32 SpellId,uint64 ExplicitTargetGuid=0,uint32 GlyphSocket=0,uint8 CastCount=0);
     void SendSetTitle(int32 TitleIndex);
 
     /** Auto-store an equipped or bag item into the requested destination bag. */
@@ -333,6 +335,7 @@ public:
     UPROPERTY(BlueprintAssignable) FOnWowError OnError;
     UPROPERTY(BlueprintAssignable) FOnCharCreateResult OnCharCreateResult;
 private:
+    uint8 NextSpellCastCount=0;
     TSet<uint32> RequestedItems;
     enum class ECursorPayloadType : uint8
     {

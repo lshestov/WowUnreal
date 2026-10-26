@@ -8,4 +8,6 @@ public:
     static void LoadSavedVariables(lua_State* L);
     static bool RunWireMacro(lua_State* L,uint32 Id);
     static bool SetActionTooltip(lua_State* L,int64 Handle,uint32 Id);
+    static void CastSent(lua_State* L,uint32 Spell,uint8 Counter);
+    static void CastResult(lua_State* L,uint32 Spell,uint8 Counter,bool Success);
 };

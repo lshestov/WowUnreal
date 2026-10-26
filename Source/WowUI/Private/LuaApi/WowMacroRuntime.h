@@ -74,9 +74,12 @@ function GetMacroSpell(id)
     local value=row(id); if not value then return end
     if value.spell then local name,rank=GetSpellInfo(value.spell); return name,rank,value.spell end
     for line in value.body:gmatch('[^\r\n]+') do
-        local action=line:match('^%s*/cast%s+(.+)') or line:match('^%s*#showtooltip%s+(.+)')
+        local sequence=line:match('^%s*/castsequence%s+(.+)')
+        local random=line:match('^%s*/castrandom%s+(.+)')
+        local action=line:match('^%s*/cast%s+(.+)') or line:match('^%s*#showtooltip%s+(.+)') or sequence or random
         if action then
             action=SecureCmdOptionParse(action)
+            if sequence and action then action=type(QueryCastSequence)=='function' and select(3,QueryCastSequence(action)) or action:gsub('^reset=[^%s]+%s*',''):match('^%s*([^,]+)') elseif random and action then action=action:match('^%s*([^,]+)') end
             local spell=action and _IdleWowResolveMacroSpell(action)
             if spell then local name,rank=GetSpellInfo(spell); return name,rank,spell end
         end
@@ -86,8 +89,9 @@ function GetMacroItem(id)
     local value=row(id); if not value then return end
     local item=value.item
     if not item then for line in value.body:gmatch('[^\r\n]+') do
-        local action=line:match('^%s*/use%s+(.+)')
-        if action then item=SecureCmdOptionParse(action); if item then break end end
+        local sequence=line:match('^%s*/castsequence%s+(.+)')
+        local action=line:match('^%s*/use%s+(.+)') or sequence
+        if action then item=SecureCmdOptionParse(action); if sequence and item then item=type(QueryCastSequence)=='function' and select(2,QueryCastSequence(item)) or nil end; if item then break end end
     end end
     if item then local id=_IdleWowResolveMacroItem(tostring(item)); if id then local name,link=GetItemInfo(id); return name,link end end
 end
@@ -109,7 +113,7 @@ function GetMacroIconIndex(id) local value=row(id); if value then for i=1,GetNum
 
 local function truth(value) return value~=nil and value~=false and value~=0 end
 local function condition(text,target)
-    local key,arg=text:match('^([^:]+):?(.*)$'); if not key then return false end
+    local key,arg=text:match('^([^:]+):?(.*)$'); if not key then return false end; key=key:lower()
     if key:sub(1,1)=='@' then return true end
     if key=='target' then return true end
     local negate=key:sub(1,2)=='no'; if negate then key=key:sub(3) end
@@ -118,6 +122,8 @@ local function condition(text,target)
     elseif key=='help' then result=UnitCanAssist('player',target)
     elseif key=='harm' then result=UnitCanAttack('player',target)
     elseif key=='dead' then result=UnitIsDeadOrGhost(target)
+    elseif key=='party' then result=UnitInParty(target)
+    elseif key=='raid' then result=UnitInRaid(target)
     elseif key=='combat' then result=UnitAffectingCombat('player')
     elseif key=='mod' or key=='modifier' then
         if arg=='' then result=truth(IsShiftKeyDown()) or truth(IsControlKeyDown()) or truth(IsAltKeyDown())
@@ -125,7 +131,22 @@ local function condition(text,target)
     elseif key=='stance' or key=='form' then
         local form=GetShapeshiftForm()
         if arg=='' then result=form>0 else for value in arg:gmatch('[^/]+') do if tonumber(value)==form then result=true end end end
-    elseif key=='pet' then if arg~='' then return false end; result=UnitExists('pet')
+    elseif key=='pet' then
+        result=UnitExists('pet'); if arg~='' then result=false; local name,family=UnitName('pet'),UnitCreatureFamily('pet'); for value in arg:gmatch('[^/]+') do if name and name:lower()==value:lower() or family and family:lower()==value:lower() then result=true end end end
+    elseif key=='flyable' then result=IsFlyableArea()
+    elseif key=='button' or key=='btn' then
+        local button=_IdleWowMacroButton(); local number=({LeftButton=1,RightButton=2,MiddleButton=3,Button4=4,Button5=5})[button] or tonumber(button)
+        if arg=='' then result=number~=nil else for value in arg:gmatch('[^/]+') do if tonumber(value)==number or value:lower()==tostring(button):lower() then result=true end end end
+    elseif key=='actionbar' or key=='bar' or key=='bonusbar' or key=='spec' then
+        local current=key=='bonusbar' and GetBonusBarOffset() or key=='spec' and GetActiveTalentGroup() or GetActionBarPage()
+        if arg=='' then result=current and current>0 else for value in arg:gmatch('[^/]+') do if tonumber(value)==current then result=true end end end
+    elseif key=='equipped' or key=='worn' then for value in arg:gmatch('[^/]+') do if IsEquippedItemType(value) then result=true end end
+    elseif key=='channeling' then
+        local name=UnitChannelInfo('player'); result=name~=nil
+        if arg~='' then result=false; for value in arg:gmatch('[^/]+') do if name and (name:lower()==value:lower() or name==GetSpellInfo(tonumber(value) or 0)) then result=true end end end
+    elseif key=='vehicleui' then result=UnitHasVehicleUI('player')
+    elseif key=='unithasvehicleui' then result=UnitHasVehicleUI(target)
+    elseif key=='cursor' then local kind=GetCursorInfo(); result=kind~=nil; if arg~='' then result=false; for value in arg:gmatch('[^/]+') do if kind and kind:lower()==value:lower() then result=true end end end
     elseif key=='mounted' then result=IsMounted()
     elseif key=='stealth' then result=IsStealthed()
     elseif key=='swimming' then result=IsSwimming()
@@ -140,6 +161,8 @@ local function condition(text,target)
     else return false end
     result=truth(result); return negate and not result or not negate and result
 end
+)LUA"
+R"LUA(
 function SecureCmdOptionParse(options)
     options=tostring(options or '')
     for clause in (options..';'):gmatch('(.-);') do

@@ -206,7 +206,7 @@ void FWowPacketHandler::HandlePacket(uint16 Opcode, const TArray<uint8>& Data)
         FPacketReader R(Data); if(R.CanRead(9)) { R.ReadFloat(); R.ReadU8(); const uint32 Count=R.ReadU32(); if(Count<=128 && R.CanRead(Count*8)) for(uint32 N=0;N<Count;++N) { const uint32 I=R.ReadU32(); const int32 Standing=int32(R.ReadU32()); if(Reputations.IsValidIndex(I)) Reputations[I].Standing=Standing; } }
     }
     if(Opcode==0x03F0 || Opcode==0x03F1 || Opcode==0x03F2) {FPacketReader Users(Data); HandleChannelUserList(Users,Opcode==0x03F1);}
-    if(Opcode==0x0032 || Opcode==0x0130 || Opcode==0x014F || Opcode==0x0151 || Opcode==0x01D7 || Opcode==0x01F5 || Opcode==0x024B || Opcode==0x024C || Opcode==0x024E || Opcode==0x024F || Opcode==0x0260 || Opcode==0x0262 || Opcode==0x0263 || Opcode==0x027B || Opcode==0x032F || Opcode==0x0333)
+    if(Opcode==0x0032 || Opcode==0x0130 || Opcode==0x0139 || Opcode==0x013A || Opcode==0x014F || Opcode==0x0151 || Opcode==0x01D7 || Opcode==0x01F5 || Opcode==0x024B || Opcode==0x024C || Opcode==0x024E || Opcode==0x024F || Opcode==0x0260 || Opcode==0x0262 || Opcode==0x0263 || Opcode==0x027B || Opcode==0x032F || Opcode==0x0333)
     {FPacketReader Combat(Data); HandleCombatPacket(Opcode,Combat); return;}
     HandlerFunc* Found = Handlers.Find(Opcode);
     if(Opcode==0x01BA && Data.Num()>=4) { FPacketReader BankResult(Data); OnBankSlotResult.Broadcast(BankResult.ReadU32()); }
@@ -744,7 +744,7 @@ void FWowPacketHandler::HandleDestroyObject(FPacketReader& R)
     // Death animation is triggered by health→0 in OnEntityUpdated.
     // Always remove from entity manager — the gameplay controller's OnEntityDestroyed
     // will clean up the actor.
-    EntityManager.Remove(Guid);
+    Casts.Remove(Guid); EntityManager.Remove(Guid);
     EntitiesDestroyed++;
 }
 
@@ -1009,18 +1009,22 @@ void FWowPacketHandler::HandleSpellCooldown(FPacketReader& R)
 
 void FWowPacketHandler::HandleAttackStart(FPacketReader& R)
 {
+    if(!R.CanRead(16) || R.Remaining()!=16) return;
     uint64 AttackerGuid = R.ReadU64();
     uint64 VictimGuid = R.ReadU64();
     UE_LOG(LogWowPacket, Log, TEXT("SMSG_ATTACKSTART: attacker=%llu victim=%llu"), AttackerGuid, VictimGuid);
+    if(AttackerGuid==EntityManager.LocalPlayerGuid && HasPendingAttackCast) {HasPendingAttackCast=false; OnCastResult.ExecuteIfBound(AttackerGuid,6603,PendingAttackCounter,true);}
     OnAttackStart.Broadcast(AttackerGuid, VictimGuid);
 }
 
 void FWowPacketHandler::HandleAttackStop(FPacketReader& R)
 {
+    if(!R.CanRead(2)) return;
     uint64 AttackerGuid = R.ReadPackedGuid();
     uint64 VictimGuid = R.ReadPackedGuid();
-    // uint32 unknown = R.ReadU32(); // sometimes present
+    if(!R.CanRead(4)) return; R.ReadU32(); if(R.Remaining()) return;
     UE_LOG(LogWowPacket, Log, TEXT("SMSG_ATTACKSTOP: attacker=%llu victim=%llu"), AttackerGuid, VictimGuid);
+    if(AttackerGuid==EntityManager.LocalPlayerGuid && HasPendingAttackCast) {HasPendingAttackCast=false; OnCastResult.ExecuteIfBound(AttackerGuid,6603,PendingAttackCounter,false);}
     OnAttackStop.Broadcast(AttackerGuid, VictimGuid);
 }
 

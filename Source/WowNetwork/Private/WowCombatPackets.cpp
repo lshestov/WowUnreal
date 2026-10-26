@@ -60,6 +60,7 @@ void FWowPacketHandler::RecordSpellCombat(FWowCombatEntry Entry)
 }
 void FWowPacketHandler::RecordUnitDeath(uint64 Target)
 {
+    Casts.Remove(Target);
     FWowCombatEntry E; E.Event=TEXT("UNIT_DIED"); E.Destination=Target;
     if(const auto* Entity=EntityManager.Find(Target))
     {
@@ -73,15 +74,16 @@ void FWowPacketHandler::HandleSpellStart(FPacketReader& R)
 {
     uint64 Object=0,Caster=0,Target=0;
     if(!Guid(R,Object) || !Guid(R,Caster) || !R.CanRead(13)) return;
-    R.ReadU8(); const uint32 Spell=R.ReadU32(),Flags=R.ReadU32(); const int32 Time=int32(R.ReadU32()); if(!Targets(R,Target)) return;
+    const uint8 Counter=R.ReadU8(); const uint32 Spell=R.ReadU32(),Flags=R.ReadU32(); const int32 Time=int32(R.ReadU32()); if(!Targets(R,Target)) return;
+    if(Time>0) {const double Now=FPlatformTime::Seconds(); if(Casts.Num()>256) for(auto It=Casts.CreateIterator();It;++It) if(It.Value().Ends<Now) It.RemoveCurrent(); Casts.Add(Caster,{Spell,Counter,Now,Now+Time/1000.,false});}
     if(Time>0) {FWowCombatEntry E; E.Source=Caster; E.Spell=Spell; E.Event=TEXT("SPELL_CAST_START"); RecordSpellCombat(MoveTemp(E));}
-    OnSpellStart.Broadcast(Caster,Spell,Flags,Time);
+    OnCastState.ExecuteIfBound(Caster,Spell,0); OnSpellStart.Broadcast(Caster,Spell,Flags,Time);
 }
 void FWowPacketHandler::HandleSpellGo(FPacketReader& R)
 {
     uint64 Object=0,Caster=0,Target=0;
     if(!Guid(R,Object) || !Guid(R,Caster) || !R.CanRead(14)) return;
-    R.ReadU8(); const uint32 Spell=R.ReadU32(),Flags=R.ReadU32(); R.ReadU32(); const uint8 Hits=R.ReadU8();
+    const uint8 Counter=R.ReadU8(); const uint32 Spell=R.ReadU32(),Flags=R.ReadU32(); R.ReadU32(); const uint8 Hits=R.ReadU8();
     if(!R.CanRead(int32(Hits)*8+1)) return; for(uint8 I=0;I<Hits;++I) {const uint64 Hit=R.ReadU64(); if(!Target) Target=Hit;}
     const uint8 Misses=R.ReadU8(); TArray<FWowCombatEntry> Missed;
     const auto* Definition=FDbcStore::Get().Spells().GetById(Spell);
@@ -97,13 +99,15 @@ void FWowPacketHandler::HandleSpellGo(FPacketReader& R)
     bool OpenLock=false; if(Definition) for(uint32 Effect:Definition->Effect) OpenLock|=Effect==33;
     if(!HasCastTime && !OpenLock) {FWowCombatEntry E; E.Source=Caster; E.Destination=Target; E.Spell=Spell; E.Event=TEXT("SPELL_CAST_SUCCESS"); RecordSpellCombat(MoveTemp(E));}
     for(auto& E:Missed) RecordSpellCombat(MoveTemp(E));
-    OnSpellGo.Broadcast(Caster,Spell,Flags);
+    if(const auto* Active=Casts.Find(Caster); Active && Active->Spell==Spell && Active->Counter==Counter) Casts.Remove(Caster);
+    OnCastResult.ExecuteIfBound(Caster,Spell,Counter,true); OnCastState.ExecuteIfBound(Caster,Spell,1); OnSpellGo.Broadcast(Caster,Spell,Flags);
 }
 void FWowPacketHandler::HandleSpellFailure(FPacketReader& R)
 {
-    uint64 Caster=0; if(!Guid(R,Caster) || !R.CanRead(6)) return; R.ReadU8(); const uint32 Spell=R.ReadU32(); const uint8 Reason=R.ReadU8();
+    uint64 Caster=0; if(!Guid(R,Caster) || !R.CanRead(6)) return; const uint8 Counter=R.ReadU8(); const uint32 Spell=R.ReadU32(); const uint8 Reason=R.ReadU8();
     RecordCastFailure(Caster,Spell,Reason);
-    OnSpellFailure.Broadcast(Caster,Spell,Reason);
+    if(const auto* Active=Casts.Find(Caster); Active && Active->Spell==Spell) Casts.Remove(Caster);
+    OnCastResult.ExecuteIfBound(Caster,Spell,Counter,false); OnCastState.ExecuteIfBound(Caster,Spell,2); OnSpellFailure.Broadcast(Caster,Spell,Reason);
 }
 void FWowPacketHandler::RecordCastFailure(uint64 Caster,uint32 Spell,uint8 Reason)
 {
@@ -165,7 +169,15 @@ void FWowPacketHandler::HandleCombatPacket(uint32 Opcode,FPacketReader& R)
 {
     FWowCombatEntry Base; TArray<FWowCombatEntry> Entries;
     const auto Push=[&](const FString& Event){Base.Event=Event; Entries.Add(Base);};
-    if(Opcode==0x0032)
+    if(Opcode==0x0139 || Opcode==0x013A)
+    {
+        uint64 Caster=0; if(!Guid(R,Caster) || !R.CanRead(Opcode==0x0139?8:4)) return;
+        const uint32 Spell=Opcode==0x0139?R.ReadU32():(Casts.Find(Caster)?Casts[Caster].Spell:0); const uint32 Duration=R.ReadU32(); if(R.Remaining()) return;
+        if(!Duration) Casts.Remove(Caster);
+        else if(Spell) {const double Now=FPlatformTime::Seconds(); const auto* Old=Casts.Find(Caster); Casts.Add(Caster,{Spell,0,Old?Old->Started:Now,Now+Duration/1000.,true});}
+        OnCastState.ExecuteIfBound(Caster,Spell,!Duration?5:Opcode==0x139?3:4); return;
+    }
+    else if(Opcode==0x0032)
     {
         uint64 Owner=0; if(!Guid(R,Base.Destination) || !Guid(R,Base.Source) || !Guid(R,Owner) || !R.CanRead(8)) return;
         const int32 Damage=int32(R.ReadU32()); Base.Spell=R.ReadU32(); const auto* Spell=FDbcStore::Get().Spells().GetById(Base.Spell); const uint32 School=Spell?Spell->SchoolMask:1;
@@ -174,9 +186,9 @@ void FWowPacketHandler::HandleCombatPacket(uint32 Opcode,FPacketReader& R)
     }
     else if(Opcode==0x0130)
     {
-        if(!R.CanRead(6)) return; R.ReadU8(); const uint32 Spell=R.ReadU32(); const uint8 Reason=R.ReadU8();
+        if(!R.CanRead(6)) return; const uint8 Counter=R.ReadU8(); const uint32 Spell=R.ReadU32(); const uint8 Reason=R.ReadU8();
         // Selected failures include additional numeric parameters for the error UI.
-        RecordCastFailure(EntityManager.LocalPlayerGuid,Spell,Reason); OnSpellFailure.Broadcast(EntityManager.LocalPlayerGuid,Spell,Reason); return;
+        RecordCastFailure(EntityManager.LocalPlayerGuid,Spell,Reason); if(const auto* Active=Casts.Find(EntityManager.LocalPlayerGuid); Active && Active->Spell==Spell) Casts.Remove(EntityManager.LocalPlayerGuid); OnCastResult.ExecuteIfBound(EntityManager.LocalPlayerGuid,Spell,Counter,false); OnCastState.ExecuteIfBound(EntityManager.LocalPlayerGuid,Spell,2); OnSpellFailure.Broadcast(EntityManager.LocalPlayerGuid,Spell,Reason); return;
     }
     else if(Opcode==0x024E) // periodic aura log; every effect is validated before publishing any
     {

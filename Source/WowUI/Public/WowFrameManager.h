@@ -225,6 +225,7 @@ public:
 	bool IsFrameKeyboardEnabled(int64 Handle) const;
 	bool IsFrameMouseWheelEnabled(int64 Handle) const;
 	FVector2D GetPointerPosition() const { return LastPointerPosition; }
+    FString CurrentMouseButton=TEXT("LeftButton");
 	bool DispatchMouseWheel(int64 Handle,float Delta);
 	bool IsFrameClickRegistered(int64 Handle, const FString& Button, bool bMouseDown) const;
 

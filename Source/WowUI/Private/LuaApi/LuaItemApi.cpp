@@ -195,6 +195,11 @@ bool Position(FWowLuaContext* C,int32 Bag,int32 Slot,uint8& WireBag,uint8& WireS
     WireBag=Bag==0 || Bag==-1?255:Bag<=4?Bag+18:Bag+62;
     WireSlot=Slot-1+(Bag==0?23:Bag==-1?39:0); return true;
 }
+bool ItemTarget(lua_State* L,int32 Index,uint64& Target)
+{
+    Target=0; if(!lua_isstring(L,Index)) return true;
+    const auto* Unit=WowLuaApi::ResolveUnitToken(L,Index); if(!Unit) return false; Target=Unit->Guid; return true;
+}
 int Pickup(lua_State* L)
 {
     auto* C=WowLuaApi::GetContext(L); if(!C || !C->ConnectionManager) return 0;
@@ -247,7 +252,7 @@ int Use(lua_State* L)
         C->ConnectionManager->SendSellItem(H.Merchant.Guid,Item->Guid,0); return 0;
     }
     if(T && T->InventoryType) C->ConnectionManager->SendAutoEquipItem(B,S);
-    else if(T && T->UseSpellId) C->ConnectionManager->SendUseItem(B,S,Item->Guid,T->UseSpellId);
+    else if(T && T->UseSpellId) {uint64 Target; if(ItemTarget(L,3,Target)) C->ConnectionManager->SendUseItem(B,S,Item->Guid,T->UseSpellId,Target);}
     return 0;
 }
 int Split(lua_State* L)
@@ -561,7 +566,10 @@ void WowLuaApi::RegisterItemApi(lua_State* L)
         { const uint32 Action=C->ConnectionManager->PacketHandler.ActionButtons[I]; if((Action>>24)==128) for(const auto* Item:C->EntityManager->GetInventoryItems()) if(Item->Entry==(Action&0xffffff)) Count+=FMath::Max(Item->GetStackCount(),1); }
         lua_pushinteger(S,Count); return 1;
     });
-    RegisterItem(L,"UseInventoryItem",[](lua_State* S)->int { auto* C=GetContext(S); const int32 Slot=luaL_checkinteger(S,1); auto* Item=Equipped(C,Slot); const auto* T=Item?Template(C,Item->Entry):nullptr; if(C && C->ConnectionManager && T && T->UseSpellId) C->ConnectionManager->SendUseItem(255,Slot-1,Item->Guid,T->UseSpellId); return 0; });
+    RegisterItem(L,"UseInventoryItem",[](lua_State* S)->int { auto* C=GetContext(S); const int32 Slot=luaL_checkinteger(S,1); auto* Item=Equipped(C,Slot); const auto* T=Item?Template(C,Item->Entry):nullptr; uint64 Target; if(C && C->ConnectionManager && T && T->UseSpellId && ItemTarget(S,2,Target)) C->ConnectionManager->SendUseItem(255,Slot-1,Item->Guid,T->UseSpellId,Target); return 0; });
+    RegisterItem(L,"GetItemSpell",[](lua_State* S)->int {auto* C=GetContext(S); const auto* T=Template(C,ItemId(S,1)); const auto* Spell=T?FDbcStore::Get().Spells().GetById(T->UseSpellId):nullptr; if(!Spell) return 0; lua_pushstring(S,TCHAR_TO_UTF8(*Spell->SpellName)); lua_pushinteger(S,T->UseSpellId); return 2;});
+    RegisterItem(L,"IsEquippableItem",[](lua_State* S)->int {const auto* T=Template(GetContext(S),ItemId(S,1)); lua_pushboolean(S,T && T->InventoryType!=0); return 1;});
+    RegisterItem(L,"IsEquippedItem",[](lua_State* S)->int {auto* C=GetContext(S); const uint32 Id=ItemId(S,1); const auto* P=C && C->EntityManager?C->EntityManager->GetLocalPlayer():nullptr; bool Found=false; if(P) for(uint8 I=0;I<19;++I) if(const auto* Item=C->EntityManager->FindItem(P->GetEquipmentItemGuid(I))) Found|=Item->Entry==Id; lua_pushboolean(S,Found); return 1;});
     RegisterItem(L,"GetItemInfo",Info); RegisterItem(L,"GetContainerItemInfo",BagInfo); RegisterItem(L,"GetContainerItemLink",BagLink);
     RegisterItem(L,"GetInventoryItemTexture",InventoryTexture); RegisterItem(L,"GetInventoryItemLink",InventoryLink);
     RegisterItem(L,"GetContainerFreeSlots",FreeSlots); RegisterItem(L,"SetBagPortraitTexture",BagPortrait);

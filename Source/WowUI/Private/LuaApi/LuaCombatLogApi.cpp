@@ -93,7 +93,7 @@ int Push(lua_State* L,const FWowCombatEntry* E)
     for(const auto& V:E->Values)
     {
         if(V.Kind==FWowCombatValue::EKind::Boolean) lua_pushboolean(L,V.Number!=0);
-        else if(V.Kind==FWowCombatValue::EKind::Localized) {lua_getglobal(L,TCHAR_TO_UTF8(*V.String)); if(!lua_isstring(L,-1)) {lua_pop(L,1); lua_pushstring(L,TCHAR_TO_UTF8(*V.String));}}
+        else if(V.Kind==FWowCombatValue::EKind::Localized) {lua_getglobal(L,TCHAR_TO_UTF8(*V.String)); if(!lua_isstring(L,-1)) {lua_pop(L,1); lua_getglobal(L,"SPELL_FAILED_CANT_DO_THAT_RIGHT_NOW"); if(!lua_isstring(L,-1)) {lua_pop(L,1); lua_pushstring(L,"Cannot cast that spell right now.");}}}
         else if(V.Kind==FWowCombatValue::EKind::String) lua_pushstring(L,TCHAR_TO_UTF8(*V.String)); else lua_pushnumber(L,V.Number);
         ++Count;
     }
@@ -141,6 +141,12 @@ void FWowCombatLogUi::Dispatch(lua_State* L,const FWowCombatEntry& Entry)
     const auto Previous=V->Active; V->Active=Entry;
     C->EventSystem->FireEventTyped(TEXT("COMBAT_LOG_EVENT_UNFILTERED"),[&](lua_State* S) { return Push(S,&Entry); });
     if(Matches(L,Entry)) C->EventSystem->FireEventTyped(TEXT("COMBAT_LOG_EVENT"),[&](lua_State* S) { return Push(S,&Entry); });
+    if(Entry.Event==TEXT("SPELL_CAST_FAILED") && C->EntityManager && Entry.Source==C->EntityManager->LocalPlayerGuid && !Entry.Values.IsEmpty())
+    {
+        lua_getglobal(L,TCHAR_TO_UTF8(*Entry.Values[0].String)); FString Message=lua_isstring(L,-1)?UTF8_TO_TCHAR(lua_tostring(L,-1)):TEXT(""); lua_pop(L,1);
+        if(Message.IsEmpty() || Message.Contains(TEXT("%"))) {lua_getglobal(L,"SPELL_FAILED_CANT_DO_THAT_RIGHT_NOW"); Message=lua_isstring(L,-1)?UTF8_TO_TCHAR(lua_tostring(L,-1)):TEXT("Cannot cast that spell right now."); lua_pop(L,1);}
+        C->EventSystem->FireEvent(TEXT("UI_ERROR_MESSAGE"),{Message});
+    }
     V->Active=Previous;
 }
 #else

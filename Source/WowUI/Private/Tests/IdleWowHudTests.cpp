@@ -1272,6 +1272,64 @@ bool FHudIndependentAnchorAxes::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudMacroSequence,"WowUnreal.Hud.MacroSequences",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudMacroSequence::RunTest(const FString&)
+{
+    FString Path; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false; FMpqManager Mpq; if(!Mpq.Initialize(Path)) return false;
+    auto& Dbc=FDbcStore::Get(); if(!Dbc.IsLoaded()) Dbc.LoadAll(Mpq); if(!Dbc.IsDeferredLoaded()) Dbc.LoadDeferred(Mpq);
+    FHudFixture F; TStrongObjectPtr<UWowConnectionManager> C(NewObject<UWowConnectionManager>()); auto& H=C->PacketHandler; F.Context.ConnectionManager=C.Get(); F.Context.EntityManager=&H.EntityManager;
+    H.EntityManager.LocalPlayerGuid=1; H.EntityManager.PromoteToTyped(1,WowTypeMask::PLAYER|WowTypeMask::UNIT); H.KnownSpells.Add(78); H.KnownSpells.Add(6673);
+    TestTrue(TEXT("Prepare original FrameXML helpers and event listener"),F.Lua.ExecuteString(TEXT(R"LUA(
+        strlower=string.lower; strtrim=function(s) return s:match('^%s*(.-)%s*$') end; strfind=string.find; strmatch=string.match; gsub=string.gsub; random=math.random
+        MacroChanges=CreateFrame('Frame'); for _,event in ipairs({'ACTIONBAR_UPDATE_STATE','ACTIONBAR_SLOT_CHANGED','ACTIONBAR_UPDATE_COOLDOWN','UNIT_SPELLCAST_CHANNEL_START','UNIT_SPELLCAST_SENT','UNIT_SPELLCAST_SUCCEEDED','UNIT_SPELLCAST_FAILED'}) do MacroChanges:RegisterEvent(event) end
+        MacroChanges:SetScript('OnEvent',function(self,event,...) if event=='UNIT_SPELLCAST_CHANNEL_START' then ChannelEvent={...} end end)
+        Requests={}; QAShift=false; IsShiftKeyDown=function() return QAShift end
+        CastSpellByName=function(name,target) local spell=_IdleWowResolveMacroSpell(name); if spell then table.insert(Requests,{spell,target}) end end
+    )LUA")));
+    TArray<uint8> Bytes; if(!TestTrue(TEXT("Read actual 12340 ChatFrame source from MPQ"),Mpq.ReadFile(TEXT("Interface\\FrameXML\\ChatFrame.lua"),Bytes))) return false;
+    Bytes.Add(0); const FString Source=UTF8_TO_TCHAR(reinterpret_cast<const char*>(Bytes.GetData()));
+    const int32 Begin=Source.Find(TEXT("local CastSequenceManager;")),End=Source.Find(TEXT("-- Slash commands that are protected"));
+    const int32 ItemBegin=Source.Find(TEXT("function SecureCmdItemParse(item)")),ItemEnd=Source.Find(TEXT("SecureCmdList[\"STARTATTACK\"]"));
+    if(!TestTrue(TEXT("Original sequence/random and item parser sections exist"),Begin>=0 && End>Begin && ItemBegin>=0 && ItemEnd>ItemBegin)) return false;
+    const FString Stock=Source.Mid(Begin,End-Begin)+TEXT("\n")+Source.Mid(ItemBegin,ItemEnd-ItemBegin)+TEXT("\n_QAExecuteSequence=ExecuteCastSequence; _QAExecuteRandom=ExecuteCastRandom; _QASequenceTick=function(seconds) CastSequenceManager_OnUpdate(CastSequenceManager,seconds) end");
+    if(!TestTrue(TEXT("Load original sequence/random implementation without replacing its logic"),F.Lua.ExecuteString(Stock))) return false;
+    const auto Request=[&](uint32 Spell,uint8 Counter){H.LocalCastRequests.Add(Counter,Spell); FWowMacros::CastSent(F.Lua.GetState(),Spell,Counter);};
+    TestTrue(TEXT("First stock sequence request"),F.Lua.ExecuteString(TEXT("_QAExecuteSequence('Heroic Strike,Battle Shout','player'); assert(#Requests==1 and Requests[1][1]==78)")));
+    Request(78,10);
+    TestTrue(TEXT("Stock pending entry prevents repeat dispatch"),F.Lua.ExecuteString(TEXT("_QAExecuteSequence('Heroic Strike,Battle Shout','player'); assert(#Requests==1 and QueryCastSequence('Heroic Strike,Battle Shout')==1)")));
+    FWowMacros::CastResult(F.Lua.GetState(),78,9,true); FWowMacros::CastResult(F.Lua.GetState(),6673,10,true);
+    TestTrue(TEXT("Unrelated results carry no local spell name and cannot advance"),F.Lua.ExecuteString(TEXT("assert(QueryCastSequence('Heroic Strike,Battle Shout')==1)")));
+    FWowMacros::CastResult(F.Lua.GetState(),78,10,false);
+    TestTrue(TEXT("Rejected step remains retryable"),F.Lua.ExecuteString(TEXT("_QAExecuteSequence('Heroic Strike,Battle Shout','player'); assert(#Requests==2 and QueryCastSequence('Heroic Strike,Battle Shout')==1)")));
+    Request(78,11); FWowMacros::CastResult(F.Lua.GetState(),78,11,true);
+    TestTrue(TEXT("Stock tuple is index,item,spell and macro icon follows it"),F.Lua.ExecuteString(TEXT("local i,item,spell=QueryCastSequence('Heroic Strike,Battle Shout'); assert(i==2 and item==nil and spell=='battle shout'); local macro=CreateMacro('Sequence',1,'/castsequence Heroic Strike,Battle Shout',false); assert(select(3,GetMacroSpell(macro))==6673); _QAExecuteSequence('Heroic Strike,Battle Shout','player')")));
+    Request(6673,12); FWowMacros::CastResult(F.Lua.GetState(),6673,12,true);
+    TestTrue(TEXT("Stock sequence cycles and null stays on its step"),F.Lua.ExecuteString(TEXT("assert(QueryCastSequence('Heroic Strike,Battle Shout')==1); _QAExecuteSequence('Heroic Strike,null','player')")));
+    Request(78,13); FWowMacros::CastResult(F.Lua.GetState(),78,13,true);
+    TestTrue(TEXT("Null does not dispatch a cast"),F.Lua.ExecuteString(TEXT("local count=#Requests; assert(QueryCastSequence('Heroic Strike,null')==2); _QAExecuteSequence('Heroic Strike,null','player'); assert(#Requests==count); _QAExecuteSequence('reset=target Heroic Strike,Battle Shout','player')")));
+    Request(78,14); FWowMacros::CastResult(F.Lua.GetState(),78,14,true); F.Events.FireEvent(TEXT("PLAYER_TARGET_CHANGED"));
+    TestTrue(TEXT("Original target reset event"),F.Lua.ExecuteString(TEXT("assert(QueryCastSequence('reset=target Heroic Strike,Battle Shout')==1); _QAExecuteSequence('reset=3 Heroic Strike,Battle Shout','player')")));
+    Request(78,15); FWowMacros::CastResult(F.Lua.GetState(),78,15,true);
+    TestTrue(TEXT("Original timeout update"),F.Lua.ExecuteString(TEXT("assert(QueryCastSequence('reset=3 Heroic Strike,Battle Shout')==2); _QASequenceTick(4); assert(QueryCastSequence('reset=3 Heroic Strike,Battle Shout')==1); _QAExecuteSequence('reset=combat Heroic Strike,Battle Shout','player')")));
+    Request(78,16); FWowMacros::CastResult(F.Lua.GetState(),78,16,true); F.Events.FireEvent(TEXT("PLAYER_REGEN_ENABLED"));
+    TestTrue(TEXT("Original combat reset and modifier reset"),F.Lua.ExecuteString(TEXT("assert(QueryCastSequence('reset=combat Heroic Strike,Battle Shout')==1); _QAExecuteSequence('reset=shift Heroic Strike,Battle Shout','player')")));
+    Request(78,17); FWowMacros::CastResult(F.Lua.GetState(),78,17,true);
+    TestTrue(TEXT("Modifier queries restart the stock entry"),F.Lua.ExecuteString(TEXT("assert(QueryCastSequence('reset=shift Heroic Strike,Battle Shout')==2); QAShift=true; assert(QueryCastSequence('reset=shift Heroic Strike,Battle Shout')==1); QAShift=false; FirstRandom=_QAExecuteRandom('Heroic Strike,Battle Shout'); assert(_QAExecuteRandom('Heroic Strike,Battle Shout')==FirstRandom)")));
+    TestTrue(TEXT("Random choice remains stable until an acknowledged success"),F.Lua.ExecuteString(TEXT("local picked=_QAExecuteRandom('Heroic Strike'); assert(picked=='Heroic Strike' and _QAExecuteRandom('Heroic Strike')==picked)")));
+    Request(78,18); FWowMacros::CastResult(F.Lua.GetState(),78,18,false);
+    TestTrue(TEXT("Failure retains the original random choice"),F.Lua.ExecuteString(TEXT("assert(_QAExecuteRandom('Heroic Strike')=='Heroic Strike')")));
+    Request(78,19); FWowMacros::CastResult(F.Lua.GetState(),78,19,true);
+    F.Frames.CurrentMouseButton=TEXT("RightButton"); H.Casts.Add(1,{740,20,FPlatformTime::Seconds(),FPlatformTime::Seconds()+5,true}); WowLuaApi::NotifyCastState(F.Lua.GetState(),1,740,3);
+    TestTrue(TEXT("Additional conditions and typed channel events"),F.Lua.ExecuteString(TEXT(R"LUA(
+        assert(ChannelEvent and ChannelEvent[1]=='player' and ChannelEvent[2]==GetSpellInfo(740) and ChannelEvent[5]==740 and type(ChannelEvent[5])=='number')
+        assert(SecureCmdOptionParse('[button:2] Right; Left')=='Right' and SecureCmdOptionParse('[bar:1,spec:1] Active; Other')=='Active')
+        assert(SecureCmdOptionParse('[noflyable,noequipped:Shields,nocursor] Clear')=='Clear')
+        assert(SecureCmdOptionParse('[channeling:'..GetSpellInfo(740)..'] Channel')=='Channel' and SecureCmdOptionParse('[vehicleui] Vehicle; Normal')=='Normal')
+        assert(select('#',UnitChannelInfo('player'))==8 and UnitCastingInfo('player')==nil)
+    )LUA")));
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudMacroFlow,"WowUnreal.Hud.MacroFlow",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FHudMacroFlow::RunTest(const FString&)
 {

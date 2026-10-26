@@ -1,38 +1,39 @@
-# Macros
+# Macros and local spell requests
 
-The original Blizzard macro panel is available from the game menu. It supports
-36 account macros and 18 character macros, 16-character names, 255-character
-bodies, icon selection, editing and deletion. Dragging a macro to an action
-button uses the same cursor/drop path as spells. A question-mark icon resolves
-the first supported spell or owned item in the body.
+The original macro panel supports 36 account macros and 18 character macros,
+16-character names, 255-character bodies, icon selection, editing and deletion.
+The normal cursor/drop path places macros on action buttons. SavedVariables
+retain account and character scope, byte-exact escaped text and stable opaque
+action identifiers. Each edit saves through temporary-file replacement; deleted
+identifiers are not reused. Execution uses the original hidden MacroEditBox and
+EXECUTE_CHAT_LINE path, with bounded recursion and Lua instruction limits.
 
-Macros are stored as SavedVariables under the current account and character.
-Each edit saves immediately through temporary-file replacement. UTF-8 and
-embedded Lua string bytes are escaped without changing their contents. Action
-buttons refer to stable opaque identifiers rather than dense list positions;
-deleting an earlier macro cannot retarget another button. Deleted identifiers
-are not reused, including when an action survives on another character.
+The original 3.3.5a ChatFrame.lua owns cast sequences and random actions. The
+client supplies the missing item, casting, equipment and condition APIs and
+typed UNIT_SPELLCAST events; it does not replace those FrameXML managers.
+QueryCastSequence returns index, item and spell in that order. Numeric action
+tokens follow the original inventory-slot parser, while spell names and ranks
+use the loaded locale's DBC data.
 
-Execution sends slash lines to the original hidden MacroEditBox and its
-EXECUTE_CHAT_LINE handler. This preserves the existing chat, spell and item
-command paths. RunMacro, RunMacroText, RunScript, StopMacro and GetRunningMacro
-are implemented. Recursion and Lua instruction limits bound execution. Explicit
-spell/item unit targets are honored; item use no longer implicitly targets an
-unrelated hostile selection.
+Spell, item and auto-attack requests share a per-connection eight-bit cast
+counter. Pending requests retain their spell identity. Only a matching local
+server result carries a spell name to the sequence manager; foreign or
+server-only effects cannot advance a sequence. Failed requests remain on the
+current step. The original target, combat, timeout and modifier resets and
+acknowledged random-choice lifetime remain in FrameXML. Local selection events
+fire only when the target actually changes, including ClearTarget.
 
-Supported condition groups include unit targets, exists, help, harm, dead,
-combat, modifiers, form/stance, pet existence, mounted, stealth, swimming,
-flying, indoors/outdoors and party/raid membership where the corresponding
-unit API supplies state. Groups are ORed, comma-separated conditions are ANDed,
-and semicolon clauses provide fallbacks. Unknown conditions fail closed.
+Spell-start/go/failure and channel packets maintain casting state. Casting and
+channel APIs expose real spell metadata and times. Cancel-cast, cancel-aura,
+cancel-form, equipment and explicit item-target commands send native requests;
+the server remains authoritative. Action-bar icon refreshes follow results.
 
-This is not complete secure-macro compatibility. Cast sequences, random cast
-selection, additional condition families and arbitrary addon secure-button
-macro attributes still require implementation and dedicated verification.
-
-Verification covers isolated editor controls, stable action identities,
-capacity, conditions, stop behavior, targeted item packet layout and byte-exact
-persistence. Native autologin checks create a macro through the panel, type into
-the real Slate editor, drag it onto an empty action, execute a Lua line and a
-local-server chat round trip, reload the UI, execute again and remove the test
-macro. Rendered screenshots verify the editor, icon picker and restored action.
+Automation loads the original sequence and random code directly from the local
+MPQ and checks request identity, rejection, resets, tuple order, dynamic icons,
+null actions, conditional commands and typed channel events. Packet tests cover
+shared counters, wraparound, full GUIDs and incomplete server responses. Native
+round trips use temporary self-healing spells and a character macro, click the
+original action button, verify server acknowledgements, then remove all owned
+test state. The root test wrapper restores the exact character macro file and
+checks inventory, health and money even when a scenario fails. The account UID
+allocator stays monotonic.

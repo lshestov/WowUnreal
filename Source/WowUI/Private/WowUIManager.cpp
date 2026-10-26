@@ -222,6 +222,12 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 		LuaVM->BeginCallback();
 		return FWowMacros::RunWireMacro(LuaVM->GetState(),Id);
 	});
+	if(ConnectionManager) ConnectionManager->OnLocalCastSent.BindWeakLambda(this,[this](uint32 Spell,uint8 Counter)
+	{if(LuaVM) FWowMacros::CastSent(LuaVM->GetState(),Spell,Counter);});
+	if(ConnectionManager) ConnectionManager->PacketHandler.OnCastResult.BindWeakLambda(this,[this](uint64 Caster,uint32 Spell,uint8 Counter,bool Success)
+	{if(LuaVM && ConnectionManager && Caster==ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid) {LuaVM->BeginCallback(); FWowMacros::CastResult(LuaVM->GetState(),Spell,Counter,Success);}});
+	if(ConnectionManager) ConnectionManager->PacketHandler.OnCastState.BindWeakLambda(this,[this](uint64 Caster,uint32 Spell,uint8 Kind)
+	{if(LuaVM && ConnectionManager && (Caster!=ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid || (Kind!=1 && Kind!=2))) {LuaVM->BeginCallback(); WowLuaApi::NotifyCastState(LuaVM->GetState(),Caster,Spell,Kind);}});
 
 	// 1. Load FrameXML (Interface/FrameXML/FrameXML.toc) — the core UI system
 	TArray<FWowXmlDirective> FrameXmlDirectives = FWowFrameXmlParser::LoadFrameXml(Mpq);

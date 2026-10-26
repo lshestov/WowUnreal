@@ -3144,7 +3144,7 @@ static int L_TargetUnit(lua_State* L)
     if (Ctx && Ctx->ConnectionManager && Ctx->EntityManager)
     {
         const uint64 TargetGuid = ResolveUnitGuid(L, 1);
-        if (TargetGuid != 0)
+        if (TargetGuid != 0 && TargetGuid != uint64(Ctx->ConnectionManager->GetTargetGuid()))
         {
             Ctx->ConnectionManager->SendSetSelection(static_cast<int64>(TargetGuid));
 
@@ -3164,9 +3164,13 @@ static int L_TargetUnit(lua_State* L)
 static int L_ClearTarget(lua_State* L)
 {
     FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-    if (Ctx && Ctx->ConnectionManager)
+    if (Ctx && Ctx->ConnectionManager && Ctx->ConnectionManager->GetTargetGuid() != 0)
     {
         Ctx->ConnectionManager->SendSetSelection(0);
+        if (Ctx->EventSystem)
+        {
+            Ctx->EventSystem->FireEvent(TEXT("PLAYER_TARGET_CHANGED"));
+        }
     }
     return 0;
 }
