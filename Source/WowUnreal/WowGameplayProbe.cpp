@@ -366,16 +366,20 @@ struct FWowGameplayProbe
         else if (Op==TEXT("bags")) { C.UIManager->ToggleBagWindow(); C.UIManager->ToggleCharacterPanel(); Done=true; }
         else if (Op==TEXT("lua")) { Done=C.UIManager->GetLuaVM()->ExecuteString(Step->GetStringField(TEXT("code")),TEXT("=GameplayProbe")); if (!Done) { Failure=TEXT("Lua assertion failed"); Finish(C,false); return; } }
         else if(Op==TEXT("drop_action_cursor")) { Done=Connection->DropActionCursor(); if(!Done) { Failure=TEXT("No action is held by the cursor"); Finish(C,false); return; } }
+        else if(Op==TEXT("request_delete_cursor")) { Done=C.RequestCursorItemDeletion(); if(!Done) { Failure=TEXT("No valid item is held by the cursor"); Finish(C,false); return; } }
         else if (Op==TEXT("click_frame") || Op==TEXT("drag_frame") || Op==TEXT("hover_frame") || Op==TEXT("wheel_frame"))
         {
             auto* Frames=C.UIManager->GetFrameManager();
-            const int64 Handle=Frames->FindFrame(Step->GetStringField(TEXT("name")));
-            if(Handle<0 || !Frames->IsFrameDrawn(Handle)) { Failure=TEXT("Requested UI frame is not visible"); Finish(C,false); return; }
+            FString Name,Global;
+            if(Step->TryGetStringField(TEXT("nameFromGlobal"),Global)) Name=C.UIManager->GetLuaVM()->GetGlobalString(Global);
+            else Name=Step->GetStringField(TEXT("name"));
+            const int64 Handle=Frames->FindFrame(Name);
+            if(Handle<0 || !Frames->IsFrameDrawn(Handle)) { Failure=FString::Printf(TEXT("UI frame '%s' is not visible"),*Name); Finish(C,false); return; }
             const auto Rect=Frames->GetLayoutRect(Handle); const float Scale=Frames->GetScreenScale();
             const float X=(Rect.X+Rect.Z*.5f)*Scale,Y=(Rect.Y+Rect.W*.5f)*Scale;
             const int64 Hit=Frames->HitTestFrames(X,Y); bool Allowed=Hit==Handle;
             if(Op==TEXT("wheel_frame")) for(int64 Parent=Hit,Depth=0;Parent>=0 && Depth<64;++Depth,Parent=Frames->GetParentHandle(Parent)) Allowed|=Parent==Handle;
-            if(!Allowed) { Failure=FString::Printf(TEXT("UI frame %s is obscured by %s"),*Step->GetStringField(TEXT("name")),*Frames->GetFrameName(Hit)); Finish(C,false); return; }
+            if(!Allowed) { Failure=FString::Printf(TEXT("UI frame %s is obscured by %s"),*Name,*Frames->GetFrameName(Hit)); Finish(C,false); return; }
             Frames->UpdateMouseHover(X,Y);
             C.GameplayProbePointer=FVector2D(X,Y);
             if(Op==TEXT("hover_frame") || Op==TEXT("wheel_frame"))

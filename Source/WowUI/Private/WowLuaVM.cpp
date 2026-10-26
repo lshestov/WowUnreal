@@ -21,6 +21,17 @@ typedef struct lua_State lua_State;
 FWowLuaVM::FWowLuaVM() {}
 FWowLuaVM::~FWowLuaVM() { Shutdown(); }
 
+FString FWowLuaVM::GetGlobalString(const FString& Name) const
+{
+#if HAS_LUA
+    if(!L) return {};
+    lua_getglobal(L,TCHAR_TO_UTF8(*Name));
+    const FString Value=lua_isstring(L,-1)?UTF8_TO_TCHAR(lua_tostring(L,-1)):FString(); lua_pop(L,1); return Value;
+#else
+    return {};
+#endif
+}
+
 // ── Memory Allocator ─────────────────────────────────────────────────────────────
 
 void* FWowLuaVM::LuaAlloc(void* ud, void* ptr, size_t osize, size_t nsize)

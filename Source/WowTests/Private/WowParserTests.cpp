@@ -430,7 +430,11 @@ bool FItemCursorTracksBagItemPickup::RunTest(const FString& Parameters)
         return false;
     }
 
-    Connection->PickupBagItemCursor(255, 2, 6948, TEXT("|cffffffff|Hitem:6948:0:0:0:0:0:0:0:0:0|h[Item 6948]|h|r"));
+    auto& Entities=Connection->PacketHandler.EntityManager; Entities.LocalPlayerGuid=1;
+    auto& Player=Entities.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER);
+    auto& Item=Entities.PromoteToTyped(2,WowTypeMask::OBJECT|WowTypeMask::ITEM); Item.Entry=6948; Item.SetField(ItemField::STACK_COUNT,1);
+    WowTestUtils::SetGuidField64(Player,PlayerField::PACK_SLOT_START+4,2);
+    Connection->PickupBagItemCursor(255, 25, 6948, TEXT("|cffffffff|Hitem:6948:0:0:0:0:0:0:0:0:0|h[Item 6948]|h|r"));
 
     FString CursorType;
     FString CursorDetail;
@@ -706,6 +710,42 @@ bool FLuaInventoryPickupFlowsQueueEquipAndUnequipPackets::RunTest(const FString&
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FItemCursorIdentity,"WowUnreal.UI.ItemCursorIdentity",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FItemCursorIdentity::RunTest(const FString&)
+{
+    auto* Connection=NewObject<UWowConnectionManager>(); auto Socket=WowTestUtils::AttachTestWorldSocket(*Connection,0);
+    auto& E=Connection->PacketHandler.EntityManager; E.LocalPlayerGuid=1;
+    auto& Player=E.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER);
+    constexpr uint64 ItemGuid=0x4000000000000042ull,ReplacementGuid=0x4000000000000043ull;
+    auto& Item=E.PromoteToTyped(ItemGuid,WowTypeMask::OBJECT|WowTypeMask::ITEM); Item.Entry=2589; Item.SetField(ItemField::STACK_COUNT,1000);
+    auto& Replacement=E.PromoteToTyped(ReplacementGuid,WowTypeMask::OBJECT|WowTypeMask::ITEM); Replacement.Entry=2589; Replacement.SetField(ItemField::STACK_COUNT,1000);
+    WowTestUtils::SetGuidField64(Player,PlayerField::PACK_SLOT_START,ItemGuid);
+    Connection->PickupBagItemCursor(255,23,2589,TEXT(""),3);
+    TestTrue(TEXT("Cursor selection retains physical identity without changing the stack"),Connection->HasCursorItemPayload() && Connection->GetCursorItem()->Guid==ItemGuid && Item.GetField(ItemField::STACK_COUNT)==1000);
+    WowTestUtils::SetGuidField64(Player,PlayerField::PACK_SLOT_START,ReplacementGuid);
+    TestFalse(TEXT("Replacing a slot with the same template invalidates the held item"),Connection->HasCursorItemPayload());
+    TestTrue(TEXT("Stale selection cannot destroy, swap, equip or write an action"),!Connection->DeleteCursorItem() && !Connection->PlaceCursorIntoContainerSlot(255,24) && !Connection->AutoEquipCursorItem() && !Connection->PlaceCursorIntoActionSlot(0));
+    uint32 Opcode=0; TArray<uint8> Payload;
+    TestFalse(TEXT("Rejected stale operations send no packets"),WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload));
+    TestTrue(TEXT("Both physical stacks remain untouched"),Item.GetField(ItemField::STACK_COUNT)==1000 && Replacement.GetField(ItemField::STACK_COUNT)==1000);
+    WowTestUtils::SetGuidField64(Player,PlayerField::PACK_SLOT_START,ItemGuid);
+    Connection->PickupBagItemCursor(255,23,2589,TEXT(""),600); TestTrue(TEXT("Large selected quantities can be deleted exactly"),Connection->DeleteCursorItem());
+    for(uint8 Expected:{uint8(255),uint8(255),uint8(90)})
+    {
+        const bool Sent=WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload);
+        TestTrue(TEXT("Destroy byte counts preserve the selected quantity and source"),Sent && Opcode==WowOpcode::CMSG_DESTROYITEM && Payload.Num()==6 && Payload[0]==255 && Payload[1]==23 && Payload[2]==Expected);
+    }
+    TestTrue(TEXT("Deletion waits for authoritative fields and clears only the cursor"),Item.GetField(ItemField::STACK_COUNT)==1000 && !Connection->HasCursorPayload());
+    Connection->PickupBagItemCursor(255,23,2589,TEXT(""),3);
+    TestTrue(TEXT("Partial stacks cannot auto-equip the whole source"),!Connection->AutoEquipCursorItem() && Connection->HasCursorItemPayload());
+    TestTrue(TEXT("Autostore preserves a selected partial quantity"),Connection->AutoStoreCursorItem());
+    const bool Sent=WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload); FPacketReader Split(Payload);
+    TestTrue(TEXT("Partial autostore is a real split, not a full-stack move"),Sent && Opcode==WowOpcode::CMSG_SPLIT_ITEM && Payload.Num()==8 && Split.ReadU8()==255 && Split.ReadU8()==23 && Split.ReadU8()==255 && Split.ReadU8()==24 && Split.ReadU32()==3);
+    Connection->PickupBagItemCursor(255,23,2589,TEXT(""),3); Item.SetField(ItemField::STACK_COUNT,2); Connection->RefreshItemCursor();
+    TestFalse(TEXT("A server stack reduction cancels a now-invalid selection"),Connection->HasCursorPayload());
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLuaSplitContainerItemQueuesSplitPacket, "WowUnreal.UI.LuaSplitContainerItemQueuesSplitPacket",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FLuaSplitContainerItemQueuesSplitPacket::RunTest(const FString& Parameters)
@@ -799,6 +839,8 @@ bool FLuaSplitContainerItemQueuesSplitPacket::RunTest(const FString& Parameters)
     const bool bCursorAfterSplit = WowTestUtils::GetLuaBooleanGlobal(LuaVM.GetState(), "CURSOR_AFTER_SPLIT", bIsBoolean);
     TestTrue(TEXT("SplitContainerItem places an item payload on the cursor"), bCursorAfterSplit && bIsBoolean);
     TestFalse(TEXT("Placing the split stack clears the cursor payload"), Connection->HasCursorItemPayload());
+    TestTrue(TEXT("Selecting the complete stack is a normal cursor pickup"),LuaVM.ExecuteString(TEXT("SplitContainerItem(0,1,5); assert(CursorHasItem()); ClearCursor()"),TEXT("FullStackSelection")));
+    TestFalse(TEXT("Cancelling a full selection sends no inventory command"),WowTestUtils::DequeueClientPacket(*WorldSocket,Opcode,Payload));
 
     WowTestUtils::ClearLuaContext(LuaVM);
     LuaVM.Shutdown();

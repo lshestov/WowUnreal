@@ -90,6 +90,8 @@ public:
     bool HasCursorPayload() const;
     bool HasCursorSpellPayload() const;
     bool HasCursorItemPayload() const;
+    const FWowItemEntity* GetCursorItem() const;
+    void RefreshItemCursor();
     bool DropActionCursor();
     bool GetCursorInfo(FString& OutType, int32& OutId, FString& OutDetail) const;
     bool PlaceCursorIntoActionSlot(int32 SlotIndex);
@@ -298,6 +300,7 @@ private:
         uint8 SourceInventorySlot = 0;
         bool bFromInventorySlot = false;
         uint32 SplitCount = 0;
+        uint64 SourceItemGuid=0;
     };
 
     EWowSessionState State = EWowSessionState::Disconnected;
@@ -319,5 +322,6 @@ private:
     TArray<FWowCharacterInfo> CachedCharacters;
     int64 TargetGuid = 0;
     FCursorPayloadState CursorPayload;
+    const FWowItemEntity* ResolveCursorSource(uint8 Bag,uint8 Slot) const;
     FDelegateHandle EnterWorldHandle;
 };

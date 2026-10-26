@@ -290,6 +290,7 @@ private:
     int64 GetUiFrameUnderCursor() const;
     bool HandleUiMousePress(const FString& Button, int64& PressedFrameHandle, bool bAllowDragDrop);
     bool HandleUiMouseRelease(const FString& Button, int64& PressedFrameHandle);
+    bool RequestCursorItemDeletion();
 
     // Entity model spawning
     void OnEntityCreated(const FWowEntity& Entity);

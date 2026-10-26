@@ -286,6 +286,8 @@ void AWowGameplayController::BindEntityEvents()
 	{
 		FireUIEvent(TEXT("CURSOR_UPDATE"));
 		FireUIEvent(ConnectionManager->HasCursorPayload()?TEXT("ACTIONBAR_SHOWGRID"):TEXT("ACTIONBAR_HIDEGRID"));
+        if(UIManager && UIManager->GetEventSystem()) for(int32 Bag=-1;Bag<=11;++Bag)
+            UIManager->GetEventSystem()->FireEventNumbers(TEXT("BAG_UPDATE"),{double(Bag)});
 	});
 	ConnectionManager->PacketHandler.OnUnitAuraUpdate.AddLambda([this](uint64 Guid)
 	{
@@ -928,6 +930,7 @@ void AWowGameplayController::Tick(float DeltaTime)
 	TickGameplayProbe();
 	if(UIManager) UIManager->ProcessPendingReload();
 	if(ConnectionManager && ConnectionManager->GetState()!=EWowSessionState::WorldInGame) return;
+    if(ConnectionManager) ConnectionManager->RefreshItemCursor();
 	const uint64 UiStarted=FPlatformTime::Cycles64();
 
 	// Dispatch OnUpdate to all WoW UI frames each tick
@@ -1304,7 +1307,7 @@ bool AWowGameplayController::HandleUiMouseRelease(const FString& Button, int64& 
 	{
 		bDraggingUi=false;
 		const int64 Destination=GetUiFrameUnderCursor();
-		if(Destination<0 && ConnectionManager) ConnectionManager->DropActionCursor();
+		if(Destination<0 && ConnectionManager) { if(!RequestCursorItemDeletion()) ConnectionManager->DropActionCursor(); }
 		else FrameManager->DispatchReceiveDrag(Destination);
 		FrameManager->DispatchDragStop(ReleasedFrameHandle,Button);
 		return true;
@@ -1326,6 +1329,7 @@ void AWowGameplayController::OnLeftClick()
 		return; // Don't target through UI
 	}
 
+    if(RequestCursorItemDeletion()) return;
 	UE_LOG(LogWowGameplay, Log, TEXT("OnLeftClick: no UI hit, trying world target"));
 	TryTargetUnderCursor();
 }
@@ -1333,6 +1337,16 @@ void AWowGameplayController::OnLeftClick()
 void AWowGameplayController::OnLeftClickReleased()
 {
 	HandleUiMouseRelease(TEXT("LeftButton"), PressedLeftMouseFrameHandle);
+}
+
+bool AWowGameplayController::RequestCursorItemDeletion()
+{
+    const auto* Item=ConnectionManager?ConnectionManager->GetCursorItem():nullptr;
+    if(!Item || !UIManager || !UIManager->GetEventSystem()) return false;
+    const auto* Template=ConnectionManager->PacketHandler.ItemTemplates.Find(Item->Entry);
+    const FString Name=Template?Template->Name:FString::Printf(TEXT("Item %u"),Item->Entry);
+    UIManager->GetEventSystem()->FireEventStringNumber(TEXT("DELETE_ITEM_CONFIRM"),Name,Template?Template->Quality:4);
+    return true;
 }
 
 void AWowGameplayController::TryTargetUnderCursor()
@@ -4547,7 +4561,8 @@ void AWowGameplayController::OnPlayerInventoryUpdated()
 			SetupLocalPlayerCharacterModel(*LocalEntity);
 
 	// Fire inventory events
-	for(int32 Bag=0; Bag<=4; ++Bag) FireUIEvent(TEXT("BAG_UPDATE"),{FString::FromInt(Bag)});
+    if(UIManager && UIManager->GetEventSystem()) for(int32 Bag=-1;Bag<=11;++Bag)
+        UIManager->GetEventSystem()->FireEventNumbers(TEXT("BAG_UPDATE"),{double(Bag)});
 	FireUIEvent(TEXT("PLAYER_MONEY"));
 	FireUIEvent(TEXT("UNIT_INVENTORY_CHANGED"),{TEXT("player")});
 	FireUIEvent(TEXT("UPDATE_INVENTORY_DURABILITY"));
@@ -5140,6 +5155,10 @@ void AWowGameplayController::OnEscapeKey()
     if(ConnectionManager && ConnectionManager->HasPendingGlyph())
     {
         ConnectionManager->CancelGlyphUse(); return;
+    }
+    if(ConnectionManager && ConnectionManager->HasCursorPayload())
+    {
+        ConnectionManager->ClearCursorPayload(); return;
     }
 
 	// 1. Stop auto-attack

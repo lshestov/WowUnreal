@@ -342,6 +342,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUiCursorAndAudio,"WowUnreal.Gameplay.CursorAnd
 bool FUiCursorAndAudio::RunTest(const FString&)
 {
     auto* Connection=NewObject<UWowConnectionManager>(); TArray<bool> States;
+    auto& Entities=Connection->PacketHandler.EntityManager; Entities.LocalPlayerGuid=1;
+    auto& Player=Entities.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER);
+    auto& CursorItem=Entities.PromoteToTyped(77,WowTypeMask::OBJECT|WowTypeMask::ITEM); CursorItem.Entry=6948; CursorItem.SetField(ItemField::STACK_COUNT,1);
+    Player.SetField(PlayerField::PACK_SLOT_START,77);
     Connection->OnCursorChanged.AddLambda([&](){States.Add(Connection->HasCursorPayload());});
     Connection->PickupBagItemCursor(255,23,6948); Connection->PlaceCursorIntoActionSlot(11);
     TestTrue(TEXT("Pickup shows empty buttons; placing an item clears the cursor without moving the physical item"),States==TArray<bool>({true,false}) && Connection->PacketHandler.ActionButtons[11]==0x80001B24);

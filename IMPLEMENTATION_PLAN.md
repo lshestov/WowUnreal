@@ -305,14 +305,21 @@ build, automation, native autologin and rendered screenshot verification):
     saved upgraded actions after relog, then removal of the QA rank and restored
     rank-one button, talents and glyphs. Five rendered before/after screenshots.
 - [ ] 4. Inventory: split/delete, compare/try-on, merchant/bank/mail/trade round trips.
-  - [?] Stock split-control text input and XML texture defaults: native viewport
+  - [x] Stock split-control text input and XML texture defaults: native viewport
     character events reach the top visible keyboard frame without stealing editor
     input. Digits, arrows, backspace, Enter and cancellation use original Lua.
     Unanchored XML textures stretch to the owner after inheritance, including
     explicitly sized backgrounds; Lua-created regions retain explicit positioning.
     Verified 84 tests and native 29-step/six-screenshot split/character/book/menu
     regression with the split panel and its number correctly aligned.
-  - [ ] Item cursor identity, actual split/merge operations and delete confirmation.
+  - [?] Item cursor identity, actual split/merge operations and delete confirmation.
+    Bind selections to source GUID/position, reject replaced or reduced stacks,
+    preserve partial quantities during autostore and byte-sized destroy requests,
+    and support full-stack selection/cancellation. Held items expose lock state;
+    numeric bag events refresh visible counts. World drop opens the original
+    quality-aware delete dialog, and Escape releases a selection. Verified 85
+    tests plus native 36-step split/cancel/7+3/merge/delete-cancel/delete-confirm
+    cycle and four nonempty screenshots. QA cloth restored to zero in server DB.
   - [ ] Equipped-item comparison and dress-up model/item preview.
   - [ ] Original merchant window, purchase/sale/buyback/repair server state.
   - [ ] Original bank, mailbox and trade windows with authoritative round trips.

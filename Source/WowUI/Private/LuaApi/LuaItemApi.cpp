@@ -129,7 +129,8 @@ int BagInfo(lua_State* L)
     auto* C=WowLuaApi::GetContext(L); auto* Item=BagItem(C,luaL_checkinteger(L,1),luaL_checkinteger(L,2));
     if(!Item) { lua_pushnil(L); return 1; }
     const auto* T=Template(C,Item->Entry);
-    lua_pushstring(L,TCHAR_TO_UTF8(*Icon(T))); lua_pushinteger(L,FMath::Max(Item->GetStackCount(),1)); lua_pushboolean(L,0);
+    const auto* Held=C->ConnectionManager?C->ConnectionManager->GetCursorItem():nullptr;
+    lua_pushstring(L,TCHAR_TO_UTF8(*Icon(T))); lua_pushinteger(L,FMath::Max(Item->GetStackCount(),1)); lua_pushboolean(L,Held && Held->Guid==Item->Guid);
     if(T) lua_pushinteger(L,T->Quality); else lua_pushnil(L);
     lua_pushboolean(L,0); lua_pushboolean(L,0); lua_pushstring(L,TCHAR_TO_UTF8(*Link(T,Item->Entry))); return 7;
 }
@@ -212,8 +213,8 @@ int Split(lua_State* L)
     auto* C=WowLuaApi::GetContext(L); if(!C || !C->ConnectionManager) return 0;
     const int32 Bag=luaL_checkinteger(L,1),Slot=luaL_checkinteger(L,2),Count=luaL_checkinteger(L,3); uint8 B,S;
     auto* Item=BagItem(C,Bag,Slot);
-    if(!Position(C,Bag,Slot,B,S) || !Item || Count<1 || Count>=Item->GetStackCount()) return 0;
-    C->ConnectionManager->PickupBagItemCursor(B,S,Item->Entry,Link(Template(C,Item->Entry),Item->Entry),Count); return 0;
+    if(!Position(C,Bag,Slot,B,S) || !Item || Count<1 || Count>Item->GetStackCount()) return 0;
+    C->ConnectionManager->PickupBagItemCursor(B,S,Item->Entry,Link(Template(C,Item->Entry),Item->Entry),Count==Item->GetStackCount()?0:Count); return 0;
 }
 int64 Handle(lua_State* L)
 {
@@ -316,6 +317,7 @@ void WowLuaApi::RegisterItemApi(lua_State* L)
     });
     RegisterItem(L,"SetCurrencyUnused",[](lua_State* S)->int { auto* C=GetContext(S); const auto Rows=CurrencyRows(C); const int32 I=luaL_checkinteger(S,1)-1; if(Rows.IsValidIndex(I)) { SetUiPreference(S,FString::Printf(TEXT("currencyUnused%u"),Rows[I]),lua_toboolean(S,2) && (!lua_isnumber(S,2) || lua_tonumber(S,2)!=0)); if(C && C->EventSystem) C->EventSystem->FireEvent(TEXT("CURRENCY_DISPLAY_UPDATE")); } return 0; });
     RegisterItem(L,"PickupContainerItem",Pickup); RegisterItem(L,"PickupInventoryItem",PickupEquipment); RegisterItem(L,"UseContainerItem",Use); RegisterItem(L,"SplitContainerItem",Split);
+    RegisterItem(L,"IsInventoryItemLocked",[](lua_State* S)->int { auto* C=GetContext(S); const auto* Item=Equipped(C,luaL_checkinteger(S,1)); const auto* Held=C && C->ConnectionManager?C->ConnectionManager->GetCursorItem():nullptr; lua_pushboolean(S,Item && Held && Item->Guid==Held->Guid); return 1; });
     RegisterItem(L,"PutItemInBackpack",[](lua_State* S)->int { auto* C=GetContext(S); lua_pushboolean(S,C && C->ConnectionManager && C->ConnectionManager->PlaceCursorIntoFirstFreeContainerSlot(255)); return 1; });
     RegisterItem(L,"PutItemInBag",[](lua_State* S)->int { auto* C=GetContext(S); const int32 Slot=luaL_checkinteger(S,1); lua_pushboolean(S,C && C->ConnectionManager && Slot>=20 && Slot<=23 && C->ConnectionManager->PlaceCursorIntoFirstFreeContainerSlot(Slot-1)); return 1; });
     RegisterItem(L,"GetContainerItemID",[](lua_State* S)->int { auto* Item=BagItem(GetContext(S),luaL_checkinteger(S,1),luaL_checkinteger(S,2)); if(Item) lua_pushinteger(S,Item->Entry); else lua_pushnil(S); return 1; });

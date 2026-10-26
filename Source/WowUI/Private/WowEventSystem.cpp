@@ -227,6 +227,13 @@ void FWowEventSystem::FireEventNumbers(const FString& EventName,const TArray<dou
 #endif
 }
 
+void FWowEventSystem::FireEventStringNumber(const FString& EventName,const FString& Text,double Number)
+{
+#if HAS_LUA
+    FireEventTyped(EventName,[&](lua_State* L) { lua_pushstring(L,TCHAR_TO_UTF8(*Text)); lua_pushnumber(L,Number); return 2; });
+#endif
+}
+
 void FWowEventSystem::FireEventTyped(const FString& EventName,TFunctionRef<int32(lua_State*)> PushArguments)
 {
 	const TSet<int64>* Handles = EventRegistrations.Find(EventName);

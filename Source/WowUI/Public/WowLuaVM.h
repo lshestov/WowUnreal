@@ -13,6 +13,7 @@ public:
     /** Save all addon SavedVariables to disk */
     void SaveAllVariables();
     bool ExecuteString(const FString& Code, const FString& ChunkName = TEXT("="));
+    FString GetGlobalString(const FString& Name) const;
     bool ExecuteBuffer(const TArray<uint8>& Buffer, const FString& ChunkName);
     void FireEvent(const FString& EventName, const TArray<FString>& Args = {});
     lua_State* GetState() const { return L; }

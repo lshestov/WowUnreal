@@ -457,6 +457,9 @@ void UWowConnectionManager::PickupActionCursor(int32 SlotIndex)
 
 void UWowConnectionManager::PickupBagItemCursor(uint8 SourceBag, uint8 SourceSlot, int32 ItemId, const FString& ItemLink, uint32 SplitCount)
 {
+    const auto* Item=ResolveCursorSource(SourceBag,SourceSlot);
+    if(!Item || Item->Entry!=uint32(ItemId) || Item->GetStackCount()<=0 || SplitCount>=uint32(Item->GetStackCount())) return;
+    CancelGlyphUse(); CursorPayload=FCursorPayloadState(); CursorPayload.SourceItemGuid=Item->Guid;
     CursorPayload.Type = ECursorPayloadType::Item;
     CursorPayload.PrimaryId = ItemId;
     CursorPayload.Detail = ItemLink;
@@ -472,6 +475,9 @@ void UWowConnectionManager::PickupBagItemCursor(uint8 SourceBag, uint8 SourceSlo
 
 void UWowConnectionManager::PickupInventoryItemCursor(uint8 InventorySlot, int32 ItemId, const FString& ItemLink)
 {
+    const auto* Item=InventorySlot<23?ResolveCursorSource(255,InventorySlot):nullptr;
+    if(!Item || Item->Entry!=uint32(ItemId) || Item->GetStackCount()<=0) return;
+    CancelGlyphUse(); CursorPayload=FCursorPayloadState(); CursorPayload.SourceItemGuid=Item->Guid;
     CursorPayload.Type = ECursorPayloadType::Item;
     CursorPayload.PrimaryId = ItemId;
     CursorPayload.Detail = ItemLink;
@@ -501,7 +507,7 @@ bool UWowConnectionManager::DropActionCursor()
 
 bool UWowConnectionManager::HasCursorPayload() const
 {
-    return CursorPayload.Type != ECursorPayloadType::None;
+    return CursorPayload.Type==ECursorPayloadType::Item?HasCursorItemPayload():CursorPayload.Type!=ECursorPayloadType::None;
 }
 
 bool UWowConnectionManager::HasCursorSpellPayload() const
@@ -511,7 +517,7 @@ bool UWowConnectionManager::HasCursorSpellPayload() const
 
 bool UWowConnectionManager::HasCursorItemPayload() const
 {
-    return CursorPayload.Type == ECursorPayloadType::Item;
+    return GetCursorItem()!=nullptr;
 }
 
 bool UWowConnectionManager::GetCursorInfo(FString& OutType, int32& OutId, FString& OutDetail) const
@@ -537,7 +543,7 @@ bool UWowConnectionManager::GetCursorInfo(FString& OutType, int32& OutId, FStrin
         return true;
     }
 
-    if (CursorPayload.Type == ECursorPayloadType::Item)
+    if (CursorPayload.Type == ECursorPayloadType::Item && HasCursorItemPayload())
     {
         OutType = TEXT("item");
         OutId = CursorPayload.PrimaryId;
@@ -553,6 +559,7 @@ bool UWowConnectionManager::GetCursorInfo(FString& OutType, int32& OutId, FStrin
 
 bool UWowConnectionManager::PlaceCursorIntoActionSlot(int32 SlotIndex)
 {
+    if(CursorPayload.Type==ECursorPayloadType::Item && !HasCursorItemPayload()) { RefreshItemCursor(); return false; }
     if (SlotIndex < 0 || SlotIndex >= 144 || CursorPayload.Type == ECursorPayloadType::None)
     {
         return false;
@@ -605,8 +612,9 @@ bool UWowConnectionManager::PlaceCursorIntoActionSlot(int32 SlotIndex)
 
 bool UWowConnectionManager::PlaceCursorIntoContainerSlot(uint8 DestinationBag, uint8 DestinationSlot)
 {
-    if (CursorPayload.Type != ECursorPayloadType::Item)
+    if (!HasCursorItemPayload())
     {
+        RefreshItemCursor();
         return false;
     }
 
@@ -624,8 +632,9 @@ bool UWowConnectionManager::PlaceCursorIntoContainerSlot(uint8 DestinationBag, u
 
 bool UWowConnectionManager::PlaceCursorIntoFirstFreeContainerSlot(uint8 DestinationBag)
 {
-    if (CursorPayload.Type != ECursorPayloadType::Item)
+    if (!HasCursorItemPayload())
     {
+        RefreshItemCursor();
         return false;
     }
 
@@ -672,8 +681,9 @@ bool UWowConnectionManager::PlaceCursorIntoFirstFreeContainerSlot(uint8 Destinat
 
 bool UWowConnectionManager::AutoEquipCursorItem()
 {
-    if (CursorPayload.Type != ECursorPayloadType::Item || CursorPayload.bFromInventorySlot)
+    if (!HasCursorItemPayload() || CursorPayload.bFromInventorySlot || CursorPayload.SplitCount)
     {
+        RefreshItemCursor();
         return false;
     }
 
@@ -684,10 +694,12 @@ bool UWowConnectionManager::AutoEquipCursorItem()
 
 bool UWowConnectionManager::AutoStoreCursorItem(uint8 DestinationBag)
 {
-    if (CursorPayload.Type != ECursorPayloadType::Item)
+    if (!HasCursorItemPayload())
     {
+        RefreshItemCursor();
         return false;
     }
+    if(CursorPayload.SplitCount) return PlaceCursorIntoFirstFreeContainerSlot(DestinationBag);
 
     if (CursorPayload.bFromInventorySlot)
     {
@@ -703,18 +715,24 @@ bool UWowConnectionManager::AutoStoreCursorItem(uint8 DestinationBag)
 
 bool UWowConnectionManager::DeleteCursorItem()
 {
-    if (CursorPayload.Type != ECursorPayloadType::Item)
+    if (!HasCursorItemPayload())
     {
+        RefreshItemCursor();
         return false;
     }
 
     const uint8 SourceBag = CursorPayload.bFromInventorySlot ? 255 : CursorPayload.SourceBag;
     const uint8 SourceSlot = CursorPayload.bFromInventorySlot ? CursorPayload.SourceInventorySlot : CursorPayload.SourceSlot;
-    const uint8 Count = CursorPayload.SplitCount > 0
-        ? static_cast<uint8>(FMath::Min<uint32>(CursorPayload.SplitCount, 255u))
-        : static_cast<uint8>(0);
-
-    SendDestroyItem(SourceBag, SourceSlot, Count);
+    // DestroyItem has a byte-sized count. Split stacks can be larger on a
+    // server; keep the selected quantity exact without truncating or deleting
+    // the full physical stack. Every request leaves its unselected remainder.
+    uint32 Remaining=CursorPayload.SplitCount;
+    if(!Remaining) SendDestroyItem(SourceBag,SourceSlot,0);
+    while(Remaining)
+    {
+        const uint8 Count=uint8(FMath::Min(Remaining,255u));
+        SendDestroyItem(SourceBag,SourceSlot,Count); Remaining-=Count;
+    }
     ClearCursorPayload();
     return true;
 }

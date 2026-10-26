@@ -33,6 +33,7 @@ public:
 	void FireEvent(const FString& EventName, const TArray<FString>& Args = {});
 	void FireEventTyped(const FString& EventName,TFunctionRef<int32(lua_State*)> PushArguments);
 	void FireEventNumbers(const FString& EventName,const TArray<double>& Args);
+    void FireEventStringNumber(const FString& EventName,const FString& Text,double Number);
 	void FireChatMessage(uint8 Type, uint32 Language, uint64 SenderGuid,
 		const FString& SenderName, const FString& Message, const FString& Channel);
 
