@@ -304,7 +304,7 @@ build, automation, native autologin and rendered screenshot verification):
     auxiliary and paged bars. Verified 82 automation checks, native learning and
     saved upgraded actions after relog, then removal of the QA rank and restored
     rank-one button, talents and glyphs. Five rendered before/after screenshots.
-- [?] 4. Inventory: split/delete, compare/try-on, merchant/bank/mail/trade round trips.
+- [x] 4. Inventory: split/delete, compare/try-on, merchant/bank/mail/trade round trips.
   - [x] Stock split-control text input and XML texture defaults: native viewport
     character events reach the top visible keyboard frame without stealing editor
     input. Digits, arrows, backspace, Enter and cancellation use original Lua.
@@ -388,7 +388,7 @@ build, automation, native autologin and rendered screenshot verification):
     goes only to the test character itself. Original inbox message, item GUIDs,
     counts, durability and money are preserved; temporary QA mail is removed.
     See [mail support](Docs/Mail.md).
-  - [?] Original trade window, local offers and authoritative transfer/accept/cancel.
+  - [x] Original trade window, local offers and authoritative transfer/accept/cancel.
     Match the original client: local offers/locks update after validated requests;
     AzerothCore sends extended snapshots to the counterpart. Inventory and money
     only change on server updates. Parse complete sparse records/state indices,
@@ -401,6 +401,15 @@ build, automation, native autologin and rendered screenshot verification):
     QA peers use native authentication/Warden and are deleted through the server;
     original inventory and zero money are verified after each run. See Docs/Trade.md.
 - [ ] 5. Chat/combat/macros: hyperlinks, remaining combat events and macro execution families.
+  - [?] Native chat hyperlink areas from real text blocks, original click/hover
+    signatures and default hyperlink-only mouse input, including wrapped links.
+    Original item/spell references and player whisper editor; real GetSpell tuple,
+    header control spacing and optional texture colors for ChannelFrame bootstrap.
+    Verified Windows build, 100-test regression, added tooltip/geometry/color cases
+    and two native 26-step/four-image runs. See Docs/ChatLinks.md.
+  - [ ] Channel membership/roster APIs and original channel-window state.
+  - [ ] Remaining combat-log event families and original formatter integration.
+  - [ ] Advanced macro execution families and acknowledgement-driven sequences.
 - [ ] 6. Maps: points of interest, tracking, interior minimaps and original map bootstrap.
   - [ ] Server near teleports: handle the actual 12340 MSG_MOVE_TELEPORT_ACK
     request (packed GUID, order counter, MovementInfo) and reply with packed GUID;

@@ -1990,11 +1990,41 @@ void FWowFrameManager::DrawMessages(int64 Handle)
 		const int32 Index=State.Lines.Num()-1-State.Offset-I;
 		if(I>=Visible || Index<0 || Bottom<=0) { Text->SetVisibility(ESlateVisibility::Collapsed); continue; }
 		const auto& Line=State.Lines[Index]; Text->SetText(FText::FromString(Line.Text)); Text->SetColorAndOpacity(Line.Color); Text->SetWrapTextAt(Width*UIScale);
+		Text->TakeWidget(); if(auto* Label=Cast<UWowTextBlock>(Text)) Label->RefreshRichStyle();
 		Text->ForceLayoutPrepass(); const float RowHeight=FMath::Max(16*UIScale,Text->GetDesiredSize().Y);
 		Bottom-=RowHeight;
 		if(auto* Slot=Cast<UCanvasPanelSlot>(Text->Slot)) { Slot->SetAnchors(FAnchors(0,0)); Slot->SetAlignment(FVector2D::ZeroVector); Slot->SetPosition(FVector2D(0,Bottom)); Slot->SetSize(FVector2D(Width*UIScale,RowHeight)); Slot->SetZOrder(200); }
 		Text->SetVisibility(ESlateVisibility::HitTestInvisible);
 	}
+}
+
+bool FWowFrameManager::MessageHyperlinkAt(int64 Handle,FVector2D Screen,FString& Data,FString& Text)
+{
+    const auto* State=MessageFrames.Find(Handle); if(!State || !State->Hyperlinks || !IsFrameDrawn(Handle)) return false;
+    const auto Rect=GetLayoutRect(Handle); const float Scale=GetScreenScale();
+    const FVector2D Point=Screen/FMath::Max(.001f,Scale)-FVector2D(Rect.X,Rect.Y);
+    if(Point.X<0 || Point.Y<0 || Point.X>=Rect.Z || Point.Y>=Rect.W) return false;
+    const FVector2D Native=Point*UIScale/FMath::Max(.001f,GetEffectiveFrameScale(Handle));
+    for(const auto& Widget:State->Widgets) if(auto* Label=Cast<UWowTextBlock>(Widget.Get()); Label && Label->IsVisible())
+        if(const auto* Slot=Cast<UCanvasPanelSlot>(Label->Slot)) if(const auto Link=Label->HyperlinkAt(Native-Slot->GetPosition()); Link.IsSet()) {Data=Link->Data; Text=Link->Text; return true;}
+    return false;
+}
+bool FWowFrameManager::MessageHyperlinkPoint(int64 Handle,const FString& Data,FVector2D& Screen)
+{
+    const auto* State=MessageFrames.Find(Handle); if(!State || !State->Hyperlinks || !IsFrameDrawn(Handle)) return false;
+    const auto Rect=GetLayoutRect(Handle); const float Scale=GetScreenScale(),Owner=GetEffectiveFrameScale(Handle);
+    for(const auto& Widget:State->Widgets) if(auto* Label=Cast<UWowTextBlock>(Widget.Get()); Label && Label->IsVisible())
+    {
+        Label->ForceLayoutPrepass(); const auto* Slot=Cast<UCanvasPanelSlot>(Label->Slot); if(!Slot) continue;
+        for(const auto& Hit:Label->HyperlinkRects()) if(Hit.Link.Data==Data)
+        {
+            const FVector2D Local=(Slot->GetPosition()+FVector2D(Hit.Rect.X+Hit.Rect.Z*.5,Hit.Rect.Y+Hit.Rect.W*.5))*Owner/FMath::Max(.001f,UIScale);
+            if(Local.X<0 || Local.Y<0 || Local.X>=Rect.Z || Local.Y>=Rect.W) continue;
+            Screen=(FVector2D(Rect.X,Rect.Y)+Local)*Scale;
+            if(HitTestFrames(Screen.X,Screen.Y)==Handle) return true;
+        }
+    }
+    return false;
 }
 
 void FWowFrameManager::DebugDumpLayout() const
@@ -2090,7 +2120,12 @@ int64 FWowFrameManager::HitTestFrames(float ScreenX, float ScreenY) const
     for (const auto& Pair : Frames)
     {
         const auto& Entry = Pair.Value;
-        if ((!Entry.bMouseEnabled && !Entry.bMouseWheelEnabled) || !Entry.Widget.IsValid()) continue;
+        if(!Entry.Widget.IsValid()) continue;
+        if(!Entry.bMouseEnabled && !Entry.bMouseWheelEnabled)
+        {
+            FString Data,Text;
+            if(!const_cast<FWowFrameManager*>(this)->MessageHyperlinkAt(Pair.Key,FVector2D(ScreenX,ScreenY),Data,Text)) continue;
+        }
         bool Visible = true;
         int64 Ancestor = Pair.Key, Descendant=-1;
         for (int32 Depth = 0; Ancestor >= 0 && Depth < 64; ++Depth)
@@ -2297,11 +2332,22 @@ void FWowFrameManager::UpdateMouseHover(float ScreenX, float ScreenY)
 			EventSystem->RunFrameScript(HoverFrameHandle, TEXT("OnEnter"), {TEXT("0")});
 		}
 	}
+    FString Data,Text; const int64 LinkFrame=MessageHyperlinkAt(NewHover,LastPointerPosition,Data,Text)?NewHover:-1;
+    if(LinkFrame!=HyperlinkHoverFrame || Data!=HyperlinkHoverData)
+    {
+        if(EventSystem && HyperlinkHoverFrame>=0) EventSystem->RunFrameScript(HyperlinkHoverFrame,TEXT("OnHyperlinkLeave"),{HyperlinkHoverData,HyperlinkHoverText});
+        HyperlinkHoverFrame=LinkFrame; HyperlinkHoverData=Data; HyperlinkHoverText=Text;
+        if(EventSystem && LinkFrame>=0) EventSystem->RunFrameScript(LinkFrame,TEXT("OnHyperlinkEnter"),{Data,Text});
+    }
 }
 
 void FWowFrameManager::DispatchMouseDown(int64 Handle, const FString& Button)
 {
 	if (!EventSystem || Handle < 0) return;
+    FString LinkData,LinkText;
+    HyperlinkPressedFrame=-1;
+    if(MessageHyperlinkAt(Handle,LastPointerPosition,LinkData,LinkText))
+    {HyperlinkPressedFrame=Handle; HyperlinkPressedData=LinkData; HyperlinkPressedButton=Button; return;}
     if(Button==TEXT("LeftButton"))
     {
         if(auto* Edit=GetEditBoxWidget(Handle); Edit && Edit->GetIsEnabled()) Edit->SetKeyboardFocus();
@@ -2351,7 +2397,14 @@ bool FWowFrameManager::DispatchMouseWheel(int64 Handle,float Delta)
 void FWowFrameManager::DispatchMouseUp(int64 Handle, const FString& Button)
 {
     if(Button==TEXT("LeftButton")) { UpdateSliderPointer(); DraggingSlider=-1; }
+    const int64 LinkFrame=HyperlinkPressedFrame; HyperlinkPressedFrame=-1;
 	if (!EventSystem || Handle < 0) return;
+    if(LinkFrame>=0)
+    {
+        FString Data,Text; if(LinkFrame==Handle && Button==HyperlinkPressedButton && MessageHyperlinkAt(Handle,LastPointerPosition,Data,Text) && Data==HyperlinkPressedData)
+            EventSystem->RunFrameScript(Handle,TEXT("OnHyperlinkClick"),{Data,Text,Button});
+        return;
+    }
 	if(auto* Visual=ButtonVisualStates.Find(Handle)) { Visual->MousePressed=false; if(!Visual->PressLocked) Visual->ForcedPressed=false; RefreshButtonVisuals(Handle); }
 	if(auto* Widget=GetButtonWidget(Handle); Widget && !Widget->GetIsEnabled()) return;
 	EventSystem->RunFrameScript(Handle, TEXT("OnMouseUp"), {Button});
@@ -2799,17 +2852,21 @@ void FWowFrameManager::TooltipUpdateDisplay(int64 TooltipHandle)
         if(auto* Rich=Cast<UWowTextBlock>(Label)) Rich->RefreshRichStyle(UIScale);
         Label->ForceLayoutPrepass(); return Label->GetDesiredSize()/UIScale;
     };
+    float HeaderReserve=0;
+    for(int64 Child:GetChildHandles(TooltipHandle)) if(const auto* Def=GetFrameDef(Child); Def && !Def->bHidden && (Def->Type==EWowFrameType::Button || Def->Type==EWowFrameType::CheckButton))
+        for(const auto& Anchor:Def->Anchors) if(Anchor.Point==EWowAnchorPoint::TOPRIGHT) HeaderReserve=FMath::Max(HeaderReserve,Def->Width+FMath::Max(0.f,-Anchor.OffsetX));
+    const int32 First=State->LineOrder.IsEmpty()?MAX_int32:State->LineOrder[0];
     float ContentWidth=FMath::Max(1.f,State->MinimumWidth-16);
     for(int32 I=0;I<State->Lines.Num();++I)
     {
         const auto& Line=State->Lines[I]; const auto Size=Measure(EnsureText(I+1,false),Line.Text);
-        ContentWidth=FMath::Max(ContentWidth,float(Line.bWrapText?FMath::Min(300.,Size.X):Size.X));
+        ContentWidth=FMath::Max(ContentWidth,float(Line.bWrapText?FMath::Min(300.,Size.X):Size.X)+(First==I?HeaderReserve:0));
     }
     for(int32 I=0;I<State->DoubleLines.Num();++I)
     {
         const auto& Line=State->DoubleLines[I]; const int32 Index=State->Lines.Num()+I+1;
         const auto Left=Measure(EnsureText(Index,false),Line.LeftText),Right=Measure(EnsureText(Index,true),Line.RightText);
-        ContentWidth=FMath::Max(ContentWidth,float(Left.X+Right.X+12));
+        ContentWidth=FMath::Max(ContentWidth,float(Left.X+Right.X+12)+(First==~I?HeaderReserve:0));
     }
     ContentWidth=(FMath::CeilToFloat(ContentWidth*UIScale)+1)/UIScale;
 

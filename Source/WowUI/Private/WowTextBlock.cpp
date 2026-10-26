@@ -5,6 +5,8 @@
 #include "Framework/Text/SlateImageRun.h"
 #include "Framework/Text/SlateTextRun.h"
 #include "Framework/Text/SlateWidgetRun.h"
+#include "Framework/Text/TextLayout.h"
+#include "Framework/Text/ILayoutBlock.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Text/SRichTextBlock.h"
@@ -18,12 +20,12 @@ FString EscapeLabel(FString Text)
 }
 FWowLabelMarkup UWowTextBlock::ParseMarkup(const FString& Text)
 {
-    FWowLabelMarkup Result; FString Pending,Color;
+    FWowLabelMarkup Result; FString Pending,Color; int32 Link=-1;
     auto Flush=[&]()
     {
         Result.Plain+=Pending;
-        if(Color.IsEmpty()) Result.Rich+=EscapeLabel(Pending);
-        else if(!Pending.IsEmpty()) Result.Rich+=FString::Printf(TEXT("<wowtext c=\"%s\">%s</>"),*Color,*EscapeLabel(Pending));
+        if(Color.IsEmpty() && Link<0) Result.Rich+=EscapeLabel(Pending);
+        else if(!Pending.IsEmpty()) Result.Rich+=FString::Printf(TEXT("<wowtext c=\"%s\" l=\"%d\">%s</>"),*Color,Link,*EscapeLabel(Pending));
         Pending.Empty();
     };
     for(int32 I=0;I<Text.Len();++I)
@@ -62,8 +64,18 @@ FWowLabelMarkup UWowTextBlock::ParseMarkup(const FString& Text)
             if(Valid) { Flush(); Color=Hex; I+=9; Result.Formatted=true; continue; }
         }
         if(Code=='r') { Flush(); Color.Empty(); ++I; Result.Formatted=true; continue; }
-        if(Code=='H') { const int32 End=Text.Find(TEXT("|h"),ESearchCase::CaseSensitive,ESearchDir::FromStart,I+2); if(End>=0) { I=End+1; continue; } }
-        if(Code=='h') { ++I; continue; }
+        if(Code=='H')
+        {
+            const int32 End=Text.Find(TEXT("|h"),ESearchCase::CaseSensitive,ESearchDir::FromStart,I+2);
+            const int32 Close=End>=0?Text.Find(TEXT("|h"),ESearchCase::CaseSensitive,ESearchDir::FromStart,End+2):-1;
+            if(End>I+2 && End-I<=2048 && Close>=0 && Result.Links.Num()<128)
+            {
+                Flush(); FWowLabelMarkup::FLink Value; Value.Data=Text.Mid(I+2,End-I-2); Value.Text=Text.Mid(I,Close+2-I);
+                if(!Color.IsEmpty()) Value.Text=TEXT("|c")+Color+Value.Text+TEXT("|r");
+                Link=Result.Links.Add(MoveTemp(Value)); Result.Formatted=true; I=End+1; continue;
+            }
+        }
+        if(Code=='h') {Flush(); Link=-1; ++I; continue;}
         if(Code=='T')
         {
             const int32 End=Text.Find(TEXT("|t"),ESearchCase::CaseSensitive,ESearchDir::FromStart,I+2);
@@ -77,7 +89,7 @@ FWowLabelMarkup UWowTextBlock::ParseMarkup(const FString& Text)
                     Icon.Height=Number(1); Icon.Width=Number(2); Icon.OffsetX=Number(3); Icon.OffsetY=Number(4);
                     const float W=Number(5),H=Number(6);
                     if(W>0 && H>0 && Parts.Num()>=11) Icon.Crop=FVector4f(Number(7)/W,Number(9)/H,Number(8)/W,Number(10)/H);
-                    Result.Rich+=FString::Printf(TEXT("<wowimage i=\"%d\"/>"),Result.Icons.Num()); Result.Icons.Add(Icon);
+                    Result.Rich+=FString::Printf(TEXT("<wowimage i=\"%d\" l=\"%d\"/>"),Result.Icons.Num(),Link); Result.Icons.Add(Icon);
                 }
                 Result.Formatted=true; I=End+1; continue;
             }
@@ -89,6 +101,7 @@ FWowLabelMarkup UWowTextBlock::ParseMarkup(const FString& Text)
 
 struct FWowRichLabelState
 {
+    TWeakPtr<FTextLayout> Layout;
     FTextBlockStyle Style;
     float Scale=0;
     float Wrap=-1;
@@ -108,6 +121,8 @@ public:
     {
         auto Meta=[&](const TCHAR* Key) { const auto* Range=Run.MetaData.Find(Key); return Range?Original.Mid(Range->BeginIndex,Range->Len()):FString(); };
         const int32 Begin=Model->Len(); FRunInfo Info(Run.Name);
+        State->Layout=Layout;
+        const FString Link=Meta(TEXT("l")); if(!Link.IsEmpty() && FCString::Atoi(*Link)>=0) Info.MetaData.Add(TEXT("wowLink"),Link);
         if(Run.Name==TEXT("wowimage"))
         {
             const int32 Index=FCString::Atoi(*Meta(TEXT("i"))); Model->AppendChar(TCHAR(0x200B));
@@ -134,6 +149,24 @@ public:
 };
 
 void UWowTextBlock::InitializeLabel(FWowFrameManager* InFrames,float Scale) { Frames=InFrames; UnitScale=Scale; }
+TArray<FWowHyperlinkRect> UWowTextBlock::HyperlinkRects() const
+{
+    TArray<FWowHyperlinkRect> Result; const auto Layout=RichState.IsValid()?RichState->Layout.Pin():nullptr; if(!Layout) return Result;
+    const float Scale=FMath::Max(.001f,Layout->GetScale());
+    for(const auto& Line:Layout->GetLineViews()) for(const auto& Block:Line.Blocks)
+    {
+        const auto* Index=Block->GetRun()->GetRunInfo().MetaData.Find(TEXT("wowLink")); if(!Index) continue;
+        const int32 Id=FCString::Atoi(**Index); if(!Parsed.Links.IsValidIndex(Id)) continue;
+        const auto Position=Block->GetLocationOffset()/Scale,Size=Block->GetSize()/Scale;
+        if(Size.X>0 && Size.Y>0) Result.Add({Parsed.Links[Id],FVector4(Position.X,Position.Y,Size.X,Size.Y)});
+    }
+    return Result;
+}
+TOptional<FWowLabelMarkup::FLink> UWowTextBlock::HyperlinkAt(FVector2D Local) const
+{
+    for(const auto& Hit:HyperlinkRects()) if(Local.X>=Hit.Rect.X && Local.X<Hit.Rect.X+Hit.Rect.Z && Local.Y>=Hit.Rect.Y && Local.Y<Hit.Rect.Y+Hit.Rect.W) return Hit.Link;
+    return {};
+}
 void UWowTextBlock::SetText(FText InText)
 {
     const FString Raw=InText.ToString(); if(HasOriginal && Raw==OriginalText) return;

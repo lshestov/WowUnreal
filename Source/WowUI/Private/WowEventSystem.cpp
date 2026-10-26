@@ -384,6 +384,10 @@ void FWowEventSystem::SetFrameScript(int64 Handle, const FString& ScriptName, co
         Params=TEXT("self, min, max, ...");
 	else if (ScriptName == TEXT("OnClick"))
 		Params = TEXT("self, button, down, ...");
+	else if (ScriptName == TEXT("OnHyperlinkClick"))
+		Params = TEXT("self, link, text, button, ...");
+	else if (ScriptName == TEXT("OnHyperlinkEnter") || ScriptName == TEXT("OnHyperlinkLeave"))
+		Params = TEXT("self, link, text, ...");
 	else if (ScriptName == TEXT("OnEnter") || ScriptName == TEXT("OnLeave"))
 		Params = TEXT("self, motion, ...");
 	else if (ScriptName == TEXT("OnMouseDown") || ScriptName == TEXT("OnMouseUp"))

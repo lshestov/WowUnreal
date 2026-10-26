@@ -16,10 +16,13 @@ struct FWowInlineIcon
 };
 struct FWowLabelMarkup
 {
+    struct FLink { FString Data,Text; };
     FString Plain,Rich;
     TArray<FWowInlineIcon> Icons;
+    TArray<FLink> Links;
     bool Formatted=false;
 };
+struct FWowHyperlinkRect { FWowLabelMarkup::FLink Link; FVector4 Rect; };
 
 /** Keeps the native TextBlock API while laying out WoW color/image runs. */
 UCLASS()
@@ -41,6 +44,8 @@ public:
     float GetPixelSpacing() const { return PixelSpacing; }
     static FWowLabelMarkup ParseMarkup(const FString& Text);
     const FWowLabelMarkup& Markup() const { return Parsed; }
+    TArray<FWowHyperlinkRect> HyperlinkRects() const;
+    TOptional<FWowLabelMarkup::FLink> HyperlinkAt(FVector2D Local) const;
     virtual void SynchronizeProperties() override;
     virtual void ReleaseSlateResources(bool ReleaseChildren) override;
 protected:

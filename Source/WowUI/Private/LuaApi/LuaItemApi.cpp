@@ -396,8 +396,18 @@ int WowLuaApi::SetInventoryItemTooltip(lua_State* L)
 }
 int WowLuaApi::SetHyperlinkTooltip(lua_State* L)
 {
-    auto* C=GetContext(L); const uint32 Id=ItemId(L,2);
-    if(C && C->FrameManager && Id) ItemTooltip(L,C,Handle(L),Template(C,Id),Id);
+    auto* C=GetContext(L); if(!C || !C->FrameManager) return 0;
+    FString Link=UTF8_TO_TCHAR(luaL_checkstring(L,2)); const int32 Header=Link.Find(TEXT("|H")); if(Header>=0) Link=Link.Mid(Header+2);
+    const int32 End=Link.Find(TEXT("|h")); if(End>=0) Link.LeftInline(End);
+    TArray<FString> Parts; Link.ParseIntoArray(Parts,TEXT(":"),false); const uint32 Id=Parts.Num()>1?FCString::Strtoui64(*Parts[1],nullptr,10):ItemId(L,2);
+    if(Parts.Num()>1 && (Parts[0]==TEXT("spell") || Parts[0]==TEXT("enchant") || Parts[0]==TEXT("talent")))
+    {
+        uint32 Spell=Id;
+        if(Parts[0]==TEXT("talent")) { const auto* Talent=FDbcStore::Get().Talents().GetById(Id); const int32 Rank=Parts.Num()>2?FMath::Clamp(FCString::Atoi(*Parts[2])+1,1,5):1; Spell=Talent?Talent->RankID[Rank-1]:0; }
+        if(const auto* Row=FDbcStore::Get().Spells().GetById(Spell)) { const auto* Player=C->EntityManager?C->EntityManager->GetLocalPlayer():nullptr; C->FrameManager->TooltipSetSpell(Handle(L),Row->ID,Player?Player->GetLevel():1); return 0; }
+    }
+    else if(Id && (Parts.Num()==1 || Parts[0]==TEXT("item") || Parts[0]==TEXT("currency"))) {ItemTooltip(L,C,Handle(L),Template(C,Id),Id); return 0;}
+    C->FrameManager->TooltipClearLines(Handle(L)); C->FrameManager->SetFrameVisible(Handle(L),false);
     return 0;
 }
 void WowLuaApi::UpdateItemComparisons(lua_State* L)

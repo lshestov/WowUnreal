@@ -299,11 +299,13 @@ public:
 	void SetCooldown(int64 Handle, double StartTime, float Duration);
 	void TickCooldowns();
 	struct FMessage { FString Text; FLinearColor Color; int32 Id=0; };
-	struct FMessageState { TArray<FMessage> Lines; TArray<TWeakObjectPtr<UTextBlock>> Widgets; int32 Offset=0,Limit=200; };
+	struct FMessageState { TArray<FMessage> Lines; TArray<TWeakObjectPtr<UTextBlock>> Widgets; int32 Offset=0,Limit=200; bool Hyperlinks=true; };
 	TMap<int64,FMessageState> MessageFrames;
 	void AddMessage(int64 Handle,const FString& Text,FLinearColor Color,int32 Id=0);
 	void ScrollMessages(int64 Handle,int32 Offset,bool Absolute=false);
 	void DrawMessages(int64 Handle);
+    bool MessageHyperlinkAt(int64 Handle,FVector2D Screen,FString& Data,FString& Text);
+    bool MessageHyperlinkPoint(int64 Handle,const FString& Data,FVector2D& Screen);
 	void SetChecked(int64 Handle,bool Checked);
 	bool GetChecked(int64 Handle) const { return CheckedFrames.Contains(Handle); }
 	TSet<int64> CheckedFrames;
@@ -327,6 +329,8 @@ private:
 
 	/** Handle of the frame currently under the mouse cursor (-1 if none) */
 	int64 HoverFrameHandle = -1;
+    int64 HyperlinkHoverFrame=-1,HyperlinkPressedFrame=-1;
+    FString HyperlinkHoverData,HyperlinkHoverText,HyperlinkPressedData,HyperlinkPressedButton;
 	FVector2D LastPointerPosition=FVector2D::ZeroVector;
 	int64 MovingFrame=-1;
 	int64 DraggingFrame=-1;

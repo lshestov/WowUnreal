@@ -2,6 +2,7 @@
 #include "WowEntity.h"
 #include "WowUiText.h"
 #include "LuaApiRegistry.h"
+#include "Formats/Dbc/DbcStore.h"
 #include "WowEventSystem.h"
 #include "WowFrameManager.h"
 #include "WowFrameTypes.h"
@@ -1487,10 +1488,11 @@ static int LF_TextureSetTexCoord(lua_State* L)
 static int LF_TextureSetVertexColor(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
-	float R = static_cast<float>(luaL_checknumber(L, 2));
-	float G = static_cast<float>(luaL_checknumber(L, 3));
-	float B = static_cast<float>(luaL_checknumber(L, 4));
-	float A = lua_isnumber(L, 5) ? static_cast<float>(lua_tonumber(L, 5)) : 1.0f;
+	// FrameScript_GetColor accepts nil components and preserves omitted alpha.
+    UImage* Img=GetTextureImage(L,1);
+    const auto Component=[&](int32 Index){const double Value=lua_tonumber(L,Index); return float(FMath::Clamp(FMath::IsFinite(Value)?Value:0.,0.,1.));};
+	float R=Component(2),G=Component(3),B=Component(4);
+	float A=lua_isnumber(L,5)?Component(5):(Img?Img->GetColorAndOpacity().A:1.f);
 
 	// Store in Lua table
 	lua_pushnumber(L, R); lua_setfield(L, 1, "__colorR");
@@ -1499,7 +1501,6 @@ static int LF_TextureSetVertexColor(lua_State* L)
 	lua_pushnumber(L, A); lua_setfield(L, 1, "__colorA");
 
 	// Apply color tinting to the texture
-	UImage* Img = GetTextureImage(L, 1);
 	if (Img)
 	{
 		Img->SetColorAndOpacity(FLinearColor(R, G, B, A));
@@ -3019,7 +3020,7 @@ static int LF_TooltipGetItem(lua_State* L)
 	return 1;
 }
 
-// tooltip:GetSpell() -- returns spell ID for currently displayed spell
+// tooltip:GetSpell() -- Wrath returns name, rank and spell ID.
 static int LF_TooltipGetSpell(lua_State* L)
 {
 	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
@@ -3033,7 +3034,9 @@ static int LF_TooltipGetSpell(lua_State* L)
 	const FTooltipState* State = Ctx->FrameManager->GetTooltipState(TooltipHandle);
 	if (State && State->SpellId > 0)
 	{
-		lua_pushnumber(L, State->SpellId);
+		if(const auto* Spell=FDbcStore::Get().Spells().GetById(State->SpellId))
+        {lua_pushstring(L,TCHAR_TO_UTF8(*Spell->SpellName)); lua_pushstring(L,TCHAR_TO_UTF8(*Spell->Rank)); lua_pushinteger(L,Spell->ID); return 3;}
+		lua_pushnil(L);
 	}
 	else
 	{
@@ -3363,7 +3366,8 @@ static const luaL_Reg FrameMethods[] =
 	{"SetClampRectInsets", [](lua_State* L)->int { return LF_ClampInsets(L,false); }},
 	{"GetClampRectInsets", [](lua_State* L)->int { return LF_ClampInsets(L,true); }},
 	{"IsClampedToScreen", [](lua_State* L)->int { return LF_GetFrameFlag(L,false,true); }},
-	{"SetHyperlinksEnabled", [](lua_State* L) -> int { return 0; }},
+	{"SetHyperlinksEnabled", [](lua_State* L)->int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->MessageFrames.FindOrAdd(GetFrameHandle(L)).Hyperlinks=lua_toboolean(L,2)!=0; return 0; }},
+	{"GetHyperlinksEnabled", [](lua_State* L)->int { const auto* C=WowLuaApi::GetContext(L); const auto* State=C && C->FrameManager?C->FrameManager->MessageFrames.Find(GetFrameHandle(L)):nullptr; lua_pushboolean(L,!State || State->Hyperlinks); return 1; }},
 	{"GetMaxLines", [](lua_State* L) -> int { lua_pushnumber(L, 0); return 1; }},
 	{"SetHistoryLines", [](lua_State* L) -> int { lua_pushinteger(L,FMath::Clamp(int32(luaL_checkinteger(L,2)),0,100)); lua_setfield(L,1,"__historyLimit"); return 0; }},
 	{"AddHistoryLine", [](lua_State* L) -> int {

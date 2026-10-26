@@ -535,6 +535,53 @@ bool FHudTextureTemplates::RunTest(const FString&)
     TestTrue(TEXT("Updated normal caption color is visible"),Text && FMath::IsNearlyEqual(Text->GetColorAndOpacity().GetSpecifiedColor().G,.8f));
     return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudLinkTooltips,"WowUnreal.Hud.LinkTooltips",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudLinkTooltips::RunTest(const FString&)
+{
+    FString Path; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false;
+    FMpqManager Mpq; if(!Mpq.Initialize(Path)) return false;
+    auto& Dbc=FDbcStore::Get(); if(!Dbc.IsLoaded()) Dbc.LoadAll(Mpq); if(!Dbc.IsDeferredLoaded()) Dbc.LoadDeferred(Mpq);
+    FHudFixture F;
+    return TestTrue(TEXT("Spell links use original tooltip metadata and invalid links clear the previous context"),F.Lua.ExecuteString(TEXT(R"LUA(
+        LinkTip=CreateFrame('GameTooltip','LinkTip',UIParent); LinkTip:SetOwner(UIParent,'ANCHOR_NONE'); LinkTip:SetHyperlink('|cff71d5ff|Hspell:6603|h[Attack]|h|r')
+        local name,rank,id=LinkTip:GetSpell(); assert(name==GetSpellInfo(6603) and id==6603 and type(rank)=='string' and select('#',LinkTip:GetSpell())==3)
+        LinkTip:SetHyperlink('unsupported:6603'); assert(not LinkTip:IsShown() and LinkTip:GetSpell()==nil)
+        LinkTipClose=CreateFrame('Button','LinkTipClose',LinkTip); LinkTipClose:SetSize(32,32); LinkTipClose:SetPoint('TOPRIGHT',LinkTip,'TOPRIGHT',0,0)
+        LinkTip:SetText('Long reference title'); local width=LinkTip:GetWidth(); LinkTipClose:Hide(); LinkTip:SetText('Long reference title'); assert(width>=LinkTip:GetWidth()+31)
+        LinkColor=UIParent:CreateTexture('LinkColor'); LinkColor:SetVertexColor(.2,.3,.4,.6); LinkColor:SetVertexColor(nil,nil,nil)
+        local r,g,b,a=LinkColor:GetVertexColor(); assert(r==0 and g==0 and b==0 and math.abs(a-.6)<.001)
+        LinkColor:SetVertexColor(2,-1,.5); r,g,b,a=LinkColor:GetVertexColor(); assert(r==1 and g==0 and b==.5 and math.abs(a-.6)<.001)
+    )LUA")));
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudHyperlinks,"WowUnreal.Hud.ChatHyperlinks",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudHyperlinks::RunTest(const FString&)
+{
+    const auto Parsed=UWowTextBlock::ParseMarkup(TEXT("|cff00ff00|Hitem:2589:0|h[Cloth <tag>]|h|r / |Hspell:6603|h[Attack]|h"));
+    if(!TestEqual(TEXT("Hyperlinks retain independent data records"),Parsed.Links.Num(),2)) return false;
+    TestTrue(TEXT("Link payloads and original colored text survive rendering"),Parsed.Links[0].Data==TEXT("item:2589:0") && Parsed.Links[0].Text.StartsWith(TEXT("|cff00ff00|Hitem:")) && Parsed.Plain==TEXT("[Cloth <tag>] / [Attack]") && Parsed.Rich.Contains(TEXT("&lt;tag&gt;")));
+    FHudFixture F;
+    if(!F.Lua.ExecuteString(TEXT(R"LUA(
+        LinkFrame=CreateFrame('ScrollingMessageFrame','LinkFrame',UIParent); LinkFrame:SetSize(220,120); LinkFrame:SetPoint('TOPLEFT',UIParent,'TOPLEFT',40,-40); LinkFrame:EnableMouse(false); assert(LinkFrame:GetHyperlinksEnabled()); LinkFrame:SetHyperlinksEnabled(true)
+        assert(LinkFrame:GetHyperlinksEnabled()); LinkClicks=0; LinkEnter=0; LinkLeave=0
+        LinkFrame:SetScript('OnHyperlinkClick',function(self,data,text,button) assert(data=='item:2589:0' and text:find('%[Cloth%]') and button=='RightButton'); LinkClicks=LinkClicks+1 end)
+        LinkFrame:SetScript('OnHyperlinkEnter',function(self,data,text) assert(data=='item:2589:0'); LinkEnter=LinkEnter+1 end)
+        LinkFrame:SetScript('OnHyperlinkLeave',function() LinkLeave=LinkLeave+1 end)
+        LinkFrame:AddMessage('hello |cff00ff00|Hitem:2589:0|h[Cloth]|h|r')
+    )LUA"))) return false;
+    const int64 Handle=F.Frames.FindFrame(TEXT("LinkFrame")); F.Frames.DrawMessages(Handle); F.Canvas->TakeWidget()->SlatePrepass();
+    FVector2D Point;
+    if(!TestTrue(TEXT("Real text-layout blocks supply a visible hyperlink point"),F.Frames.MessageHyperlinkPoint(Handle,TEXT("item:2589:0"),Point))) return false;
+    F.Frames.UpdateMouseHover(Point.X,Point.Y); F.Frames.DispatchMouseDown(Handle,TEXT("RightButton")); F.Frames.DispatchMouseUp(Handle,TEXT("RightButton")); F.Frames.UpdateMouseHover(0,0);
+    TestTrue(TEXT("Hover, leave and right-click deliver the original data/text/button tuple"),F.Lua.ExecuteString(TEXT("assert(LinkClicks==1 and LinkEnter==1 and LinkLeave==1); LinkFrame:SetHyperlinksEnabled(false); assert(not LinkFrame:GetHyperlinksEnabled())")));
+    TestFalse(TEXT("Disabled hyperlinks cannot be selected"),F.Frames.MessageHyperlinkPoint(Handle,TEXT("item:2589:0"),Point));
+    TestTrue(TEXT("Wrapped links retain their data and individual text blocks"),F.Lua.ExecuteString(TEXT("LinkFrame:SetHyperlinksEnabled(true); LinkFrame:Clear(); LinkFrame:SetSize(110,180); LinkFrame:AddMessage('|Hitem:2589:0|h[Cloth] multiple wrapped words|h')")));
+    F.Frames.DrawMessages(Handle); F.Canvas->TakeWidget()->SlatePrepass(); int32 Blocks=0;
+    for(const auto& Widget:F.Frames.MessageFrames[Handle].Widgets) if(const auto* Label=Cast<UWowTextBlock>(Widget.Get()); Label && Label->IsVisible()) Blocks+=Label->HyperlinkRects().Num();
+    TestTrue(TEXT("A wrapped link has multiple physical hit areas"),Blocks>1 && F.Frames.MessageHyperlinkPoint(Handle,TEXT("item:2589:0"),Point));
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudInlineLabels,"WowUnreal.Hud.StockInlineLabels",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FHudInlineLabels::RunTest(const FString&)
 {

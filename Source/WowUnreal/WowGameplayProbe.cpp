@@ -420,6 +420,16 @@ struct FWowGameplayProbe
         else if (Op==TEXT("lua")) { Done=C.UIManager->GetLuaVM()->ExecuteString(Step->GetStringField(TEXT("code")),TEXT("=GameplayProbe")); if (!Done) { Failure=TEXT("Lua assertion failed"); Finish(C,false); return; } }
         else if(Op==TEXT("drop_action_cursor")) { Done=Connection->DropActionCursor(); if(!Done) { Failure=TEXT("No action is held by the cursor"); Finish(C,false); return; } }
         else if(Op==TEXT("request_delete_cursor")) { Done=C.RequestCursorItemDeletion(); if(!Done) { Failure=TEXT("No valid item is held by the cursor"); Finish(C,false); return; } }
+        else if(Op==TEXT("click_link") || Op==TEXT("hover_link"))
+        {
+            auto* Frames=C.UIManager->GetFrameManager(); const int64 Handle=Frames->FindFrame(Step->GetStringField(TEXT("name"))); FVector2D Point;
+            if(Frames->MessageHyperlinkPoint(Handle,Step->GetStringField(TEXT("data")),Point))
+            {
+                Frames->UpdateMouseHover(Point.X,Point.Y); C.GameplayProbePointer=Point;
+                if(Op==TEXT("click_link")) {FString Button=TEXT("LeftButton"); Step->TryGetStringField(TEXT("button"),Button); Frames->DispatchMouseDown(Handle,Button); Frames->DispatchMouseUp(Handle,Button);}
+                Done=true;
+            }
+        }
         else if (Op==TEXT("click_frame") || Op==TEXT("drag_frame") || Op==TEXT("hover_frame") || Op==TEXT("wheel_frame"))
         {
             auto* Frames=C.UIManager->GetFrameManager();

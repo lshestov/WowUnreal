@@ -26,6 +26,9 @@ compatibility work.
   with original panels and separate player/pet wire state.
 - UTF-8 chat, channel and recipient fields, bounded message history and input
   focus. A native round-trip test uses an otherwise empty local realm.
+  Native hyperlink areas open original item/spell references and player whisper
+  editors, including wrapped links and background mouse passthrough. See
+  [chat hyperlinks](ChatLinks.md).
 - Outdoor minimap and zone/continent map textures, player position and zoom.
 - Game menu, window close order, logout and character re-entry, ReloadUI and
   saved per-character UI preferences. Windowed mode remains the initial mode.
@@ -109,7 +112,7 @@ Full WoW UI compatibility is **not complete**. In particular:
 - Specialized legacy frame/region methods and broader addon compatibility. Visible panels and
   readable category lists do not establish complete visual parity.
 - Advanced macro commands such as cast sequences, complete conditional syntax,
-  additional combat event families and clickable chat links. See
+  additional combat event families. See
   [macro support](Macros.md) and [combat-log support](CombatLog.md).
 - Complete PvP/battleground, LFG and achievement panels and protocol support.
 - World-map points of interest, indoor minimap tiles and tracking markers.
