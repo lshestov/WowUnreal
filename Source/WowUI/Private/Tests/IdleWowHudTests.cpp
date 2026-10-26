@@ -616,6 +616,73 @@ bool FHudInventoryItems::RunTest(const FString&)
     TestTrue(TEXT("Server display resolves an existing MPQ icon"),Display && F.Frames.LoadUITexture(TEXT("Interface\\Icons\\")+Display->Icon1));
     return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudItemComparison,"WowUnreal.Hud.ItemComparison",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudItemComparison::RunTest(const FString&)
+{
+    FHudFixture F; TStrongObjectPtr<UWowConnectionManager> Connection(NewObject<UWowConnectionManager>());
+    auto& Entities=Connection->PacketHandler.EntityManager; Entities.LocalPlayerGuid=1;
+    auto& Player=Entities.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER);
+    F.Context.ConnectionManager=Connection.Get(); F.Context.EntityManager=&Entities;
+    auto& Templates=Connection->PacketHandler.ItemTemplates;
+    const auto AddTemplate=[&](uint32 Id,uint32 Type,const FString& Name,uint32 Armor,int32 Strength)
+    {
+        FWowItemTemplate T; T.Id=Id; T.Name=Name; T.InventoryType=Type; T.Armor=Armor; T.Stats.Add({4,Strength}); T.Quality=2;
+        Templates.Add(Id,T);
+    };
+    AddTemplate(1001,13,TEXT("Incoming Sword"),0,4); Templates[1001].DamageMin=8; Templates[1001].DamageMax=12; Templates[1001].Delay=1000;
+    AddTemplate(1002,13,TEXT("Main Sword"),0,7); Templates[1002].DamageMin=2; Templates[1002].DamageMax=4; Templates[1002].Delay=2000;
+    AddTemplate(1003,14,TEXT("Offhand Shield"),20,2);
+    AddTemplate(1004,11,TEXT("Incoming Ring"),0,10); AddTemplate(1005,11,TEXT("First Ring"),0,2); AddTemplate(1006,11,TEXT("Second Ring"),0,3);
+    AddTemplate(1007,18,TEXT("Bag"),0,0);
+    const auto Equip=[&](int32 Slot,uint32 Id)
+    {
+        const uint64 Guid=0x4000000000000000ull|Id;
+        auto& Item=Entities.PromoteToTyped(Guid,WowTypeMask::OBJECT|WowTypeMask::ITEM); Item.Entry=Id; Item.SetField(ItemField::STACK_COUNT,1);
+        Player.SetField(PlayerField::INV_SLOT_HEAD+Slot*2,uint32(Guid&0xffffffffull)); Player.SetField(PlayerField::INV_SLOT_HEAD+Slot*2+1,uint32(Guid>>32));
+    };
+    Equip(15,1002); Equip(16,1003); Equip(10,1005); Equip(11,1006);
+    TestTrue(TEXT("Original tooltip signatures, weapon priority and signed stat APIs"),F.Lua.ExecuteString(TEXT(R"LUA(
+        Incoming=CreateFrame('GameTooltip','CompareIncoming',UIParent)
+        Compare=CreateFrame('GameTooltip','CompareEquipped',UIParent)
+        Incoming:SetOwner(UIParent,'ANCHOR_RIGHT'); Incoming:SetMinimumWidth(220)
+        Incoming:SetHyperlink('item:1001'); local name,link=Incoming:GetItem()
+        assert(name=='Incoming Sword' and link:find('item:1001:'))
+        assert(Incoming:GetAnchorType()=='ANCHOR_RIGHT' and Incoming:GetMinimumWidth()==220)
+        Incoming:SetAnchorType('ANCHOR_LEFT',25,4); assert(Incoming:GetAnchorType()=='ANCHOR_LEFT')
+        assert(Compare:SetHyperlinkCompareItem(link,1,false,Incoming) and Compare:GetItem()=='Offhand Shield')
+        assert(Compare:SetHyperlinkCompareItem(link,2,false,Incoming) and Compare:GetItem()=='Main Sword')
+        local stat=GetItemStats(link); assert(stat.ITEM_MOD_STRENGTH_SHORT==4 and stat.ITEM_MOD_DAMAGE_PER_SECOND_SHORT==10)
+        local supplied={keep=1}; assert(GetItemStatDelta(link,'item:1002',supplied)==supplied and supplied.keep==1)
+        assert(supplied.ITEM_MOD_STRENGTH_SHORT==-3 and supplied.ITEM_MOD_DAMAGE_PER_SECOND_SHORT==8.5)
+        assert(GetItemStats('item:1003').RESISTANCE0_NAME==20)
+    )LUA")));
+    const auto* Tip=F.Frames.GetTooltipState(F.Frames.FindFrame(TEXT("CompareEquipped")));
+    TestTrue(TEXT("Compare keeps equipped context and header before the item title"),Tip && Tip->ItemId==1002 && Tip->Lines.Num()>4 && Tip->Lines[0].Text==TEXT("Currently Equipped") && Tip->Lines[1].Text==TEXT("Main Sword"));
+    if(Tip)
+    {
+        bool Gain=false,Loss=false;
+        for(const auto& Line:Tip->Lines) { if(Line.Text.StartsWith(TEXT("+8.5"))) Gain=Line.Color.G==1 && Line.Color.R==0; if(Line.Text.StartsWith(TEXT("-3"))) Loss=Line.Color.R==1 && Line.Color.G<.2f; }
+        TestTrue(TEXT("Incoming minus equipped renders gains green and losses red"),Gain && Loss);
+    }
+    const auto* Left3=F.Frames.GetNamedFontString(TEXT("CompareEquippedTextLeft3")); const auto* Right3=F.Frames.GetNamedFontString(TEXT("CompareEquippedTextRight3"));
+    const auto* Left4=F.Frames.GetNamedFontString(TEXT("CompareEquippedTextLeft4"));
+    TestTrue(TEXT("Mixed rows render damage and speed together before DPS"),Left3 && Right3 && Left4 && Left3->GetText().ToString()==TEXT("2 - 4 Damage") && Right3->GetText().ToString()==TEXT("Speed 2.00") && Left4->GetText().ToString().Contains(TEXT("1.5 damage per second")));
+    TestTrue(TEXT("Ring slots, unsupported indices and stale contexts follow stock behavior"),F.Lua.ExecuteString(TEXT(R"LUA(
+        Incoming:SetHyperlink('item:1004'); local _,link=Incoming:GetItem()
+        assert(Compare:SetHyperlinkCompareItem(link,1) and Compare:GetItem()=='First Ring')
+        assert(Compare:SetHyperlinkCompareItem(link,2) and Compare:GetItem()=='Second Ring')
+        assert(not Compare:SetHyperlinkCompareItem(link,3) and not Compare:IsShown() and Compare:GetItem()==nil)
+        assert(not Compare:SetHyperlinkCompareItem('item:1007',1))
+        Incoming:SetText('Different content'); assert(Incoming:GetItem()==nil)
+        Incoming:AddDoubleLine('left','right'); Incoming:AppendText(' more')
+    )LUA")));
+    Tip=F.Frames.GetTooltipState(F.Frames.FindFrame(TEXT("CompareIncoming")));
+    TestTrue(TEXT("AppendText follows the last inserted row"),Tip && Tip->DoubleLines.Last().LeftText==TEXT("left more"));
+    // An offhand item also compares against a two-handed weapon when offhand is empty.
+    Player.SetField(PlayerField::INV_SLOT_HEAD+16*2,0); Player.SetField(PlayerField::INV_SLOT_HEAD+16*2+1,0); Templates[1002].InventoryType=17;
+    TestTrue(TEXT("Offhand comparison falls back to the equipped two-hander"),F.Lua.ExecuteString(TEXT("assert(Compare:SetHyperlinkCompareItem('item:1003',1) and Compare:GetItem()=='Main Sword'); assert(not Compare:SetHyperlinkCompareItem('item:1003',2))")));
+    return true;
+}
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUiWindowMovement,"WowUnreal.Hud.WindowMovement",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FUiWindowMovement::RunTest(const FString&)
 {

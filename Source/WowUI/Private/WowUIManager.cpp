@@ -466,6 +466,12 @@ void UWowUIManager::TickWorldImages(UWorld* World)
 {
     if(ModelRenderer) ModelRenderer->Tick(World);
     if(MapRenderer) MapRenderer->Tick(World);
+    const double Now=FPlatformTime::Seconds();
+    if(bUILoaded && LuaVM && Now>=NextItemComparisonUpdate)
+    {
+        NextItemComparisonUpdate=Now+.2; LuaVM->BeginCallback();
+        WowLuaApi::UpdateItemComparisons(LuaVM->GetState());
+    }
 }
 
 void UWowUIManager::MapCommand(int32 Command) { if(MapRenderer) MapRenderer->Command(Command); }

@@ -2590,6 +2590,8 @@ void FWowFrameManager::TooltipSetOwner(int64 TooltipHandle, int64 OwnerHandle, c
 
 	State->OwnerHandle = OwnerHandle;
 	State->AnchorType = AnchorType;
+    State->AnchorOffset=FVector2D::ZeroVector; State->MinimumWidth=0;
+    if(AnchorType==TEXT("ANCHOR_NONE") || AnchorType==TEXT("ANCHOR_PRESERVE")) return;
 
 	// Position the tooltip relative to owner frame if valid
 	if (OwnerHandle > 0)
@@ -2645,9 +2647,26 @@ void FWowFrameManager::TooltipAddLine(int64 TooltipHandle, const FString& Text, 
 	NewLine.Text = Text;
 	NewLine.Color = FLinearColor(R, G, B, 1.0f);
 	NewLine.bWrapText = bWrapText;
-	State->Lines.Add(NewLine);
+	State->LineOrder.Add(State->Lines.Add(NewLine));
 
 	TooltipUpdateDisplay(TooltipHandle);
+}
+
+void FWowFrameManager::TooltipSetAnchorType(int64 Handle,const FString& Type,float X,float Y)
+{
+    if(auto* State=GetTooltipState(Handle))
+    {
+        State->AnchorType=Type; State->AnchorOffset=FVector2D(X,Y);
+        TooltipUpdateDisplay(Handle);
+    }
+}
+
+void FWowFrameManager::TooltipSetMinimumWidth(int64 Handle,float Width)
+{
+    if(auto* State=GetTooltipState(Handle))
+    {
+        State->MinimumWidth=FMath::Max(0.f,Width); TooltipUpdateDisplay(Handle);
+    }
 }
 
 void FWowFrameManager::TooltipAddDoubleLine(int64 TooltipHandle, const FString& LeftText, const FString& RightText,
@@ -2661,7 +2680,7 @@ void FWowFrameManager::TooltipAddDoubleLine(int64 TooltipHandle, const FString& 
 	NewLine.RightText = RightText;
 	NewLine.LeftColor = FLinearColor(LR, LG, LB, 1.0f);
 	NewLine.RightColor = FLinearColor(RR, RG, RB, 1.0f);
-	State->DoubleLines.Add(NewLine);
+	State->LineOrder.Add(~State->DoubleLines.Add(NewLine));
 
 	TooltipUpdateDisplay(TooltipHandle);
 }
@@ -2671,8 +2690,7 @@ void FWowFrameManager::TooltipClearLines(int64 TooltipHandle)
 	FTooltipState* State = GetTooltipState(TooltipHandle);
 	if (!State) return;
 
-	State->Lines.Empty();
-	State->DoubleLines.Empty();
+	State->ClearContent();
 	TooltipUpdateDisplay(TooltipHandle);
 }
 
@@ -2688,13 +2706,12 @@ void FWowFrameManager::TooltipSetText(int64 TooltipHandle, const FString& Text)
 	if (!State) return;
 
 	// SetText replaces line 1 or creates it
-	State->Lines.Empty();
-	State->DoubleLines.Empty();
+	State->ClearContent();
 
 	FTooltipLine NewLine;
 	NewLine.Text = Text;
 	NewLine.Color = FLinearColor::White;
-	State->Lines.Add(NewLine);
+	State->LineOrder.Add(State->Lines.Add(NewLine));
 
 	TooltipUpdateDisplay(TooltipHandle);
 }
@@ -2704,7 +2721,11 @@ void FWowFrameManager::TooltipAppendText(int64 TooltipHandle, const FString& Tex
 	FTooltipState* State = GetTooltipState(TooltipHandle);
 	if (!State) return;
 
-	if (State->Lines.Num() > 0)
+    if(!State->LineOrder.IsEmpty() && State->LineOrder.Last()<0)
+    {
+        State->DoubleLines[~State->LineOrder.Last()].LeftText+=Text;
+    }
+	else if (State->Lines.Num() > 0)
 	{
 		// Append to the last line
 		State->Lines.Last().Text += Text;
@@ -2715,7 +2736,7 @@ void FWowFrameManager::TooltipAppendText(int64 TooltipHandle, const FString& Tex
 		FTooltipLine NewLine;
 		NewLine.Text = Text;
 		NewLine.Color = FLinearColor::White;
-		State->Lines.Add(NewLine);
+		State->LineOrder.Add(State->Lines.Add(NewLine));
 	}
 
 	TooltipUpdateDisplay(TooltipHandle);
@@ -2760,7 +2781,7 @@ void FWowFrameManager::TooltipUpdateDisplay(int64 TooltipHandle)
         if(auto* Rich=Cast<UWowTextBlock>(Label)) Rich->RefreshRichStyle(UIScale);
         Label->ForceLayoutPrepass(); return Label->GetDesiredSize()/UIScale;
     };
-    float ContentWidth=FMath::Max(1.f,State->MinimumWidth);
+    float ContentWidth=FMath::Max(1.f,State->MinimumWidth-16);
     for(int32 I=0;I<State->Lines.Num();++I)
     {
         const auto& Line=State->Lines[I]; const auto Size=Measure(EnsureText(I+1,false),Line.Text);
@@ -2774,54 +2795,38 @@ void FWowFrameManager::TooltipUpdateDisplay(int64 TooltipHandle)
     }
     ContentWidth=(FMath::CeilToFloat(ContentWidth*UIScale)+1)/UIScale;
 
-	// Update FontString widgets with tooltip lines
-	int32 LineIndex = 0;
-
-	// Process regular lines
-	for (const FTooltipLine& Line : State->Lines)
-	{
-		LineIndex++;
-
-		// Find the FontString widget for this line
-		UTextBlock* LeftTextBlock = EnsureText(LineIndex,false);
-		if(auto* Right=GetNamedFontString(FString::Printf(TEXT("%sTextRight%d"),*Prefix,LineIndex))) Right->SetVisibility(ESlateVisibility::Collapsed);
-
-		if (LeftTextBlock)
-		{
-			LeftTextBlock->SetText(FText::FromString(Line.Text));
-			LeftTextBlock->SetAutoWrapText(false); LeftTextBlock->SetWrapTextAt(Line.bWrapText?ContentWidth*UIScale:0);
-            if(auto* Rich=Cast<UWowTextBlock>(LeftTextBlock)) Rich->RefreshRichStyle(UIScale);
-			LeftTextBlock->SetColorAndOpacity(FSlateColor(Line.Color));
-			LeftTextBlock->SetVisibility(ESlateVisibility::Visible);
-			LeftTextBlock->ForceLayoutPrepass();
-			TextY+=FMath::Max(14.f,float(LeftTextBlock->GetDesiredSize().Y/UIScale));
-		}
-	}
-
-	// Process double lines
-	for (const FTooltipDoubleLine& DoubleLine : State->DoubleLines)
-	{
-		LineIndex++;
-
-		// Left side
-		UTextBlock* LeftTextBlock = EnsureText(LineIndex,false);
-		if (LeftTextBlock)
-		{
-			LeftTextBlock->SetText(FText::FromString(DoubleLine.LeftText));
-			LeftTextBlock->SetColorAndOpacity(FSlateColor(DoubleLine.LeftColor));
-			LeftTextBlock->SetVisibility(ESlateVisibility::Visible);
-		}
-
-		// Right side
-		UTextBlock* RightTextBlock = EnsureText(LineIndex,true);
-		if (RightTextBlock)
-		{
-			RightTextBlock->SetText(FText::FromString(DoubleLine.RightText));
-			RightTextBlock->SetColorAndOpacity(FSlateColor(DoubleLine.RightColor));
-			RightTextBlock->SetVisibility(ESlateVisibility::Visible);
-		}
-		TextY+=14;
-	}
+	int32 LineIndex=0;
+    // FontString numbers follow insertion order, including mixed single/double rows.
+    for(const int32 Ordered:State->LineOrder)
+    {
+        ++LineIndex;
+        const auto* Single=Ordered>=0 && State->Lines.IsValidIndex(Ordered)?&State->Lines[Ordered]:nullptr;
+        const auto* Double=Ordered<0 && State->DoubleLines.IsValidIndex(~Ordered)?&State->DoubleLines[~Ordered]:nullptr;
+        if(!Single && !Double) continue;
+        float Height=14;
+        const auto Draw=[&](bool Right,const FString& Text,const FLinearColor& Color,bool Wrap)
+        {
+            if(auto* Label=EnsureText(LineIndex,Right))
+            {
+                Label->SetText(FText::FromString(Text)); Label->SetAutoWrapText(false);
+                Label->SetWrapTextAt(Wrap?ContentWidth*UIScale:0);
+                Label->SetColorAndOpacity(FSlateColor(Color)); Label->SetVisibility(ESlateVisibility::Visible);
+                if(auto* Rich=Cast<UWowTextBlock>(Label)) Rich->RefreshRichStyle(UIScale);
+                Label->ForceLayoutPrepass(); Height=FMath::Max(Height,float(Label->GetDesiredSize().Y/UIScale));
+            }
+        };
+        if(Single)
+        {
+            Draw(false,Single->Text,Single->Color,Single->bWrapText);
+            if(auto* Right=GetNamedFontString(FString::Printf(TEXT("%sTextRight%d"),*Prefix,LineIndex))) Right->SetVisibility(ESlateVisibility::Collapsed);
+        }
+        else
+        {
+            Draw(false,Double->LeftText,Double->LeftColor,false);
+            Draw(true,Double->RightText,Double->RightColor,false);
+        }
+        TextY+=Height;
+    }
 
 	// Hide unused FontString widgets
 	for (int32 HideIndex = LineIndex + 1; HideIndex <= 30; HideIndex++) // WoW usually has up to 30 tooltip lines
@@ -2845,7 +2850,7 @@ void FWowFrameManager::TooltipUpdateDisplay(int64 TooltipHandle)
 
 	// Set the tooltip frame size
 	SetFrameSize(TooltipHandle, TooltipWidth, TooltipHeight);
-	if(State->AnchorType!=TEXT("ANCHOR_NONE"))
+	if(State->AnchorType!=TEXT("ANCHOR_NONE") && State->AnchorType!=TEXT("ANCHOR_PRESERVE"))
 	{
 		const auto Root=GetFrameRect(TEXT("UIParent")); const auto Owner=GetLayoutRect(State->OwnerHandle);
 		FVector2D P=LastPointerPosition/RawViewportScale+FVector2D(16,-TooltipHeight-12);
@@ -2856,6 +2861,7 @@ void FWowFrameManager::TooltipUpdateDisplay(int64 TooltipHandle)
 			if(State->AnchorType==TEXT("ANCHOR_TOP")) P=FVector2D(Owner.X+(Owner.Z-TooltipWidth)*.5,Owner.Y-TooltipHeight-8);
 			if(State->AnchorType==TEXT("ANCHOR_BOTTOM")) P=FVector2D(Owner.X,Owner.Y+Owner.W+8);
 		}
+        P+=FVector2D(State->AnchorOffset.X,-State->AnchorOffset.Y);
 		FWowAnchor Anchor; Anchor.Point=Anchor.RelativePoint=EWowAnchorPoint::TOPLEFT; Anchor.RelativeTo=TEXT("UIParent");
 		Anchor.OffsetX=FMath::Clamp(float(P.X),4.f,FMath::Max(4.f,Root.W-TooltipWidth-4)); Anchor.OffsetY=-FMath::Clamp(float(P.Y),4.f,FMath::Max(4.f,Root.H-TooltipHeight-4));
 		SetFrameAnchors(TooltipHandle,{Anchor});
@@ -2867,13 +2873,13 @@ void FWowFrameManager::TooltipSetItem(int64 TooltipHandle, const FString& ItemLi
 	FTooltipState* State = GetTooltipState(TooltipHandle);
 	if (!State) return;
 
+	TooltipClearLines(TooltipHandle);
 	State->ItemLink = ItemLink;
 	State->SpellId = 0; // Clear other contexts
 	State->UnitToken.Empty();
 
 	// TODO: Parse item link and populate tooltip with item data
 	// For now, just add a placeholder line
-	TooltipClearLines(TooltipHandle);
 	TooltipAddLine(TooltipHandle, FString::Printf(TEXT("Item: %s"), *ItemLink), 1.0f, 1.0f, 1.0f, false);
 }
 
@@ -2882,11 +2888,11 @@ void FWowFrameManager::TooltipSetSpell(int64 TooltipHandle, int32 SpellId,int32 
 	FTooltipState* State = GetTooltipState(TooltipHandle);
 	if (!State) return;
 
+	TooltipClearLines(TooltipHandle);
 	State->SpellId = SpellId;
 	State->ItemLink.Empty(); // Clear other contexts
 	State->UnitToken.Empty();
 
-	TooltipClearLines(TooltipHandle);
 	const auto& Spells=FDbcStore::Get().Spells(); const auto* Spell=Spells.GetById(SpellId);
 	if(!Spell) { SetFrameVisible(TooltipHandle,false); return; }
 	TooltipAddLine(TooltipHandle,Spell->SpellName,1,1,1,false);
@@ -2914,13 +2920,13 @@ void FWowFrameManager::TooltipSetUnit(int64 TooltipHandle, const FString& UnitTo
 	FTooltipState* State = GetTooltipState(TooltipHandle);
 	if (!State) return;
 
+	TooltipClearLines(TooltipHandle);
 	State->UnitToken = UnitToken;
 	State->ItemLink.Empty(); // Clear other contexts
 	State->SpellId = 0;
 
 	// TODO: Lookup unit data and populate tooltip
 	// For now, just add a placeholder line
-	TooltipClearLines(TooltipHandle);
 	TooltipAddLine(TooltipHandle, FString::Printf(TEXT("Unit: %s"), *UnitToken), 1.0f, 1.0f, 1.0f, false);
 }
 

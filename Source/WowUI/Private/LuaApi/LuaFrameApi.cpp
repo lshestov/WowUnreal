@@ -2943,7 +2943,7 @@ static int LF_TooltipAppendText(lua_State* L)
 	return 0;
 }
 
-// tooltip:GetItem() -- returns item link for currently displayed item
+// tooltip:GetItem() -- item name and link, as consumed by stock comparison tooltips.
 static int LF_TooltipGetItem(lua_State* L)
 {
 	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
@@ -2957,7 +2957,9 @@ static int LF_TooltipGetItem(lua_State* L)
 	const FTooltipState* State = Ctx->FrameManager->GetTooltipState(TooltipHandle);
 	if (State && !State->ItemLink.IsEmpty())
 	{
+		lua_pushstring(L, TCHAR_TO_UTF8(*State->ItemName));
 		lua_pushstring(L, TCHAR_TO_UTF8(*State->ItemLink));
+		return 2;
 	}
 	else
 	{
@@ -3015,13 +3017,7 @@ static int LF_TooltipGetUnit(lua_State* L)
 // tooltip:SetItem(itemLink) -- sets item context for tooltip
 static int LF_TooltipSetItem(lua_State* L)
 {
-	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-	if (!Ctx || !Ctx->FrameManager) return 0;
-
-	int64 TooltipHandle = GetFrameHandle(L, 1);
-	const char* ItemLink = luaL_checkstring(L, 2);
-	Ctx->FrameManager->TooltipSetItem(TooltipHandle, UTF8_TO_TCHAR(ItemLink));
-	return 0;
+	return WowLuaApi::SetHyperlinkTooltip(L);
 }
 
 // tooltip:SetSpell(spellId) -- sets spell context for tooltip
@@ -3441,17 +3437,20 @@ static const luaL_Reg FrameMethods[] =
 	{"SetSpell", WowLuaApi::SetSpellTooltip},
 	{"SetSpellByID", WowLuaApi::SetSpellTooltip},
 	{"SetHyperlink", WowLuaApi::SetHyperlinkTooltip},
+	{"SetHyperlinkCompareItem", WowLuaApi::SetHyperlinkCompareItem},
 	{"AddLine", LF_TooltipAddLine},
 	{"AddDoubleLine", LF_TooltipAddDoubleLine},
 	{"ClearLines", LF_TooltipClearLines},
 	{"NumLines", LF_TooltipNumLines},
-	{"SetMinimumWidth", [](lua_State* L) -> int { return 0; }},
+	{"SetMinimumWidth", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->TooltipSetMinimumWidth(GetFrameHandle(L,1),luaL_checknumber(L,2)); return 0; }},
+	{"GetMinimumWidth", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); const auto* S=C && C->FrameManager?C->FrameManager->GetTooltipState(GetFrameHandle(L,1)):nullptr; lua_pushnumber(L,S?S->MinimumWidth:0); return 1; }},
 	{"AppendText", LF_TooltipAppendText},
 	{"GetItem", LF_TooltipGetItem},
 	{"GetSpell", LF_TooltipGetSpell},
 	{"GetUnit", LF_TooltipGetUnit},
 	{"SetItem", LF_TooltipSetItem},
-	{"GetAnchorType", [](lua_State* L) -> int { lua_pushstring(L, "ANCHOR_NONE"); return 1; }},
+	{"GetAnchorType", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); const auto* S=C && C->FrameManager?C->FrameManager->GetTooltipState(GetFrameHandle(L,1)):nullptr; lua_pushstring(L,S?TCHAR_TO_UTF8(*S->AnchorType):"ANCHOR_NONE"); return 1; }},
+	{"SetAnchorType", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->TooltipSetAnchorType(GetFrameHandle(L,1),UTF8_TO_TCHAR(luaL_checkstring(L,2)),luaL_optnumber(L,3,0),luaL_optnumber(L,4,0)); return 0; }},
 	{"FadeOut", [](lua_State* L) -> int { return 0; }},
 
 	// Cooldown frame

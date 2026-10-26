@@ -41,22 +41,30 @@ struct FTooltipState
 {
 	TArray<FTooltipLine> Lines;
 	TArray<FTooltipDoubleLine> DoubleLines;
+    TArray<int32> LineOrder; // Single index, or bitwise-complement double index.
 	int64 OwnerHandle = -1;
 	FString AnchorType = TEXT("ANCHOR_NONE");
 	FString ItemLink;
+    FString ItemName;
+    uint32 ItemId=0;
+    FVector2D AnchorOffset=FVector2D::ZeroVector;
 	int32 SpellId = 0;
 	FString UnitToken;
 	float MinimumWidth = 0.f;
 
-	void Clear()
+    void ClearContent()
 	{
 		Lines.Empty();
 		DoubleLines.Empty();
-		OwnerHandle = -1;
-		AnchorType = TEXT("ANCHOR_NONE");
+        LineOrder.Empty();
 		ItemLink.Empty();
+        ItemName.Empty(); ItemId=0;
 		SpellId = 0;
 		UnitToken.Empty();
+	}
+    void Clear()
+    {
+        ClearContent(); OwnerHandle=-1; AnchorType=TEXT("ANCHOR_NONE"); AnchorOffset=FVector2D::ZeroVector;
 		MinimumWidth = 0.f;
 	}
 
@@ -415,6 +423,8 @@ public:
 
 	/** Tooltip methods for Lua API */
 	void TooltipSetOwner(int64 TooltipHandle, int64 OwnerHandle, const FString& AnchorType);
+    void TooltipSetAnchorType(int64 Handle,const FString& Type,float X,float Y);
+    void TooltipSetMinimumWidth(int64 Handle,float Width);
 	void TooltipAddLine(int64 TooltipHandle, const FString& Text, float R, float G, float B, bool bWrapText);
 	void TooltipAddDoubleLine(int64 TooltipHandle, const FString& LeftText, const FString& RightText,
 							  float LR, float LG, float LB, float RR, float RG, float RB);

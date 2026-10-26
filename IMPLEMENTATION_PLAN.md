@@ -312,7 +312,7 @@ build, automation, native autologin and rendered screenshot verification):
     explicitly sized backgrounds; Lua-created regions retain explicit positioning.
     Verified 84 tests and native 29-step/six-screenshot split/character/book/menu
     regression with the split panel and its number correctly aligned.
-  - [?] Item cursor identity, actual split/merge operations and delete confirmation.
+  - [x] Item cursor identity, actual split/merge operations and delete confirmation.
     Bind selections to source GUID/position, reject replaced or reduced stacks,
     preserve partial quantities during autostore and byte-sized destroy requests,
     and support full-stack selection/cancellation. Held items expose lock state;
@@ -320,7 +320,14 @@ build, automation, native autologin and rendered screenshot verification):
     quality-aware delete dialog, and Escape releases a selection. Verified 85
     tests plus native 36-step split/cancel/7+3/merge/delete-cancel/delete-confirm
     cycle and four nonempty screenshots. QA cloth restored to zero in server DB.
-  - [ ] Equipped-item comparison and dress-up model/item preview.
+  - [?] Equipped-item comparison: original shopping-tooltip Lua, correct item
+    name/link tuple, 3.3.5 equipment masks and dual-slot order, signed template
+    stats/DPS/armor and automatic modifier/preference updates. Retain mixed
+    tooltip row order, anchor adjustments and minimum widths; clear old contexts.
+    Verified 86 automation tests and a native 20-step run/three screenshots for
+    shield vs two-hander, armor gain, preference off and spellbook regression.
+    Equipment is unchanged; comparison preference restored after verification.
+  - [ ] Independent dress-up model/item preview, rotation, undress and reset.
   - [ ] Original merchant window, purchase/sale/buyback/repair server state.
   - [ ] Original bank, mailbox and trade windows with authoritative round trips.
 - [ ] 5. Chat/combat/macros: hyperlinks, remaining combat events and macro execution families.

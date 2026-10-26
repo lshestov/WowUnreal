@@ -83,6 +83,7 @@ private:
 
 	FWowLuaContext* UIContext = nullptr;
 	bool bUILoaded = false;
+    double NextItemComparisonUpdate=0;
 
 	// UI Windows
 	TSharedPtr<SWowBagWindow> BagWindow;

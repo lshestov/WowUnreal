@@ -220,18 +220,62 @@ int64 Handle(lua_State* L)
 {
     lua_getfield(L,1,"__handle"); const int64 Value=lua_tointeger(L,-1); lua_pop(L,1); return Value;
 }
-void ItemTooltip(FWowLuaContext* C,int64 H,const FWowItemTemplate* T,uint32 Id,FWowItemEntity* Item=nullptr)
+const TCHAR* StatToken(uint32 Id)
+{
+    static const TCHAR* Names[]={TEXT("MANA"),TEXT("HEALTH"),TEXT(""),TEXT("AGILITY"),TEXT("STRENGTH"),TEXT("INTELLECT"),TEXT("SPIRIT"),TEXT("STAMINA"),TEXT(""),TEXT(""),TEXT(""),TEXT(""),
+        TEXT("DEFENSE_SKILL_RATING"),TEXT("DODGE_RATING"),TEXT("PARRY_RATING"),TEXT("BLOCK_RATING"),TEXT("HIT_MELEE_RATING"),TEXT("HIT_RANGED_RATING"),TEXT("HIT_SPELL_RATING"),
+        TEXT("CRIT_MELEE_RATING"),TEXT("CRIT_RANGED_RATING"),TEXT("CRIT_SPELL_RATING"),TEXT("HIT_TAKEN_MELEE_RATING"),TEXT("HIT_TAKEN_RANGED_RATING"),TEXT("HIT_TAKEN_SPELL_RATING"),
+        TEXT("CRIT_TAKEN_MELEE_RATING"),TEXT("CRIT_TAKEN_RANGED_RATING"),TEXT("CRIT_TAKEN_SPELL_RATING"),TEXT("HASTE_MELEE_RATING"),TEXT("HASTE_RANGED_RATING"),TEXT("HASTE_SPELL_RATING"),
+        TEXT("HIT_RATING"),TEXT("CRIT_RATING"),TEXT("HIT_TAKEN_RATING"),TEXT("CRIT_TAKEN_RATING"),TEXT("RESILIENCE_RATING"),TEXT("HASTE_RATING"),TEXT("EXPERTISE_RATING"),
+        TEXT("ATTACK_POWER"),TEXT("RANGED_ATTACK_POWER"),TEXT("FERAL_ATTACK_POWER"),TEXT("SPELL_HEALING_DONE"),TEXT("SPELL_DAMAGE_DONE"),TEXT("MANA_REGENERATION"),
+        TEXT("ARMOR_PENETRATION_RATING"),TEXT("SPELL_POWER"),TEXT("HEALTH_REGEN"),TEXT("SPELL_PENETRATION"),TEXT("BLOCK_VALUE")};
+    return Id<UE_ARRAY_COUNT(Names)?Names[Id]:TEXT("");
+}
+FString StatKey(uint32 Id) { const TCHAR* Token=StatToken(Id); return *Token?FString::Printf(TEXT("ITEM_MOD_%s_SHORT"),Token):FString(); }
+FString Localized(lua_State* L,const FString& Key,const FString& Fallback)
+{
+    lua_getglobal(L,TCHAR_TO_UTF8(*Key)); const FString Text=lua_isstring(L,-1)?UTF8_TO_TCHAR(lua_tostring(L,-1)):Fallback; lua_pop(L,1); return Text;
+}
+FString StatLabel(lua_State* L,const FString& Key)
+{
+    if(Key==TEXT("RESISTANCE0_NAME")) return Localized(L,Key,TEXT("Armor"));
+    FString Fallback=Key; Fallback.RemoveFromStart(TEXT("ITEM_MOD_")); Fallback.RemoveFromEnd(TEXT("_SHORT"));
+    return Localized(L,Key,Fallback.Replace(TEXT("_"),TEXT(" ")).ToLower());
+}
+TMap<FString,float> ItemStats(const FWowItemTemplate* T)
+{
+    TMap<FString,float> Values; if(!T) return Values;
+    if(T->Armor) Values.Add(TEXT("RESISTANCE0_NAME"),T->Armor);
+    if(T->DamageMax>0 && T->Delay) Values.Add(TEXT("ITEM_MOD_DAMAGE_PER_SECOND_SHORT"),(T->DamageMin+T->DamageMax)*500.f/T->Delay);
+    for(const auto& Stat:T->Stats) { const auto Key=StatKey(Stat.Key); if(!Key.IsEmpty()) Values.FindOrAdd(Key)+=Stat.Value; }
+    return Values;
+}
+TMap<FString,float> ItemDelta(const FWowItemTemplate* Incoming,const FWowItemTemplate* EquippedItem)
+{
+    auto Values=ItemStats(Incoming); for(const auto& Stat:ItemStats(EquippedItem)) Values.FindOrAdd(Stat.Key)-=Stat.Value; return Values;
+}
+int PushStats(lua_State* L,const TMap<FString,float>& Values,int32 OptionalTable)
+{
+    if(lua_istable(L,OptionalTable)) lua_pushvalue(L,OptionalTable); else lua_newtable(L);
+    for(const auto& Stat:Values) if(!FMath::IsNearlyZero(Stat.Value)) { lua_pushnumber(L,Stat.Value); lua_setfield(L,-2,TCHAR_TO_UTF8(*Stat.Key)); }
+    return 1;
+}
+void ItemTooltip(lua_State* L,FWowLuaContext* C,int64 H,const FWowItemTemplate* T,uint32 Id,FWowItemEntity* Item=nullptr,bool Compare=false)
 {
     auto* F=C->FrameManager; F->TooltipClearLines(H);
-    auto* State=F->GetTooltipState(H); State->ItemLink=Link(T,Id); State->SpellId=0; State->UnitToken.Empty();
+    auto* State=F->GetTooltipState(H); State->ItemLink=Link(T,Id); State->ItemId=Id; State->ItemName=T?T->Name:TEXT("Retrieving item information...");
+    if(Compare) F->TooltipAddLine(H,Localized(L,TEXT("CURRENTLY_EQUIPPED"),TEXT("Currently Equipped")),1,.82f,0,false);
     const FLinearColor Color=Quality(T?T->Quality:1);
     F->TooltipAddLine(H,T?T->Name:TEXT("Retrieving item information..."),Color.R,Color.G,Color.B,false);
     if(T)
     {
-        if(T->DamageMax>0) F->TooltipAddDoubleLine(H,FString::Printf(TEXT("%.0f - %.0f Damage"),T->DamageMin,T->DamageMax),FString::Printf(TEXT("Speed %.2f"),T->Delay/1000.f),1,1,1,1,1,1);
-        if(T->Armor) F->TooltipAddLine(H,FString::Printf(TEXT("%u Armor"),T->Armor),1,1,1,false);
-        static const TCHAR* StatNames[]={TEXT("Mana"),TEXT("Health"),TEXT(""),TEXT("Agility"),TEXT("Strength"),TEXT("Intellect"),TEXT("Spirit"),TEXT("Stamina")};
-        for(const auto& Stat:T->Stats) if(Stat.Key<UE_ARRAY_COUNT(StatNames) && *StatNames[Stat.Key]) F->TooltipAddLine(H,FString::Printf(TEXT("%+d %s"),Stat.Value,StatNames[Stat.Key]),1,1,1,false);
+        if(T->DamageMax>0)
+        {
+            F->TooltipAddDoubleLine(H,FString::Printf(TEXT("%.0f - %.0f Damage"),T->DamageMin,T->DamageMax),FString::Printf(TEXT("Speed %.2f"),T->Delay/1000.f),1,1,1,1,1,1);
+            if(T->Delay) F->TooltipAddLine(H,FString::Printf(TEXT("(%.1f damage per second)"),(T->DamageMin+T->DamageMax)*500.f/T->Delay),1,1,1,false);
+        }
+        if(T->Armor) F->TooltipAddLine(H,FString::Printf(TEXT("%u %s"),T->Armor,*StatLabel(L,TEXT("RESISTANCE0_NAME"))),1,1,1,false);
+        for(const auto& Stat:T->Stats) if(const auto Key=StatKey(Stat.Key); !Key.IsEmpty()) F->TooltipAddLine(H,FString::Printf(TEXT("%+d %s"),Stat.Value,*StatLabel(L,Key)),1,1,1,false);
         if(T->RequiredLevel>1) F->TooltipAddLine(H,FString::Printf(TEXT("Requires Level %u"),T->RequiredLevel),1,1,1,false);
         if(!T->Description.IsEmpty()) F->TooltipAddLine(H,T->Description,1,.82f,0,true);
         if(T->UseSpellId) { const auto* P=C->EntityManager?C->EntityManager->GetLocalPlayer():nullptr; const auto Text=FDbcStore::Get().Spells().Description(T->UseSpellId,P?P->GetLevel():1); if(!Text.IsEmpty()) F->TooltipAddLine(H,TEXT("Use: ")+Text,0,1,0,true); }
@@ -244,33 +288,130 @@ int WowLuaApi::SetBagItemTooltip(lua_State* L)
 {
     auto* C=GetContext(L); if(!C || !C->FrameManager) return 0;
     auto* Item=BagItem(C,luaL_checkinteger(L,2),luaL_checkinteger(L,3)); const int64 H=Handle(L);
-    if(Item) ItemTooltip(C,H,Template(C,Item->Entry),Item->Entry,Item); else C->FrameManager->SetFrameVisible(H,false);
+    if(Item) ItemTooltip(L,C,H,Template(C,Item->Entry),Item->Entry,Item); else C->FrameManager->SetFrameVisible(H,false);
     lua_pushboolean(L,0); lua_pushinteger(L,0); return 2;
 }
 int WowLuaApi::SetInventoryItemTooltip(lua_State* L)
 {
     auto* C=GetContext(L); if(!C || !C->FrameManager) return 0;
     auto* Item=Equipped(C,luaL_checkinteger(L,3)); const int64 H=Handle(L);
-    if(Item) ItemTooltip(C,H,Template(C,Item->Entry),Item->Entry,Item); else C->FrameManager->SetFrameVisible(H,false);
+    if(Item) ItemTooltip(L,C,H,Template(C,Item->Entry),Item->Entry,Item); else C->FrameManager->SetFrameVisible(H,false);
     lua_pushboolean(L,Item!=nullptr); lua_pushboolean(L,0); lua_pushinteger(L,0); return 3;
 }
 int WowLuaApi::SetHyperlinkTooltip(lua_State* L)
 {
     auto* C=GetContext(L); const uint32 Id=ItemId(L,2);
-    if(C && C->FrameManager && Id) ItemTooltip(C,Handle(L),Template(C,Id),Id);
+    if(C && C->FrameManager && Id) ItemTooltip(L,C,Handle(L),Template(C,Id),Id);
     return 0;
+}
+void WowLuaApi::UpdateItemComparisons(lua_State* L)
+{
+    auto* C=GetContext(L); if(!C || !C->FrameManager) return;
+    const int32 Top=lua_gettop(L);
+    const auto Call=[&](int32 Args,int32 Results)->bool
+    {
+        if(lua_pcall(L,Args,Results,0)==0) return true;
+        UE_LOG(LogWowLuaFrame,Warning,TEXT("Item comparison: %s"),UTF8_TO_TCHAR(lua_tostring(L,-1))); lua_pop(L,1); return false;
+    };
+    lua_getglobal(L,"GameTooltip"); if(!lua_istable(L,-1)) { lua_settop(L,Top); return; }
+    const int32 Tip=lua_gettop(L); lua_getfield(L,Tip,"__handle"); const int64 H=lua_tointeger(L,-1); lua_pop(L,1);
+    const auto* State=C->FrameManager->GetTooltipState(H);
+    bool Compare=false,Shift=false;
+    if(State && State->ItemId && C->FrameManager->IsFrameVisible(H))
+    {
+        lua_getglobal(L,"IsModifiedClick"); lua_pushstring(L,"COMPAREITEMS");
+        if(Call(1,1)) { Shift=lua_toboolean(L,-1)!=0; lua_pop(L,1); }
+        Compare=Shift;
+        lua_getglobal(L,"GetCVar"); lua_pushstring(L,"alwaysCompareItems");
+        if(Call(1,1)) { Compare|=FCStringAnsi::Atoi(lua_tostring(L,-1)?lua_tostring(L,-1):"")!=0; lua_pop(L,1); }
+    }
+    if(Compare)
+    {
+        lua_getglobal(L,"GameTooltip_ShowCompareItem");
+        if(lua_isfunction(L,-1)) { lua_pushvalue(L,Tip); lua_pushboolean(L,Shift); Call(2,0); }
+        else lua_pop(L,1);
+    }
+    else
+    {
+        lua_getfield(L,Tip,"shoppingTooltips");
+        if(lua_istable(L,-1))
+        {
+            const int32 Shopping=lua_gettop(L); lua_pushnil(L);
+            while(lua_next(L,Shopping))
+            {
+                if(lua_istable(L,-1))
+                {
+                    lua_getfield(L,-1,"__handle"); const int64 Other=lua_tointeger(L,-1); lua_pop(L,1);
+                    if(C->FrameManager->IsFrameVisible(Other)) C->FrameManager->SetFrameVisible(Other,false);
+                }
+                lua_pop(L,1);
+            }
+        }
+    }
+    lua_pushboolean(L,Compare); lua_setfield(L,Tip,"comparing"); lua_settop(L,Top);
+}
+int WowLuaApi::SetHyperlinkCompareItem(lua_State* L)
+{
+    auto* C=GetContext(L); const uint32 Id=ItemId(L,2); const int32 Index=luaL_optinteger(L,3,1)-1;
+    const int64 H=Handle(L);
+    const auto Fail=[&] { if(C && C->FrameManager) { C->FrameManager->TooltipClearLines(H); C->FrameManager->SetFrameVisible(H,false); } lua_pushnil(L); return 1; };
+    const auto* Incoming=Template(C,Id);
+    if(!C || !C->FrameManager || !Incoming || Index<0 || Index>1) return Fail();
+    // 3.3.5 equipment masks. Containers are outside the 19 equipped-item slots.
+    static const uint32 Masks[]={0,1,2,4,8,16,32,64,128,256,512,3072,12288,98304,65536,131072,16384,98304,7864320,262144,16,98304,98304,65536,0,131072,131072,0,131072};
+    const uint32 Mask=Incoming->InventoryType<UE_ARRAY_COUNT(Masks)?Masks[Incoming->InventoryType]:0;
+    TArray<FWowItemEntity*> Candidates;
+    auto* Main=Equipped(C,16); auto* Off=Equipped(C,17);
+    if(Mask&0x18000)
+    {
+        if((Mask&0x18000)==0x18000 || Incoming->InventoryType==17)
+        {
+            if(Main && Off && Main!=Off) { Candidates.Add(Off); Candidates.Add(Main); }
+            else if(Main || Off) Candidates.Add(Main?Main:Off);
+        }
+        else if(Mask&0x8000) { if(Main) Candidates.Add(Main); }
+        else if(Off) Candidates.Add(Off);
+        else if(Main) { const auto* T=Template(C,Main->Entry); if(T && T->InventoryType==17) Candidates.Add(Main); }
+    }
+    else for(int32 Slot=0;Slot<19;++Slot) if(Mask&(1u<<Slot)) if(auto* Item=Equipped(C,Slot+1)) Candidates.Add(Item);
+    if(!Candidates.IsValidIndex(Index)) return Fail();
+    auto* Item=Candidates[Index]; const auto* Current=Template(C,Item->Entry); if(!Current) return Fail();
+    ItemTooltip(L,C,H,Current,Item->Entry,Item,true);
+    if(lua_istable(L,5))
+    {
+        lua_getfield(L,5,"__handle"); const auto* Source=C->FrameManager->GetTooltipState(lua_tointeger(L,-1)); lua_pop(L,1);
+        if(Source && Source->ItemId==Id)
+        {
+            const auto Delta=ItemDelta(Incoming,Current); TArray<FString> Keys; Delta.GetKeys(Keys); Keys.Sort();
+            bool Header=false;
+            for(const auto& Key:Keys) if(const float Value=Delta[Key]; !FMath::IsNearlyZero(Value))
+            {
+                if(!Header)
+                {
+                    C->FrameManager->TooltipAddLine(H,TEXT(" "),1,1,1,false);
+                    C->FrameManager->TooltipAddLine(H,Localized(L,TEXT("ITEM_DELTA_DESCRIPTION"),TEXT("If you replace this item, the following stat changes will occur:")),1,.82f,0,true); Header=true;
+                }
+                const bool Positive=Value>0;
+                const FString Amount=Key==TEXT("ITEM_MOD_DAMAGE_PER_SECOND_SHORT")?FString::Printf(TEXT("%+.1f"),Value):FString::Printf(TEXT("%+d"),FMath::RoundToInt(Value));
+                C->FrameManager->TooltipAddLine(H,Amount+TEXT(" ")+StatLabel(L,Key),Positive?0:1,Positive?1:.1f,0,false);
+            }
+        }
+    }
+    lua_pushboolean(L,1); return 1;
 }
 int WowLuaApi::SetActionTooltip(lua_State* L)
 {
     auto* C=GetContext(L); const int32 Slot=luaL_checkinteger(L,2)-1; if(!C || !C->ConnectionManager || !C->FrameManager || !C->ConnectionManager->PacketHandler.ActionButtons.IsValidIndex(Slot)) return 0;
     const uint32 Packed=C->ConnectionManager->PacketHandler.ActionButtons[Slot],Id=Packed&0xffffff;
     if((Packed>>24)==64) { lua_pushboolean(L,FWowMacros::SetActionTooltip(L,Handle(L),Id)); return 1; }
-    if((Packed>>24)==128) ItemTooltip(C,Handle(L),Template(C,Id),Id);
+    if((Packed>>24)==128) ItemTooltip(L,C,Handle(L),Template(C,Id),Id);
     else { const auto* P=C->EntityManager?C->EntityManager->GetLocalPlayer():nullptr; C->FrameManager->TooltipSetSpell(Handle(L),Id,P?P->GetLevel():1); }
     lua_pushboolean(L,Id!=0); return 1;
 }
 void WowLuaApi::RegisterItemApi(lua_State* L)
 {
+    RegisterItem(L,"GetItemStats",[](lua_State* S)->int { const auto* T=Template(GetContext(S),ItemId(S,1)); return T?PushStats(S,ItemStats(T),2):0; });
+    RegisterItem(L,"GetItemStatDelta",[](lua_State* S)->int { auto* C=GetContext(S); const auto* A=Template(C,ItemId(S,1)); const auto* B=Template(C,ItemId(S,2)); return A && B?PushStats(S,ItemDelta(A,B),3):0; });
     RegisterItem(L,"IsItemAction",[](lua_State* S)->int { auto* C=GetContext(S); const int32 I=luaL_checkinteger(S,1)-1; const auto* Actions=C && C->ConnectionManager?&C->ConnectionManager->PacketHandler.ActionButtons:nullptr; lua_pushboolean(S,Actions && Actions->IsValidIndex(I) && ((*Actions)[I]>>24)==128); return 1; });
     RegisterItem(L,"GetActionCount",[](lua_State* S)->int {
         auto* C=GetContext(S); const int32 I=luaL_checkinteger(S,1)-1; int32 Count=0;
@@ -344,5 +485,7 @@ void WowLuaApi::RegisterItemApi(lua_State*) {}
 int WowLuaApi::SetBagItemTooltip(lua_State*) { return 0; }
 int WowLuaApi::SetInventoryItemTooltip(lua_State*) { return 0; }
 int WowLuaApi::SetHyperlinkTooltip(lua_State*) { return 0; }
+int WowLuaApi::SetHyperlinkCompareItem(lua_State*) { return 0; }
+void WowLuaApi::UpdateItemComparisons(lua_State*) {}
 int WowLuaApi::SetActionTooltip(lua_State*) { return 0; }
 #endif
