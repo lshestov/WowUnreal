@@ -22,9 +22,7 @@ namespace
 {
 int32 ProgressionRank(const FSpellDbcEntry& S)
 {
-    int32 Rank=0;
-    for(const auto Ch:S.Rank) { if(FChar::IsDigit(Ch)) Rank=Rank*10+(Ch-'0'); else if(Rank) break; }
-    return Rank;
+    return S.ProgressionRank();
 }
 bool VisibleInBook(const FSpellDbcEntry& S)
 {

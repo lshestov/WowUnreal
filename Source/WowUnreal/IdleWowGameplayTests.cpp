@@ -17,6 +17,29 @@ struct FWire
 };
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGameplaySpellRanks,"WowUnreal.Gameplay.SpellRankReplacement",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FGameplaySpellRanks::RunTest(const FString&)
+{
+    FString Path; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false; FMpqManager Mpq; if(!Mpq.Initialize(Path)) return false;
+    auto& D=FDbcStore::Get(); if(!D.IsLoaded()) D.LoadAll(Mpq); if(!D.IsDeferredLoaded()) D.LoadDeferred(Mpq);
+    FWowPacketHandler H; H.KnownSpells.Add(78); H.ActionButtons.Init(0,144); H.ActionButtons[72]=78; H.ActionButtons[10]=78; H.ActionButtons[11]=78|(128u<<24); H.ActionButtons[12]=78|(64u<<24);
+    int32 Events=0; TArray<TArray<uint8>> Requests;
+    H.OnActionButtonsUpdated.AddLambda([&]{++Events;}); H.OnSendPacket.BindLambda([&](uint32 Op,const TArray<uint8>& Data){if(Op==WowOpcode::CMSG_SET_ACTION_BUTTON)Requests.Add(Data);});
+    FWire Learn; Learn.Add(uint32(284)).Add(uint16(0)); H.HandlePacket(WowOpcode::SMSG_LEARNED_SPELL,Learn.Data);
+    TestTrue(TEXT("Learning the next rank updates spell buttons and retains downranking"),H.KnownSpells.Contains(78) && H.KnownSpells.Contains(284) && H.ActionButtons[72]==284 && H.ActionButtons[10]==284 && Events==1 && Requests.Num()==2);
+    TestTrue(TEXT("Item and macro actions are never rewritten as spells"),H.ActionButtons[11]==(78|(128u<<24)) && H.ActionButtons[12]==(78|(64u<<24)));
+    if(Requests.Num()==2) { FPacketReader R(Requests[0]); TestTrue(TEXT("Updated slots use exact server persistence packets"),Requests[0].Num()==5 && R.ReadU8()==10 && R.ReadU32()==284); }
+    FWire Upgrade; Upgrade.Add(uint32(78)).Add(uint32(284)); H.HandlePacket(WowOpcode::SMSG_SUPERCEDED_SPELL,Upgrade.Data);
+    TestTrue(TEXT("Superseded melee ranks are removed rather than exposed as castable"),!H.KnownSpells.Contains(78) && H.KnownSpells.Contains(284) && Requests.Num()==2);
+    FWire Downgrade; Downgrade.Add(uint32(284)).Add(uint32(78)); H.HandlePacket(WowOpcode::SMSG_SUPERCEDED_SPELL,Downgrade.Data);
+    TestTrue(TEXT("An authoritative downgrade restores buttons and removes the high rank"),!H.KnownSpells.Contains(284) && H.KnownSpells.Contains(78) && H.ActionButtons[72]==78 && Events==2 && Requests.Num()==4);
+    auto Bad=Downgrade.Data; Bad.SetNum(7); H.HandlePacket(WowOpcode::SMSG_SUPERCEDED_SPELL,Bad); Bad=Downgrade.Data; Bad.Add(0); H.HandlePacket(WowOpcode::SMSG_SUPERCEDED_SPELL,Bad);
+    TestTrue(TEXT("Malformed replacements cannot mutate state or send action writes"),Requests.Num()==4 && Events==2 && H.ActionButtons[72]==78);
+    H.HandlePacket(WowOpcode::SMSG_LEARNED_SPELL,Learn.Data); const int32 Before=Requests.Num(); H.HandlePacket(WowOpcode::SMSG_LEARNED_SPELL,Learn.Data);
+    TestEqual(TEXT("Duplicate learned packets do not rewrite unchanged actions"),Requests.Num(),Before);
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGameplayGlyphTargeting,"WowUnreal.Gameplay.GlyphTargeting",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FGameplayGlyphTargeting::RunTest(const FString&)
 {

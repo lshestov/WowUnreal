@@ -58,6 +58,7 @@ FWowPacketHandler::FWowPacketHandler()
     // Talent system handlers
     Handlers.Add(WowOpcode::SMSG_TALENTS_INFO,             &FWowPacketHandler::HandleTalentsInfo);
     Handlers.Add(WowOpcode::SMSG_LEARNED_SPELL,            &FWowPacketHandler::HandleLearnedSpell);
+    Handlers.Add(WowOpcode::SMSG_SUPERCEDED_SPELL,         &FWowPacketHandler::HandleSupersededSpell);
     Handlers.Add(WowOpcode::SMSG_REMOVED_SPELL,            &FWowPacketHandler::HandleRemovedSpell);
 
     // ── Social / Guild / Friends handlers ──────────────────────────────────
@@ -2094,9 +2095,40 @@ void FWowPacketHandler::HandleLearnedSpell(FPacketReader& R)
     uint32 SpellId = R.ReadU32();
     uint16 Unknown = R.ReadU16();
 
+    if(!SpellId || SpellId>0xffffffu) return;
     KnownSpells.Add(SpellId);
+    ReplaceSpellActions(0,SpellId);
 
     UE_LOG(LogWowPacket, Log, TEXT("LEARNED_SPELL: spell=%u"), SpellId);
+}
+
+void FWowPacketHandler::ReplaceSpellActions(uint32 OldId,uint32 NewId)
+{
+    const auto& Spells=FDbcStore::Get().Spells(); const auto* New=Spells.GetById(NewId); bool Changed=false;
+    for(int32 I=0;I<FMath::Min(144,ActionButtons.Num());++I)
+    {
+        const uint32 Packed=ActionButtons[I],Id=Packed&0xffffffu;
+        if(!Id || (Packed>>24)!=0 || Id==NewId) continue;
+        const auto* Old=Spells.GetById(Id);
+        const bool Adjacent=New && Old && New->ProgressionRank()>0 && New->ProgressionRank()==Old->ProgressionRank()+1 && New->SpellName==Old->SpellName;
+        if(!(OldId && Id==OldId) && !Adjacent) continue;
+        ActionButtons[I]=NewId; Changed=true;
+        TArray<uint8> Data; Data.Add(uint8(I)); Data.Append(reinterpret_cast<const uint8*>(&NewId),4);
+        OnSendPacket.ExecuteIfBound(WowOpcode::CMSG_SET_ACTION_BUTTON,Data);
+    }
+    if(Changed) OnActionButtonsUpdated.Broadcast();
+}
+
+void FWowPacketHandler::HandleSupersededSpell(FPacketReader& R)
+{
+    if(!R.CanRead(8) || R.CanRead(9)) return;
+    const uint32 OldId=R.ReadU32(),NewId=R.ReadU32();
+    if(!OldId || !NewId || OldId==NewId || OldId>0xffffffu || NewId>0xffffffu) return;
+    // Superseded ranks are no longer active (e.g. warrior melee abilities).
+    // Stackable caster ranks arrive as LEARNED_SPELL and retain prior ranks.
+    KnownSpells.Remove(OldId);
+    KnownSpells.Add(NewId); ReplaceSpellActions(OldId,NewId);
+    UE_LOG(LogWowPacket,Log,TEXT("SUPERCEDED_SPELL: %u -> %u"),OldId,NewId);
 }
 
 // ── SMSG_REMOVED_SPELL ───────────────────────────────────────────────────

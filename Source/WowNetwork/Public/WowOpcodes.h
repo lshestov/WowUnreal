@@ -202,6 +202,7 @@ namespace WowOpcode
 
     // Talent system opcodes
     inline constexpr uint16 SMSG_LEARNED_SPELL           = 0x012B;
+    inline constexpr uint16 SMSG_SUPERCEDED_SPELL        = 0x012C;
     inline constexpr uint16 SMSG_REMOVED_SPELL           = 0x0203;
     inline constexpr uint16 CMSG_LEARN_TALENT            = 0x0251;
     inline constexpr uint16 SMSG_TALENTS_INFO            = 0x04C0;

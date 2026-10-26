@@ -4637,11 +4637,10 @@ void AWowGameplayController::OnActionButtonsUpdated()
 		ActionBarWidget->RefreshActionButtons();
 	}
 
-	// Fire action bar events
-	for (int32 SlotIndex = 0; SlotIndex < 12; ++SlotIndex)
-	{
-		FireUIEvent(TEXT("ACTIONBAR_SLOT_CHANGED"), {FString::Printf(TEXT("%d"), SlotIndex + 1)});
-	}
+	// The stock handler compares numeric slot IDs; zero refreshes every page,
+	// stance and auxiliary bar, including slots outside the first twelve.
+    if(UIManager && UIManager->GetEventSystem())
+        UIManager->GetEventSystem()->FireEventNumbers(TEXT("ACTIONBAR_SLOT_CHANGED"),{0});
 	FireUIEvent(TEXT("ACTIONBAR_UPDATE_STATE"));
 	FireUIEvent(TEXT("UPDATE_BONUS_ACTIONBAR"));
 }

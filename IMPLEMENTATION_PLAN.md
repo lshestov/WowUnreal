@@ -263,7 +263,7 @@ build, automation, native autologin and rendered screenshot verification):
     automatic text bounds reserve a physical pixel for fractional-scale glyphs.
     Verified 70 tests, 84 native probe steps and 22 rendered screenshots at
     1280x720 and 1920x1080, including original menu/video panels.
-- [ ] 3. Spellbook/class windows: hidden spells, ranks/tabs, talents, glyphs and specializations.
+- [?] 3. Spellbook/class windows: hidden spells, ranks/tabs, talents, glyphs and specializations.
   - [x] Spellbook visibility, SkillRaceClassInfo grouping, alphabetical tabs,
     independent highest-rank indices and real spell-slot lookup. Automation:
     71 tests plus focused slot regression passed; native 21-step run verifies
@@ -288,7 +288,7 @@ build, automation, native autologin and rendered screenshot verification):
     through texture replacement. Own reproducible UI materials contain no game
     images. Verified 77 tests, focused highlight regression, 14 native steps and
     four screenshots including grayscale locked talents and circular portraits.
-  - [?] Glyph metadata/socket APIs, targeting/application/removal and original panel.
+  - [x] Glyph metadata/socket APIs, targeting/application/removal and original panel.
     Real item targeting validates socket type/unlocks, item position and active spec;
     Escape cancels without consuming items. Apply/remove wait for server state.
     Texture templates retain real timed Alpha/Translation groups and parent keys;
@@ -297,7 +297,13 @@ build, automation, native autologin and rendered screenshot verification):
     tooltips measure native text. Verified 81 tests plus focused regressions;
     final native 29-step use/cancel/apply/remove run and six nonempty screenshots
     show correct tooltips and restore all glyphs/items. No glyph/animation Lua errors.
-  - [ ] Live spell-rank replacement and complete class-window regression.
+  - [?] Live spell-rank replacement and complete class-window regression.
+    Handle both learned and superseded spells: retain independently learned
+    caster ranks, remove superseded inactive ranks, upgrade matching buttons and
+    persist every changed slot. Numeric all-slot notifications refresh stance,
+    auxiliary and paged bars. Verified 82 automation checks, native learning and
+    saved upgraded actions after relog, then removal of the QA rank and restored
+    rank-one button, talents and glyphs. Five rendered before/after screenshots.
 - [ ] 4. Inventory: split/delete, compare/try-on, merchant/bank/mail/trade round trips.
 - [ ] 5. Chat/combat/macros: hyperlinks, remaining combat events and macro execution families.
 - [ ] 6. Maps: points of interest, tracking, interior minimaps and original map bootstrap.

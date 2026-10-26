@@ -51,6 +51,11 @@ struct FSpellDbcEntry
     uint32 ActiveIconID;
     FString SpellName;
     FString Rank;
+    int32 ProgressionRank() const
+    {
+        int32 Value=0; for(const TCHAR Ch:Rank) { if(FChar::IsDigit(Ch)) Value=Value*10+(Ch-'0'); else if(Value) break; }
+        return Value;
+    }
     FString Description;
     FString ToolTip;
     uint32 ManaCostPercentage;

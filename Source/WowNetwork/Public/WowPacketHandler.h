@@ -371,6 +371,8 @@ private:
     // Talent handlers
     void HandleTalentsInfo(FPacketReader& R);
     void HandleLearnedSpell(FPacketReader& R);
+    void HandleSupersededSpell(FPacketReader& R);
+    void ReplaceSpellActions(uint32 OldId,uint32 NewId);
     void HandleRemovedSpell(FPacketReader& R);
 
     // ── Social / Guild / Friends handlers ──────────────────────────────────
