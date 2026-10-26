@@ -440,7 +440,8 @@ struct FWowGameplayProbe
         else if(Op==TEXT("input_text"))
         {
             const auto Focused=FSlateApplication::IsInitialized()?FSlateApplication::Get().GetKeyboardFocusedWidget():nullptr;
-            if(!Focused || !Focused->GetType().ToString().Contains(TEXT("EditableText"))) { Failure=TEXT("Text input requires a focused editor"); Finish(C,false); return; }
+            const bool FrameCapture=C.UIManager->GetFrameManager()->GetCharacterCaptureFrame()>=0;
+            if(!FrameCapture && (!Focused || !Focused->GetType().ToString().Contains(TEXT("EditableText")))) { Failure=TEXT("Text input requires a focused editor or keyboard-enabled frame"); Finish(C,false); return; }
             TGuardValue<bool> Synthetic(C.bProbeSyntheticKeyboard,true);
             TGuardValue<bool> AllowText(InputGuard->SyntheticText,true);
             auto& Slate=FSlateApplication::Get();

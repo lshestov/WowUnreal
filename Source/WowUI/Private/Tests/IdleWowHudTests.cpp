@@ -1039,6 +1039,45 @@ bool FUiIncrementalGc::RunTest(const FString&)
     TestTrue(TEXT("Incremental collection bounds transient memory"),Peak<F.Lua.GetMemoryLimit()*9/10);
     return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudXmlTextureDefaults,"WowUnreal.Hud.XmlTextureDefaults",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudXmlTextureDefaults::RunTest(const FString&)
+{
+    FHudFixture F;
+    const char* Xml=R"XML(<Ui><Texture name="UnanchoredTextureTemplate" virtual="true"><Size x="32" y="16"/></Texture>
+      <Frame name="DefaultTextureOwner"><Size x="172" y="96"/><Anchors><Anchor point="CENTER"/></Anchors><Layers><Layer>
+       <Texture name="$parentFill" inherits="UnanchoredTextureTemplate"/>
+       <Texture name="$parentAnchored" inherits="UnanchoredTextureTemplate"><Anchors><Anchor point="BOTTOMRIGHT"/></Anchors></Texture>
+      </Layer></Layers></Frame></Ui>)XML";
+    TArray<uint8> Bytes; Bytes.Append(reinterpret_cast<const uint8*>(Xml),FCStringAnsi::Strlen(Xml));
+    const auto Parsed=FWowFrameXmlParser::ParseXml(Bytes,TEXT("XmlTextureDefaults"));
+    for(const auto& D:Parsed) if(D.Type==FWowXmlDirective::EType::Texture) F.Frames.LoadTextureDefinition(D.TextureDef,D.TextureParent); else F.Frames.CreateFrame(D.FrameDef);
+    F.Frames.RefreshLayout();
+    const auto* Fill=Cast<UCanvasPanelSlot>(F.Frames.GetNamedTexture(TEXT("DefaultTextureOwnerFill"))->Slot);
+    const auto* Anchored=Cast<UCanvasPanelSlot>(F.Frames.GetNamedTexture(TEXT("DefaultTextureOwnerAnchored"))->Slot);
+    TestTrue(TEXT("XML PostLoad defaults stretch even explicitly sized unanchored textures"),Fill && Fill->GetAnchors().Maximum==FVector2D(1,1));
+    TestTrue(TEXT("Explicit child anchors override the default of an inherited template"),Anchored && Anchored->GetAnchors().Maximum==FVector2D(0,0) && Anchored->GetSize()==FVector2D(32,16));
+    TestTrue(TEXT("Lua-created regions still require their own anchors"),F.Lua.ExecuteString(TEXT("LocalTexture=DefaultTextureOwner:CreateTexture('LocalTexture'); LocalTexture:SetSize(32,16); assert(not LocalTexture:IsVisible() and LocalTexture:GetNumPoints()==0)")));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudFrameCharacterInput,"WowUnreal.Hud.FrameCharacterInput",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudFrameCharacterInput::RunTest(const FString&)
+{
+    FHudFixture F;
+    TestTrue(TEXT("Create keyboard-enabled character handlers"),F.Lua.ExecuteString(TEXT(R"LUA(
+        CharLow=CreateFrame('Frame','CharLow',UIParent); CharLow:SetSize(100,100); CharLow:SetPoint('CENTER'); CharLow:EnableKeyboard(true)
+        CharLow:SetScript('OnChar',function(self,text) assert(type(text)=='string'); self.receivedChars=(self.receivedChars or '')..text end)
+        CharHigh=CreateFrame('Frame','CharHigh',UIParent); CharHigh:SetSize(100,100); CharHigh:SetPoint('CENTER'); CharHigh:SetFrameStrata('DIALOG'); CharHigh:EnableKeyboard(true)
+        CharHigh:SetScript('OnChar',function(self,text) assert(type(text)=='string'); self.receivedChars=(self.receivedChars or '')..text end); CharHigh:Hide()
+    )LUA")));
+    TestTrue(TEXT("Visible keyboard frames receive native digits and Unicode"),F.Frames.DispatchCharacter('3') && F.Frames.DispatchCharacter(TCHAR(0x416)));
+    TestFalse(TEXT("Control characters remain key events"),F.Frames.DispatchCharacter(TCHAR(10)));
+    TestTrue(TEXT("Hidden frames cannot intercept characters"),F.Lua.ExecuteString(TEXT("assert(CharLow.receivedChars=='3Ж' and CharHigh.receivedChars==nil); CharHigh:Show()")));
+    TestTrue(TEXT("The top keyboard frame captures characters exclusively"),F.Frames.DispatchCharacter('7') && F.Lua.ExecuteString(TEXT("assert(CharHigh.receivedChars=='7' and CharLow.receivedChars=='3Ж'); CharHigh:EnableKeyboard(false); CharLow:Hide()")));
+    TestFalse(TEXT("No character handler consumes input when disabled or hidden"),F.Frames.DispatchCharacter('1'));
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudTextureAnimations,"WowUnreal.Hud.TextureAnimations",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FHudTextureAnimations::RunTest(const FString&)
 {

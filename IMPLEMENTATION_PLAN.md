@@ -263,7 +263,7 @@ build, automation, native autologin and rendered screenshot verification):
     automatic text bounds reserve a physical pixel for fractional-scale glyphs.
     Verified 70 tests, 84 native probe steps and 22 rendered screenshots at
     1280x720 and 1920x1080, including original menu/video panels.
-- [?] 3. Spellbook/class windows: hidden spells, ranks/tabs, talents, glyphs and specializations.
+- [x] 3. Spellbook/class windows: hidden spells, ranks/tabs, talents, glyphs and specializations.
   - [x] Spellbook visibility, SkillRaceClassInfo grouping, alphabetical tabs,
     independent highest-rank indices and real spell-slot lookup. Automation:
     71 tests plus focused slot regression passed; native 21-step run verifies
@@ -297,7 +297,7 @@ build, automation, native autologin and rendered screenshot verification):
     tooltips measure native text. Verified 81 tests plus focused regressions;
     final native 29-step use/cancel/apply/remove run and six nonempty screenshots
     show correct tooltips and restore all glyphs/items. No glyph/animation Lua errors.
-  - [?] Live spell-rank replacement and complete class-window regression.
+  - [x] Live spell-rank replacement and complete class-window regression.
     Handle both learned and superseded spells: retain independently learned
     caster ranks, remove superseded inactive ranks, upgrade matching buttons and
     persist every changed slot. Numeric all-slot notifications refresh stance,
@@ -305,6 +305,17 @@ build, automation, native autologin and rendered screenshot verification):
     saved upgraded actions after relog, then removal of the QA rank and restored
     rank-one button, talents and glyphs. Five rendered before/after screenshots.
 - [ ] 4. Inventory: split/delete, compare/try-on, merchant/bank/mail/trade round trips.
+  - [?] Stock split-control text input and XML texture defaults: native viewport
+    character events reach the top visible keyboard frame without stealing editor
+    input. Digits, arrows, backspace, Enter and cancellation use original Lua.
+    Unanchored XML textures stretch to the owner after inheritance, including
+    explicitly sized backgrounds; Lua-created regions retain explicit positioning.
+    Verified 84 tests and native 29-step/six-screenshot split/character/book/menu
+    regression with the split panel and its number correctly aligned.
+  - [ ] Item cursor identity, actual split/merge operations and delete confirmation.
+  - [ ] Equipped-item comparison and dress-up model/item preview.
+  - [ ] Original merchant window, purchase/sale/buyback/repair server state.
+  - [ ] Original bank, mailbox and trade windows with authoritative round trips.
 - [ ] 5. Chat/combat/macros: hyperlinks, remaining combat events and macro execution families.
 - [ ] 6. Maps: points of interest, tracking, interior minimaps and original map bootstrap.
 - [ ] 7. Group/special windows: party/loot, PvP, dungeon finder and achievements.

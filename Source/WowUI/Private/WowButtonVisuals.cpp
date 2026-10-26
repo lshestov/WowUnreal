@@ -21,12 +21,14 @@ FWowTextureElement FWowFrameManager::ResolveTexture(const FWowTextureElement& Te
         if(Result.Width<=0) Result.Width=Base.Width; if(Result.Height<=0) Result.Height=Base.Height;
         if(Result.Anchors.IsEmpty()) Result.Anchors=Base.Anchors;
         if(Result.Animations.IsEmpty()) Result.Animations=Base.Animations;
+        Result.bXmlDefaults|=Base.bXmlDefaults;
         if(!Result.bHasTexCoords && (Result.Left==0 && Result.Right==1 && Result.Top==0 && Result.Bottom==1))
         {
             Result.Left=Base.Left; Result.Right=Base.Right; Result.Top=Base.Top; Result.Bottom=Base.Bottom; Result.bHasTexCoords=Base.bHasTexCoords;
         }
         Result.bAdditive|=Base.bAdditive; Result.bSetAllPoints|=Base.bSetAllPoints;
     }
+    if(Depth==0 && Result.bXmlDefaults && Result.Anchors.IsEmpty()) Result.bSetAllPoints=true;
     Result.Inherits.Empty(); return Result;
 }
 void FWowFrameManager::LoadTextureDefinition(const FWowTextureElement& Texture,const FString& Parent)

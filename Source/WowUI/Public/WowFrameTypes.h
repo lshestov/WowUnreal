@@ -60,6 +60,7 @@ struct FWowTextureElement
 {
 	FString Inherits;
 	bool bVirtual=false;
+    bool bXmlDefaults=false; // PostLoadXML stretches textures lacking anchors.
 	bool bHasTexCoords=false;
 	bool bAdditive = false;
     bool bSliderThumb=false;

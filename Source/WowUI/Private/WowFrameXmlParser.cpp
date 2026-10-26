@@ -477,6 +477,7 @@ static FWowAnimationDef ParseAnimationNode(const pugi::xml_node& Node)
 static FWowTextureElement ParseTextureNode(const FXmlNode* Node)
 {
 	FWowTextureElement Tex;
+    Tex.bXmlDefaults=true;
 	Tex.Name = Node->GetAttribute(TEXT("name"));
     Tex.Inherits=Node->GetAttribute(TEXT("inherits")); Tex.bVirtual=Node->GetAttribute(TEXT("virtual")).Equals(TEXT("true"),ESearchCase::IgnoreCase);
 	Tex.ParentKey = Node->GetAttribute(TEXT("parentKey"));
@@ -953,7 +954,8 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 						}
 
 						if(const auto Anim=Tex.child("Animations")) for(auto C:Anim.children()) T.Animations.Add(ParseAnimationNode(C));
-                        L.Textures.Add(T);
+						T.bXmlDefaults=true;
+						L.Textures.Add(T);
 					}
 					else if (TexTag == TEXT("FontString"))
 					{

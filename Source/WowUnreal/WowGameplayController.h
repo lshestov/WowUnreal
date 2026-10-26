@@ -48,6 +48,7 @@ public:
     virtual bool InputKey(const FInputKeyEventArgs& Params) override;
     TMap<FKey,FKey> HeldBindingKeys;
     bool bProbeSyntheticKeyboard=false;
+    bool CanAcceptNativeCharacter() const { return !GameplayProbe || bProbeSyntheticKeyboard; }
 
     /** Connection manager for sending movement packets */
     UPROPERTY()
