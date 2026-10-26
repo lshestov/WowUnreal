@@ -206,6 +206,8 @@ void FWowPacketHandler::HandlePacket(uint16 Opcode, const TArray<uint8>& Data)
         FPacketReader R(Data); if(R.CanRead(9)) { R.ReadFloat(); R.ReadU8(); const uint32 Count=R.ReadU32(); if(Count<=128 && R.CanRead(Count*8)) for(uint32 N=0;N<Count;++N) { const uint32 I=R.ReadU32(); const int32 Standing=int32(R.ReadU32()); if(Reputations.IsValidIndex(I)) Reputations[I].Standing=Standing; } }
     }
     if(Opcode==0x03F0 || Opcode==0x03F1 || Opcode==0x03F2) {FPacketReader Users(Data); HandleChannelUserList(Users,Opcode==0x03F1);}
+    if(Opcode==0x0032 || Opcode==0x0130 || Opcode==0x014F || Opcode==0x0151 || Opcode==0x01D7 || Opcode==0x01F5 || Opcode==0x024B || Opcode==0x024C || Opcode==0x024E || Opcode==0x024F || Opcode==0x0260 || Opcode==0x0262 || Opcode==0x0263 || Opcode==0x027B || Opcode==0x032F || Opcode==0x0333)
+    {FPacketReader Combat(Data); HandleCombatPacket(Opcode,Combat); return;}
     HandlerFunc* Found = Handlers.Find(Opcode);
     if(Opcode==0x01BA && Data.Num()>=4) { FPacketReader BankResult(Data); OnBankSlotResult.Broadcast(BankResult.ReadU32()); }
     if(Opcode==0x03FE && Data.Num()>=4)
@@ -351,7 +353,7 @@ void FWowPacketHandler::ParseUpdateBlock(FPacketReader& R)
             const int32 PreviousHealth=Entity->IsUnit()?Entity->GetHealth():0;
             ParseUpdateFields(R, *Entity);
             if(PreviousHealth>0 && Entity->IsUnit() && Entity->GetHealth()==0)
-            { FWowCombatEntry Death; Death.Event=TEXT("UNIT_DIED"); Death.Destination=Guid; RecordCombat(MoveTemp(Death)); OnEntityDeath.Broadcast(Guid); }
+            {RecordUnitDeath(Guid); OnEntityDeath.Broadcast(Guid);}
             if (const uint32 UpdatedTypeMask = Entity->GetField(ObjectField::TYPE); UpdatedTypeMask != 0)
             {
                 Entity = &EntityManager.PromoteToTyped(Guid, UpdatedTypeMask);
@@ -959,105 +961,6 @@ void FWowPacketHandler::HandleTimeSyncReq(FPacketReader& R)
     OnSendPacket.ExecuteIfBound(WowOpcode::CMSG_TIME_SYNC_RESP, Resp);
 }
 
-// ── SMSG_SPELL_START ─────────────────────────────────────────────────────
-// packed guid caster, packed guid caster again, uint8 cast counter, uint32 spell id, uint32 cast flags, int32 cast time, (targets)
-
-void FWowPacketHandler::HandleSpellStart(FPacketReader& R)
-{
-    if (!R.CanRead(18)) // minimum: 2 packed guids (2 bytes each) + cast counter + spell id + cast flags + cast time
-    {
-        UE_LOG(LogWowPacket, Warning, TEXT("SPELL_START: packet too short"));
-        return;
-    }
-
-    uint64 CasterGuid1 = R.ReadPackedGuid(); // Item or caster guid
-    uint64 CasterGuid = R.ReadPackedGuid();  // Actual caster guid
-    uint8 CastCounter = R.ReadU8();
-    uint32 SpellId = R.ReadU32();
-    uint32 CastFlags = R.ReadU32();
-    int32 CastTime = static_cast<int32>(R.ReadU32());
-
-    UE_LOG(LogWowPacket, Log, TEXT("SPELL_START: caster=%llu spell=%u castTime=%dms"),
-        CasterGuid, SpellId, CastTime);
-
-    OnSpellStart.Broadcast(CasterGuid, SpellId, CastFlags, CastTime);
-
-    // Skip remaining data (targets and additional cast flag data)
-}
-
-// ── SMSG_SPELL_GO ───────────────────────────────────────────────────────
-// packed guid caster, packed guid caster again, uint8 cast counter, uint32 spell id, uint32 cast flags, uint32 timestamp,
-// uint8 hit count, packed guids..., uint8 miss count, packed guids + miss reasons...
-
-void FWowPacketHandler::HandleSpellGo(FPacketReader& R)
-{
-    if (!R.CanRead(20)) // minimum: 2 packed guids + cast counter + spell id + cast flags + timestamp + hit count + miss count
-    {
-        UE_LOG(LogWowPacket, Warning, TEXT("SPELL_GO: packet too short"));
-        return;
-    }
-
-    uint64 CasterGuid1 = R.ReadPackedGuid(); // Item or caster guid
-    uint64 CasterGuid = R.ReadPackedGuid();  // Actual caster guid
-    uint8 CastCounter = R.ReadU8();
-    uint32 SpellId = R.ReadU32();
-    uint32 CastFlags = R.ReadU32();
-    uint32 Timestamp = R.ReadU32();
-
-    // Hit targets
-    if (!R.CanRead(1)) return;
-    uint8 HitCount = R.ReadU8();
-    for (uint32 i = 0; i < HitCount; ++i)
-    {
-        if (R.Remaining() == 0) break;
-        R.ReadPackedGuid(); // hit target guid
-    }
-
-    // Miss targets
-    if (!R.CanRead(1)) return;
-    uint8 MissCount = R.ReadU8();
-    for (uint32 i = 0; i < MissCount; ++i)
-    {
-        if (!R.CanRead(2)) break; // need at least guid + miss reason
-        R.ReadPackedGuid(); // miss target guid
-        uint8 MissReason = R.ReadU8();
-        if (MissReason == 11) // SPELL_MISS_REFLECT
-        {
-            if (R.CanRead(1))
-                R.ReadU8(); // reflect result
-        }
-    }
-
-    UE_LOG(LogWowPacket, Log, TEXT("SPELL_GO: caster=%llu spell=%u hits=%d misses=%d"),
-        CasterGuid, SpellId, HitCount, MissCount);
-
-    OnSpellGo.Broadcast(CasterGuid, SpellId, CastFlags);
-
-    // Skip remaining data (targets and additional cast flag data)
-}
-
-// ── SMSG_SPELL_FAILURE ──────────────────────────────────────────────────
-// packed guid caster, uint8 cast counter, uint32 spell id, uint8 failure reason
-
-void FWowPacketHandler::HandleSpellFailure(FPacketReader& R)
-{
-    if (!R.CanRead(7)) // minimum: packed guid (1) + cast counter + spell id + failure reason
-    {
-        UE_LOG(LogWowPacket, Warning, TEXT("SPELL_FAILURE: packet too short"));
-        return;
-    }
-
-    uint64 CasterGuid = R.ReadPackedGuid();
-    uint8 CastCounter = R.ReadU8();
-    uint32 SpellId = R.ReadU32();
-    uint8 FailureReason = R.ReadU8();
-
-    UE_LOG(LogWowPacket, Log, TEXT("SPELL_FAILURE: caster=%llu spell=%u reason=%u"),
-        CasterGuid, SpellId, FailureReason);
-
-    OnSpellFailure.Broadcast(CasterGuid, SpellId, FailureReason);
-}
-
 // ── SMSG_SPELL_COOLDOWN ──────────────────────────────────────────────────
 // SMSG_SPELL_COOLDOWN format (3.3.5a):
 // - uint64 CasterGuid
@@ -1124,41 +1027,6 @@ void FWowPacketHandler::HandleAttackStop(FPacketReader& R)
 // ── SMSG_AURA_UPDATE ────────────────────────────────────────────────────
 // packed guid target, uint8 slot, [if slot != 0xFF: uint32 spell id, uint8 flags, uint8 level, uint8 charges, possible packed guid caster]
 
-void FWowPacketHandler::HandleAuraUpdate(FPacketReader& R)
-{
-    if(!R.CanRead(1)) return;
-    const uint64 Guid=R.ReadPackedGuid();
-    HandleAuraRecords(R,Guid);
-}
-
-void FWowPacketHandler::HandleAuraUpdateAll(FPacketReader& R)
-{
-    if(!R.CanRead(1)) return;
-    const uint64 Guid=R.ReadPackedGuid();
-    if(auto* Entity=EntityManager.Find(Guid)) for(auto& Aura:Entity->Auras) Aura=FAuraInfo();
-    HandleAuraRecords(R,Guid);
-}
-
-void FWowPacketHandler::HandleAuraRecords(FPacketReader& R,uint64 TargetGuid)
-{
-    auto* Entity=EntityManager.Find(TargetGuid); if(!Entity) return;
-    while(R.CanRead(5))
-    {
-        const uint8 Slot=R.ReadU8(); const uint32 Id=R.ReadU32();
-        if(!Entity->Auras.IsValidIndex(Slot)) return;
-        FAuraInfo Aura; Aura.SpellId=Id;
-        if(Id)
-        {
-            if(!R.CanRead(3)) return;
-            Aura.Flags=R.ReadU8(); Aura.Level=R.ReadU8(); Aura.Charges=R.ReadU8();
-            Aura.CasterGuid=(Aura.Flags&0x08)?TargetGuid:R.ReadPackedGuid();
-            if(Aura.Flags&0x20) { if(!R.CanRead(8)) return; Aura.DurationMs=R.ReadU32(); Aura.RemainingMs=R.ReadU32(); }
-            Aura.bActive=true; Aura.UpdatedAt=FPlatformTime::Seconds();
-        }
-        Entity->Auras[Slot]=Aura;
-    }
-    OnUnitAuraUpdate.Broadcast(TargetGuid);
-}
 // ── SMSG_POWER_UPDATE ───────────────────────────────────────────────────
 // packed guid target, uint8 power type, uint32 power value
 
@@ -2350,7 +2218,7 @@ void FWowPacketHandler::HandleCreatureQueryResponse(FPacketReader& R)
         OnCreatureNameReceived.Broadcast(Entry, Name, Title);
     }
 
-    // Skip the rest of the packet (icon name, type flags, etc.)
+    if(R.Remaining()) {R.ReadCString(); if(R.CanRead(8)) {R.ReadU32(); CreatureTypes.Add(Entry,R.ReadU32());}}
 }
 
 // ── Cooldown Helper Methods ──────────────────────────────────────────────────

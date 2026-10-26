@@ -6,6 +6,7 @@
 #include "WowCombatLog.h"
 
 DECLARE_DELEGATE_OneParam(FOnWowCombatLog,const FWowCombatEntry&);
+DECLARE_DELEGATE_RetVal_OneParam(uint32,FOnWowCombatFlags,uint64);
 
 DECLARE_MULTICAST_DELEGATE_FiveParams(FOnLoginVerifyWorld, uint32 /*MapId*/, float /*X*/, float /*Y*/, float /*Z*/, float /*Orientation*/);
 DECLARE_MULTICAST_DELEGATE_SixParams(FOnChatMessage, uint8 /*Type*/, uint32 /*Language*/, uint64 /*SenderGuid*/, const FString& /*SenderName*/, const FString& /*Message*/, const FString& /*Channel*/);
@@ -157,6 +158,7 @@ public:
     FWowEntityManager EntityManager;
     FWowCombatHistory CombatHistory;
     FOnWowCombatLog OnCombatLog;
+    FOnWowCombatFlags OnResolveCombatFlags;
     void RecordCombat(FWowCombatEntry Entry);
 
     /** Known spell IDs (populated from SMSG_INITIAL_SPELLS) */
@@ -211,6 +213,7 @@ public:
 
     /** Creature name cache */
     TMap<uint32, FString> CreatureNameCache;
+    TMap<uint32,uint32> CreatureTypes;
     TMap<uint32, FString> CreatureTitleCache;
 
     /** World states (field -> value) */
@@ -401,11 +404,16 @@ private:
     void HandleAttackerStateUpdate(FPacketReader& R);
     void HandleSpellDamageLog(FPacketReader& R);
     void HandleSpellHealLog(FPacketReader& R);
+    void HandleCombatPacket(uint32 Opcode,FPacketReader& R);
+    void RecordSpellCombat(FWowCombatEntry Entry);
+    void RecordCastFailure(uint64 Caster,uint32 Spell,uint8 Reason);
+    void RecordUnitDeath(uint64 Guid);
+    void RecordAuraChanges(uint64 Guid,const TArray<FAuraInfo>& Previous,bool Initial);
     void HandleAttackStart(FPacketReader& R);
     void HandleAttackStop(FPacketReader& R);
     void HandleAuraUpdate(FPacketReader& R);
     void HandleAuraUpdateAll(FPacketReader& R);
-    void HandleAuraRecords(FPacketReader& R,uint64 TargetGuid);
+    void HandleAuraRecords(FPacketReader& R,uint64 TargetGuid,bool All=false);
     void HandlePowerUpdate(FPacketReader& R);
     void HandleMonsterMove(FPacketReader& R);
     void HandleInventoryChangeFailure(FPacketReader& R);

@@ -45,6 +45,7 @@ struct FSpellDbcEntry
     uint32 EffectImplicitTargetB[3];
     uint32 EffectApplyAuraName[3];
     int32 EffectMiscValue[3];
+    uint32 EffectMiscValueB[3];
     uint32 EffectTriggerSpell[3];
     uint32 SpellVisual[2];
     uint32 SpellIconID;
@@ -57,6 +58,7 @@ struct FSpellDbcEntry
         return Value;
     }
     FString Description;
+    uint32 DescriptionVariablesID=0;
     FString ToolTip;
     uint32 ManaCostPercentage;
     uint32 SpellFamilyName;
@@ -72,6 +74,7 @@ public:
     struct FRange { float Min[2] = {}, Max[2] = {}; uint32 Flags = 0; };
     bool LoadRanges(const FDbcParser& Parser);
     bool LoadTimes(const FDbcParser& Parser,bool CastTimes);
+    bool LoadDescriptionVariables(const FDbcParser& Parser);
     float Duration(uint32 Id) const { const auto* Value=Durations.Find(Id); return Value?*Value:0; }
     float CastTime(uint32 Id) const { const auto* Value=CastTimes.Find(Id); return Value?*Value:0; }
     FString Description(uint32 Id,int32 Level=1,bool Aura=false) const;
@@ -84,4 +87,5 @@ private:
     TMap<uint32, int32> IdIndex;
     TMap<uint32, FRange> Ranges;
     TMap<uint32,float> Durations,CastTimes;
+    TMap<uint32,TMap<FString,FString>> DescriptionVariables;
 };

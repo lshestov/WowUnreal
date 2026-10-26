@@ -143,6 +143,7 @@ namespace UnitField
     inline constexpr uint16 MOUNTDISPLAYID       = BASE + 0x003F;
     inline constexpr uint16 BYTES_1              = BASE + 0x0044; // byte0=StandState, byte1=PetTalents, byte2=StandFlags, byte3=AnimTier
     inline constexpr uint16 DYNAMIC_FLAGS        = BASE + 0x0049;
+    inline constexpr uint16 CREATED_BY_SPELL     = BASE + 0x004B;
     inline constexpr uint16 NPC_EMOTESTATE       = BASE + 0x004D;
 
     // Stats (Strength, Agility, Stamina, Intellect, Spirit)

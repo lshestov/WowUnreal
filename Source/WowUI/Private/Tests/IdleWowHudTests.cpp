@@ -1336,6 +1336,80 @@ bool FHudMacroFlow::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudCombatFamilies,"WowUnreal.Hud.CombatFamilies",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudCombatFamilies::RunTest(const FString&)
+{
+    FString Path; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false; FMpqManager Mpq; if(!Mpq.Initialize(Path)) return false;
+    auto& Dbc=FDbcStore::Get(); if(!Dbc.IsLoaded()) Dbc.LoadAll(Mpq); if(!Dbc.IsDeferredLoaded()) Dbc.LoadDeferred(Mpq);
+    const FString Renew=Dbc.Spells().Description(139,20); TestTrue(TEXT("Named description variables resolve before numeric formulas"),Renew.Contains(TEXT("45")) && !Renew.Contains(TEXT("$<")));
+    FHudFixture F; TStrongObjectPtr<UWowConnectionManager> C(NewObject<UWowConnectionManager>()); auto& H=C->PacketHandler;
+    F.Context.ConnectionManager=C.Get(); F.Context.EntityManager=&H.EntityManager; H.EntityManager.LocalPlayerGuid=1;
+    H.EntityManager.PromoteToTyped(1,WowTypeMask::PLAYER|WowTypeMask::UNIT).SetField(UnitField::HEALTH,100);
+    const uint64 Victim=0xf130000005000001ULL; H.EntityManager.PromoteToTyped(Victim,WowTypeMask::UNIT).SetField(UnitField::HEALTH,100);
+    H.PlayerNameCache.Add(1,TEXT("Main")); H.CreatureNameCache.Add(5,TEXT("Wolf"));
+    H.OnResolveCombatFlags.BindLambda([&](uint64 Id){return WowLuaApi::CombatLogFlags(&F.Context,Id);});
+    H.OnCombatLog.BindLambda([&](const FWowCombatEntry& E){FWowCombatLogUi::Dispatch(F.Lua.GetState(),E);});
+    TestTrue(TEXT("Install typed event listener"),F.Lua.ExecuteString(TEXT(R"LUA(
+        Rows={}; Listener=CreateFrame('Frame'); Listener:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED'); Listener:SetScript('OnEvent',function(self,event,...) table.insert(Rows,{...}) end)
+        SPELL_FAILED_MOVING='Localized moving failure'
+    )LUA")));
+    TArray<uint8> P; const auto U32=[&](uint32 V){P.Append(reinterpret_cast<const uint8*>(&V),4);}; const auto U64=[&](uint64 V){P.Append(reinterpret_cast<const uint8*>(&V),8);}; const auto Float=[&](float V){P.Append(reinterpret_cast<const uint8*>(&V),4);};
+    const auto Guid=[&](uint64 V){uint8 Mask=0; TArray<uint8> Bytes; for(int32 I=0;I<8;++I) if(uint8 B=V>>(8*I)) {Mask|=1<<I; Bytes.Add(B);} P.Add(Mask); P.Append(Bytes);};
+    const auto Check=[&](const TCHAR* Name,const TCHAR* Lua){return TestTrue(Name,F.Lua.ExecuteString(Lua));};
+    Guid(Victim); Guid(1); U32(139); U32(2); U32(3); U32(20); U32(0); U32(2); U32(3); U32(4); P.Add(1); U32(8); U32(40); U32(5); U32(2); P.Add(0);
+    auto Truncated=P; Truncated.Pop(); H.HandlePacket(0x24E,Truncated); TestEqual(TEXT("Partial multi-effect periodic packet publishes no rows"),H.CombatHistory.Num(),0);
+    H.HandlePacket(0x24E,P);
+    Check(TEXT("Periodic damage and heal suffixes retain exact order/types"),TEXT("assert(#Rows==2 and Rows[1][2]=='SPELL_PERIODIC_DAMAGE' and Rows[1][12]==20 and Rows[1][15]==4 and Rows[1][17]==3 and Rows[1][18]==true); assert(Rows[2][2]=='SPELL_PERIODIC_HEAL' and Rows[2][12]==40 and Rows[2][13]==5 and Rows[2][14]==2 and Rows[2][15]==false)"));
+    P.Reset(); Guid(1); Guid(1); U32(78); U32(1); U32(150); H.HandlePacket(0x151,P);
+    Check(TEXT("Rage uses client power display units"),TEXT("assert(Rows[3][2]=='SPELL_ENERGIZE' and Rows[3][12]==15 and Rows[3][13]==1)"));
+    P.Reset(); Guid(1); U32(1766); U32(2); U32(68); U32(1); Guid(Victim); U32(133); U32(8); U32(1); Guid(Victim); U32(23); U32(0); Float(.5f);
+    Truncated=P; Truncated.Pop(); H.HandlePacket(0x24C,Truncated); TestEqual(TEXT("Partial later execute effect does not publish an earlier interrupt"),H.CombatHistory.Num(),3);
+    H.HandlePacket(0x24C,P);
+    Check(TEXT("Interrupt carries the interrupted spell and leech carries integral gain"),TEXT("assert(Rows[4][2]=='SPELL_INTERRUPT' and Rows[4][12]==133 and type(Rows[4][13])=='string' and Rows[4][14]==4); assert(Rows[5][2]=='SPELL_LEECH' and Rows[5][12]==23 and Rows[5][13]==0 and Rows[5][14]==11)"));
+    P.Reset(); Guid(Victim); Guid(1); U32(527); P.Add(0); U32(1); U32(139); P.Add(0); H.HandlePacket(0x27B,P); H.HandlePacket(0x333,P); H.HandlePacket(0x14F,P);
+    Check(TEXT("Dispel/steal/break use different spell prefixes and original aura suffix"),TEXT("assert(Rows[6][2]=='SPELL_DISPEL' and Rows[6][9]==527 and Rows[6][12]==139 and Rows[6][15]=='BUFF'); assert(Rows[7][2]=='SPELL_STOLEN'); assert(Rows[8][2]=='SPELL_AURA_BROKEN_SPELL' and Rows[8][9]==139 and Rows[8][12]==527 and Rows[8][15]=='BUFF')"));
+    P.Reset(); U64(1); U64(Victim); U32(527); U32(139); H.HandlePacket(0x262,P);
+    P.Reset(); U32(78); U64(1); P.Add(0); U32(1); U64(Victim); P.Add(10); H.HandlePacket(0x24B,P);
+    Check(TEXT("Failed dispels and shield misses have correct typed suffixes"),TEXT("assert(Rows[9][2]=='SPELL_DISPEL_FAILED' and Rows[9][12]==139); assert(Rows[10][2]=='DAMAGE_SHIELD_MISSED' and Rows[10][12]=='ABSORB' and Rows[10][13]==0)"));
+    P.Reset(); U64(1); U64(Victim); U32(78); U32(25); U32(3); U32(1); H.HandlePacket(0x24F,P);
+    P.Reset(); U64(1); U64(Victim); H.HandlePacket(0x1F5,P); U32(78); H.HandlePacket(0x32F,P);
+    Check(TEXT("Shield, party kill and instant-kill preserve full GUIDs"),TEXT("assert(Rows[11][2]=='DAMAGE_SHIELD' and Rows[11][12]==25 and Rows[11][13]==3); assert(Rows[12][2]=='PARTY_KILL' and Rows[13][2]=='SPELL_INSTAKILL'); assert(Rows[13][6]=='0xF130000005000001')"));
+    P.Reset(); Guid(1); Guid(1); P.Add(7); U32(133); U32(0); U32(2000); U32(2); Guid(Victim); H.HandlePacket(WowOpcode::SMSG_SPELL_START,P);
+    Check(TEXT("Cast start has no fabricated destination"),TEXT("assert(Rows[14][2]=='SPELL_CAST_START' and Rows[14][6]==nil)"));
+    P.Reset(); Guid(1); Guid(1); P.Add(8); U32(78); U32(0); U32(123); P.Add(1); U64(Victim); P.Add(1); U64(Victim); P.Add(11); P.Add(2); U32(2); Guid(Victim);
+    Truncated=P; Truncated.Pop(); H.HandlePacket(WowOpcode::SMSG_SPELL_GO,Truncated); TestEqual(TEXT("Truncated target block does not emit success/miss"),H.CombatHistory.Num(),14);
+    H.HandlePacket(WowOpcode::SMSG_SPELL_GO,P);
+    Check(TEXT("Spell-go hit/miss arrays contain full, not packed, GUIDs"),TEXT("assert(Rows[15][2]=='SPELL_CAST_SUCCESS' and Rows[15][6]=='0xF130000005000001'); assert(Rows[16][2]=='SPELL_MISSED' and Rows[16][12]=='REFLECT')"));
+    P.Reset(); P.Add(8); U32(78); P.Add(51); H.HandlePacket(0x130,P);
+    Check(TEXT("Local cast rejection localizes the original failure token"),TEXT("assert(Rows[17][2]=='SPELL_CAST_FAILED' and Rows[17][12]=='Localized moving failure')"));
+    Check(TEXT("Spell filters, reverse indices and unfiltered traversal match original API"),TEXT("CombatLogResetFilter(); CombatLogAddFilter(nil,nil,nil,133); assert(CombatLogGetNumEntries()==1 and CombatLogGetNumEntries(0)==1); assert(CombatLogSetCurrentEntry(1)==1 and select(2,CombatLogGetCurrentEntry())=='SPELL_CAST_START'); assert(CombatLogSetCurrentEntry(-1,true)==1 and select(2,CombatLogGetCurrentEntry())=='SPELL_MISSED'); assert(CombatLogAdvanceEntry(1,true) and select(2,CombatLogGetCurrentEntry())=='SPELL_CAST_FAILED'); assert(not CombatLogAdvanceEntry(1,true)); CombatLogResetFilter(); CombatLogAddFilter(nil,nil,nil,GetSpellInfo(133)); assert(CombatLogGetNumEntries()==1); assert(not pcall(CombatLogAddFilter,nil,1,nil)); CombatLogResetFilter()"));
+    const uint32 OldFlags=H.CombatHistory.Find(1)->DestinationFlags;
+    H.EntityManager.Find(Victim)->SetField(UnitField::SUMMONEDBY,1);
+    TestTrue(TEXT("Historical affiliation is captured at receipt"),H.CombatHistory.Find(1)->FlagsCaptured && H.CombatHistory.Find(1)->DestinationFlags==OldFlags && OldFlags!=WowLuaApi::CombatLogFlags(&F.Context,Victim));
+    H.CombatHistory.Reset(); Check(TEXT("Reset listener for aura transactions"),TEXT("Rows={}"));
+    const auto Aura=[&](uint8 Charges){P.Reset(); Guid(1); P.Add(0); U32(7386); P.Add(0xA8); P.Add(20); P.Add(Charges); U32(30000); U32(30000);};
+    Aura(1); H.HandlePacket(WowOpcode::SMSG_AURA_UPDATE,P); Aura(3); H.HandlePacket(WowOpcode::SMSG_AURA_UPDATE,P); Aura(2); H.HandlePacket(WowOpcode::SMSG_AURA_UPDATE,P);
+    Check(TEXT("Aura application and stack changes expose correct names and counts"),TEXT("assert(#Rows==3 and Rows[1][2]=='SPELL_AURA_APPLIED' and Rows[1][12]=='DEBUFF'); assert(Rows[2][2]=='SPELL_AURA_APPLIED_DOSE' and Rows[2][13]==3); assert(Rows[3][2]=='SPELL_AURA_REMOVED_DOSE' and Rows[3][13]==2)"));
+    P.Reset(); Guid(1); P.Add(0); U32(0); P.Add(1); U32(139); P.Add(0x20); // complete removal followed by a partial second aura
+    H.HandlePacket(WowOpcode::SMSG_AURA_UPDATE_ALL,P);
+    TestTrue(TEXT("Partial all-aura snapshot preserves previous entries and history"),H.EntityManager.Find(1)->Auras[0].SpellId==7386 && H.CombatHistory.Num()==3);
+    P.Reset(); Guid(1); P.Add(0); U32(0); H.HandlePacket(WowOpcode::SMSG_AURA_UPDATE,P);
+    Check(TEXT("Aura removal references the old caster/spell"),TEXT("assert(Rows[4][2]=='SPELL_AURA_REMOVED' and Rows[4][9]==7386 and Rows[4][12]=='DEBUFF')"));
+    P.Reset(); Guid(Victim); Guid(1); Guid(0); U32(30); U32(133); H.HandlePacket(0x32,P);
+    P.Reset(); Guid(Victim); Guid(1); Guid(0); U32(uint32(-20)); U32(133); H.HandlePacket(0x32,P);
+    Check(TEXT("Destructible-building damage and healing have distinct suffixes"),TEXT("assert(Rows[5][2]=='SPELL_BUILDING_DAMAGE' and Rows[5][12]==30 and Rows[5][14]==4); assert(Rows[6][2]=='SPELL_BUILDING_HEAL' and Rows[6][12]==20 and Rows[6][15]==false)"));
+    auto* Dying=H.EntityManager.Find(Victim); Dying->Entry=5; H.CreatureTypes.Add(5,13);
+    P.Reset(); U32(1); P.Add(0); Guid(Victim); P.Add(1); U32(1u<<UnitField::HEALTH); U32(0); H.HandlePacket(WowOpcode::SMSG_UPDATE_OBJECT,P);
+    Check(TEXT("Gas-cloud death uses the original dissipation event"),TEXT("assert(Rows[7][2]=='UNIT_DISSIPATES')"));
+    H.CreatureTypes.Remove(5); Dying->SetField(UnitField::HEALTH,100); Dying->SetField(UnitField::CREATED_BY_SPELL,2484); H.HandlePacket(WowOpcode::SMSG_UPDATE_OBJECT,P);
+    Check(TEXT("SummonProperties totem slots identify destroyed units"),TEXT("assert(Rows[8][2]=='UNIT_DESTROYED')"));
+    uint32 Enchant=0; for(uint32 I=1;I<5000 && !Enchant;++I) if(const auto* E=Dbc.ItemUi().Enchant(I); E && !E->Name.IsEmpty() && !(E->Flags&2)) Enchant=I;
+    TestTrue(TEXT("Client contains visible enchantment metadata"),Enchant!=0); FWowItemTemplate Template; Template.Name=TEXT("Shield"); H.ItemTemplates.Add(2211,Template);
+    P.Reset(); Guid(1); Guid(0); U32(2211); U32(Enchant); H.HandlePacket(0x1D7,P);
+    Check(TEXT("Enchantment removal uses names/item fields without a spell prefix"),TEXT("assert(Rows[9][2]=='ENCHANT_REMOVED' and type(Rows[9][9])=='string' and Rows[9][10]==2211 and Rows[9][11]=='Shield')"));
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudCombatHistory,"WowUnreal.Hud.CombatHistory",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FHudCombatHistory::RunTest(const FString&)
 {

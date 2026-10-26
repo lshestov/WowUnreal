@@ -407,7 +407,7 @@ build, automation, native autologin and rendered screenshot verification):
     header control spacing and optional texture colors for ChannelFrame bootstrap.
     Verified Windows build, 100-test regression, added tooltip/geometry/color cases
     and two native 26-step/four-image runs. See Docs/ChatLinks.md.
-  - [?] Channel membership/roster APIs and original channel-window state.
+  - [x] Channel membership/roster APIs and original channel-window state.
     Server-confirmed joins/leaves, atomic member lists/watch updates, local
     channel numbers, chat-window filters and moderation requests. Original
     categories, collapse/selection and owner roles; viewport-local cursor and
@@ -415,7 +415,14 @@ build, automation, native autologin and rendered screenshot verification):
     Windows build, 103-test regression, focused geometry/API checks and native
     private-channel round trips with rendered roster/chat/menu captures.
     Zone channel selection depends on the actual area resolver in stage 6.
-  - [ ] Remaining combat-log event families and original formatter integration.
+  - [?] Remaining combat-log event families and original formatter integration.
+    Periodic/resource/aura/cast/failure/miss/interrupt/dispel/shield/split/execute,
+    enchantment/party-kill/instant-kill and building events, plus actual totem and
+    gas-cloud death types. Atomic multi-effect/aura records, full spell-go target
+    GUIDs, receipt-time flags, spell filters and original reverse/unfiltered cursor.
+    Localized failure tokens and DBC named description formulas. Verified Windows
+    build, 104-test regression, focused families/filter/metadata cases and native
+    periodic healing, application/refresh/removal, cast rejection, links and reload.
   - [ ] Advanced macro execution families and acknowledgement-driven sequences.
 - [ ] 6. Maps: points of interest, tracking, interior minimaps and original map bootstrap.
   - [ ] Resolve actual zone/subzone from streamed terrain areas and join/replace

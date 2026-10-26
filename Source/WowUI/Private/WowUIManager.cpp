@@ -212,6 +212,8 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 	FWowSavedVariables::LoadForAddon(LuaVM->GetState(),TEXT("IdleWowUI"),Preferences);
 	WowLuaApi::ApplySavedUiSettings(LuaVM->GetState());
 	FWowMacros::LoadSavedVariables(LuaVM->GetState());
+	if(ConnectionManager) ConnectionManager->PacketHandler.OnResolveCombatFlags.BindWeakLambda(this,[this](uint64 Guid)->uint32
+	{ return LuaVM?WowLuaApi::CombatLogFlags(WowLuaApi::GetContext(LuaVM->GetState()),Guid):0x80000000u; });
 	if(ConnectionManager) ConnectionManager->PacketHandler.OnCombatLog.BindWeakLambda(this,[this](const FWowCombatEntry& Entry)
 	{ if(LuaVM) FWowCombatLogUi::Dispatch(LuaVM->GetState(),Entry); });
 	if(ConnectionManager) ConnectionManager->OnMacroUse.BindWeakLambda(this,[this](uint32 Id)

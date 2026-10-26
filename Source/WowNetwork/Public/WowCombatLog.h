@@ -3,12 +3,13 @@
 
 struct FWowCombatValue
 {
-    enum class EKind : uint8 { Number,Boolean,String } Kind=EKind::Number;
+    enum class EKind : uint8 { Number,Boolean,String,Localized } Kind=EKind::Number;
     double Number=0;
     FString String;
     static FWowCombatValue N(double V) { FWowCombatValue R; R.Number=V; return R; }
     static FWowCombatValue B(bool V) { auto R=N(V?1:0); R.Kind=EKind::Boolean; return R; }
     static FWowCombatValue S(const FString& V) { FWowCombatValue R; R.Kind=EKind::String; R.String=V; return R; }
+    static FWowCombatValue L(const FString& V) { auto R=S(V); R.Kind=EKind::Localized; return R; }
 };
 struct FWowCombatEntry
 {
@@ -16,6 +17,8 @@ struct FWowCombatEntry
     double Timestamp=0;
     FString Event;
     uint32 Spell=0,School=1;
+    uint32 SourceFlags=0,DestinationFlags=0;
+    bool FlagsCaptured=false;
     TArray<FWowCombatValue> Values;
 };
 

@@ -10,10 +10,32 @@ bool FSpellDbc::LoadTimes(const FDbcParser& Parser,bool Cast)
     return true;
 }
 
+bool FSpellDbc::LoadDescriptionVariables(const FDbcParser& Parser)
+{
+    if(!Parser.IsValid() || Parser.GetFieldCount()<2) return false;
+    DescriptionVariables.Reset();
+    for(uint32 I=0;I<Parser.GetRecordCount();++I)
+    {
+        TArray<FString> Lines; Parser.GetString(I,1).ParseIntoArrayLines(Lines);
+        auto& Values=DescriptionVariables.FindOrAdd(Parser.GetUInt(I,0));
+        for(const auto& Line:Lines)
+        {FRegexMatcher Definition(FRegexPattern(TEXT("^\\$([A-Za-z_][A-Za-z_0-9]*)=(.*)$")),Line.TrimStartAndEnd()); if(Definition.FindNext()) Values.Add(Definition.GetCaptureGroup(1),Definition.GetCaptureGroup(2));}
+    }
+    return true;
+}
 FString FSpellDbc::Description(uint32 Id,int32 Level,bool Aura) const
 {
     const auto* Spell=GetById(Id); if(!Spell) return {};
-    const FString Text=Aura && !Spell->ToolTip.IsEmpty()?Spell->ToolTip:Spell->Description;
+    FString Text=Aura && !Spell->ToolTip.IsEmpty()?Spell->ToolTip:Spell->Description;
+    if(const auto* Variables=DescriptionVariables.Find(Spell->DescriptionVariablesID))
+    {
+        for(int32 Depth=0;Depth<8;++Depth)
+        {
+            FRegexMatcher Reference(FRegexPattern(TEXT("\\$<([A-Za-z_][A-Za-z_0-9]*)>")),Text); FString Expanded; int32 End=0; bool Changed=false;
+            while(Reference.FindNext()) {Expanded+=Text.Mid(End,Reference.GetMatchBeginning()-End); if(const auto* Value=Variables->Find(Reference.GetCaptureGroup(1))) {Expanded+=*Value; Changed=true;} else Expanded+=Reference.GetCaptureGroup(0); End=Reference.GetMatchEnding(); if(Expanded.Len()>65536) return Spell->Description;}
+            Expanded+=Text.Mid(End); if(!Changed || Expanded==Text || Expanded.Len()>65536) break; Text=MoveTemp(Expanded);
+        }
+    }
     FRegexMatcher Match(FRegexPattern(TEXT("\\$(?:([*/])([0-9]+(?:\\.[0-9]+)?);)?(?:(\\d+))?([sSmMdDtTuUxXoOrRhH])([1-3])?")),Text);
     FString Result; int32 Previous=0;
     while(Match.FindNext())
@@ -137,6 +159,7 @@ bool FSpellDbc::Load(const FDbcParser& Parser)
             E.EffectImplicitTargetB[j] = Parser.GetUInt(i, 89 + j);
             E.EffectApplyAuraName[j] = Parser.GetUInt(i, 95 + j);
             E.EffectMiscValue[j] = static_cast<int32>(Parser.GetUInt(i, 110 + j));
+            E.EffectMiscValueB[j] = Parser.GetUInt(i,113+j);
             E.EffectTriggerSpell[j] = Parser.GetUInt(i, 116 + j);
         }
 
@@ -147,6 +170,7 @@ bool FSpellDbc::Load(const FDbcParser& Parser)
         E.SpellName = Parser.GetString(i, 136);
         E.Rank = Parser.GetString(i, 153);
         E.Description = Parser.GetString(i, 170);
+        if(Parser.GetFieldCount()>232) E.DescriptionVariablesID=Parser.GetUInt(i,232);
         E.ToolTip = Parser.GetString(i, 187);
         E.ManaCostPercentage = Parser.GetUInt(i, 204);
         E.SpellFamilyName = Parser.GetUInt(i, 208);

@@ -46,6 +46,7 @@ public:
     bool LoadAll(FMpqManager& Mpq);
     void LoadDeferred(FMpqManager& Mpq);
     const FItemUiDbc& ItemUi() const { return ItemUiDbc; }
+    uint32 SummonSlot(uint32 Id) const {const auto* Slot=SummonSlots.Find(Id); return Slot?*Slot:0;}
     float StatRatio(FName Table,uint32 Id) const { const auto* Values=StatRatios.Find(Table); const auto* Value=Values?Values->Find(Id):nullptr; return Value?*Value:0.f; }
     struct FTitle { uint32 Mask=0; FString Male,Female; };
     const FTitle* Title(uint32 Mask) const { return Titles.Find(Mask); }
@@ -164,6 +165,7 @@ private:
     FCreatureModelDataDbc CreatureModelDataDbc;
     FItemDisplayInfoDbc ItemDisplayInfoDbc;
     FSpellDbc SpellDbc;
+    TMap<uint32,uint32> SummonSlots;
     FSpellBookDbc SpellBookDbc;
     TMap<FName,TMap<uint32,float>> StatRatios;
     TMap<uint32,FTitle> Titles;

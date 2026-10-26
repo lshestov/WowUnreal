@@ -37,7 +37,7 @@ bool FItemUiDbc::Load(FMpqManager& Mpq)
     }
     if(Read(TEXT("SpellItemEnchantment.dbc"),38))
     {
-        Enchants.Empty(); for(uint32 I=0;I<Parser.GetRecordCount();++I) { FEnchant Row; Row.Name=Parser.GetString(I,14); Row.Gem=Parser.GetUInt(I,33); Enchants.Add(Parser.GetUInt(I,0),MoveTemp(Row)); }
+        Enchants.Empty(); for(uint32 I=0;I<Parser.GetRecordCount();++I) { FEnchant Row; Row.Name=Parser.GetString(I,14); Row.Gem=Parser.GetUInt(I,33); Row.Flags=Parser.GetUInt(I,32); Enchants.Add(Parser.GetUInt(I,0),MoveTemp(Row)); }
     }
     if(Read(TEXT("ChatChannels.dbc"),37))
     {

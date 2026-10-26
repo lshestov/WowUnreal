@@ -9,7 +9,7 @@ public:
     struct FExtendedCost { uint32 Honor=0,Arena=0,Bracket=0,Items[5]={},Counts[5]={},Rating=0,Group=0; };
     struct FStationery { uint32 Id=0,Item=0,Flags=0; FString Texture; };
     struct FPackage { uint32 Id=0,Cost=0; FString Icon,Name; };
-    struct FEnchant { FString Name; uint32 Gem=0; };
+    struct FEnchant { FString Name; uint32 Gem=0,Flags=0; };
     struct FChatChannel { uint32 Id=0,Flags=0; FString Pattern,Name; };
     bool Load(FMpqManager& Mpq);
     const FExtendedCost* ExtendedCost(uint32 Id) const { return ExtendedCosts.Find(Id); }
