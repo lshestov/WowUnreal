@@ -45,6 +45,10 @@ namespace WowLuaApi
     void UpdateMerchant(lua_State* L);
     void RegisterBankApi(lua_State* L);
     void UpdateBank(lua_State* L);
+    void RegisterMailApi(lua_State* L);
+    void UpdateMail(lua_State* L);
+    int SetInboxItemTooltip(lua_State* L);
+    int SetSendMailItemTooltip(lua_State* L);
     const FWowItemTemplate* QueryItemTemplate(FWowLuaContext* Context,uint32 Id);
     FString ItemLinkForUi(FWowLuaContext* Context,uint32 Id);
     FString ItemIconForUi(FWowLuaContext* Context,uint32 Id,uint32 Display=0);

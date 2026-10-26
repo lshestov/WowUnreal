@@ -69,6 +69,7 @@ public:
 
 private:
 	void InitializeCore();
+    void OnMailLockItems(int32 Index,uint64 Guid);
 	UPROPERTY() TObjectPtr<UCanvasPanel> RootCanvas;
 	FMpqManager* LoadedMpq = nullptr;
 	FWowAssetCache* LoadedCache = nullptr;

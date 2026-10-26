@@ -146,7 +146,7 @@ int BagInfo(lua_State* L)
     if(!Item) { lua_pushnil(L); return 1; }
     const auto* T=Template(C,Item->Entry);
     const auto* Held=C->ConnectionManager?C->ConnectionManager->GetCursorItem():nullptr;
-    lua_pushstring(L,TCHAR_TO_UTF8(*Icon(T))); lua_pushinteger(L,FMath::Max(Item->GetStackCount(),1)); lua_pushboolean(L,Held && Held->Guid==Item->Guid);
+    lua_pushstring(L,TCHAR_TO_UTF8(*Icon(T))); lua_pushinteger(L,FMath::Max(Item->GetStackCount(),1)); lua_pushboolean(L,(Held && Held->Guid==Item->Guid) || (C->ConnectionManager && C->ConnectionManager->IsItemInOutgoingMail(Item->Guid)));
     if(T) lua_pushinteger(L,T->Quality); else lua_pushnil(L);
     lua_pushboolean(L,0); lua_pushboolean(L,0); lua_pushstring(L,TCHAR_TO_UTF8(*Link(T,Item->Entry))); return 7;
 }
@@ -223,6 +223,12 @@ int Use(lua_State* L)
     if(!Position(C,Bag,Slot,B,S)) return 0;
     auto* Item=BagItem(C,Bag,Slot); const auto* T=Item?Template(C,Item->Entry):nullptr;
     if((Bag==-1 || (Bag>=5 && Bag<=11)) && !C->ConnectionManager->PacketHandler.CurrentBankerGuid) return 0;
+    if(Item && C->ConnectionManager->IsItemInOutgoingMail(Item->Guid)) return 0;
+    if(Item && C->ConnectionManager->PacketHandler.CurrentMailboxGuid && C->ConnectionManager->PacketHandler.MailComposer.Showing)
+    {
+        const auto& Mail=C->ConnectionManager->PacketHandler.MailComposer; if(Mail.Sending || Mail.Pending.Index>=0 || Mail.LockIndex>=0) return 0;
+        C->ConnectionManager->PickupBagItemCursor(B,S,Item->Entry,Link(T,Item->Entry)); C->ConnectionManager->ClickOutgoingMailAttachment(-1); return 0;
+    }
     if(Item && C->ConnectionManager->IsRepairMode()) { C->ConnectionManager->SendRepairItems(Item->Guid); return 0; }
     if(Item && C->ConnectionManager->PacketHandler.CurrentBankerGuid) { C->ConnectionManager->SendBankItem(B,S,Bag>=0 && Bag<=4); return 0; }
     if(Item && C->ConnectionManager->PacketHandler.Merchant.Open)
@@ -287,7 +293,7 @@ int PushStats(lua_State* L,const TMap<FString,float>& Values,int32 OptionalTable
     for(const auto& Stat:Values) if(!FMath::IsNearlyZero(Stat.Value)) { lua_pushnumber(L,Stat.Value); lua_setfield(L,-2,TCHAR_TO_UTF8(*Stat.Key)); }
     return 1;
 }
-void ItemTooltip(lua_State* L,FWowLuaContext* C,int64 H,const FWowItemTemplate* T,uint32 Id,FWowItemEntity* Item=nullptr,bool Compare=false)
+void ItemTooltip(lua_State* L,FWowLuaContext* C,int64 H,const FWowItemTemplate* T,uint32 Id,const FWowItemEntity* Item=nullptr,bool Compare=false)
 {
     auto* F=C->FrameManager; F->TooltipClearLines(H);
     auto* State=F->GetTooltipState(H); State->ItemLink=Link(T,Id); State->ItemId=Id; State->ItemName=T?T->Name:TEXT("Retrieving item information...");
@@ -317,6 +323,22 @@ FString WowLuaApi::ItemIconForUi(FWowLuaContext* C,uint32 Id,uint32 Display)
 {
     if(const auto* D=FDbcStore::Get().ItemDisplayInfo().GetById(Display); D && !D->Icon1.IsEmpty()) return TEXT("Interface\\Icons\\")+D->Icon1;
     return Icon(Template(C,Id));
+}
+int WowLuaApi::SetInboxItemTooltip(lua_State* L)
+{
+    auto* C=GetContext(L); if(!C || !C->ConnectionManager || !C->FrameManager) return 0;
+    const int32 Index=luaL_checkinteger(L,2)-1,Slot=luaL_optinteger(L,3,1)-1; const auto& Rows=C->ConnectionManager->PacketHandler.MailInbox;
+    const auto* A=Rows.IsValidIndex(Index)?Rows[Index].Attachments.FindByPredicate([Slot](const auto& R){return int32(R.AttachmentIndex)==Slot;}):nullptr;
+    if(!A) { C->FrameManager->TooltipClearLines(Handle(L)); C->FrameManager->SetFrameVisible(Handle(L),false); return 0; }
+    FWowItemEntity Item; Item.Entry=A->ItemEntry; Item.SetField(ItemField::MAX_DURABILITY,A->MaxDurability); Item.SetField(ItemField::DURABILITY,A->Durability);
+    ItemTooltip(L,C,Handle(L),Template(C,A->ItemEntry),A->ItemEntry,&Item); return 0;
+}
+int WowLuaApi::SetSendMailItemTooltip(lua_State* L)
+{
+    auto* C=GetContext(L); if(!C || !C->ConnectionManager || !C->FrameManager) return 0;
+    const auto* Item=C->ConnectionManager->GetOutgoingMailItem(luaL_optinteger(L,2,1)-1);
+    if(Item) ItemTooltip(L,C,Handle(L),Template(C,Item->Entry),Item->Entry,Item);
+    else { C->FrameManager->TooltipClearLines(Handle(L)); C->FrameManager->SetFrameVisible(Handle(L),false); } return 0;
 }
 int WowLuaApi::SetMerchantItemTooltip(lua_State* L)
 {
@@ -544,7 +566,7 @@ void WowLuaApi::RegisterItemApi(lua_State* L)
     });
     RegisterItem(L,"SetCurrencyUnused",[](lua_State* S)->int { auto* C=GetContext(S); const auto Rows=CurrencyRows(C); const int32 I=luaL_checkinteger(S,1)-1; if(Rows.IsValidIndex(I)) { SetUiPreference(S,FString::Printf(TEXT("currencyUnused%u"),Rows[I]),lua_toboolean(S,2) && (!lua_isnumber(S,2) || lua_tonumber(S,2)!=0)); if(C && C->EventSystem) C->EventSystem->FireEvent(TEXT("CURRENCY_DISPLAY_UPDATE")); } return 0; });
     RegisterItem(L,"PickupContainerItem",Pickup); RegisterItem(L,"PickupInventoryItem",PickupEquipment); RegisterItem(L,"UseContainerItem",Use); RegisterItem(L,"SplitContainerItem",Split);
-    RegisterItem(L,"IsInventoryItemLocked",[](lua_State* S)->int { auto* C=GetContext(S); const auto* Item=Equipped(C,luaL_checkinteger(S,1)); const auto* Held=C && C->ConnectionManager?C->ConnectionManager->GetCursorItem():nullptr; lua_pushboolean(S,Item && Held && Item->Guid==Held->Guid); return 1; });
+    RegisterItem(L,"IsInventoryItemLocked",[](lua_State* S)->int { auto* C=GetContext(S); const auto* Item=Equipped(C,luaL_checkinteger(S,1)); const auto* Held=C && C->ConnectionManager?C->ConnectionManager->GetCursorItem():nullptr; lua_pushboolean(S,Item && ((Held && Item->Guid==Held->Guid) || (C->ConnectionManager && C->ConnectionManager->IsItemInOutgoingMail(Item->Guid)))); return 1; });
     RegisterItem(L,"PutItemInBackpack",[](lua_State* S)->int { auto* C=GetContext(S); lua_pushboolean(S,C && C->ConnectionManager && C->ConnectionManager->PlaceCursorIntoFirstFreeContainerSlot(255)); return 1; });
     RegisterItem(L,"PutItemInBag",[](lua_State* S)->int { auto* C=GetContext(S); const int32 Slot=luaL_checkinteger(S,1); lua_pushboolean(S,C && C->ConnectionManager && Slot>=20 && Slot<=23 && C->ConnectionManager->PlaceCursorIntoFirstFreeContainerSlot(Slot-1)); return 1; });
     RegisterItem(L,"GetContainerItemID",[](lua_State* S)->int { auto* Item=BagItem(GetContext(S),luaL_checkinteger(S,1),luaL_checkinteger(S,2)); if(Item) lua_pushinteger(S,Item->Entry); else lua_pushnil(S); return 1; });
@@ -578,6 +600,8 @@ const FWowItemTemplate* WowLuaApi::QueryItemTemplate(FWowLuaContext*,uint32) { r
 FString WowLuaApi::ItemLinkForUi(FWowLuaContext*,uint32) { return {}; }
 FString WowLuaApi::ItemIconForUi(FWowLuaContext*,uint32,uint32) { return {}; }
 int WowLuaApi::SetMerchantItemTooltip(lua_State*) { return 0; }
+int WowLuaApi::SetInboxItemTooltip(lua_State*) { return 0; }
+int WowLuaApi::SetSendMailItemTooltip(lua_State*) { return 0; }
 int WowLuaApi::SetBuybackItemTooltip(lua_State*) { return 0; }
 int WowLuaApi::SetActionTooltip(lua_State*) { return 0; }
 #endif

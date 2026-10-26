@@ -1738,9 +1738,7 @@ FString FWowEventSystem::OpcodeToEvent(uint16 Opcode)
 	case 0x0160: return TEXT("LOOT_OPENED");                     // SMSG_LOOT_RESPONSE
 	case 0x0161: return TEXT("LOOT_CLOSED");                     // SMSG_LOOT_RELEASE_RESPONSE
 
-	// Mail
-	case 0x0297: return TEXT("MAIL_SHOW");                       // SMSG_SHOW_MAILBOX
-	case 0x023B: return TEXT("MAIL_INBOX_UPDATE");               // SMSG_MAIL_LIST_RESULT (correct opcode)
+	// Mail callbacks fire only after validated mailbox/cache updates.
 
 	// Talent / skills
 	case 0x012F: return TEXT("CHARACTER_POINTS_CHANGED");

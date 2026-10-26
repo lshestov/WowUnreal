@@ -500,6 +500,53 @@ void AWowGameplayController::BindEntityEvents()
 		{
 			ShowMailbox(static_cast<int64>(MailboxGuid));
 		});
+    ConnectionManager->PacketHandler.OnMailListReceived.AddLambda([this](const TArray<FWowMailMessage>& Inbox)
+    {
+        for(const auto& Message:Inbox) for(const auto& Item:Message.Attachments) ConnectionManager->RequestItemTemplate(Item.ItemEntry);
+        FireUIEvent(TEXT("MAIL_INBOX_UPDATE"));
+    });
+    ConnectionManager->PacketHandler.OnMailSendInfoChanged.AddLambda([this]()
+    {
+        FireUIEvent(TEXT("MAIL_SEND_INFO_UPDATE"));
+        if(UIManager && UIManager->GetEventSystem()) for(int32 Bag=0;Bag<=4;++Bag) UIManager->GetEventSystem()->FireEventNumbers(TEXT("BAG_UPDATE"),{double(Bag)});
+    });
+    ConnectionManager->PacketHandler.OnPendingMailChanged.AddLambda([this](){FireUIEvent(TEXT("UPDATE_PENDING_MAIL"));});
+    ConnectionManager->PacketHandler.OnMailUnlockItems.AddLambda([this](){FireUIEvent(TEXT("MAIL_UNLOCK_SEND_ITEMS"));});
+    ConnectionManager->PacketHandler.OnMailClientError.AddLambda([this](const FString& Key)
+    {
+        const auto* Events=UIManager?UIManager->GetEventSystem():nullptr;
+        FireUIEvent(TEXT("UI_ERROR_MESSAGE"),{Events?Events->ResolveText(Key):Key});
+    });
+    ConnectionManager->PacketHandler.OnMailResult.AddLambda([this](const FWowMailResult& Result)
+    {
+        const auto* Events=UIManager?UIManager->GetEventSystem():nullptr;
+        if(Result.Error)
+        {
+            const TCHAR* Key=TEXT("ERR_MAIL_DATABASE_ERROR");
+            switch(Result.Error)
+            {
+            case 1: Key=Result.EquipError==4?TEXT("ERR_BAG_FULL"):Result.EquipError==50?TEXT("ERR_INV_FULL"):Result.EquipError==31?TEXT("ERR_CAN_ONLY_DO_WITH_EMPTY_BAGS"):Result.EquipError==72?TEXT("ERR_MAIL_BOUND_ITEM"):Result.EquipError==82?TEXT("ERR_MAIL_TO_SELF"):TEXT("ERR_MAIL_INVALID_ATTACHMENT"); break;
+            case 2: Key=TEXT("ERR_MAIL_TO_SELF"); break;
+            case 3: Key=TEXT("ERR_NOT_ENOUGH_MONEY"); break;
+            case 4: Key=TEXT("ERR_MAIL_TARGET_NOT_FOUND"); break;
+            case 5: Key=TEXT("ERR_PLAYER_WRONG_FACTION"); break;
+            case 14: Key=TEXT("ERR_RESTRICTED_ACCOUNT"); break;
+            case 15: Key=TEXT("ERR_MAIL_REACHED_CAP"); break;
+            case 16: Key=TEXT("ERR_MAIL_WRAPPED_COD"); break;
+            case 17: Key=TEXT("ERR_USER_SQUELCHED"); break;
+            case 18: Key=TEXT("ERR_MAIL_TOO_MANY_ATTACHMENTS"); break;
+            case 19: Key=TEXT("ERR_MAIL_INVALID_ATTACHMENT"); break;
+            case 21: Key=TEXT("ERR_MAIL_ATTACHMENT_EXPIRED"); break;
+            }
+            FireUIEvent(TEXT("MAIL_FAILED")); FireUIEvent(TEXT("UI_ERROR_MESSAGE"),{Events?Events->ResolveText(Key):Key});
+        }
+        else
+        {
+            if((Result.Action==3 || Result.Action==4) && Events) UIManager->GetEventSystem()->FireEventNumbers(TEXT("CLOSE_INBOX_ITEM"),{double(Result.Index)});
+            FireUIEvent(Result.Action==0?TEXT("MAIL_SEND_SUCCESS"):TEXT("MAIL_SUCCESS"));
+            if(Result.Action==0) FireUIEvent(TEXT("UI_INFO_MESSAGE"),{Events?Events->ResolveText(TEXT("ERR_MAIL_SENT")):TEXT("Mail sent.")});
+        }
+    });
 
 	ConnectionManager->PacketHandler.OnBankOpened.AddLambda(
 		[this](uint64 BankerGuid)
@@ -3883,6 +3930,7 @@ void AWowGameplayController::ExecuteActionSlot(int32 SlotIndex)
 
 void AWowGameplayController::OnPlayerNameReceived(uint64 Guid, const FString& Name)
 {
+    if(ConnectionManager && ConnectionManager->PacketHandler.CurrentMailboxGuid) FireUIEvent(TEXT("MAIL_INBOX_UPDATE"));
 	// TODO: Update nameplate for matching entity
 	UE_LOG(LogWowGameplay, Log, TEXT("Received player name: GUID=%llu Name=%s"), Guid, *Name);
 	PendingDuelNameQueries.Remove(Guid);
@@ -3895,6 +3943,7 @@ void AWowGameplayController::OnPlayerNameReceived(uint64 Guid, const FString& Na
 
 void AWowGameplayController::OnCreatureNameReceived(uint32 Entry, const FString& Name, const FString& Title)
 {
+    if(ConnectionManager && ConnectionManager->PacketHandler.CurrentMailboxGuid) FireUIEvent(TEXT("MAIL_INBOX_UPDATE"));
 	// TODO: Update nameplate for matching entities
 	UE_LOG(LogWowGameplay, Log, TEXT("Received creature name: Entry=%u Name=%s Title=%s"), Entry, *Name, *Title);
 }
@@ -4608,6 +4657,10 @@ void AWowGameplayController::OnPlayerInventoryUpdated()
 	FireUIEvent(TEXT("UNIT_INVENTORY_CHANGED"),{TEXT("player")});
 	FireUIEvent(TEXT("UPDATE_INVENTORY_DURABILITY"));
     if(ConnectionManager && ConnectionManager->PacketHandler.Merchant.Open) FireUIEvent(TEXT("MERCHANT_UPDATE"));
+    if(ConnectionManager && ConnectionManager->PacketHandler.CurrentMailboxGuid)
+    {
+        FireUIEvent(TEXT("MAIL_SEND_INFO_UPDATE")); FireUIEvent(TEXT("MAIL_INBOX_UPDATE"));
+    }
     if(ConnectionManager && ConnectionManager->PacketHandler.CurrentBankerGuid && UIManager && UIManager->GetEventSystem())
     {
         for(int32 Slot=1;Slot<=35;++Slot) UIManager->GetEventSystem()->FireEventNumbers(TEXT("PLAYERBANKSLOTS_CHANGED"),{double(Slot)});
@@ -5462,6 +5515,14 @@ void AWowGameplayController::OnGuildRosterUpdated()
 
 void AWowGameplayController::ShowMailbox(int64 MailboxGuid)
 {
+    if(!ConnectionManager || !MailboxGuid) return;
+    ConnectionManager->OpenMail(uint64(MailboxGuid));
+    if(UIManager && UIManager->IsUILoaded())
+    {
+        if(ConnectionManager->PacketHandler.Merchant.Open) { ConnectionManager->CloseMerchant(); FireUIEvent(TEXT("MERCHANT_CLOSED")); }
+        if(ConnectionManager->PacketHandler.CurrentBankerGuid) { ConnectionManager->CloseBank(); FireUIEvent(TEXT("BANKFRAME_CLOSED")); }
+        FireUIEvent(TEXT("MAIL_SHOW")); return;
+    }
 	if (!MailboxWidget.IsValid())
 	{
 		CreateMailbox();

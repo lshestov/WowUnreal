@@ -22,6 +22,10 @@ DECLARE_MULTICAST_DELEGATE_TwoParams(FOnVendorOpened, uint64 /*VendorGuid*/, con
 DECLARE_MULTICAST_DELEGATE(FOnVendorUpdated);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnVendorError,uint8 /*Code*/,bool /*Sale*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnMailListReceived, const TArray<FWowMailMessage>& /*Mail*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnMailResult,const FWowMailResult&);
+DECLARE_MULTICAST_DELEGATE(FOnMailStateChanged);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnMailLockItems,int32,uint64);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnMailClientError,const FString&);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnMailboxShown, uint64 /*MailboxGuid*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnTradeUpdated, const FWowTradeState& /*TradeState*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnDuelUpdated, const FWowDuelState& /*DuelState*/);
@@ -249,6 +253,16 @@ public:
     uint64 CurrentMailboxGuid = 0;
     uint32 MailInboxTotalCount = 0;
     TArray<FWowMailMessage> MailInbox;
+    FWowMailComposer MailComposer;
+    TArray<FWowRecentMailSender> RecentMailSenders;
+    uint32 AutoLootMailId=0,PendingMailId=0,PendingMailItem=0;
+    int32 PendingMailAction=-1;
+    bool MailListPending=false,HasUnreadMail=false;
+    double NextMailQuery=0;
+    bool MailStatusPending=false;
+    double NextMailStatusQuery=0;
+    TSet<uint64> RequestedMailNames;
+    TSet<uint32> RequestedMailCreatures;
 
     /** Current trade window state */
     FWowTradeState CurrentTrade;
@@ -277,6 +291,11 @@ public:
     DECLARE_MULTICAST_DELEGATE_OneParam(FRefundResult,uint32);
     FRefundResult OnRefundResult;
     FOnMailListReceived OnMailListReceived;
+    FOnMailResult OnMailResult;
+    FOnMailStateChanged OnMailSendInfoChanged,OnPendingMailChanged;
+    FOnMailLockItems OnMailLockItems;
+    FOnMailStateChanged OnMailUnlockItems;
+    FOnMailClientError OnMailClientError;
     FOnMailboxShown OnMailboxShown;
     FOnTradeUpdated OnTradeUpdated;
     FOnDuelUpdated OnDuelUpdated;
@@ -463,6 +482,9 @@ private:
     // ── Mail system handlers ────────────────────────────────────────────────
     void HandleShowMailbox(FPacketReader& R);
     void HandleMailListResult(FPacketReader& R);
+    void HandleMailResult(FPacketReader& R);
+    void HandleNextMailTime(FPacketReader& R);
+    void HandleReceivedMail(FPacketReader& R);
 
     // ── Pet system handlers ─────────────────────────────────────────────────
     void HandlePetSpells(FPacketReader& R);

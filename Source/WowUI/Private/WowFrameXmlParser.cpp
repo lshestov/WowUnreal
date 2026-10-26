@@ -1147,6 +1147,10 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
                 if(Thumb.Name.IsEmpty()) Thumb.Name=TEXT("$parentThumbTexture"); InlineTextures.Add(Thumb);
             }
 		}
+		else if(Tag==TEXT("FontString") && Def.Type==EWowFrameType::EditBox)
+        {
+            Def.EditFont=UTF8_TO_TCHAR(Child.attribute("inherits").as_string());
+        }
 		else if(Tag==TEXT("NormalFont") || Tag==TEXT("HighlightFont") || Tag==TEXT("DisabledFont"))
         {
             const FString Font=UTF8_TO_TCHAR(Child.attribute("style").as_string());
@@ -1299,6 +1303,10 @@ static FWowFrameDef ParseFrameNode(const FXmlNode* Node)
 				}
 			}
 		}
+		else if(Tag==TEXT("FontString") && Def.Type==EWowFrameType::EditBox)
+        {
+            Def.EditFont=Child->GetAttribute(TEXT("inherits"));
+        }
 		else if(Tag==TEXT("NormalFont") || Tag==TEXT("HighlightFont") || Tag==TEXT("DisabledFont"))
         {
             const FString Font=Child->GetAttribute(TEXT("style"));

@@ -1563,6 +1563,8 @@ static int LF_FontStringSetTextColor(lua_State* L)
 		TextBlock->SetColorAndOpacity(FSlateColor(TextColor));
 		if(auto* Rich=Cast<UWowTextBlock>(TextBlock)) Rich->RefreshRichStyle();
 	}
+    if(auto* Edit=GetEditBoxWidgetForTable(L)) Edit->SetForegroundColor(FLinearColor(R,G,B,A));
+    if(auto* Edit=GetMultiLineEditor(L)) { auto Style=Edit->WidgetStyle; Style.SetColorAndOpacity(FLinearColor(R,G,B,A)); Edit->SetWidgetStyle(Style); }
 
 	return 0;
 }
@@ -1589,6 +1591,16 @@ static int LF_FontStringSetFont(lua_State* L)
 		if(C && C->FrameManager) if(auto* Fonts=C->FrameManager->GetFontManager(); Fonts && Fonts->IsInitialized()) FontInfo=Fonts->GetFont(UTF8_TO_TCHAR(FontPath),FMath::RoundToInt(FontSize*C->FrameManager->GetUIScale()));
 		TextBlock->SetFont(FontInfo);
 	}
+	const auto* C=WowLuaApi::GetContext(L);
+    const auto FontForEditor=[&](FSlateFontInfo Info)
+    {
+        const float Scale=C && C->FrameManager?C->FrameManager->GetUIScale():1;
+        Info.Size=FMath::Max(1,FMath::RoundToInt(FontSize*.75f*Scale));
+        if(C && C->FrameManager) if(const auto* Fonts=C->FrameManager->GetFontManager(); Fonts && Fonts->IsInitialized()) Info=Fonts->GetFont(UTF8_TO_TCHAR(FontPath),FMath::RoundToInt(FontSize*Scale));
+        return Info;
+    };
+    if(auto* Edit=GetEditBoxWidgetForTable(L)) { auto Style=Edit->GetWidgetStyle(); Style.SetFont(FontForEditor(Style.TextStyle.Font)); Edit->SetWidgetStyle(Style); }
+    if(auto* Edit=GetMultiLineEditor(L)) { auto Style=Edit->WidgetStyle; Style.SetFont(FontForEditor(Style.Font)); Edit->SetWidgetStyle(Style); }
 
 	return 0;
 }
@@ -2549,6 +2561,8 @@ static int LF_SetFontObject(lua_State* L)
         lua_getfield(L,1,Method); lua_pushvalue(L,1); for(const auto Key:Keys) lua_getfield(L,Source,Key);
         lua_call(L,1+static_cast<int32>(Keys.size()),0);
     };
+    Apply("SetFont",{"__fontPath","__fontSize","__fontFlags"});
+    Apply("SetTextColor",{"__textColorR","__textColorG","__textColorB","__textColorA"});
     Apply("SetJustifyH",{"__justifyH"}); Apply("SetJustifyV",{"__justifyV"});
     Apply("SetWordWrap",{"__wordWrap"}); Apply("SetNonSpaceWrap",{"__nonSpaceWrap"}); Apply("SetSpacing",{"__spacing"});
     Apply("SetShadowOffset",{"__shadowX","__shadowY"}); Apply("SetShadowColor",{"__shadowR","__shadowG","__shadowB","__shadowA"});
@@ -2897,10 +2911,11 @@ static int LF_TooltipAddLine(lua_State* L)
 	if (!Ctx || !Ctx->FrameManager) return 0;
 
 	int64 TooltipHandle = GetFrameHandle(L, 1);
-	const char* Text = luaL_checkstring(L, 2);
-	float R = static_cast<float>(luaL_optnumber(L, 3, 1.0));
-	float G = static_cast<float>(luaL_optnumber(L, 4, 1.0));
-	float B = static_cast<float>(luaL_optnumber(L, 5, 1.0));
+	const char* Text = luaL_optstring(L, 2, "");
+    // Native 12340 ignores a nonnumeric optional color, including MailFrame's empty string.
+	float R = lua_isnumber(L,3)?static_cast<float>(lua_tonumber(L,3)):1.f;
+	float G = lua_isnumber(L,3) && lua_isnumber(L,4)?static_cast<float>(lua_tonumber(L,4)):1.f;
+	float B = lua_isnumber(L,3) && lua_isnumber(L,5)?static_cast<float>(lua_tonumber(L,5)):1.f;
 	bool bWrap = (lua_toboolean(L, 6) != 0);
 
 	Ctx->FrameManager->TooltipAddLine(TooltipHandle, UTF8_TO_TCHAR(Text), R, G, B, bWrap);
@@ -3455,6 +3470,8 @@ static const luaL_Reg FrameMethods[] =
 	{"SetBagItem", WowLuaApi::SetBagItemTooltip},
     {"SetMerchantItem",WowLuaApi::SetMerchantItemTooltip},
     {"SetBuybackItem",WowLuaApi::SetBuybackItemTooltip},
+    {"SetInboxItem",WowLuaApi::SetInboxItemTooltip},
+    {"SetSendMailItem",WowLuaApi::SetSendMailItemTooltip},
 	{"SetAction", WowLuaApi::SetActionTooltip},
 	{"SetSpell", WowLuaApi::SetSpellTooltip},
 	{"SetSpellByID", WowLuaApi::SetSpellTooltip},

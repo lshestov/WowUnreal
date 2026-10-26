@@ -690,6 +690,7 @@ void FWowFrameManager::MergeTemplate(FWowFrameDef& Target, const FWowFrameDef& T
 	// Type-specific properties — use template values if target is empty
 	if (Target.ButtonText.IsEmpty()) Target.ButtonText = Template.ButtonText;
     if(Target.NormalFont.IsEmpty()) Target.NormalFont=Template.NormalFont;
+    if(Target.EditFont.IsEmpty()) Target.EditFont=Template.EditFont;
     if(Target.HighlightFont.IsEmpty()) Target.HighlightFont=Template.HighlightFont;
     if(Target.DisabledFont.IsEmpty()) Target.DisabledFont=Template.DisabledFont;
 	Target.bMultiLine|=Template.bMultiLine;
@@ -1300,6 +1301,8 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 			BoxStyle.SetBackgroundImageFocused(EmptyBrush);
 			BoxStyle.SetBackgroundImageReadOnly(EmptyBrush);
 			BoxStyle.SetPadding(FMargin(2.f));
+			if(FontManager) BoxStyle.SetFont(FontManager->GetDefaultFont(FMath::RoundToInt(12.f*UIScale)));
+            else { auto Font=BoxStyle.TextStyle.Font; Font.Size=FMath::Max(1,FMath::RoundToInt(9.f*UIScale)); BoxStyle.SetFont(Font); }
 			EditBox->SetWidgetStyle(BoxStyle);
 			AddFillChild(EditBox, 50, ESlateVisibility::Visible);
 			EditBoxWidgets.Add(Handle, EditBox);
@@ -1626,6 +1629,7 @@ int64 FWowFrameManager::CreateFrame(const FWowFrameDef& Def)
 	if (EventSystem && !Resolved.Name.IsEmpty())
 	{
 		EventSystem->CreateFrameObject(Handle, Resolved.Name, Resolved.FrameID);
+        if(Resolved.Type==EWowFrameType::EditBox && !Resolved.EditFont.IsEmpty()) EventSystem->ApplyRegionFont(Resolved.Name,Resolved.EditFont);
 
 		if (Entry.ParentHandle != -1)
 		{
@@ -2298,6 +2302,11 @@ void FWowFrameManager::UpdateMouseHover(float ScreenX, float ScreenY)
 void FWowFrameManager::DispatchMouseDown(int64 Handle, const FString& Button)
 {
 	if (!EventSystem || Handle < 0) return;
+    if(Button==TEXT("LeftButton"))
+    {
+        if(auto* Edit=GetEditBoxWidget(Handle); Edit && Edit->GetIsEnabled()) Edit->SetKeyboardFocus();
+        if(auto* Edit=GetMultiLineEditBoxWidget(Handle); Edit && Edit->GetIsEnabled()) Edit->SetKeyboardFocus();
+    }
     if(auto* Slider=GetSliderWidget(Handle); Slider && Button==TEXT("LeftButton")) { if(!Slider->GetIsEnabled()) return; DraggingSlider=Handle; UpdateSliderPointer(); }
     if(auto* Widget=GetButtonWidget(Handle))
 	{
@@ -2598,6 +2607,8 @@ void FWowFrameManager::TooltipSetOwner(int64 TooltipHandle, int64 OwnerHandle, c
 	State->OwnerHandle = OwnerHandle;
 	State->AnchorType = AnchorType;
     State->AnchorOffset=FVector2D::ZeroVector; State->MinimumWidth=0;
+    // Native SetOwner clears content even when owner and anchor are unchanged.
+    TooltipClearLines(TooltipHandle);
     if(AnchorType==TEXT("ANCHOR_NONE") || AnchorType==TEXT("ANCHOR_PRESERVE")) return;
 
 	// Position the tooltip relative to owner frame if valid

@@ -20,6 +20,7 @@
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/Image.h"
+#include "Components/EditableTextBox.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Components/ProgressBar.h"
 #include "Components/Slider.h"
@@ -539,10 +540,13 @@ bool FHudInlineLabels::RunTest(const FString&)
 {
     const auto Parsed=UWowTextBlock::ParseMarkup(TEXT("Before |cffff0000red|r |TInterface/Icons/Example:16:24:2:-1:64:64:4:36:8:40|t |Hitem:123|h[item]|h || <text>"));
     TestEqual(TEXT("Markup preserves visible text and escaped pipes"),Parsed.Plain,FString(TEXT("Before red  [item] | <text>")));
+    TestEqual(TEXT("Mail expiration grammar chooses visible plural forms"),UWowTextBlock::ParseMarkup(TEXT("|cff00ff001 |4Day:Days;|r / 20 |4Day:Days; / 22 |4день:дня:дней; / 11 |4день:дня:дней;")).Plain,FString(TEXT("1 Day / 20 Days / 22 дня / 11 дней")));
+    TestEqual(TEXT("Malformed and escaped grammar remains literal"),UWowTextBlock::ParseMarkup(TEXT("||4Day:Days; |4bad")).Plain,FString(TEXT("|4Day:Days; |4bad")));
     if(!TestEqual(TEXT("Inline texture parsed"),Parsed.Icons.Num(),1)) return false;
     const auto& Icon=Parsed.Icons[0];
     TestTrue(TEXT("Icon dimensions, offsets and crop are retained"),Icon.Height==16 && Icon.Width==24 && Icon.OffsetX==2 && Icon.OffsetY==-1 && Icon.Crop.X==.0625f && Icon.Crop.Y==.125f);
     TestTrue(TEXT("Literal markup cannot become a decorator"),Parsed.Rich.Contains(TEXT("&lt;text&gt;")) && Parsed.Rich.Contains(TEXT("wowimage")));
+    TestTrue(TEXT("Portrait-to-texture accepts a stock global name and missing item art"),FHudFixture().Lua.ExecuteString(TEXT("PortraitFixture=UIParent:CreateTexture('PortraitFixture'); SetPortraitToTexture('PortraitFixture',nil); assert(PortraitFixture:GetTexture()==nil); SetPortraitToTexture(PortraitFixture,nil)")));
     FString DataPath; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),DataPath)) return false;
     FMpqManager Mpq; if(!Mpq.Initialize(DataPath)) return false;
     FHudFixture F; F.Frames.SetMpqManager(&Mpq); FWowAssetCache Cache; F.Frames.SetAssetCache(&Cache);
@@ -677,6 +681,82 @@ bool FHudBankApi::RunTest(const FString&)
     TestTrue(TEXT("Original APIs expose purchased slots from server fields"),F.Lua.ExecuteString(TEXT("assert(GetNumBankSlots()==1 and not select(2,GetNumBankSlots()))")));
     Player->SetField(PlayerField::BYTES_2,7u<<16);
     TestTrue(TEXT("The server's seventh purchased slot hides further purchases"),F.Lua.ExecuteString(TEXT("assert(GetNumBankSlots()==7 and select(2,GetNumBankSlots()))")));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudEditBoxFonts,"WowUnreal.Hud.EditBoxFonts",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudEditBoxFonts::RunTest(const FString&)
+{
+    FHudFixture F;
+    if(!F.Lua.ExecuteString(TEXT("EditorFont=CreateFont('EditorFont'); EditorFont:SetFont('Fonts\\\\FRIZQT__.TTF',14); EditorFont:SetTextColor(.18,.12,.06)"))) return false;
+    const FString Xml=TEXT("<Ui><EditBox name='EditorTemplate' virtual='true'><FontString inherits='EditorFont'/></EditBox><EditBox name='SingleEditor' inherits='EditorTemplate'><Size x='220' y='20'/></EditBox><EditBox name='MultiEditor' multiLine='true'><Size x='220' y='180'/><FontString inherits='EditorFont'/></EditBox></Ui>");
+    const FTCHARToUTF8 Utf8(*Xml); TArray<uint8> Bytes; Bytes.Append(reinterpret_cast<const uint8*>(Utf8.Get()),Utf8.Length());
+    const auto Parsed=FWowFrameXmlParser::ParseXml(Bytes,TEXT("EditorFontFixture")); if(Parsed.Num()!=3) return false;
+    for(const auto& Row:Parsed) F.Frames.CreateFrame(Row.FrameDef);
+    const auto* Single=F.Frames.GetEditBoxWidget(F.Frames.FindFrame(TEXT("SingleEditor"))); const auto* Multi=F.Frames.GetMultiLineEditBoxWidget(F.Frames.FindFrame(TEXT("MultiEditor")));
+    TestTrue(TEXT("Root FontString style survives template inheritance and styles both editor types"),Single && Multi && Single->GetWidgetStyle().TextStyle.Font.Size==11 && Multi->WidgetStyle.Font.Size==11 && F.Lua.ExecuteString(TEXT("assert(SingleEditor:GetFontObject()==EditorFont and MultiEditor:GetFontObject()==EditorFont)")));
+    TestTrue(TEXT("Runtime SetFont changes native editor rendering"),F.Lua.ExecuteString(TEXT("SingleEditor:SetFont('Fonts\\\\FRIZQT__.TTF',20); MultiEditor:SetFont('Fonts\\\\FRIZQT__.TTF',16)")));
+    TestTrue(TEXT("Single and multiline use WoW pixel-to-point sizing"),Single && Multi && Single->GetWidgetStyle().TextStyle.Font.Size==15 && Multi->WidgetStyle.Font.Size==12);
+    TestTrue(TEXT("Parchment editor colors inherit from the original font object"),Multi && FMath::IsNearlyEqual(Multi->WidgetStyle.ColorAndOpacity.GetSpecifiedColor().R,.18f));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudMailApi,"WowUnreal.Hud.MailApi",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudMailApi::RunTest(const FString&)
+{
+    FString Path; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false;
+    FMpqManager Mpq; if(!Mpq.Initialize(Path)) return false;
+    auto& Dbc=FDbcStore::Get(); if(!Dbc.IsLoaded()) Dbc.LoadAll(Mpq); if(!Dbc.IsDeferredLoaded()) Dbc.LoadDeferred(Mpq);
+    TArray<uint8> Bytes; FDbcParser MailTemplates;
+    if(!Mpq.ReadFile(TEXT("DBFilesClient\\MailTemplate.dbc"),Bytes) || !MailTemplates.Parse(Bytes) || !MailTemplates.GetRecordCount()) return false;
+    const auto* Body=Dbc.ItemUi().MailBody(MailTemplates.GetUInt(0,0));
+    TestTrue(TEXT("Body templates use the second localized string block"),Body && *Body==MailTemplates.GetString(0,18));
+    const auto* Title=Dbc.ItemUi().MailSubject(MailTemplates.GetUInt(0,0));
+    TestTrue(TEXT("Mail subjects use the first localized block"),Title && *Title==MailTemplates.GetString(0,1));
+    TestTrue(TEXT("Original stationery and package records load"),!Dbc.ItemUi().Stationeries().IsEmpty() && !Dbc.ItemUi().Packages().IsEmpty());
+    FHudFixture F; TStrongObjectPtr<UWowConnectionManager> C(NewObject<UWowConnectionManager>());
+    auto& H=C->PacketHandler; auto& E=H.EntityManager; E.LocalPlayerGuid=1;
+    auto& P=E.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER); P.SetField(PlayerField::COINAGE,10000); P.SetField(UnitField::BYTES_0,0x101);
+    F.Context.ConnectionManager=C.Get(); F.Context.EntityManager=&E;
+    H.CurrentMailboxGuid=1; H.MailComposer.Showing=true;
+    FWowItemTemplate T; T.Id=2589; T.Name=TEXT("Cloth"); T.Quality=1; H.ItemTemplates.Add(T.Id,T);
+    auto& Item=E.PromoteToTyped(101,WowTypeMask::OBJECT|WowTypeMask::ITEM); Item.Entry=T.Id; Item.SetField(ItemField::STACK_COUNT,3); P.SetField(PlayerField::PACK_SLOT_START,101);
+    H.MailComposer.Items[3]=101;
+    FWowMailMessage M; M.MessageId=77; M.SenderGuid=2; M.Subject=TEXT("A message"); M.Body=TEXT("Body"); M.Money=50; M.Stationery=41; M.DaysLeft=30;
+    FWowMailAttachment A; A.AttachmentIndex=9; A.ItemGuidLow=88; A.ItemEntry=2589; A.Count=5; M.Attachments.Add(A); H.MailInbox.Add(M); H.MailInboxTotalCount=8; H.PlayerNameCache.Add(2,TEXT("Sender"));
+    TestTrue(TEXT("Original mailbox tuples preserve sparse attachment slots and server counts"),F.Lua.ExecuteString(TEXT(R"LUA(
+        local shown,total=GetInboxNumItems(); assert(shown==1 and total==8)
+        local icon,stationery,sender,subject,money,cod,days,count,read,copied,returned,reply,gm,stack=GetInboxHeaderInfo(1)
+        assert(icon and sender=='Sender' and subject=='A message' and money==50 and cod==0 and days==30 and count==1)
+        assert(not read and not copied and not returned and reply and not gm and stack==5)
+        local name,_,n,q,usable=GetInboxItem(1,10); assert(name=='Cloth' and n==5 and q==-1 and usable)
+        assert(GetInboxItem(1,1)==nil and GetInboxItemLink(1,10):find('item:2589:'))
+        assert(not InboxItemCanDelete(1)); assert(select('#',GetInboxHeaderInfo(99))==14)
+        assert(GetCoinIcon(0):find('Coin_05') and GetCoinIcon(100):find('Coin_03') and GetCoinIcon(100000):find('Coin_02'))
+        assert(GetCoinText(10203,' / ')=='1 Gold / 2 Silver / 3 Copper' and GetCoinText(0)=='')
+        local coins=GetCoinTextureString(10203,12); assert(coins:find('GoldIcon:12:12') and coins:find('SilverIcon:12:12') and coins:find('CopperIcon:12:12'))
+        MailTooltipFixture=CreateFrame('GameTooltip','MailTooltipFixture',UIParent)
+        MailTooltipFixture:AddLine('Enclosed money','',1,1,1); assert(MailTooltipFixture:NumLines()==1)
+        for i=1,20 do MailTooltipFixture:SetOwner(UIParent,'ANCHOR_RIGHT'); MailTooltipFixture:AddLine('Enclosed money','',1,1,1) end
+        assert(MailTooltipFixture:NumLines()==1 and MailTooltipFixture:GetItem()==nil)
+        local body,paper=GetInboxText(1); assert(body=='Body' and type(paper)=='string')
+        local name,_,n,q=GetSendMailItem(4); assert(name=='Cloth' and n==3 and q==-1)
+        assert(GetSendMailItemLink(4):find('item:2589:') and GetSendMailItem(1)==nil)
+        SetSendMailMoney(100); assert(GetSendMailMoney()==100 and GetSendMailPrice()==130)
+        SetSendMailMoney(0); SetSendMailCOD(42); assert(GetSendMailCOD()==42)
+        assert(GetNumStationeries()>0 and GetNumPackages()>0)
+        local name,texture,cost=GetPackageInfo(1); assert(name and texture and type(cost)=='number')
+        SelectStationery(1); assert(GetSelectedStationeryTexture()); SelectStationery(999); assert(GetSelectedStationeryTexture()==nil)
+        ClearSendMail(); assert(GetSendMailItem(4)==nil and GetSendMailCOD()==0 and GetSendMailMoney()==0)
+    )LUA")));
+    TestTrue(TEXT("Clearing attachments preserves the active tab"),H.MailComposer.Showing);
+    H.MailInbox[0].MessageType=2; H.MailInbox[0].Subject=TEXT("2589:0:3"); H.MailInbox[0].Body=TEXT("2:100:200:1:2:3:0");
+    TestTrue(TEXT("Expired-auction mail does not expose an invoice"),F.Lua.ExecuteString(TEXT("assert(select(4,GetInboxText(1))==nil and GetInboxInvoiceInfo(1)==nil)")));
+    H.MailInbox[0].Subject=TEXT("2589:0:2");
+    TestTrue(TEXT("Successful auction mail exposes the original invoice tuple"),F.Lua.ExecuteString(TEXT("local kind,item,who,bid,buyout,deposit,cut,delay,h,m=GetInboxInvoiceInfo(1); assert(kind=='seller' and item=='Cloth' and who=='Sender' and bid==100 and buyout==200 and deposit==1 and cut==2 and delay==3 and h==0 and m==0); assert(select(4,GetInboxText(1)))")));
+    H.MailInbox[0].Attachments.Empty(); H.MailInbox[0].Money=0;
+    TestTrue(TEXT("Empty mail can be deleted"),F.Lua.ExecuteString(TEXT("assert(InboxItemCanDelete(1)); CloseMail()")));
+    TestTrue(TEXT("Close clears mailbox identity"),!H.CurrentMailboxGuid && !H.MailComposer.Showing);
     return true;
 }
 

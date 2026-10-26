@@ -128,7 +128,7 @@ void UWowConnectionManager::SelectRealm(int32 I)
             PacketHandler.KnownSpells.Reset(); PacketHandler.ActionButtons.Reset(); PacketHandler.QuestLog.Reset(); PacketHandler.ResetTalentState(); PacketHandler.Reputations.Reset();
             PacketHandler.SpellCooldowns.Reset(); PacketHandler.SpellCooldownInfo.Reset(); PacketHandler.CombatHistory.Reset();
             PacketHandler.GroupInfo=FWowGroupInfo(); PacketHandler.PetActionBar=FWowPetActionBarState();
-            PacketHandler.Merchant.Clear(); PacketHandler.CurrentBankerGuid=0;
+            PacketHandler.Merchant.Clear(); PacketHandler.CurrentBankerGuid=0; ResetMailState();
             RepairCursor=false; PacketHandler.GuildCanRepair=false; PacketHandler.GuildRepairRequested=false; PacketHandler.GuildRepairId=0; PacketHandler.GuildWithdrawMoney=0; PacketHandler.GuildRoster.Reset(); PacketHandler.GuildRankAccess.Reset(); PacketHandler.GuildInfoText.Empty(); PacketHandler.ItemRefunds.Empty(); PacketHandler.RequestedItemRefunds.Empty(); PacketHandler.TotalPlayedTime=0; PacketHandler.PlayedTimeReceived=0; PacketHandler.PlayedTimeRequested=false;
             PacketHandler.WeaponProficiency=PacketHandler.ArmorProficiency=0; PacketHandler.HasWeaponProficiency=PacketHandler.HasArmorProficiency=false;
             RequestCharacterList(); return;
@@ -465,7 +465,7 @@ void UWowConnectionManager::PickupActionCursor(int32 SlotIndex)
 void UWowConnectionManager::PickupBagItemCursor(uint8 SourceBag, uint8 SourceSlot, int32 ItemId, const FString& ItemLink, uint32 SplitCount)
 {
     const auto* Item=ResolveCursorSource(SourceBag,SourceSlot);
-    if(!Item || Item->Entry!=uint32(ItemId) || Item->GetStackCount()<=0 || SplitCount>=uint32(Item->GetStackCount())) return;
+    if(!Item || IsItemInOutgoingMail(Item->Guid) || Item->Entry!=uint32(ItemId) || Item->GetStackCount()<=0 || SplitCount>=uint32(Item->GetStackCount())) return;
     CancelGlyphUse(); CursorPayload=FCursorPayloadState(); CursorPayload.SourceItemGuid=Item->Guid;
     CursorPayload.Type = ECursorPayloadType::Item;
     CursorPayload.PrimaryId = ItemId;
@@ -483,7 +483,7 @@ void UWowConnectionManager::PickupBagItemCursor(uint8 SourceBag, uint8 SourceSlo
 void UWowConnectionManager::PickupInventoryItemCursor(uint8 InventorySlot, int32 ItemId, const FString& ItemLink)
 {
     const auto* Item=InventorySlot<23?ResolveCursorSource(255,InventorySlot):nullptr;
-    if(!Item || Item->Entry!=uint32(ItemId) || Item->GetStackCount()<=0) return;
+    if(!Item || IsItemInOutgoingMail(Item->Guid) || Item->Entry!=uint32(ItemId) || Item->GetStackCount()<=0) return;
     CancelGlyphUse(); CursorPayload=FCursorPayloadState(); CursorPayload.SourceItemGuid=Item->Guid;
     CursorPayload.Type = ECursorPayloadType::Item;
     CursorPayload.PrimaryId = ItemId;
@@ -1012,7 +1012,7 @@ TArray<uint8> UWowConnectionManager::BuildUseItemPacket(uint8 Bag,uint8 Slot,uin
 
 void UWowConnectionManager::SendUseItem(uint8 Bag,uint8 Slot,uint64 ItemGuid,uint32 SpellId,uint64 ExplicitTargetGuid,int32 GlyphSocket)
 {
-    if(!WorldSocket.IsValid() || State!=EWowSessionState::WorldInGame || !ItemGuid || !SpellId) return;
+    if(!WorldSocket.IsValid() || State!=EWowSessionState::WorldInGame || !ItemGuid || !SpellId || IsItemInOutgoingMail(ItemGuid)) return;
     if(GlyphSocket<0) if(const auto* Spell=FDbcStore::Get().Spells().GetById(SpellId)) for(const uint32 Effect:Spell->Effect) if(Effect==74) { BeginGlyphUse(Bag,Slot,ItemGuid,SpellId); return; }
     if(GlyphSocket>=6) return;
     WorldSocket->SendPacket(WowOpcode::CMSG_USE_ITEM,BuildUseItemPacket(Bag,Slot,ItemGuid,SpellId,ExplicitTargetGuid,GlyphSocket<0?0:GlyphSocket));
@@ -1387,6 +1387,8 @@ void UWowConnectionManager::SendBankerActivate(int64 BankerGuid)
 void UWowConnectionManager::SendGetMailList(int64 MailboxGuid)
 {
     if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+    if(!MailboxGuid || PacketHandler.MailListPending || PacketHandler.PendingMailAction>=0) return;
+    PacketHandler.MailListPending=true; PacketHandler.NextMailQuery=FPlatformTime::Seconds()+60;
 
     TArray<uint8> Data;
     Data.SetNumUninitialized(8);
@@ -1539,7 +1541,7 @@ void UWowConnectionManager::Disconnect()
     }
 
     PacketHandler.EntityManager.Clear();
-    PacketHandler.Merchant.Clear(); PacketHandler.CurrentBankerGuid=0;
+    PacketHandler.Merchant.Clear(); PacketHandler.CurrentBankerGuid=0; ResetMailState();
     RepairCursor=false; PacketHandler.GuildCanRepair=false; PacketHandler.GuildRepairRequested=false; PacketHandler.GuildRepairId=0; PacketHandler.GuildWithdrawMoney=0; PacketHandler.GuildRoster.Reset(); PacketHandler.GuildRankAccess.Reset(); PacketHandler.GuildInfoText.Empty(); PacketHandler.ItemRefunds.Empty(); PacketHandler.RequestedItemRefunds.Empty(); PacketHandler.TotalPlayedTime=0; PacketHandler.PlayedTimeReceived=0; PacketHandler.PlayedTimeRequested=false;
     PacketHandler.WeaponProficiency=PacketHandler.ArmorProficiency=0; PacketHandler.HasWeaponProficiency=PacketHandler.HasArmorProficiency=false;
     PacketHandler.CombatHistory.Reset();

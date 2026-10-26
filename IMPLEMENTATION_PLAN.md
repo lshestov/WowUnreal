@@ -361,7 +361,7 @@ build, automation, native autologin and rendered screenshot verification):
     45-step/five-image buy/sell/buyback/buy-in-slot/cancel cycle and controlled
     individual repair of a temporary weapon. Server DB confirms original money,
     equipment, durability, bags and position restored; QA items removed.
-  - [?] Original bank with authoritative deposit/withdraw, explicit slot drops,
+  - [x] Original bank with authoritative deposit/withdraw, explicit slot drops,
     split/merge, bag-slot prices and purchase confirmation/result handling.
     Bind the server banker before opening FrameXML; support bank-bag inventory
     IDs and reject cached bank operations after close. Stock numeric bank events
@@ -373,7 +373,21 @@ build, automation, native autologin and rendered screenshot verification):
     purchase/full-slot updates are tested in isolation; the live bankSlots value
     remains zero. Server DB confirms all original item GUIDs, counts, durability
     and money unchanged, with an empty bank after the round trip.
-  - [ ] Original mailbox and authoritative send/read/take/return/delete handling.
+  - [?] Original mailbox and authoritative send/read/take/return/delete handling.
+    Original inbox/composer, stationery and template subjects/bodies, sender names,
+    currencies, attachment icons/tooltips, reply/invoice metadata and pending-mail
+    notification. Serialize commands by message/item GUID and apply complete
+    matching acknowledgements; preserve valid cache on truncated packets. Lock
+    outgoing item identities, split real stacks into available carried bag space
+    and require refund consent. Restore stock editor fonts/colors/focus, portrait
+    name overloads and tooltip reset behavior. Verified Windows build, 97
+    automation tests, focused parser/return/copy/automatic-collection cases, an
+    86-step/14-image native receive/read/take/delete/composer/split/self-error
+    cycle and a final 25-step/three-image money-tooltip cycle. Positive send,
+    return and permanent-copy acknowledgements are isolated tests; live mail
+    goes only to the test character itself. Original inbox message, item GUIDs,
+    counts, durability and money are preserved; temporary QA mail is removed.
+    See [mail support](Docs/Mail.md).
   - [ ] Original trade window and authoritative offer/accept/cancel round trips.
 - [ ] 5. Chat/combat/macros: hyperlinks, remaining combat events and macro execution families.
 - [ ] 6. Maps: points of interest, tracking, interior minimaps and original map bootstrap.

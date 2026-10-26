@@ -454,6 +454,7 @@ void UWowUIManager::TickWorldImages(UWorld* World)
         WowLuaApi::UpdateItemComparisons(LuaVM->GetState());
         WowLuaApi::UpdateMerchant(LuaVM->GetState());
         WowLuaApi::UpdateBank(LuaVM->GetState());
+        WowLuaApi::UpdateMail(LuaVM->GetState());
     }
 }
 
@@ -465,6 +466,7 @@ void UWowUIManager::ProcessPendingReload()
     bReloadRequested=false;
     if(ConnectionManager) ConnectionManager->CloseMerchant();
     if(ConnectionManager) ConnectionManager->CloseBank();
+    if(ConnectionManager) ConnectionManager->CloseMail();
     // Recreate the VM only after its active callback has returned to the game loop.
     FWowSavedVariables::SaveAll(LuaVM->GetState());
     auto Resolver=UIContext->ResolveActor;
@@ -554,6 +556,8 @@ void UWowUIManager::SetConnectionManager(UWowConnectionManager* InConnectionMana
 	{
 		UIContext->ConnectionManager = ConnectionManager;
 		UIContext->EntityManager = &ConnectionManager->PacketHandler.EntityManager;
+        ConnectionManager->PacketHandler.OnMailLockItems.RemoveAll(this);
+        ConnectionManager->PacketHandler.OnMailLockItems.AddUObject(this,&UWowUIManager::OnMailLockItems);
 
 		UE_LOG(LogWowUIManager, Log, TEXT("Updated Lua context with ConnectionManager and EntityManager"));
 	}
@@ -567,4 +571,14 @@ void UWowUIManager::SetConnectionManager(UWowConnectionManager* InConnectionMana
 	{
 		CharacterPanel->SetConnectionManager(ConnectionManager);
 	}
+}
+
+void UWowUIManager::OnMailLockItems(int32 Index,uint64 Guid)
+{
+#if HAS_LUA
+    if(!EventSystem || !UIContext || !ConnectionManager) return;
+    const auto* Item=ConnectionManager->PacketHandler.EntityManager.FindItem(Guid); if(!Item) return;
+    const FString Link=WowLuaApi::ItemLinkForUi(UIContext,Item->Entry);
+    EventSystem->FireEventTyped(TEXT("MAIL_LOCK_SEND_ITEMS"),[&](lua_State* L){lua_pushinteger(L,Index); lua_pushstring(L,TCHAR_TO_UTF8(*Link)); return 2;});
+#endif
 }

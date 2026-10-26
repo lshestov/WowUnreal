@@ -28,6 +28,13 @@ bool FItemUiDbc::Load(FMpqManager& Mpq)
     if(Read(TEXT("DurabilityQuality.dbc"),2)) { DurabilityQuality.Empty(); for(uint32 I=0;I<Parser.GetRecordCount();++I) DurabilityQuality.Add(Parser.GetUInt(I,0),Parser.GetFloat(I,1)); }
     if(Read(TEXT("FactionTemplate.dbc"),2)) { FactionTemplates.Empty(); for(uint32 I=0;I<Parser.GetRecordCount();++I) FactionTemplates.Add(Parser.GetUInt(I,0),Parser.GetUInt(I,1)); }
     if(Read(TEXT("BankBagSlotPrices.dbc"),2)) { BankBagPrices.Empty(); for(uint32 I=0;I<Parser.GetRecordCount();++I) BankBagPrices.Add(Parser.GetUInt(I,0),Parser.GetUInt(I,1)); }
+    if(Read(TEXT("Stationery.dbc"),4)) { MailStationeries.Empty(); for(uint32 I=0;I<Parser.GetRecordCount();++I) { FStationery Row; Row.Id=Parser.GetUInt(I,0); Row.Item=Parser.GetUInt(I,1); Row.Texture=Parser.GetString(I,2); Row.Flags=Parser.GetUInt(I,3); MailStationeries.Add(MoveTemp(Row)); } }
+    if(Read(TEXT("Package.dbc"),20)) { MailPackages.Empty(); for(uint32 I=0;I<Parser.GetRecordCount();++I) { FPackage Row; Row.Id=Parser.GetUInt(I,0); Row.Icon=Parser.GetString(I,1); Row.Cost=Parser.GetUInt(I,2); Row.Name=Parser.GetString(I,3); MailPackages.Add(MoveTemp(Row)); } }
+    if(Read(TEXT("MailTemplate.dbc"),35))
+    {
+        MailBodies.Empty(); MailSubjects.Empty();
+        for(uint32 I=0;I<Parser.GetRecordCount();++I) { const uint32 Id=Parser.GetUInt(I,0); MailBodies.Add(Id,Parser.GetString(I,18)); MailSubjects.Add(Id,Parser.GetString(I,1)); }
+    }
     return Complete;
 }
 uint32 FItemUiDbc::RepairCost(uint32 Level,uint32 Quality,uint32 Class,uint32 Subclass,uint32 Lost,float Discount) const

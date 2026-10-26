@@ -805,6 +805,91 @@ bool FBankPackets::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMailPackets,"WowUnreal.UI.MailPackets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FMailPackets::RunTest(const FString&)
+{
+    auto* C=NewObject<UWowConnectionManager>(); const auto Socket=WowTestUtils::AttachTestWorldSocket(*C,0);
+    auto& H=C->PacketHandler; auto& E=H.EntityManager; E.LocalPlayerGuid=1;
+    auto& P=E.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER);
+    constexpr uint64 Box=0xF110000012345678ull,Guid=0x4000000000000088ull;
+    auto& Item=E.PromoteToTyped(Guid,WowTypeMask::OBJECT|WowTypeMask::ITEM); Item.Entry=2589; Item.SetField(ItemField::STACK_COUNT,5);
+    WowTestUtils::SetGuidField64(P,PlayerField::PACK_SLOT_START,Guid);
+    FWowItemTemplate T; T.Id=2589; T.Name=TEXT("Cloth"); H.ItemTemplates.Add(T.Id,T);
+    const auto Put=[](TArray<uint8>& B,const auto V){const int32 At=B.AddUninitialized(sizeof(V)); FMemory::Memcpy(B.GetData()+At,&V,sizeof(V));};
+    const auto Text=[](TArray<uint8>& B,const TCHAR* V){const FTCHARToUTF8 U(V); B.Append(reinterpret_cast<const uint8*>(U.Get()),U.Length()+1);};
+    uint32 Op=0; TArray<uint8> Data,Expected;
+    TestFalse(TEXT("Closed mailbox cannot send"),C->SendMail(TEXT("Other"),TEXT("Subject"),TEXT("Body")));
+    C->OpenMail(Box); H.MailComposer.Showing=true; C->PickupBagItemCursor(255,23,2589);
+    TestTrue(TEXT("Sparse attachment locks the exact carried identity"),C->ClickOutgoingMailAttachment(7) && C->GetOutgoingMailItem(7)->Guid==Guid && C->IsItemInOutgoingMail(Guid));
+    C->PickupBagItemCursor(255,23,2589); TestFalse(TEXT("Attached item cannot be picked up for another operation"),C->HasCursorItemPayload());
+    H.MailComposer.Money=12345; H.MailComposer.Package=3;
+    TestTrue(TEXT("Send queues a request without removing the item"),C->SendMail(TEXT("Other"),TEXT("Subject"),TEXT("Body")) && E.FindItem(Guid) && H.MailComposer.Sending);
+    Put(Expected,Box); Text(Expected,TEXT("Other")); Text(Expected,TEXT("Subject")); Text(Expected,TEXT("Body")); Put(Expected,uint32(41)); Put(Expected,uint32(3)); Put(Expected,uint8(1)); Put(Expected,uint8(7)); Put(Expected,Guid); Put(Expected,uint32(12345)); Put(Expected,uint32(0)); Put(Expected,uint64(0)); Put(Expected,uint8(0));
+    TestTrue(TEXT("Send wire uses full mailbox/item GUIDs, sparse byte slot and uint32 money"),WowTestUtils::DequeueClientPacket(*Socket,Op,Data) && Op==0x0238 && Data==Expected);
+    TestFalse(TEXT("Pending send cannot be submitted twice"),C->SendMail(TEXT("Other"),TEXT("Subject"),TEXT("Body")));
+    TArray<uint8> Ack; Put(Ack,uint32(0)); Put(Ack,uint32(0)); Put(Ack,uint32(3)); auto Short=Ack; Short.Pop(); H.HandlePacket(0x0239,Short);
+    TestTrue(TEXT("Truncated send result preserves pending state"),H.MailComposer.Sending);
+    H.HandlePacket(0x0239,Ack); TestTrue(TEXT("Server error unlocks composer without dropping the selection"),!H.MailComposer.Sending && H.MailComposer.Items[7]==Guid && H.PendingMailAction<0);
+    H.MailComposer.Money=0; C->SendMail(TEXT("Other"),TEXT("Subject"),TEXT("Body")); WowTestUtils::DequeueClientPacket(*Socket,Op,Data); Ack[8]=0; H.HandlePacket(0x0239,Ack);
+    TestTrue(TEXT("Successful send releases locks but retains the visible composer tab"),!C->IsItemInOutgoingMail(Guid) && H.MailComposer.Showing && !H.MailComposer.Sending);
+    FWowMailMessage M; M.MessageId=77; M.SenderGuid=0x123456789ull; M.Money=50; M.Body=TEXT("Body"); FWowMailAttachment A; A.AttachmentIndex=9; A.ItemGuidLow=0x8899; A.ItemEntry=2589; A.Count=3; M.Attachments.Add(A); H.MailInbox.Add(M); H.MailInboxTotalCount=1;
+    TestTrue(TEXT("Read is idempotent and has the exact mailbox/message request"),C->MarkMailRead(77) && !C->MarkMailRead(77));
+    Expected.Reset(); Put(Expected,Box); Put(Expected,uint32(77));
+    TestTrue(TEXT("Read packet is 12 bytes"),WowTestUtils::DequeueClientPacket(*Socket,Op,Data) && Op==0x0247 && Data==Expected);
+    while(WowTestUtils::DequeueClientPacket(*Socket,Op,Data)) {}
+    TestFalse(TEXT("Normal mail with valuables cannot be deleted"),C->SendMailAction(77,4));
+    TestTrue(TEXT("Take item uses its low GUID rather than its sparse UI slot"),C->SendMailAction(77,2,0x8899)); Put(Expected,uint32(0x8899));
+    TestTrue(TEXT("Take-item wire has the actual item identity"),WowTestUtils::DequeueClientPacket(*Socket,Op,Data) && Op==0x0246 && Data==Expected);
+    TestFalse(TEXT("Other mail commands wait for the server"),C->SendMailAction(77,1));
+    Ack.Reset(); Put(Ack,uint32(78)); Put(Ack,uint32(2)); Put(Ack,uint32(0)); Put(Ack,uint32(0x8899)); Put(Ack,uint32(3)); H.HandlePacket(0x0239,Ack);
+    TestTrue(TEXT("Unrelated result cannot complete a pending operation"),H.PendingMailAction==2 && H.MailInbox[0].Attachments.Num()==1);
+    Ack[0]=77; Short=Ack; Short.Pop(); H.HandlePacket(0x0239,Short); TestEqual(TEXT("Partial item result keeps the attachment"),H.MailInbox[0].Attachments.Num(),1);
+    H.HandlePacket(0x0239,Ack); TestTrue(TEXT("Only acknowledged item is removed"),H.MailInbox[0].Attachments.IsEmpty() && H.MailInbox[0].Money==50);
+    TestTrue(TEXT("Take-money request starts"),C->SendMailAction(77,1)); WowTestUtils::DequeueClientPacket(*Socket,Op,Data);
+    TestEqual(TEXT("Money remains until acknowledgement"),H.MailInbox[0].Money,50u);
+    Ack.Reset(); Put(Ack,uint32(77)); Put(Ack,uint32(1)); Put(Ack,uint32(0)); H.HandlePacket(0x0239,Ack); TestEqual(TEXT("Acknowledged money is cleared"),H.MailInbox[0].Money,0u);
+    TestTrue(TEXT("Delete adds the required zero parameter"),C->SendMailAction(77,4) && WowTestUtils::DequeueClientPacket(*Socket,Op,Data) && Op==0x0249 && Data.Num()==16);
+    Ack[4]=4; H.HandlePacket(0x0239,Ack); TestTrue(TEXT("Deletion updates both displayed and total counts"),H.MailInbox.IsEmpty() && H.MailInboxTotalCount==0);
+    M.MessageId=78; H.MailInbox.Add(M); H.MailInboxTotalCount=1;
+    Expected.Reset(); Put(Expected,Box); Put(Expected,uint32(78)); Put(Expected,M.SenderGuid);
+    TestTrue(TEXT("Return includes the original sender GUID and waits for server removal"),C->SendMailAction(78,3) && WowTestUtils::DequeueClientPacket(*Socket,Op,Data) && Op==0x0248 && Data==Expected && H.MailInbox.Num()==1);
+    Ack.Reset(); Put(Ack,uint32(78)); Put(Ack,uint32(3)); Put(Ack,uint32(0)); H.HandlePacket(0x0239,Ack);
+    TestTrue(TEXT("Acknowledged return removes only its mail"),H.MailInbox.IsEmpty() && H.MailInboxTotalCount==0);
+    M.MessageId=79; M.Money=0; M.Attachments.Empty(); H.MailInbox.Add(M); H.MailInboxTotalCount=1;
+    TestTrue(TEXT("Permanent letter request is mailbox GUID plus message ID"),C->SendMailAction(79,5) && WowTestUtils::DequeueClientPacket(*Socket,Op,Data) && Op==0x024A && Data.Num()==12 && !(H.MailInbox[0].Checked&4));
+    Ack.Reset(); Put(Ack,uint32(79)); Put(Ack,uint32(5)); Put(Ack,uint32(0)); H.HandlePacket(0x0239,Ack);
+    TestTrue(TEXT("Server copy flag prevents creating the letter twice"),(H.MailInbox[0].Checked&4)!=0 && !C->SendMailAction(79,5));
+    H.MailInbox.Empty(); M.MessageId=80; M.Money=20; M.Body.Empty(); M.Attachments.Add(A); M.Checked=0; H.MailInbox.Add(M); H.MailInboxTotalCount=1;
+    C->StartMailAutoLoot(80); TestTrue(TEXT("Automatic collection starts with money and waits for acknowledgement"),H.PendingMailAction==1 && H.MailInbox[0].Money==20 && H.MailInbox[0].Attachments.Num()==1);
+    while(WowTestUtils::DequeueClientPacket(*Socket,Op,Data)) {}
+    Ack.Reset(); Put(Ack,uint32(80)); Put(Ack,uint32(1)); Put(Ack,uint32(0)); H.HandlePacket(0x0239,Ack); H.MailStatusPending=true; C->TickMailState();
+    TestTrue(TEXT("Next automatic step takes the actual attachment GUID"),H.PendingMailAction==2 && WowTestUtils::DequeueClientPacket(*Socket,Op,Data) && Op==0x0246);
+    Ack.Reset(); Put(Ack,uint32(80)); Put(Ack,uint32(2)); Put(Ack,uint32(0)); Put(Ack,A.ItemGuidLow); Put(Ack,A.Count); H.HandlePacket(0x0239,Ack); C->TickMailState();
+    TestTrue(TEXT("Automatic deletion waits until all valuables were acknowledged"),H.PendingMailAction==4 && WowTestUtils::DequeueClientPacket(*Socket,Op,Data) && Op==0x0249);
+    Ack.Reset(); Put(Ack,uint32(80)); Put(Ack,uint32(4)); Put(Ack,uint32(0)); H.HandlePacket(0x0239,Ack); C->TickMailState();
+    TestTrue(TEXT("Automatic collection stops after server-confirmed deletion"),H.MailInbox.IsEmpty() && !H.AutoLootMailId && H.PendingMailAction<0);
+    TArray<uint8> Status; Put(Status,float(0)); Put(Status,uint32(1)); Put(Status,uint64(123)); Put(Status,uint32(0)); Put(Status,uint32(0)); Put(Status,uint32(41)); Put(Status,float(-1)); H.HandlePacket(0x0284,Status);
+    TestTrue(TEXT("Pending-mail status parses all 24 bytes of a sender row"),H.HasUnreadMail && H.RecentMailSenders.Num()==1 && H.RecentMailSenders[0].Guid==123);
+    Short=Status; Short.Pop(); H.HandlePacket(0x0284,Short); TestEqual(TEXT("Truncated status retains the last valid sender"),H.RecentMailSenders.Num(),1);
+    // Split selection waits for both server changes, preventing an unrelated same-entry stack from being attached.
+    C->PickupBagItemCursor(255,23,2589,TEXT(""),2); TestTrue(TEXT("Partial stack attachment starts a physical split"),C->ClickOutgoingMailAttachment(0));
+    while(WowTestUtils::DequeueClientPacket(*Socket,Op,Data)) {}
+    constexpr uint64 SplitGuid=0x4000000000000089ull; auto& Split=E.PromoteToTyped(SplitGuid,WowTypeMask::OBJECT|WowTypeMask::ITEM); Split.Entry=2589; Split.SetField(ItemField::STACK_COUNT,2); WowTestUtils::SetGuidField64(P,PlayerField::PACK_SLOT_START+2,SplitGuid);
+    H.MailStatusPending=true; C->TickMailState(); TestTrue(TEXT("Destination alone cannot bind an unrelated stack"),!H.MailComposer.Items[0] && H.MailComposer.Pending.Index==0);
+    Item.SetField(ItemField::STACK_COUNT,3); C->TickMailState(); TestTrue(TEXT("Confirmed split binds the new GUID only after the source count changes"),H.MailComposer.Items[0]==SplitGuid && H.MailComposer.Pending.Index<0);
+    C->ClearOutgoingMail(); for(int32 I=2;I<16;++I) WowTestUtils::SetGuidField64(P,PlayerField::PACK_SLOT_START+I*2,uint64(500+I));
+    constexpr uint64 BagGuid=0x4000000000000090ull;
+    auto& Bag=E.PromoteToTyped(BagGuid,WowTypeMask::OBJECT|WowTypeMask::ITEM|WowTypeMask::CONTAINER); Bag.SetField(ContainerField::NUM_SLOTS,4); WowTestUtils::SetGuidField64(P,PlayerField::INV_SLOT_BAG_1,BagGuid);
+    C->PickupBagItemCursor(255,23,2589,TEXT(""),1); TestTrue(TEXT("A full backpack can split an attachment into an equipped bag"),C->ClickOutgoingMailAttachment(1) && H.MailComposer.Pending.Bag==19 && H.MailComposer.Pending.Slot==0);
+    C->ClearOutgoingMail(); Item.SetField(ItemField::FLAGS,0x1000); int32 Locked=0;
+    H.OnMailLockItems.AddLambda([&](int32 Index,uint64 Id){if(Index==2 && Id==Guid) ++Locked;});
+    C->PickupBagItemCursor(255,23,2589); TestTrue(TEXT("Refundable attachment waits for explicit consent"),C->ClickOutgoingMailAttachment(1) && H.MailComposer.LockIndex==1 && Locked==1);
+    TestFalse(TEXT("Unanswered refund consent blocks sending"),C->SendMail(TEXT("Other"),TEXT("Subject"),TEXT("Body")));
+    C->RespondOutgoingMailLock(1,false); TestTrue(TEXT("Cancelling consent removes only that selection"),!H.MailComposer.Items[1] && H.MailComposer.LockIndex<0 && E.FindItem(Guid));
+    C->CloseMail(); TestTrue(TEXT("Closing releases all composer locks"),!C->IsItemInOutgoingMail(SplitGuid) && !H.MailComposer.Showing && !H.CurrentMailboxGuid);
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMerchantGuildState,"WowUnreal.UI.MerchantGuildState",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FMerchantGuildState::RunTest(const FString&)
 {
@@ -2313,6 +2398,9 @@ bool FMailListPacketParsesInbox::RunTest(const FString& Parameters)
     TestEqual(TEXT("Attachment entry parsed"), Attachment.ItemEntry, ItemEntry);
     TestEqual(TEXT("Attachment count parsed"), Attachment.Count, 2u);
     TestEqual(TEXT("Attachment random property id parsed as signed"), Attachment.RandomPropertyId, -42);
+
+    bCalled=false; PacketData.Pop(); PacketHandler.HandlePacket(WowOpcode::SMSG_MAIL_LIST_RESULT,PacketData);
+    TestTrue(TEXT("A truncated list cannot replace the last complete inbox or fire a refresh"),!bCalled && PacketHandler.MailInbox.Num()==1 && PacketHandler.MailInbox[0].Attachments[0].ItemGuidLow==77);
 
     return true;
 }

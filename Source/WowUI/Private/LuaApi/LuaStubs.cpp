@@ -3690,38 +3690,11 @@ static int L_SetPortraitTexture(lua_State* L)
 }
 static int L_SetPortraitToTexture(lua_State* L)
 {
-    // SetPortraitToTexture(texture, texturePath)
-    luaL_checktype(L, 1, LUA_TTABLE); // texture widget
-    const char* TexturePath = luaL_checkstring(L, 2);
-
-    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-    if (!Ctx || !Ctx->FrameManager) return 0;
-
-    // Get the texture name from the widget
-    lua_getfield(L, 1, "__name");
-    const char* TextureName = lua_isstring(L, -1) ? lua_tostring(L, -1) : nullptr;
-    lua_pop(L, 1);
-
-    if (TextureName)
-    {
-        UImage* NamedImage = Ctx->FrameManager->GetNamedTexture(UTF8_TO_TCHAR(TextureName));
-        UTexture2D* Texture = Ctx->FrameManager->LoadUITexture(UTF8_TO_TCHAR(TexturePath));
-
-        if (Texture && NamedImage)
-        {
-            FSlateBrush Brush;
-            Brush.SetResourceObject(Texture);
-            Brush.DrawAs = ESlateBrushDrawType::Image;
-            Brush.ImageSize = FVector2D(Texture->GetSizeX(), Texture->GetSizeY());
-            Brush.Tiling = ESlateBrushTileType::NoTile;
-            NamedImage->SetBrush(Brush);
-        }
-    }
-
-    // Store the texture path in the widget table
-    lua_pushstring(L, TexturePath);
-    lua_setfield(L, 1, "__texture");
-
+    // Stock MailFrame passes a global name; other callers pass the region itself.
+    lua_settop(L,2);
+    if(lua_isstring(L,1)) { lua_getglobal(L,lua_tostring(L,1)); lua_replace(L,1); }
+    luaL_checktype(L,1,LUA_TTABLE);
+    lua_getfield(L,1,"SetTexture"); lua_pushvalue(L,1); lua_pushvalue(L,2); lua_call(L,2,0);
     return 0;
 }
 
@@ -3747,23 +3720,40 @@ static int L_GetMoneyString(lua_State* L)
     return 1;
 }
 
+static uint32 CoinAmount(lua_State* L)
+{
+    const double Value=luaL_checknumber(L,1); return uint32(FMath::Clamp(FMath::IsFinite(Value)?Value:0.,0.,double(MAX_int32)));
+}
+static int L_GetCoinIcon(lua_State* L)
+{
+    const uint32 Amount=CoinAmount(L); const TCHAR* Icon=Amount<10?TEXT("05"):Amount<100?TEXT("06"):Amount<1000?TEXT("03"):Amount<10000?TEXT("04"):Amount<100000?TEXT("01"):TEXT("02");
+    lua_pushstring(L,TCHAR_TO_UTF8(*(FString(TEXT("Interface\\Icons\\INV_Misc_Coin_"))+Icon))); return 1;
+}
+static int CoinString(lua_State* L,bool Textures)
+{
+    const uint32 Amount=CoinAmount(L),Parts[]={Amount%100,(Amount/100)%100,Amount/10000};
+    const int32 Height=Textures?FMath::Clamp(int32(luaL_optnumber(L,2,14)),0,128):0;
+    const FString Separator=Textures?TEXT(" "):UTF8_TO_TCHAR(luaL_optstring(L,2,", ")); FString Result;
+    static const char* Tokens[]={"COPPER_AMOUNT","SILVER_AMOUNT","GOLD_AMOUNT"};
+    static const char* TextureTokens[]={"COPPER_AMOUNT_TEXTURE","SILVER_AMOUNT_TEXTURE","GOLD_AMOUNT_TEXTURE"};
+    static const TCHAR* Names[]={TEXT("Copper"),TEXT("Silver"),TEXT("Gold")};
+    for(int32 I=2;I>=0;--I)
+    {
+        if(!Parts[I] && !(Textures && !Amount && !I)) continue;
+        lua_getglobal(L,Textures?TextureTokens[I]:Tokens[I]);
+        const FString Fallback=Textures?FString::Printf(TEXT("%%d|TInterface\\MoneyFrame\\UI-%sIcon:%%d:%%d|t"),Names[I]):FString::Printf(TEXT("%%d %s"),Names[I]);
+        const FString Format=lua_isstring(L,-1)?UTF8_TO_TCHAR(lua_tostring(L,-1)):Fallback; lua_pop(L,1);
+        lua_getglobal(L,"format"); lua_pushstring(L,TCHAR_TO_UTF8(*Format)); lua_pushinteger(L,Parts[I]);
+        if(Textures) {lua_pushinteger(L,Height); lua_pushinteger(L,Height);}
+        lua_call(L,Textures?4:2,1);
+        if(!Result.IsEmpty()) Result+=Separator; Result+=UTF8_TO_TCHAR(lua_tostring(L,-1)); lua_pop(L,1);
+    }
+    lua_pushstring(L,TCHAR_TO_UTF8(*Result)); return 1;
+}
+static int L_GetCoinText(lua_State* L) { return CoinString(L,false); }
 static int L_GetCoinTextureString(lua_State* L)
 {
-    int32 amount = static_cast<int32>(luaL_checknumber(L, 1));
-    const char* coinType = luaL_optstring(L, 2, "gold");
-
-    FString texture;
-    if (strcmp(coinType, "gold") == 0)
-        texture = TEXT("Interface\\MoneyFrame\\UI-GoldIcon");
-    else if (strcmp(coinType, "silver") == 0)
-        texture = TEXT("Interface\\MoneyFrame\\UI-SilverIcon");
-    else
-        texture = TEXT("Interface\\MoneyFrame\\UI-CopperIcon");
-
-    FString Result = FString::Printf(TEXT("|T%s:0|t%d"), *texture, amount);
-    FTCHARToUTF8 Conv(*Result);
-    lua_pushstring(L, Conv.Get());
-    return 1;
+    return CoinString(L,true);
 }
 
 static int L_BreakUpLargeNumbers(lua_State* L)
@@ -4877,6 +4867,7 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "SetPortraitToTexture", L_SetPortraitToTexture);
     lua_register(L, "GetMoneyString", L_GetMoneyString);
     lua_register(L, "GetCoinTextureString", L_GetCoinTextureString);
+    lua_register(L, "GetCoinIcon", L_GetCoinIcon);
     lua_register(L, "BreakUpLargeNumbers", L_BreakUpLargeNumbers);
 
     // Misc
@@ -6340,7 +6331,7 @@ lua_pushboolean(L2, PLATFORM_MAC);
     lua_register(L, "ToggleWorldMap", [](lua_State* S) -> int { auto* C=WowLuaApi::GetContext(S); if(C && C->FrameManager && C->FrameManager->OnMapCommand) C->FrameManager->OnMapCommand(0); return 0; });
     lua_register(L, "OpenWorldMap", [](lua_State* S) -> int { auto* C=WowLuaApi::GetContext(S); if(C && C->FrameManager && C->FrameManager->OnMapCommand) { const auto H=C->FrameManager->FindFrame(TEXT("IdleWowWorldMapFrame")); if(H<0 || !C->FrameManager->IsFrameHierarchyShown(H)) C->FrameManager->OnMapCommand(0); } return 0; });
     lua_register(L, "CloseWorldMap", [](lua_State* S) -> int { auto* C=WowLuaApi::GetContext(S); if(C && C->FrameManager && C->FrameManager->OnMapCommand) C->FrameManager->OnMapCommand(3); return 0; });
-    lua_register(L, "GetCoinText", [](lua_State* L2) -> int { lua_pushstring(L2, "0g"); return 1; });
+    lua_register(L, "GetCoinText", L_GetCoinText);
     // ShowUIPanel(frame) / HideUIPanel(frame) — THE core panel management functions
     // Every WoW UI panel (spellbook, character, quest log etc.) uses these
     lua_register(L, "ShowUIPanel", [](lua_State* L2) -> int {

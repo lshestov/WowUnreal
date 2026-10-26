@@ -193,6 +193,7 @@ struct WOWUI_API FWowFrameDef
 	// Type-specific properties
 	FString ButtonText;
 	FString NormalFont,HighlightFont,DisabledFont;
+	FString EditFont;
 	bool bMultiLine=false;
 	int32 EditBoxLetters=0;
 	TMap<FString, FWowTextureElement> ButtonTextureRegions;

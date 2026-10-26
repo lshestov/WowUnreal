@@ -32,6 +32,29 @@ FWowLabelMarkup UWowTextBlock::ParseMarkup(const FString& Text)
         const TCHAR Code=Text[I+1];
         if(Code=='|') { Pending.AppendChar('|'); ++I; continue; }
         if(Code=='n') { Pending.AppendChar('\n'); ++I; continue; }
+        if(Code=='4')
+        {
+            const int32 End=Text.Find(TEXT(";"),ESearchCase::CaseSensitive,ESearchDir::FromStart,I+2);
+            if(End>=0)
+            {
+                TArray<FString> Forms; Text.Mid(I+2,End-I-2).ParseIntoArray(Forms,TEXT(":"),false);
+                if(Forms.Num()==2 || Forms.Num()==3)
+                {
+                    // WoW grammar selects a form using the last visible number.
+                    const FString Before=Result.Plain+Pending; int32 Last=Before.Len()-1;
+                    while(Last>=0 && !FChar::IsDigit(Before[Last])) --Last;
+                    int32 First=Last; while(First>=0 && (FChar::IsDigit(Before[First]) || Before[First]=='.')) --First;
+                    const double Number=Last>=0?FCString::Atod(*Before.Mid(First+1,Last-First)):0;
+                    int32 Form=Number==1?0:1;
+                    if(Forms.Num()==3)
+                    {
+                        const int64 Whole=int64(FMath::Clamp(FMath::IsFinite(Number)?Number:0.,0.,double(MAX_int32))); const int32 Tens=int32(Whole%100),Ones=int32(Whole%10);
+                        Form=Number!=double(Whole)?2:Ones==1 && Tens!=11?0:Ones>=2 && Ones<=4 && (Tens<12 || Tens>14)?1:2;
+                    }
+                    Pending+=Forms[Form]; I=End; continue;
+                }
+            }
+        }
         if(Code=='c' && I+9<Text.Len())
         {
             const FString Hex=Text.Mid(I+2,8);

@@ -142,6 +142,7 @@ struct FWowMailMessage
     uint64 SenderGuid = 0;
     uint32 SenderEntry = 0;
     uint32 COD = 0;
+    uint32 Package = 0;
     uint32 Stationery = 0;
     uint32 Money = 0;
     uint32 Checked = 0;
@@ -150,6 +151,37 @@ struct FWowMailMessage
     FString Subject;
     FString Body;
     TArray<FWowMailAttachment> Attachments;
+    double ReceivedAt=0;
+};
+
+struct FWowMailComposer
+{
+    uint64 Items[12]={};
+    uint32 Money=0,COD=0,Stationery=41,Package=0;
+    bool Showing=false,Sending=false;
+    int32 LockIndex=-1;
+    bool LockNotified=false;
+    struct FPendingAttachment
+    {
+        int32 Index=-1;
+        uint8 Bag=255,Slot=0;
+        uint64 Guid=0,SourceGuid=0,PreviousGuid=0;
+        uint32 Entry=0,Count=0,SourceCount=0;
+        double Deadline=0;
+    } Pending;
+};
+
+struct FWowMailResult
+{
+    uint32 Id=0,Action=0,Error=0,EquipError=0,ItemGuid=0,Count=0;
+    int32 Index=0;
+};
+
+struct FWowRecentMailSender
+{
+    uint64 Guid=0;
+    uint32 Entry=0,Type=0,Stationery=0;
+    float TimeLeft=0;
 };
 
 // Trade slot summary from SMSG_TRADE_STATUS_EXTENDED
