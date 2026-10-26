@@ -161,6 +161,11 @@ static uint64 ResolveDirectUnitGuid(const FWowLuaContext* Ctx, const FString& Un
     {
         return static_cast<uint64>(Ctx->ConnectionManager->GetTargetGuid());
     }
+    if(UnitToken.Equals(TEXT("npc"),ESearchCase::IgnoreCase) && Ctx->ConnectionManager)
+    {
+        const auto& Handler=Ctx->ConnectionManager->PacketHandler;
+        return Handler.Merchant.Open?Handler.Merchant.Guid:Handler.GossipMenu.Guid;
+    }
 
     if (UnitToken.Equals(TEXT("focus"), ESearchCase::IgnoreCase))
     {
@@ -5543,7 +5548,7 @@ lua_pushboolean(L2, PLATFORM_MAC);
     });
     lua_register(L, "CursorHasItem", [](lua_State* L2) -> int {
         FWowLuaContext* C = WowLuaApi::GetContext(L2);
-        lua_pushboolean(L2, C && C->ConnectionManager && C->ConnectionManager->HasCursorItemPayload());
+        lua_pushboolean(L2, C && C->ConnectionManager && (C->ConnectionManager->HasCursorItemPayload() || C->ConnectionManager->HasCursorMerchantPayload()));
         return 1;
     });
     lua_register(L, "CursorHasSpell", L_CursorHasSpell);

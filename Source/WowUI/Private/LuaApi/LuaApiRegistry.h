@@ -14,6 +14,8 @@ struct FWowEntity;
 struct FWowSpellBookView;
 struct FWowCombatLogView;
 struct FWowClassUiView;
+struct FWowItemTemplate;
+struct FWowItemEntity;
 
 /** Context passed to Lua API functions so they can access game state */
 struct FWowLuaContext
@@ -28,6 +30,8 @@ struct FWowLuaContext
     TFunction<AActor*(uint64)> ResolveActor;
     TFunction<void()> ReloadUI;
     TMap<FName,int32> SelectedRows;
+    FString CursorTexture;
+    bool CursorHidden=false,SoftwareCursorVisible=false;
 };
 
 namespace WowLuaApi
@@ -36,6 +40,17 @@ namespace WowLuaApi
     void RegisterGlobals(lua_State* L);
     void RegisterStubs(lua_State* L);
     void RegisterItemApi(lua_State* L);
+    void RegisterMerchantApi(lua_State* L);
+    void RegisterCursorApi(lua_State* L);
+    void UpdateMerchant(lua_State* L);
+    const FWowItemTemplate* QueryItemTemplate(FWowLuaContext* Context,uint32 Id);
+    FString ItemLinkForUi(FWowLuaContext* Context,uint32 Id);
+    FString ItemIconForUi(FWowLuaContext* Context,uint32 Id,uint32 Display=0);
+    bool CanUseItem(FWowLuaContext* Context,const FWowItemTemplate& Item);
+    uint32 ItemRepairCost(FWowLuaContext* Context,const FWowItemEntity& Item);
+    FWowItemEntity* BuybackItemForUi(FWowLuaContext* Context,int32 Index,int32* Slot=nullptr);
+    int SetMerchantItemTooltip(lua_State* L);
+    int SetBuybackItemTooltip(lua_State* L);
     void RegisterSpellApi(lua_State* L);
     void RegisterClassApi(lua_State* L);
     void RegisterGlyphApi(lua_State* L);

@@ -19,6 +19,8 @@ DECLARE_MULTICAST_DELEGATE_TwoParams(FOnAttackStop, uint64 /*AttackerGuid*/, uin
 DECLARE_MULTICAST_DELEGATE_FourParams(FOnLootOpened, uint64 /*LootGuid*/, uint8 /*LootType*/, uint32 /*Gold*/, const TArray<FWowLootItem>& /*Items*/);
 DECLARE_MULTICAST_DELEGATE(FOnLootClosed);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnVendorOpened, uint64 /*VendorGuid*/, const TArray<FWowVendorItem>& /*Items*/);
+DECLARE_MULTICAST_DELEGATE(FOnVendorUpdated);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnVendorError,uint8 /*Code*/,bool /*Sale*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnMailListReceived, const TArray<FWowMailMessage>& /*Mail*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnMailboxShown, uint64 /*MailboxGuid*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnTradeUpdated, const FWowTradeState& /*TradeState*/);
@@ -161,6 +163,15 @@ public:
     FWowQuestDetails QuestDetails;
     FWowLootState Loot;
     TMap<uint32,FWowItemTemplate> ItemTemplates;
+    FWowMerchantState Merchant;
+    TMap<uint64,FWowItemRefundInfo> ItemRefunds;
+    TSet<uint64> RequestedItemRefunds;
+    uint32 TotalPlayedTime=0;
+    double PlayedTimeReceived=0;
+    bool PlayedTimeRequested=false;
+    int32 ItemRefundSeconds(uint64 Guid) const;
+    uint32 WeaponProficiency=0,ArmorProficiency=0;
+    bool HasWeaponProficiency=false,HasArmorProficiency=false;
     TMap<uint32,FWowQuestTemplate> QuestTemplates;
     TSet<uint32> RequestedQuestTemplates;
     void RefreshQuestLog();
@@ -215,6 +226,11 @@ public:
     /** Guild information */
     FString GuildName;
     FString GuildMotd;
+    FString GuildInfoText;
+    TArray<FWowGuildRankAccess> GuildRankAccess;
+    bool GuildCanRepair=false,GuildRepairRequested=false;
+    uint32 GuildRepairId=0;
+    int64 GuildWithdrawMoney=0;
 
     /** Group/Party information */
     FWowGroupInfo GroupInfo;
@@ -255,6 +271,10 @@ public:
     FOnLootOpened OnLootOpened;
     FOnLootClosed OnLootClosed;
     FOnVendorOpened OnVendorOpened;
+    FOnVendorUpdated OnVendorUpdated;
+    FOnVendorError OnVendorError;
+    DECLARE_MULTICAST_DELEGATE_OneParam(FRefundResult,uint32);
+    FRefundResult OnRefundResult;
     FOnMailListReceived OnMailListReceived;
     FOnMailboxShown OnMailboxShown;
     FOnTradeUpdated OnTradeUpdated;
@@ -319,6 +339,9 @@ public:
 
 private:
     void HandleItemQueryResponse(FPacketReader& R);
+    void HandleBuyItemResult(FPacketReader& R);
+    void HandleBuyItemFailure(FPacketReader& R);
+    void HandleSellItemResult(FPacketReader& R);
     void HandleQuestgiverQuestList(FPacketReader& R);
     void HandleLootRemoved(FPacketReader& R);
     void HandleLootClearMoney(FPacketReader& R);
@@ -379,6 +402,8 @@ private:
     void HandleFriendList(FPacketReader& R);
     void HandleFriendStatus(FPacketReader& R);
     void HandleGuildRoster(FPacketReader& R);
+    void HandleItemRefundInfo(FPacketReader& R);
+    void HandleItemRefundResult(FPacketReader& R);
     void HandleGuildEvent(FPacketReader& R);
     void HandleChannelNotify(FPacketReader& R);
     void HandleGroupList(FPacketReader& R);

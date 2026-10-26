@@ -13,6 +13,8 @@
 #include "WowTextBlock.h"
 #include "WowSavedVariables.h"
 #include "WowAddonLoader.h"
+#include "../WowUiCursorRenderer.h"
+#include "Formats/DbcParser.h"
 #include "Misc/Paths.h"
 #include "HAL/FileManager.h"
 #include "Components/CanvasPanel.h"
@@ -640,6 +642,85 @@ bool FHudInventoryItems::RunTest(const FString&)
     TestTrue(TEXT("Server display resolves an existing MPQ icon"),Display && F.Frames.LoadUITexture(TEXT("Interface\\Icons\\")+Display->Icon1));
     return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudMerchantApi,"WowUnreal.Hud.MerchantApi",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudMerchantApi::RunTest(const FString&)
+{
+    FString Path; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false;
+    FMpqManager Mpq; if(!Mpq.Initialize(Path)) return false;
+    auto& Dbc=FDbcStore::Get(); if(!Dbc.IsLoaded()) Dbc.LoadAll(Mpq); if(!Dbc.IsDeferredLoaded()) Dbc.LoadDeferred(Mpq);
+    const auto& Ui=Dbc.ItemUi();
+    TestTrue(TEXT("Original item class and subclass names load"),Ui.ClassName(2) && *Ui.ClassName(2)==TEXT("Weapon") && Ui.SubclassName(2,0) && !Ui.SubclassName(2,0)->IsEmpty());
+    TArray<uint8> Bytes; FDbcParser Costs,Quality;
+    if(!Mpq.ReadFile(TEXT("DBFilesClient\\DurabilityCosts.dbc"),Bytes) || !Costs.Parse(Bytes)) return false;
+    if(!Mpq.ReadFile(TEXT("DBFilesClient\\DurabilityQuality.dbc"),Bytes) || !Quality.Parse(Bytes)) return false;
+    uint32 Multiplier=0; float Modifier=0;
+    for(uint32 I=0;I<Costs.GetRecordCount();++I) if(Costs.GetUInt(I,0)==20) Multiplier=Costs.GetUInt(I,8); // Weapon subclass 7.
+    for(uint32 I=0;I<Quality.GetRecordCount();++I) if(Quality.GetUInt(I,0)==4) Modifier=Quality.GetFloat(I,1);
+    const uint32 Expected=FMath::Max(1u,uint32(float(uint32(7*Multiplier*double(Modifier)))*.95f));
+    TestEqual(TEXT("Repair price follows server integer and float rounding"),Ui.RepairCost(20,1,2,7,7,.95f),Expected);
+    TestEqual(TEXT("Undamaged items cost nothing"),Ui.RepairCost(20,1,2,7,0),0u);
+    FHudFixture F; F.Frames.SetMpqManager(&Mpq); FWowAssetCache Cache; F.Frames.SetAssetCache(&Cache);
+    TStrongObjectPtr<UWowConnectionManager> Connection(NewObject<UWowConnectionManager>());
+    auto& H=Connection->PacketHandler; auto& E=H.EntityManager; E.LocalPlayerGuid=1;
+    auto& P=E.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER);
+    P.SetField(UnitField::BYTES_0,0x101); P.SetField(UnitField::LEVEL,20); P.SetField(UnitField::HEALTH,100);
+    auto& N=E.PromoteToTyped(2,WowTypeMask::OBJECT|WowTypeMask::UNIT); N.SetField(UnitField::NPC_FLAGS,WowNpcFlags::VENDOR|WowNpcFlags::REPAIR);
+    F.Context.ConnectionManager=Connection.Get(); F.Context.EntityManager=&E;
+    FWowItemTemplate T; T.Id=117; T.Name=TEXT("Vendor sword"); T.Class=2; T.Subclass=7; T.Quality=1; T.ItemLevel=20; T.MaxStack=20;
+    H.ItemTemplates.Add(117,T); H.Merchant.Guid=2; H.Merchant.Open=true;
+    FWowVendorItem V; V.Slot=7; V.ItemId=117; V.Price=25; V.MaxCount=MAX_uint32; V.BuyCount=1; H.Merchant.Items.Add(V);
+    const auto Item=[&](uint64 Guid,int32 Slot,int32 Count,uint32 Damage)
+    {
+        auto& I=E.PromoteToTyped(Guid,WowTypeMask::OBJECT|WowTypeMask::ITEM); I.Entry=117; I.SetField(ItemField::STACK_COUNT,Count); I.SetField(ItemField::MAX_DURABILITY,100); I.SetField(ItemField::DURABILITY,100-Damage);
+        if(Slot>=0) { P.SetField(PlayerField::INV_SLOT_HEAD+Slot*2,uint32(Guid)); P.SetField(PlayerField::INV_SLOT_HEAD+Slot*2+1,0); }
+    };
+    Item(101,15,1,7); Item(102,23,3,0); Item(103,39,5,50); Item(104,74,2,50); Item(105,75,4,50); Item(106,-1,100,50);
+    P.SetField(PlayerField::BUYBACK_PRICE_START,20); P.SetField(PlayerField::BUYBACK_PRICE_START+1,40);
+    P.SetField(PlayerField::BUYBACK_TIME_START,200); P.SetField(PlayerField::BUYBACK_TIME_START+1,100);
+    TestTrue(TEXT("Usable inventory excludes bank, buyback and detached cached items"),E.GetInventoryItems().Num()==2 && E.GetInventoryItems(true).Num()==3);
+    TestTrue(TEXT("Original merchant tuples, buyback ordering and real item counts"),F.Lua.ExecuteString(TEXT(R"LUA(
+        assert(GetMerchantNumItems()==1 and CanMerchantRepair() and not CanGuildBankRepair())
+        local name,icon,price,bundle,stock,usable,extended=GetMerchantItemInfo(1)
+        assert(name=='Vendor sword' and icon and price==25 and bundle==1 and stock==-1 and usable and not extended)
+        assert(GetMerchantItemMaxStack(1)==20 and GetMerchantItemLink(1):find('item:117:'))
+        assert(GetItemCount(117)==4 and GetItemCount('Vendor sword',true)==9)
+        assert(GetNumBuybackItems()==2)
+        local n,_,p,c=GetBuybackItemInfo(1); assert(n=='Vendor sword' and p==40 and c==4)
+        n,_,p,c=GetBuybackItemInfo(2); assert(p==20 and c==2)
+        assert(GetBuybackItemLink(1):find('item:117:'))
+    )LUA")));
+    uint32 All=Ui.RepairCost(20,1,2,7,7);
+    TestTrue(TEXT("Repair all sums carried inventory only"),F.Lua.ExecuteString(FString::Printf(TEXT("local cost,needed=GetRepairAllCost(); assert(cost==%u and needed)"),All)));
+    H.HasWeaponProficiency=true; H.WeaponProficiency=0;
+    TestFalse(TEXT("Unlearned weapon proficiency is unusable"),WowLuaApi::CanUseItem(&F.Context,T));
+    H.WeaponProficiency=1u<<7; TestTrue(TEXT("Known proficiency restores usability"),WowLuaApi::CanUseItem(&F.Context,T));
+    TestTrue(TEXT("Ordinary items do not open a refund confirmation"),F.Lua.ExecuteString(TEXT("assert(GetContainerItemPurchaseInfo(0,1)==nil and GetContainerItemPurchaseItem(0,1,1)==nil)")));
+    auto* Refundable=E.FindItem(102); Refundable->SetField(ItemField::FLAGS,0x1000);
+    FWowItemRefundInfo Refund; Refund.Money=50; Refund.Honor=10; Refund.Items[3]=117; Refund.Counts[3]=2; Refund.PurchasePlayedTime=990;
+    H.ItemRefunds.Add(102,Refund); H.TotalPlayedTime=1000; H.PlayedTimeReceived=FPlatformTime::Seconds();
+    TestTrue(TEXT("Refund metadata has the original tuple and sparse currency rows"),F.Lua.ExecuteString(TEXT(R"LUA(
+        local money,honor,arena,count,left=GetContainerItemPurchaseInfo(0,1)
+        assert(money==50 and honor==10 and arena==0 and count==1 and left>=7188 and left<=7190)
+        local icon,n,link=GetContainerItemPurchaseItem(0,1,1); assert(icon and n==2 and link:find('item:117:'))
+    )LUA")));
+    Refundable->SetField(ItemField::ENCHANTMENT_1_1,1);
+    TestTrue(TEXT("Permanent enchantments prevent a refundable quote"),F.Lua.ExecuteString(TEXT("assert(GetContainerItemPurchaseInfo(0,1)==nil)")));
+    Refundable->SetField(ItemField::FLAGS,0); Refundable->SetField(ItemField::ENCHANTMENT_1_1,0);
+    T.RequiredLevel=21; TestFalse(TEXT("Level requirement remains authoritative"),WowLuaApi::CanUseItem(&F.Context,T)); T.RequiredLevel=0;
+    T.AllowableClass=2; TestFalse(TEXT("Wrong class is unusable"),WowLuaApi::CanUseItem(&F.Context,T)); T.AllowableClass=MAX_uint32;
+    T.RequiredSpell=123; TestFalse(TEXT("Required learned spell is checked"),WowLuaApi::CanUseItem(&F.Context,T)); H.KnownSpells.Add(123); TestTrue(TEXT("Known required spell is accepted"),WowLuaApi::CanUseItem(&F.Context,T));
+    Connection->PickupMerchantCursor(1); FWowUiCursorRenderer Cursor(F.Frames,F.Context); F.Frames.UpdateMouseHover(200,200); Cursor.Tick(F.Lua.GetState());
+    H.ItemTemplates[117].InventoryType=13;
+    TestTrue(TEXT("Equipment highlighting accepts matching slots only"),F.Lua.ExecuteString(TEXT("assert(CursorCanGoInSlot(16) and CursorCanGoInSlot(17) and not CursorCanGoInSlot(1))")));
+    TestTrue(TEXT("Merchant pickup renders a visible icon and retains source identity"),F.Context.SoftwareCursorVisible && Connection->GetCursorMerchantItemId()==117 && F.Frames.GetNamedTexture(TEXT("IdleWowCursorIcon")));
+    const auto* CursorImage=F.Frames.GetNamedTexture(TEXT("IdleWowCursorIcon"));
+    TestTrue(TEXT("An initially empty cursor texture becomes an opaque drawable brush"),CursorImage && CursorImage->GetRenderOpacity()==1 && CursorImage->GetBrush().DrawAs==ESlateBrushDrawType::Image && CursorImage->GetBrush().GetResourceObject());
+    TestTrue(TEXT("Unpurchased goods cannot replace action-bar entries"),!Connection->PlaceCursorIntoActionSlot(0) && Connection->HasCursorMerchantPayload());
+    Connection->CloseMerchant(); Cursor.Tick(F.Lua.GetState());
+    TestTrue(TEXT("Closing clears vendor selection and its visible icon"),!Connection->HasCursorPayload() && !F.Context.SoftwareCursorVisible);
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudItemComparison,"WowUnreal.Hud.ItemComparison",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FHudItemComparison::RunTest(const FString&)
 {

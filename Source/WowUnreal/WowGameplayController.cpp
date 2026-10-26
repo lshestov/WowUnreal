@@ -437,11 +437,31 @@ void AWowGameplayController::BindEntityEvents()
 	ConnectionManager->PacketHandler.OnVendorOpened.AddLambda(
 		[this](uint64 VendorGuid, const TArray<FWowVendorItem>& Items)
 		{
+            if(UIManager && UIManager->IsUILoaded())
+            {
+                for(const auto& Item:Items) ConnectionManager->RequestItemTemplate(Item.ItemId);
+                FireUIEvent(TEXT("MERCHANT_SHOW")); return;
+            }
 			if (GameUI)
 			{
 				GameUI->ShowVendorWindow(VendorGuid, Items);
 			}
 		});
+
+    ConnectionManager->PacketHandler.OnVendorUpdated.AddLambda([this]{ FireUIEvent(TEXT("MERCHANT_UPDATE")); });
+    ConnectionManager->PacketHandler.OnRefundResult.AddLambda([this](uint32 Error)
+    {
+        if(Error) { const auto* Events=UIManager?UIManager->GetEventSystem():nullptr; FireUIEvent(TEXT("UI_ERROR_MESSAGE"),{Events?Events->ResolveText(TEXT("UNABLE_TO_REFUND_ITEM")):TEXT("Unable to refund item")}); }
+    });
+    ConnectionManager->PacketHandler.OnVendorError.AddLambda([this](uint8 Error,bool Sale)
+    {
+        // BuyResult and SellResult have different, sparse wire values in 12340.
+        static const TCHAR* Buy[]={TEXT("ERR_ITEM_NOT_FOUND"),TEXT("ERR_VENDOR_SOLD_OUT"),TEXT("ERR_NOT_ENOUGH_MONEY"),TEXT("ERR_ITEM_NOT_FOUND"),TEXT("ERR_VENDOR_HATES_YOU"),TEXT("ERR_VENDOR_TOO_FAR"),TEXT("ERR_ITEM_NOT_FOUND"),TEXT("ERR_VENDOR_SOLD_OUT"),TEXT("ERR_ITEM_MAX_COUNT"),TEXT("ERR_ITEM_NOT_FOUND"),TEXT("ERR_ITEM_NOT_FOUND"),TEXT("ERR_CANT_EQUIP_RANK"),TEXT("ERR_CANT_EQUIP_REPUTATION")};
+        static const TCHAR* Sell[]={TEXT(""),TEXT("ERR_ITEM_NOT_FOUND"),TEXT("ERR_VENDOR_NOT_INTERESTED"),TEXT("ERR_VENDOR_HATES_YOU"),TEXT("ERR_NOT_OWNER"),TEXT("ERR_ITEM_NOT_FOUND"),TEXT("ERR_DESTROY_NONEMPTY_BAG"),TEXT("ERR_VENDOR_DOESNT_BUY"),TEXT("ERR_MUST_REPAIR_DURABILITY"),TEXT("ERR_INTERNAL_BAG_ERROR")};
+        const TCHAR* Key=Sale?(Error<UE_ARRAY_COUNT(Sell)?Sell[Error]:TEXT("ERR_VENDOR_NOT_INTERESTED")):(Error<UE_ARRAY_COUNT(Buy)?Buy[Error]:TEXT("ERR_ITEM_NOT_FOUND"));
+        const FString Message=UIManager && UIManager->GetEventSystem()?UIManager->GetEventSystem()->ResolveText(Key):Key;
+        FireUIEvent(TEXT("UI_ERROR_MESSAGE"),{Message});
+    });
 
 	ConnectionManager->PacketHandler.OnTradeUpdated.AddLambda(
 		[this](const FWowTradeState& TradeState)
@@ -966,6 +986,7 @@ void AWowGameplayController::Tick(float DeltaTime)
 		// Update cooldown overlay animations
 		UIManager->GetFrameManager()->TickCooldowns();
 		UIManager->TickWorldImages(GetWorld());
+        CurrentMouseCursor=UIManager->HasSoftwareCursor()?EMouseCursor::None:EMouseCursor::Default;
 		LastWidgetMilliseconds=FPlatformTime::ToMilliseconds64(FPlatformTime::Cycles64()-PartStarted);
 
 
@@ -1341,6 +1362,7 @@ void AWowGameplayController::OnLeftClickReleased()
 
 bool AWowGameplayController::RequestCursorItemDeletion()
 {
+    if(ConnectionManager && ConnectionManager->HasCursorMerchantPayload()) { ConnectionManager->ClearCursorPayload(); return true; }
     const auto* Item=ConnectionManager?ConnectionManager->GetCursorItem():nullptr;
     if(!Item || !UIManager || !UIManager->GetEventSystem()) return false;
     const auto* Template=ConnectionManager->PacketHandler.ItemTemplates.Find(Item->Entry);
@@ -2102,6 +2124,7 @@ void AWowGameplayController::InteractWithTarget()
 	// Check NPC flags to determine interaction type
 	uint32 NpcFlags = TargetEntity->GetField(UnitField::NPC_FLAGS);
 	UE_LOG(LogWowGameplay, Log, TEXT("Right-click NPC %llu: NpcFlags=0x%08X"), TargetGuid, NpcFlags);
+    if(ConnectionManager->PacketHandler.Merchant.Open && ConnectionManager->PacketHandler.Merchant.Guid!=TargetGuid) { ConnectionManager->CloseMerchant(); FireUIEvent(TEXT("MERCHANT_CLOSED")); }
 
 	if (NpcFlags & WowNpcFlags::MAILBOX)
 	{
@@ -2113,6 +2136,10 @@ void AWowGameplayController::InteractWithTarget()
 		UE_LOG(LogWowGameplay, Log, TEXT("  -> Sending banker activate"));
 		ConnectionManager->SendBankerActivate(static_cast<int64>(TargetGuid));
 	}
+    else if((NpcFlags&WowNpcFlags::VENDOR) && !(NpcFlags&(WowNpcFlags::GOSSIP|WowNpcFlags::QUESTGIVER)))
+    {
+        ConnectionManager->RequestVendorInventory(TargetGuid);
+    }
 	else if (NpcFlags & WowNpcFlags::INTERACTABLE)
 	{
 		// This NPC has interactable flags — send gossip/questgiver hello
@@ -4566,6 +4593,7 @@ void AWowGameplayController::OnPlayerInventoryUpdated()
 	FireUIEvent(TEXT("PLAYER_MONEY"));
 	FireUIEvent(TEXT("UNIT_INVENTORY_CHANGED"),{TEXT("player")});
 	FireUIEvent(TEXT("UPDATE_INVENTORY_DURABILITY"));
+    if(ConnectionManager && ConnectionManager->PacketHandler.Merchant.Open) FireUIEvent(TEXT("MERCHANT_UPDATE"));
 }
 
 void AWowGameplayController::OnUnitHealthUpdate(uint64 EntityGuid)
@@ -5156,6 +5184,7 @@ void AWowGameplayController::OnEscapeKey()
     {
         ConnectionManager->CancelGlyphUse(); return;
     }
+    if(ConnectionManager && ConnectionManager->IsRepairMode()) { ConnectionManager->SetRepairMode(false); return; }
     if(ConnectionManager && ConnectionManager->HasCursorPayload())
     {
         ConnectionManager->ClearCursorPayload(); return;

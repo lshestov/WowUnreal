@@ -90,7 +90,17 @@ public:
     bool HasCursorPayload() const;
     bool HasCursorSpellPayload() const;
     bool HasCursorItemPayload() const;
+    bool HasCursorMerchantPayload() const;
+    uint32 GetCursorMerchantItemId() const;
+    void PickupMerchantCursor(int32 Index);
+    bool SellCursorToMerchant();
+    void CloseMerchant();
+    void SetRepairMode(bool Active);
+    bool IsRepairMode() const { return RepairCursor && PacketHandler.Merchant.Open; }
     const FWowItemEntity* GetCursorItem() const;
+    uint32 GetCursorItemCount() const;
+    void RequestItemRefundInfo(uint64 Guid);
+    bool SendItemRefund(uint64 Guid);
     void RefreshItemCursor();
     bool DropActionCursor();
     bool GetCursorInfo(FString& OutType, int32& OutId, FString& OutDetail) const;
@@ -124,9 +134,15 @@ public:
 
     /** Send buy item from vendor command */
     UFUNCTION(BlueprintCallable) void SendBuyItem(int64 VendorGuid, int32 ItemId, int32 Count = 1);
+    void RequestVendorInventory(uint64 VendorGuid);
+    /** Counts are vendor bundles, not individual items in a bundle. */
+    bool SendBuyVendorSlot(uint32 VendorSlot,uint32 Count);
+    bool SendBuyVendorSlotIntoBag(uint32 VendorSlot,uint32 Count,uint8 Bag,uint8 Slot);
+    bool SendBuybackItem(uint32 InventorySlot);
+    bool SendRepairItems(uint64 ItemGuid=0,bool GuildFunds=false);
 
     /** Send sell item to vendor command */
-    UFUNCTION(BlueprintCallable) void SendSellItem(int64 VendorGuid, int64 ItemGuid, uint8 Count = 1);
+    UFUNCTION(BlueprintCallable) void SendSellItem(int64 VendorGuid, int64 ItemGuid, int32 Count = 1);
 
     /** Auto-equip an inventory item from the specified bag/slot. */
     void SendAutoEquipItem(uint8 SourceBag, uint8 SourceSlot);
@@ -286,6 +302,7 @@ private:
         Spell,
         Action,
         Item,
+        Merchant,
     };
 
     struct FCursorPayloadState
@@ -301,6 +318,8 @@ private:
         bool bFromInventorySlot = false;
         uint32 SplitCount = 0;
         uint64 SourceItemGuid=0;
+        uint64 SourceVendorGuid=0;
+        uint32 SourceVendorSlot=0;
     };
 
     EWowSessionState State = EWowSessionState::Disconnected;
@@ -322,6 +341,7 @@ private:
     TArray<FWowCharacterInfo> CachedCharacters;
     int64 TargetGuid = 0;
     FCursorPayloadState CursorPayload;
+    bool RepairCursor=false;
     const FWowItemEntity* ResolveCursorSource(uint8 Bag,uint8 Slot) const;
     FDelegateHandle EnterWorldHandle;
 };

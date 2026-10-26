@@ -336,7 +336,7 @@ build, automation, native autologin and rendered screenshot verification):
     Handle frames created before the network player and release hidden UI actors.
     Verified 87 automation tests plus focused regressions, native 26-step/six-image
     run with full-body paperdoll, shield/robe/boots, reset and unchanged gear/money.
-  - [?] Shared FrameXML text alignment and texture replacement layout: retain
+  - [x] Shared FrameXML text alignment and texture replacement layout: retain
     original centered defaults, font-object alignment inheritance (including addon
     font definitions) and explicit per-region overrides. Preserve stretched texture
     anchors when setting a new image; canvas offsets are not natural file sizes.
@@ -344,11 +344,28 @@ build, automation, native autologin and rendered screenshot verification):
     Verified 88 tests and native 20-step/four-image character/dress-up/book/menu
     regression: centered titles, left spell labels and visible equipment/empty-slot
     icons with positive geometry. Natural image dimensions remain correct.
-  - [ ] Original merchant window, purchase/sale/buyback/repair server state.
+  - [?] Merchant protocol and authoritative cache: full GUIDs, sparse server slots,
+    complete buy/buy-in-slot/buyback/repair requests, stock acknowledgements and
+    separate buy/sell error results; direct interaction for plain vendor NPCs.
+    Purchases use complete 21/29-byte requests; sales use uint32 counts (20 bytes),
+    including stacks above 255. Stock and balances wait for server updates.
+  - [?] Original merchant window, purchase/sale/buyback/repair server state.
+    Original goods, buyback, stack selection, target bag slots, repair cursor and
+    individual/all/guild repair APIs use cached server items and DBC costs.
+    Refund quotes retain sparse token costs and online-played-time expiry;
+    pending quotes cannot silently sell refundable items. Fix full guild-rank
+    records, offline members and repair allowance queries. Render carried icons,
+    stack counts and contextual cursors in engine captures; restore model brushes
+    after static buyback art. Equipment highlights check real requirements.
+    Verified Windows build, 91 automation tests plus focused regressions, native
+    45-step/five-image buy/sell/buyback/buy-in-slot/cancel cycle and controlled
+    individual repair of a temporary weapon. Server DB confirms original money,
+    equipment, durability, bags and position restored; QA items removed.
   - [ ] Original bank, mailbox and trade windows with authoritative round trips.
 - [ ] 5. Chat/combat/macros: hyperlinks, remaining combat events and macro execution families.
 - [ ] 6. Maps: points of interest, tracking, interior minimaps and original map bootstrap.
 - [ ] 7. Group/special windows: party/loot, PvP, dungeon finder and achievements.
+  - [ ] Restore NPC portrait captures and friendly NPC unit-frame reactions.
 
 - [x] Stock options category placement and text: numeric-offset SetPoint overloads, runtime $parent references, constrained description wrapping, and XML markup rendered without asset paths while Lua keeps original strings. Verified 64 automation tests and native category clicks, character/spellbook windows and rendered screenshots.
 - [x] Stock FrameXML visibility: preserve hidden branches during parent Show/layout, respect explicit hidden=false, remove frame-name and Flash overrides. Verified 63 automation tests, native action-bar options/window clicks and rendered screenshots at 1280x720 and 1920x1080.

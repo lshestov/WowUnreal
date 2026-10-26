@@ -710,6 +710,92 @@ bool FLuaInventoryPickupFlowsQueueEquipAndUnequipPackets::RunTest(const FString&
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMerchantPackets,"WowUnreal.UI.MerchantPackets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FMerchantPackets::RunTest(const FString&)
+{
+    auto* Connection=NewObject<UWowConnectionManager>(); const uint64 Vendor=0xF13000012ABCDEF0ull;
+    const auto Socket=WowTestUtils::AttachTestWorldSocket(*Connection,Vendor); auto& Handler=Connection->PacketHandler;
+    const auto Put=[](TArray<uint8>& Bytes,const auto Value){const int32 At=Bytes.AddUninitialized(sizeof(Value)); FMemory::Memcpy(Bytes.GetData()+At,&Value,sizeof(Value));};
+    TArray<uint8> List; Put(List,Vendor); Put(List,uint8(2));
+    for(uint32 Slot:{7u,11u}) { Put(List,Slot); Put(List,uint32(117)); Put(List,uint32(784)); Put(List,uint32(-1)); Put(List,uint32(25)); Put(List,uint32(0)); Put(List,uint32(5)); Put(List,uint32(0)); }
+    int32 Opened=0,Updated=0,Errors=0; uint8 LastError=0; bool Sale=false;
+    Handler.OnVendorOpened.AddLambda([&](uint64 Guid,const TArray<FWowVendorItem>& Items){++Opened; TestEqual(TEXT("Full vendor GUID survives decoding"),Guid,Vendor); TestEqual(TEXT("Sparse server slots retained"),Items[1].Slot,11u);});
+    Handler.OnVendorUpdated.AddLambda([&]{++Updated;}); Handler.OnVendorError.AddLambda([&](uint8 Code,bool IsSale){++Errors; LastError=Code; Sale=IsSale;});
+    Handler.HandlePacket(WowOpcode::SMSG_LIST_INVENTORY,List);
+    TestTrue(TEXT("Vendor state is populated before notifying UI"),Handler.Merchant.Open && Handler.Merchant.Guid==Vendor && Handler.Merchant.Items.Num()==2 && Opened==1);
+    const auto Revision=Handler.Merchant.Revision; auto Truncated=List; Truncated.Pop(); Handler.HandlePacket(WowOpcode::SMSG_LIST_INVENTORY,Truncated);
+    TestTrue(TEXT("Truncated lists cannot replace valid vendor state"),Handler.Merchant.Revision==Revision && Opened==1);
+    uint32 Opcode=0; TArray<uint8> Payload,Expected;
+    Connection->RequestVendorInventory(Vendor); TestTrue(TEXT("Request queues full GUID"),WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload) && Opcode==WowOpcode::CMSG_LIST_INVENTORY && Payload.Num()==8);
+    Connection->SendBuyItem(Vendor,117,2); Put(Expected,Vendor); Put(Expected,uint32(117)); Put(Expected,uint32(7)); Put(Expected,uint32(2)); Put(Expected,uint8(0));
+    TestTrue(TEXT("Legacy buy resolves the server slot and writes the complete 21-byte packet"),WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload) && Opcode==WowOpcode::CMSG_BUY_ITEM && Payload==Expected);
+    TestTrue(TEXT("Explicit server slot distinguishes identical item entries"),Connection->SendBuyVendorSlot(11,3));
+    Expected.Reset(); Put(Expected,Vendor); Put(Expected,uint32(117)); Put(Expected,uint32(11)); Put(Expected,uint32(3)); Put(Expected,uint8(0));
+    TestTrue(TEXT("Duplicate item keeps its selected server slot"),WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload) && Payload==Expected);
+    Handler.EntityManager.LocalPlayerGuid=1; Handler.EntityManager.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER);
+    TestTrue(TEXT("Purchase can target a physical backpack slot"),Connection->SendBuyVendorSlotIntoBag(7,1,255,23));
+    Expected.Reset(); Put(Expected,Vendor); Put(Expected,uint32(117)); Put(Expected,uint32(7)); Put(Expected,uint64(1)); Put(Expected,uint8(23)); Put(Expected,uint32(1));
+    TestTrue(TEXT("Buy-in-slot writes vendor slot, bag GUID and uint32 bundle count"),WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload) && Opcode==WowOpcode::CMSG_BUY_ITEM_IN_SLOT && Payload==Expected);
+    TestFalse(TEXT("Bank slots are not vendor purchase destinations"),Connection->SendBuyVendorSlotIntoBag(7,1,255,39));
+    TestFalse(TEXT("Counts cannot silently wrap the server's uint8 bundle limit"),Connection->SendBuyVendorSlot(7,256));
+    Connection->SendSellItem(int64(Vendor),int64(0x4000000000000042ull),600);
+    Expected.Reset(); Put(Expected,Vendor); Put(Expected,uint64(0x4000000000000042ull)); Put(Expected,uint32(600));
+    TestTrue(TEXT("Sell count is uint32, including stacks above 255"),WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload) && Opcode==WowOpcode::CMSG_SELL_ITEM && Payload==Expected && Payload.Num()==20);
+    TArray<uint8> Ack; Put(Ack,Vendor); Put(Ack,uint32(11)); Put(Ack,uint32(0)); Put(Ack,uint32(3)); Handler.HandlePacket(WowOpcode::SMSG_BUY_ITEM,Ack);
+    TestTrue(TEXT("Only the server acknowledgement changes remaining stock"),Handler.Merchant.Items[1].MaxCount==0 && Updated==1);
+    TestFalse(TEXT("Out of stock cannot be purchased"),Connection->SendBuyVendorSlot(11,1));
+    TArray<uint8> Failure; Put(Failure,Vendor); Put(Failure,uint32(117)); Put(Failure,uint32(123)); Put(Failure,uint8(2)); Handler.HandlePacket(WowOpcode::SMSG_BUY_FAILED,Failure);
+    TestTrue(TEXT("Buy failures read the final error after the optional parameter"),Errors==1 && LastError==2 && !Sale);
+    Failure.Reset(); Put(Failure,Vendor); Put(Failure,uint64(3)); Put(Failure,uint32(456)); Put(Failure,uint8(5)); Handler.HandlePacket(WowOpcode::SMSG_SELL_ITEM,Failure);
+    TestTrue(TEXT("Sale failures preserve their distinct error family"),Errors==2 && LastError==5 && Sale);
+    TestTrue(TEXT("Buyback uses the physical server slot"),Connection->SendBuybackItem(74));
+    TestTrue(TEXT("Buyback packet is GUID plus uint32 slot"),WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload) && Opcode==WowOpcode::CMSG_BUYBACK_ITEM && Payload.Num()==12);
+    TestTrue(TEXT("Repair request waits for server durability and money updates"),Connection->SendRepairItems());
+    TestTrue(TEXT("Repair-all packet contains empty item GUID and guild flag"),WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload) && Opcode==WowOpcode::CMSG_REPAIR_ITEM && Payload.Num()==17 && Payload.Last()==0);
+    constexpr uint64 RefundGuid=0x4000000000000033ull;
+    auto& RefundItem=Handler.EntityManager.PromoteToTyped(RefundGuid,WowTypeMask::OBJECT|WowTypeMask::ITEM); RefundItem.Entry=117; RefundItem.SetField(ItemField::FLAGS,0x1000);
+    Connection->RequestItemRefundInfo(RefundGuid);
+    TestTrue(TEXT("Refund query requests silent played time first"),WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload) && Opcode==0x01CC && Payload==TArray<uint8>({0}));
+    TestTrue(TEXT("Refund query carries full item identity"),WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload) && Opcode==0x04B3 && Payload.Num()==8);
+    Connection->RequestItemRefundInfo(RefundGuid); TestFalse(TEXT("Repeated UI updates do not flood refund requests"),WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload));
+    TArray<uint8> Played; Put(Played,uint32(1000)); Put(Played,uint32(100)); Put(Played,uint8(0)); Handler.HandlePacket(WowOpcode::SMSG_PLAYED_TIME,Played);
+    TArray<uint8> Info; Put(Info,RefundGuid); Put(Info,uint32(50)); Put(Info,uint32(10)); Put(Info,uint32(0));
+    for(int32 I=0;I<5;++I) { Put(Info,uint32(I==3?117:0)); Put(Info,uint32(I==3?2:0)); } Put(Info,uint32(0)); Put(Info,uint32(990));
+    auto ShortInfo=Info; ShortInfo.Pop(); Handler.HandlePacket(0x04B2,ShortInfo);
+    TestTrue(TEXT("Partial refund responses cannot create quotes"),Handler.ItemRefunds.IsEmpty());
+    Handler.HandlePacket(0x04B2,Info);
+    TestTrue(TEXT("Refund quote retains sparse currencies and server played-time expiry"),Handler.ItemRefunds.Contains(RefundGuid) && Handler.ItemRefunds[RefundGuid].Counts[3]==2 && Handler.ItemRefundSeconds(RefundGuid)>7188);
+    TestTrue(TEXT("A confirmed refund sends a real request"),Connection->SendItemRefund(RefundGuid));
+    TestTrue(TEXT("Refund request is exactly the item GUID"),WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload) && Opcode==0x04B4 && Payload.Num()==8);
+    Handler.Merchant.Clear(); TestFalse(TEXT("A closed vendor cannot receive stale purchases"),Connection->SendBuyVendorSlot(7,1));
+    TestFalse(TEXT("Refund cannot proceed after the vendor closes"),Connection->SendItemRefund(RefundGuid));
+    TestFalse(TEXT("A closed vendor cannot receive buyback or repair"),Connection->SendBuybackItem(74) || Connection->SendRepairItems());
+    TestFalse(TEXT("Rejected operations queued no extra packet"),WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload));
+    return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMerchantGuildState,"WowUnreal.UI.MerchantGuildState",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FMerchantGuildState::RunTest(const FString&)
+{
+    auto* Connection=NewObject<UWowConnectionManager>(); auto& H=Connection->PacketHandler; H.EntityManager.LocalPlayerGuid=1;
+    const auto Put=[](TArray<uint8>& B,const auto V) { const int32 At=B.AddUninitialized(sizeof(V)); FMemory::Memcpy(B.GetData()+At,&V,sizeof(V)); };
+    const auto Text=[](TArray<uint8>& B,const ANSICHAR* S) { B.Append(reinterpret_cast<const uint8*>(S),FCStringAnsi::Strlen(S)+1); };
+    TArray<uint8> Packet; Put(Packet,uint32(2)); Text(Packet,"Motd"); Text(Packet,"Info"); Put(Packet,uint32(2));
+    for(int32 Rank=0;Rank<2;++Rank) { Put(Packet,uint32(Rank?0x00040000:0)); Put(Packet,uint32(10000)); for(int32 Tab=0;Tab<6;++Tab) {Put(Packet,uint32(Tab+1)); Put(Packet,uint32(Tab+2));} }
+    for(int32 Index=0;Index<2;++Index)
+    {
+        Put(Packet,uint64(Index+1)); Put(Packet,uint8(Index?0:1)); Text(Packet,Index?"Offline":"Player"); Put(Packet,uint32(1)); Put(Packet,uint8(20)); Put(Packet,uint8(1)); Put(Packet,uint8(Index)); Put(Packet,uint32(12));
+        if(Index) Put(Packet,float(1.5)); Text(Packet,"Public"); Text(Packet,"Officer");
+    }
+    H.HandlePacket(WowOpcode::SMSG_GUILD_ROSTER,Packet);
+    TestTrue(TEXT("Guild roster skips all six bank permission pairs and offline float"),H.GuildRoster.Num()==2 && H.GuildRankAccess.Num()==2 && H.GuildInfoText==TEXT("Info") && H.GuildRoster[1].DaysOffline==1.5f && H.GuildRoster[1].OfficerNote==TEXT("Officer"));
+    TestTrue(TEXT("Local rank repair right is decoded"),H.GuildCanRepair);
+    Packet.Pop(); H.HandlePacket(WowOpcode::SMSG_GUILD_ROSTER,Packet);
+    TestTrue(TEXT("Partial roster cannot replace the previous valid state"),H.GuildRoster.Num()==2 && H.GuildCanRepair);
+    Packet.Reset(); Put(Packet,uint32(MAX_uint32)); H.HandlePacket(0x03FE,Packet);
+    TestEqual(TEXT("Guild master's unlimited repair allowance remains -1"),H.GuildWithdrawMoney,int64(-1));
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FItemCursorIdentity,"WowUnreal.UI.ItemCursorIdentity",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FItemCursorIdentity::RunTest(const FString&)
 {

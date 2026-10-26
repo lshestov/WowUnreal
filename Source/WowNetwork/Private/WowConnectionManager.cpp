@@ -128,6 +128,9 @@ void UWowConnectionManager::SelectRealm(int32 I)
             PacketHandler.KnownSpells.Reset(); PacketHandler.ActionButtons.Reset(); PacketHandler.QuestLog.Reset(); PacketHandler.ResetTalentState(); PacketHandler.Reputations.Reset();
             PacketHandler.SpellCooldowns.Reset(); PacketHandler.SpellCooldownInfo.Reset(); PacketHandler.CombatHistory.Reset();
             PacketHandler.GroupInfo=FWowGroupInfo(); PacketHandler.PetActionBar=FWowPetActionBarState();
+            PacketHandler.Merchant.Clear();
+            RepairCursor=false; PacketHandler.GuildCanRepair=false; PacketHandler.GuildRepairRequested=false; PacketHandler.GuildRepairId=0; PacketHandler.GuildWithdrawMoney=0; PacketHandler.GuildRoster.Reset(); PacketHandler.GuildRankAccess.Reset(); PacketHandler.GuildInfoText.Empty(); PacketHandler.ItemRefunds.Empty(); PacketHandler.RequestedItemRefunds.Empty(); PacketHandler.TotalPlayedTime=0; PacketHandler.PlayedTimeReceived=0; PacketHandler.PlayedTimeRequested=false;
+            PacketHandler.WeaponProficiency=PacketHandler.ArmorProficiency=0; PacketHandler.HasWeaponProficiency=PacketHandler.HasArmorProficiency=false;
             RequestCharacterList(); return;
         }
         if (Opcode == WowOpcode::SMSG_CHAR_CREATE || Opcode == WowOpcode::SMSG_CHAR_DELETE)
@@ -418,6 +421,7 @@ void UWowConnectionManager::SendClearActionButton(int32 SlotIndex)
 
 void UWowConnectionManager::PickupSpellCursor(int32 SpellId, const FString& BookType)
 {
+    RepairCursor=false; CursorPayload=FCursorPayloadState();
     CursorPayload.Type = ECursorPayloadType::Spell;
     CursorPayload.PrimaryId = SpellId;
     CursorPayload.Detail = BookType;
@@ -429,6 +433,7 @@ void UWowConnectionManager::PickupSpellCursor(int32 SpellId, const FString& Book
 void UWowConnectionManager::PickupMacroCursor(uint32 Id)
 {
     if(!Id || Id>=0x1000000u) return;
+    RepairCursor=false;
     CursorPayload=FCursorPayloadState(); CursorPayload.Type=ECursorPayloadType::Action;
     CursorPayload.PrimaryId=Id; CursorPayload.ActionType=0x40; CursorPayload.SourceActionSlot=-1;
     OnCursorChanged.Broadcast();
@@ -446,6 +451,8 @@ void UWowConnectionManager::PickupActionCursor(int32 SlotIndex)
     {
         return;
     }
+
+    RepairCursor=false;
 
     CursorPayload.Type = ECursorPayloadType::Action;
     CursorPayload.PrimaryId = static_cast<int32>(PackedAction & 0x00FFFFFFu);
@@ -507,7 +514,7 @@ bool UWowConnectionManager::DropActionCursor()
 
 bool UWowConnectionManager::HasCursorPayload() const
 {
-    return CursorPayload.Type==ECursorPayloadType::Item?HasCursorItemPayload():CursorPayload.Type!=ECursorPayloadType::None;
+    return CursorPayload.Type==ECursorPayloadType::Item?HasCursorItemPayload():CursorPayload.Type==ECursorPayloadType::Merchant?HasCursorMerchantPayload():CursorPayload.Type!=ECursorPayloadType::None;
 }
 
 bool UWowConnectionManager::HasCursorSpellPayload() const
@@ -522,6 +529,7 @@ bool UWowConnectionManager::HasCursorItemPayload() const
 
 bool UWowConnectionManager::GetCursorInfo(FString& OutType, int32& OutId, FString& OutDetail) const
 {
+    if(HasCursorMerchantPayload()) { OutType=TEXT("merchant"); OutId=CursorPayload.SourceActionSlot+1; OutDetail.Empty(); return true; }
     if (CursorPayload.Type == ECursorPayloadType::Spell)
     {
         OutType = TEXT("spell");
@@ -559,6 +567,8 @@ bool UWowConnectionManager::GetCursorInfo(FString& OutType, int32& OutId, FStrin
 
 bool UWowConnectionManager::PlaceCursorIntoActionSlot(int32 SlotIndex)
 {
+    // Vendor selections are not owned inventory and cannot replace an action.
+    if(CursorPayload.Type==ECursorPayloadType::Merchant) return false;
     if(CursorPayload.Type==ECursorPayloadType::Item && !HasCursorItemPayload()) { RefreshItemCursor(); return false; }
     if (SlotIndex < 0 || SlotIndex >= 144 || CursorPayload.Type == ECursorPayloadType::None)
     {
@@ -612,7 +622,12 @@ bool UWowConnectionManager::PlaceCursorIntoActionSlot(int32 SlotIndex)
 
 bool UWowConnectionManager::PlaceCursorIntoContainerSlot(uint8 DestinationBag, uint8 DestinationSlot)
 {
-    if (!HasCursorItemPayload())
+    if(HasCursorMerchantPayload())
+    {
+        if(!SendBuyVendorSlotIntoBag(CursorPayload.SourceVendorSlot,1,DestinationBag,DestinationSlot)) return false;
+        ClearCursorPayload(); return true;
+    }
+    if (!HasCursorItemPayload() && !HasCursorMerchantPayload())
     {
         RefreshItemCursor();
         return false;
@@ -632,7 +647,7 @@ bool UWowConnectionManager::PlaceCursorIntoContainerSlot(uint8 DestinationBag, u
 
 bool UWowConnectionManager::PlaceCursorIntoFirstFreeContainerSlot(uint8 DestinationBag)
 {
-    if (!HasCursorItemPayload())
+    if (!HasCursorItemPayload() && !HasCursorMerchantPayload())
     {
         RefreshItemCursor();
         return false;
@@ -681,6 +696,19 @@ bool UWowConnectionManager::PlaceCursorIntoFirstFreeContainerSlot(uint8 Destinat
 
 bool UWowConnectionManager::AutoEquipCursorItem()
 {
+    if(HasCursorMerchantPayload())
+    {
+        const auto* Item=PacketHandler.ItemTemplates.Find(GetCursorMerchantItemId());
+        if(!Item) return false;
+        static const int32 Slots[]={-1,0,1,2,3,4,5,6,7,8,9,10,12,15,16,17,14,15,19,18,4,15,16,16,18,17,17,19,17};
+        int32 Slot=Item->InventoryType<UE_ARRAY_COUNT(Slots)?Slots[Item->InventoryType]:-1; if(Slot<0) return false;
+        if(const auto* P=PacketHandler.EntityManager.GetLocalPlayer())
+        {
+            const int32 Last=Item->InventoryType==11?11:Item->InventoryType==12?13:Item->InventoryType==18 || Item->InventoryType==27?22:Slot;
+            for(int32 I=Slot;I<=Last;++I) if(!P->GetField64(PlayerField::INV_SLOT_HEAD+I*2)) {Slot=I; break;}
+        }
+        return PlaceCursorIntoContainerSlot(255,uint8(Slot));
+    }
     if (!HasCursorItemPayload() || CursorPayload.bFromInventorySlot || CursorPayload.SplitCount)
     {
         RefreshItemCursor();
@@ -694,6 +722,7 @@ bool UWowConnectionManager::AutoEquipCursorItem()
 
 bool UWowConnectionManager::AutoStoreCursorItem(uint8 DestinationBag)
 {
+    if(HasCursorMerchantPayload()) return PlaceCursorIntoFirstFreeContainerSlot(DestinationBag);
     if (!HasCursorItemPayload())
     {
         RefreshItemCursor();
@@ -914,34 +943,18 @@ void UWowConnectionManager::SendLootItem(int32 LootSlot)
 
 void UWowConnectionManager::SendBuyItem(int64 VendorGuid, int32 ItemId, int32 Count)
 {
-    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
-
-    TArray<uint8> Data;
-    Data.Reserve(16);
-
-    // uint64 vendor_guid, uint32 item_id, uint8 count
-    uint64 VGuid = static_cast<uint64>(VendorGuid);
-    Data.SetNumUninitialized(8);
-    FMemory::Memcpy(Data.GetData(), &VGuid, 8);
-
-    uint32 IId = static_cast<uint32>(ItemId);
-    Data.SetNumUninitialized(Data.Num() + 4);
-    FMemory::Memcpy(Data.GetData() + 8, &IId, 4);
-
-    Data.Add(static_cast<uint8>(Count));
-
-    WorldSocket->SendPacket(WowOpcode::CMSG_BUY_ITEM, Data);
-    UE_LOG(LogWowNet, Log, TEXT("Buy item %d (count=%d) from vendor %lld"), ItemId, Count, VendorGuid);
+    if(uint64(VendorGuid)!=PacketHandler.Merchant.Guid || Count<1) return;
+    for(const auto& Item:PacketHandler.Merchant.Items) if(Item.ItemId==uint32(ItemId)) { SendBuyVendorSlot(Item.Slot,Count); return; }
 }
 
-void UWowConnectionManager::SendSellItem(int64 VendorGuid, int64 ItemGuid, uint8 Count)
+void UWowConnectionManager::SendSellItem(int64 VendorGuid, int64 ItemGuid, int32 Count)
 {
-    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame || Count<0) return;
 
     TArray<uint8> Data;
-    Data.Reserve(17);
+    Data.Reserve(20);
 
-    // uint64 vendor_guid, uint64 item_guid, uint8 count
+    // 12340: uint64 vendor, uint64 item, uint32 count (zero sells the stack).
     uint64 VGuid = static_cast<uint64>(VendorGuid);
     Data.SetNumUninitialized(8);
     FMemory::Memcpy(Data.GetData(), &VGuid, 8);
@@ -950,7 +963,7 @@ void UWowConnectionManager::SendSellItem(int64 VendorGuid, int64 ItemGuid, uint8
     Data.SetNumUninitialized(Data.Num() + 8);
     FMemory::Memcpy(Data.GetData() + 8, &IGuid, 8);
 
-    Data.Add(Count);
+    const uint32 WireCount=uint32(Count); Data.Append(reinterpret_cast<const uint8*>(&WireCount),sizeof(WireCount));
 
     WorldSocket->SendPacket(WowOpcode::CMSG_SELL_ITEM, Data);
     UE_LOG(LogWowNet, Log, TEXT("Sell item %lld (count=%d) to vendor %lld"), ItemGuid, Count, VendorGuid);
@@ -1525,6 +1538,9 @@ void UWowConnectionManager::Disconnect()
     }
 
     PacketHandler.EntityManager.Clear();
+    PacketHandler.Merchant.Clear();
+    RepairCursor=false; PacketHandler.GuildCanRepair=false; PacketHandler.GuildRepairRequested=false; PacketHandler.GuildRepairId=0; PacketHandler.GuildWithdrawMoney=0; PacketHandler.GuildRoster.Reset(); PacketHandler.GuildRankAccess.Reset(); PacketHandler.GuildInfoText.Empty(); PacketHandler.ItemRefunds.Empty(); PacketHandler.RequestedItemRefunds.Empty(); PacketHandler.TotalPlayedTime=0; PacketHandler.PlayedTimeReceived=0; PacketHandler.PlayedTimeRequested=false;
+    PacketHandler.WeaponProficiency=PacketHandler.ArmorProficiency=0; PacketHandler.HasWeaponProficiency=PacketHandler.HasArmorProficiency=false;
     PacketHandler.CombatHistory.Reset();
     PacketHandler.OnLoginVerifyWorld.Clear();
     PacketHandler.OnSendPacket.Unbind();

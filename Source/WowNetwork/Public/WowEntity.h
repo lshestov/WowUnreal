@@ -107,6 +107,19 @@ struct FWowVendorItem
     uint32 ExtendedCost = 0;
 };
 
+struct FWowMerchantState
+{
+    uint64 Guid=0,Revision=0;
+    TArray<FWowVendorItem> Items;
+    bool Open=false;
+    void Clear() { Guid=0; Items.Empty(); Open=false; ++Revision; }
+};
+
+struct FWowItemRefundInfo
+{
+    uint32 Money=0,Honor=0,Arena=0,Items[5]={},Counts[5]={},PurchasePlayedTime=0;
+};
+
 // Mail attachment entry
 struct FWowMailAttachment
 {
@@ -239,6 +252,8 @@ struct FWowItemTemplate
 {
     uint32 Id=0, Class=0, Subclass=0, DisplayId=0, Quality=0, InventoryType=0, RequiredLevel=0;
     uint32 Flags=0, SellPrice=0, ItemLevel=0, MaxStack=1, ContainerSlots=0, Armor=0, Delay=0, MaxDurability=0, BagFamily=0;
+    uint32 Flags2=0,BuyPrice=0,AllowableClass=MAX_uint32,AllowableRace=MAX_uint32;
+    uint32 RequiredSkill=0,RequiredSkillRank=0,RequiredSpell=0,RequiredReputationFaction=0,RequiredReputationRank=0,Bonding=0;
     float DamageMin=0, DamageMax=0;
     TArray<TPair<uint32,int32>> Stats;
     uint32 UseSpellId=0;
@@ -1099,9 +1114,16 @@ struct FWowGuildMember
     uint8 Class = 0;
     uint32 ZoneId = 0;
     uint8 RankId = 0;
+    uint8 Gender=0;
+    float DaysOffline=0;
     FString RankName;
     FString PublicNote;
     FString OfficerNote;
+};
+
+struct FWowGuildRankAccess
+{
+    uint32 Rights=0,GoldPerDay=0,TabRights[6]={},TabSlots[6]={};
 };
 
 // Group/Party member information

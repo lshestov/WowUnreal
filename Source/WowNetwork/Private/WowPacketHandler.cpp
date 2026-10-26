@@ -46,6 +46,9 @@ FWowPacketHandler::FWowPacketHandler()
 
     // Vendor system handlers
     Handlers.Add(WowOpcode::SMSG_LIST_INVENTORY,           &FWowPacketHandler::HandleListInventory);
+    Handlers.Add(WowOpcode::SMSG_BUY_ITEM,&FWowPacketHandler::HandleBuyItemResult);
+    Handlers.Add(WowOpcode::SMSG_BUY_FAILED,&FWowPacketHandler::HandleBuyItemFailure);
+    Handlers.Add(WowOpcode::SMSG_SELL_ITEM,&FWowPacketHandler::HandleSellItemResult);
 
     // Quest system handlers
     Handlers.Add(WowOpcode::SMSG_QUESTGIVER_STATUS,        &FWowPacketHandler::HandleQuestgiverStatus);
@@ -65,6 +68,8 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(WowOpcode::SMSG_FRIEND_LIST,              &FWowPacketHandler::HandleFriendList);
     Handlers.Add(WowOpcode::SMSG_FRIEND_STATUS,            &FWowPacketHandler::HandleFriendStatus);
     Handlers.Add(WowOpcode::SMSG_GUILD_ROSTER,             &FWowPacketHandler::HandleGuildRoster);
+    Handlers.Add(0x04B2,&FWowPacketHandler::HandleItemRefundInfo);
+    Handlers.Add(0x04B5,&FWowPacketHandler::HandleItemRefundResult);
     Handlers.Add(WowOpcode::SMSG_GUILD_EVENT,              &FWowPacketHandler::HandleGuildEvent);
     Handlers.Add(WowOpcode::SMSG_CHANNEL_NOTIFY,           &FWowPacketHandler::HandleChannelNotify);
     Handlers.Add(WowOpcode::SMSG_GROUP_LIST,               &FWowPacketHandler::HandleGroupList);
@@ -197,6 +202,17 @@ void FWowPacketHandler::HandlePacket(uint16 Opcode, const TArray<uint8>& Data)
         FPacketReader R(Data); if(R.CanRead(9)) { R.ReadFloat(); R.ReadU8(); const uint32 Count=R.ReadU32(); if(Count<=128 && R.CanRead(Count*8)) for(uint32 N=0;N<Count;++N) { const uint32 I=R.ReadU32(); const int32 Standing=int32(R.ReadU32()); if(Reputations.IsValidIndex(I)) Reputations[I].Standing=Standing; } }
     }
     HandlerFunc* Found = Handlers.Find(Opcode);
+    if(Opcode==0x03FE && Data.Num()>=4)
+    {
+        FPacketReader Withdraw(Data); const uint32 Money=Withdraw.ReadU32(); GuildWithdrawMoney=Money==MAX_uint32?-1:int64(Money); OnVendorUpdated.Broadcast();
+    }
+    if(Opcode==0x0127 && Data.Num()>=5)
+    {
+        FPacketReader Proficiency(Data); const uint8 Class=Proficiency.ReadU8(); const uint32 Mask=Proficiency.ReadU32();
+        if(Class==2) { WeaponProficiency=Mask; HasWeaponProficiency=true; }
+        else if(Class==4) { ArmorProficiency=Mask; HasArmorProficiency=true; }
+        OnPlayerInventoryUpdate.Broadcast();
+    }
     if (Found)
     {
         FPacketReader R(Data);
@@ -1350,16 +1366,14 @@ void FWowPacketHandler::HandleInventoryChangeFailure(FPacketReader& R)
 }
 
 // ── SMSG_LIST_INVENTORY ──────────────────────────────────────────────────────
-// packed guid vendor_guid, uint8 item_count, for each item: uint32 slot + uint32 itemid + uint32 displayid + uint32 maxcount + uint32 price + uint32 maxdurability + uint32 buycount + uint32 extendedcost
+// full uint64 vendor_guid, uint8 item_count, then eight uint32 fields per item.
 
 void FWowPacketHandler::HandleListInventory(FPacketReader& R)
 {
-    if (!R.CanRead(2)) return; // minimum: packed guid + item count
-
-    uint64 VendorGuid = R.ReadPackedGuid();
-
-    if (!R.CanRead(1)) return;
+    if (!R.CanRead(9)) return;
+    uint64 VendorGuid = R.ReadU64();
     uint8 ItemCount = R.ReadU8();
+    if(!VendorGuid || !R.CanRead(ItemCount*32)) return;
 
     TArray<FWowVendorItem> Items;
     Items.Reserve(ItemCount);
@@ -1382,8 +1396,8 @@ void FWowPacketHandler::HandleListInventory(FPacketReader& R)
     }
 
     UE_LOG(LogWowPacket, Log, TEXT("LIST_INVENTORY: vendor=%llu items=%d"), VendorGuid, ItemCount);
-
-    OnVendorOpened.Broadcast(VendorGuid, Items);
+    Merchant.Guid=VendorGuid; Merchant.Items=MoveTemp(Items); Merchant.Open=true; ++Merchant.Revision;
+    OnVendorOpened.Broadcast(VendorGuid, Merchant.Items);
 }
 
 // ── ──────────────────────────────────────────────────────────────────────────
@@ -1460,57 +1474,35 @@ void FWowPacketHandler::HandleFriendStatus(FPacketReader& R)
 
 void FWowPacketHandler::HandleGuildRoster(FPacketReader& R)
 {
-    if (!R.CanRead(4)) return;
-
-    uint32 MemberCount = R.ReadU32();
-    GuildMotd = R.ReadCString();
-    FString GuildInfo = R.ReadCString();
-
-    if (!R.CanRead(4)) return;
-    uint32 RankCount = R.ReadU32();
-
-    UE_LOG(LogWowPacket, Log, TEXT("GUILD_ROSTER: %d members, %d ranks"), MemberCount, RankCount);
-    UE_LOG(LogWowPacket, Verbose, TEXT("  MOTD: %s"), *GuildMotd);
-
-    // Read rank data (rights and gold limits)
-    for (uint32 i = 0; i < RankCount && R.CanRead(8); ++i)
+    if(!R.CanRead(4)) return;
+    const uint32 Members=R.ReadU32(); if(Members>5000) return;
+    const auto ReadText=[&](FString& Out) { const int32 Start=R.Pos; Out=R.ReadCString(); return R.Pos>Start && R.Data[R.Pos-1]==0; };
+    FString Motd,Info; if(!ReadText(Motd) || !ReadText(Info) || !R.CanRead(4)) return;
+    const uint32 RankCount=R.ReadU32(); if(RankCount>10 || !R.CanRead(RankCount*56)) return;
+    TArray<FWowGuildRankAccess> Ranks;
+    for(uint32 I=0;I<RankCount;++I)
     {
-        uint32 Rights = R.ReadU32();
-        uint32 GoldLimit = R.ReadU32();
-        // Store rank info if needed later
+        FWowGuildRankAccess Rank; Rank.Rights=R.ReadU32(); Rank.GoldPerDay=R.ReadU32();
+        for(int32 Tab=0;Tab<6;++Tab) { Rank.TabRights[Tab]=R.ReadU32(); Rank.TabSlots[Tab]=R.ReadU32(); }
+        Ranks.Add(Rank);
     }
-
-    GuildRoster.Empty(MemberCount);
-
-    // Read member data
-    for (uint32 i = 0; i < MemberCount; ++i)
+    TArray<FWowGuildMember> Rows;
+    for(uint32 I=0;I<Members;++I)
     {
-        if (!R.CanRead(9)) break; // minimum: guid + status
-
-        FWowGuildMember Member;
-        Member.Guid = R.ReadU64();
-        Member.Status = R.ReadU8();
-        Member.Name = R.ReadCString();
-
-        if (!R.CanRead(11)) break; // rankId + level + class + gender + zoneId
-        Member.RankId = R.ReadU32();
-        Member.Level = R.ReadU8();
-        Member.Class = R.ReadU8();
-        uint8 Gender = R.ReadU8(); // not stored in member struct
-        Member.ZoneId = R.ReadU32();
-
-        Member.PublicNote = R.ReadCString();
-        Member.OfficerNote = R.ReadCString();
-
-        GuildRoster.Add(Member);
-
-        UE_LOG(LogWowPacket, Verbose, TEXT("  Member: %s (level %d) rank=%d zone=%d"),
-               *Member.Name, Member.Level, Member.RankId, Member.ZoneId);
+        if(!R.CanRead(9)) return;
+        FWowGuildMember Member; Member.Guid=R.ReadU64(); Member.Status=R.ReadU8();
+        if(!ReadText(Member.Name) || !R.CanRead(11)) return;
+        const uint32 Rank=R.ReadU32(); if(Rank>=RankCount) return;
+        Member.RankId=uint8(Rank); Member.Level=R.ReadU8(); Member.Class=R.ReadU8(); Member.Gender=R.ReadU8(); Member.ZoneId=R.ReadU32();
+        if(!Member.Status) { if(!R.CanRead(4)) return; Member.DaysOffline=R.ReadFloat(); }
+        if(!ReadText(Member.PublicNote) || !ReadText(Member.OfficerNote)) return;
+        Rows.Add(MoveTemp(Member));
     }
-
-    OnGuildRosterUpdated.Broadcast();
+    GuildRoster=MoveTemp(Rows); GuildRankAccess=MoveTemp(Ranks); GuildMotd=MoveTemp(Motd); GuildInfoText=MoveTemp(Info);
+    GuildCanRepair=false;
+    for(const auto& Member:GuildRoster) if(Member.Guid==EntityManager.LocalPlayerGuid && GuildRankAccess.IsValidIndex(Member.RankId)) GuildCanRepair=Member.RankId==0 || (GuildRankAccess[Member.RankId].Rights&0x00040000)!=0;
+    OnGuildRosterUpdated.Broadcast(); if(Merchant.Open) OnVendorUpdated.Broadcast();
 }
-
 // ── SMSG_GUILD_EVENT ────────────────────────────────────────────────────────
 // uint8 eventType, uint8 stringCount, then read each string
 
@@ -2585,6 +2577,7 @@ void FWowPacketHandler::HandlePlayedTime(FPacketReader& R)
     }
 
     uint32 TotalTime = R.ReadU32();
+    TotalPlayedTime=TotalTime; PlayedTimeReceived=FPlatformTime::Seconds(); PlayedTimeRequested=true;
     uint32 LevelTime = R.ReadU32();
     uint8 TriggerEvent = R.ReadU8();
 

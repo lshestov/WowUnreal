@@ -6,6 +6,7 @@
 #include "WowFrameXmlParser.h"
 #include "WowUiModelRenderer.h"
 #include "WowUiMapRenderer.h"
+#include "WowUiCursorRenderer.h"
 #include "WowAddonLoader.h"
 #include "LuaApi/LuaApiRegistry.h"
 #include "Mpq/MpqManager.h"
@@ -122,6 +123,7 @@ void UWowUIManager::InitializeCore()
 	WowLuaApi::SetContext(LuaVM->GetState(), UIContext);
 	ModelRenderer=MakeShared<FWowUiModelRenderer>(*FrameManager,*UIContext);
 	MapRenderer=MakeShared<FWowUiMapRenderer>(*FrameManager,*UIContext);
+    CursorRenderer=MakeShared<FWowUiCursorRenderer>(*FrameManager,*UIContext);
 	FrameManager->OnMapCommand=[this](int32 Command){ MapRenderer->Command(Command); };
 	FrameManager->OnPortrait=[this](const FString& Name,uint64 Guid){ ModelRenderer->Portrait(Name,Guid); };
 	FrameManager->OnUnitModel=[this](int64 Handle,uint64 Guid){ ModelRenderer->Model(Handle,Guid); };
@@ -138,6 +140,7 @@ void UWowUIManager::Deinitialize()
 {
 	ModelRenderer.Reset();
 	MapRenderer.Reset();
+    CursorRenderer.Reset();
 	if (NativeWindowRoot.IsValid() && GEngine && GEngine->GameViewport) GEngine->GameViewport->RemoveViewportWidgetContent(NativeWindowRoot.ToSharedRef());
 	NativeWindowRoot.Reset();
 	if (LuaVM && LuaVM->GetState())
@@ -441,6 +444,7 @@ void UWowUIManager::SetActorResolver(TFunction<AActor*(uint64)> Resolver)
 
 void UWowUIManager::TickWorldImages(UWorld* World)
 {
+    if(bUILoaded && CursorRenderer && LuaVM) CursorRenderer->Tick(LuaVM->GetState());
     if(ModelRenderer) ModelRenderer->Tick(World);
     if(MapRenderer) MapRenderer->Tick(World);
     const double Now=FPlatformTime::Seconds();
@@ -448,6 +452,7 @@ void UWowUIManager::TickWorldImages(UWorld* World)
     {
         NextItemComparisonUpdate=Now+.2; LuaVM->BeginCallback();
         WowLuaApi::UpdateItemComparisons(LuaVM->GetState());
+        WowLuaApi::UpdateMerchant(LuaVM->GetState());
     }
 }
 
@@ -457,13 +462,14 @@ void UWowUIManager::ProcessPendingReload()
 {
     if(!bReloadRequested || !bUILoaded || !RootCanvas || !LoadedMpq || !LoadedCache) return;
     bReloadRequested=false;
+    if(ConnectionManager) ConnectionManager->CloseMerchant();
     // Recreate the VM only after its active callback has returned to the game loop.
     FWowSavedVariables::SaveAll(LuaVM->GetState());
     auto Resolver=UIContext->ResolveActor;
     auto Rows=UIContext->SelectedRows;
     auto Action=FrameManager->OnSecureActionDispatch;
     auto Spell=FrameManager->OnSecureSpellDispatch;
-    ModelRenderer.Reset(); MapRenderer.Reset();
+    ModelRenderer.Reset(); MapRenderer.Reset(); CursorRenderer.Reset();
     RootCanvas->ClearChildren();
     WowLuaApi::ClearContext(LuaVM->GetState());
     delete UIContext; UIContext=nullptr;
@@ -484,6 +490,8 @@ void UWowUIManager::SetWorldUiVisible(bool Visible)
     if(RootCanvas) RootCanvas->SetVisibility(Visible?ESlateVisibility::SelfHitTestInvisible:ESlateVisibility::Collapsed);
     if(UIOverlay) UIOverlay->SetVisibility(Visible?EVisibility::SelfHitTestInvisible:EVisibility::Collapsed);
 }
+
+bool UWowUIManager::HasSoftwareCursor() const { return bUILoaded && UIContext && UIContext->SoftwareCursorVisible; }
 
 void UWowUIManager::ToggleCharacterPanel()
 {

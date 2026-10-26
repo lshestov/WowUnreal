@@ -243,6 +243,9 @@ namespace PlayerField
     inline constexpr uint16 BANK_SLOT_END = BANK_SLOT_START + 55;
     inline constexpr uint16 BANKBAG_SLOT_1 = BASE + 0x0136; // 14 uint32s (7 GUIDs)
     inline constexpr uint16 BANKBAG_SLOT_END = BANKBAG_SLOT_1 + 13;
+    inline constexpr uint16 BUYBACK_SLOT_START=BASE+0x0144;
+    inline constexpr uint16 BUYBACK_PRICE_START=BASE+0x041D;
+    inline constexpr uint16 BUYBACK_TIME_START=BASE+0x0429;
 
     inline constexpr uint16 END = BASE + 0x049A;
 }

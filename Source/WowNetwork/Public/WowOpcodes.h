@@ -174,7 +174,12 @@ namespace WowOpcode
     inline constexpr uint16 CMSG_SELL_ITEM               = 0x01A0;
     inline constexpr uint16 SMSG_SELL_ITEM               = 0x01A1;
     inline constexpr uint16 CMSG_BUY_ITEM                = 0x01A2;
-    inline constexpr uint16 SMSG_BUY_ITEM                = 0x01A2;
+    inline constexpr uint16 CMSG_LIST_INVENTORY          = 0x019E;
+    inline constexpr uint16 CMSG_BUY_ITEM_IN_SLOT         = 0x01A3;
+    inline constexpr uint16 SMSG_BUY_ITEM                = 0x01A4;
+    inline constexpr uint16 SMSG_BUY_FAILED              = 0x01A5;
+    inline constexpr uint16 CMSG_BUYBACK_ITEM            = 0x0290;
+    inline constexpr uint16 CMSG_REPAIR_ITEM             = 0x02A8;
 
     // NPC interaction opcodes
     inline constexpr uint16 CMSG_GOSSIP_HELLO            = 0x017B;

@@ -9,6 +9,8 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FOnEntityDestroyed, uint64 /*Guid*/);
 class WOWNETWORK_API FWowEntityManager
 {
 public:
+    /** Actual player slots and bag contents; cached buyback/mail items are excluded. */
+    TArray<const FWowItemEntity*> GetInventoryItems(bool IncludeBank=false) const;
     /** Get or create an entity by GUID */
     FWowEntity& GetOrCreate(uint64 Guid);
 

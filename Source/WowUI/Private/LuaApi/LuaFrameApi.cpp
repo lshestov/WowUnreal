@@ -3453,6 +3453,8 @@ static const luaL_Reg FrameMethods[] =
 	{"SetUnitAura", WowLuaApi::SetAuraTooltip},
 	{"SetInventoryItem", WowLuaApi::SetInventoryItemTooltip},
 	{"SetBagItem", WowLuaApi::SetBagItemTooltip},
+    {"SetMerchantItem",WowLuaApi::SetMerchantItemTooltip},
+    {"SetBuybackItem",WowLuaApi::SetBuybackItemTooltip},
 	{"SetAction", WowLuaApi::SetActionTooltip},
 	{"SetSpell", WowLuaApi::SetSpellTooltip},
 	{"SetSpellByID", WowLuaApi::SetSpellTooltip},

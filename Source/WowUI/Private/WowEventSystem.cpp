@@ -1748,8 +1748,8 @@ FString FWowEventSystem::OpcodeToEvent(uint16 Opcode)
 	case 0x0127: return TEXT("SKILL_LINES_CHANGED");             // SMSG_SET_PROFICIENCY
 
 	// Merchant / vendor
-	case 0x019F: return TEXT("MERCHANT_SHOW");                   // SMSG_LIST_INVENTORY
-	case 0x01B4: return TEXT("MERCHANT_CLOSED");
+    // Merchant callbacks fire after validated state, not directly from opcodes.
+    case 0x03FE: return TEXT("GUILDBANK_UPDATE_WITHDRAWMONEY");
 
 	// Friend list
 	case 0x0067: return TEXT("FRIENDLIST_UPDATE");               // SMSG_FRIEND_LIST (correct opcode)

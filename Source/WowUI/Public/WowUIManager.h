@@ -50,6 +50,7 @@ public:
 	TSharedPtr<FWowInventoryManager> GetInventoryManager() const { return InventoryManager; }
 
 	bool IsUILoaded() const { return bUILoaded; }
+    bool HasSoftwareCursor() const;
 
 	/** UI Window Management */
 	void ToggleBagWindow();
@@ -75,6 +76,7 @@ private:
 	TUniquePtr<FWowLuaVM> LuaVM;
 	TSharedPtr<class FWowUiModelRenderer> ModelRenderer;
 	TSharedPtr<class FWowUiMapRenderer> MapRenderer;
+    TSharedPtr<class FWowUiCursorRenderer> CursorRenderer;
 	TUniquePtr<FWowFrameManager> FrameManager;
 	TUniquePtr<FWowEventSystem> EventSystem;
 	TUniquePtr<FWowFontManager> FontManager;

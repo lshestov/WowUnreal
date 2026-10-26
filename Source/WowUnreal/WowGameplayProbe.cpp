@@ -422,6 +422,23 @@ struct FWowGameplayProbe
             Done=true;
             }
         }
+        else if(Op==TEXT("inspect_vendor"))
+        {
+            const auto& Merchant=Handler.Merchant;
+            if(Merchant.Open && Merchant.Guid==C.TargetGuid)
+            {
+                const int32 Expected=Step->GetIntegerField(TEXT("items"));
+                if(Merchant.Items.Num()!=Expected) { Failure=TEXT("Vendor item count differs from server fixture"); Finish(C,false); return; }
+                auto Row=MakeShared<FJsonObject>(); Row->SetStringField(TEXT("guid"),FString::Printf(TEXT("%llu"),Merchant.Guid));
+                TArray<TSharedPtr<FJsonValue>> Items;
+                for(const auto& Item:Merchant.Items)
+                {
+                    auto Value=MakeShared<FJsonObject>(); Value->SetNumberField(TEXT("slot"),Item.Slot); Value->SetNumberField(TEXT("id"),Item.ItemId); Value->SetNumberField(TEXT("price"),Item.Price); Value->SetNumberField(TEXT("bundle"),Item.BuyCount); Value->SetNumberField(TEXT("stock"),int32(Item.MaxCount));
+                    Items.Add(MakeShared<FJsonValueObject>(Value));
+                }
+                Row->SetArrayField(TEXT("items"),Items); Inspections->SetObjectField(TEXT("merchant"),Row); Done=true;
+            }
+        }
         else if(Op==TEXT("inspect_frame"))
         {
             const FString Name=Step->GetStringField(TEXT("name")); auto* Frames=C.UIManager->GetFrameManager(); const int64 Handle=Frames->FindFrame(Name);

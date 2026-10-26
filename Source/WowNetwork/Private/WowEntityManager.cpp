@@ -1,5 +1,19 @@
 #include "WowEntityManager.h"
 
+TArray<const FWowItemEntity*> FWowEntityManager::GetInventoryItems(bool IncludeBank) const
+{
+    TArray<const FWowItemEntity*> Items; const auto* Player=GetLocalPlayer(); if(!Player) return Items;
+    const auto Add=[&](uint64 Guid) { if(const auto* Item=FindItem(Guid)) Items.AddUnique(Item); };
+    for(int32 Slot=0;Slot<150;++Slot)
+    {
+        if((Slot>=39 && Slot<74 && !IncludeBank) || (Slot>=74 && Slot<86)) continue;
+        const uint64 Guid=Player->GetField64(PlayerField::INV_SLOT_HEAD+Slot*2); Add(Guid);
+        if((Slot>=19 && Slot<=22) || (IncludeBank && Slot>=67 && Slot<=73))
+            if(const auto* Bag=FindContainer(Guid)) for(int32 I=0;I<Bag->GetNumSlots();++I) Add(Bag->GetItemGuidAtSlot(I));
+    }
+    return Items;
+}
+
 namespace
 {
 EWowEntityKind ResolveEntityKind(uint32 TypeMask)

@@ -63,10 +63,6 @@ void FWowUiModelRenderer::Configure(const FString& Key,UImage* Image,uint64 Guid
             S.Material->SetTextureParameterValue(TEXT("Image"),S.Target.Get());
             S.Material->SetScalarParameterValue(TEXT("Circle"),Portrait?1:0);
         }
-        FSlateBrush Brush; Brush.DrawAs=ESlateBrushDrawType::Image;
-        Brush.SetResourceObject(S.Material.IsValid()?static_cast<UObject*>(S.Material.Get()):static_cast<UObject*>(S.Target.Get()));
-        Brush.ImageSize=FVector2D(Portrait?128:256,Portrait?128:384);
-        Image->SetBrush(Brush); Image->SetRenderOpacity(1); Image->SetColorAndOpacity(FLinearColor::White);
         if(Handle>=0)
         {
             const auto& View=Views.FindOrAdd(Handle); S.Yaw=FMath::RadiansToDegrees(View.Facing); S.Position=View.Position;
@@ -78,6 +74,13 @@ void FWowUiModelRenderer::Configure(const FString& Key,UImage* Image,uint64 Guid
             S.ModelScale=View.Scale>0?View.Scale:S.BaseModelScale;
         }
     }
+    // Stock panels temporarily replace portraits with static art (e.g. buyback).
+    // SetPortraitTexture must restore the capture even when the GUID is unchanged.
+    auto& Slot=*Owned;
+    FSlateBrush Brush; Brush.DrawAs=ESlateBrushDrawType::Image;
+    Brush.SetResourceObject(Slot.Material.IsValid()?static_cast<UObject*>(Slot.Material.Get()):static_cast<UObject*>(Slot.Target.Get()));
+    Brush.ImageSize=FVector2D(Portrait?128:256,Portrait?128:384);
+    Image->SetBrush(Brush); Image->SetRenderOpacity(1); Image->SetColorAndOpacity(FLinearColor::White);
     if(Owned->Guid!=Guid) { Owned->Guid=Guid; Owned->NextCapture=0; }
     Image->SetVisibility(Guid?ESlateVisibility::HitTestInvisible:ESlateVisibility::Collapsed);
 }

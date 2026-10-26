@@ -183,12 +183,14 @@ void FWowPacketHandler::HandleItemQueryResponse(FPacketReader& R)
     Item.Class=R.ReadU32(); Item.Subclass=R.ReadU32(); R.Skip(4);
     Item.Name=R.ReadCString(); R.ReadCString(); R.ReadCString(); R.ReadCString();
     if (!R.CanRead(44)) return;
-    Item.DisplayId=R.ReadU32(); Item.Quality=R.ReadU32(); Item.Flags=R.ReadU32(); R.Skip(8); Item.SellPrice=R.ReadU32();
-    Item.InventoryType=R.ReadU32(); R.Skip(8); Item.ItemLevel=R.ReadU32(); Item.RequiredLevel=R.ReadU32();
+    Item.DisplayId=R.ReadU32(); Item.Quality=R.ReadU32(); Item.Flags=R.ReadU32(); Item.Flags2=R.ReadU32(); Item.BuyPrice=R.ReadU32(); Item.SellPrice=R.ReadU32();
+    Item.InventoryType=R.ReadU32(); Item.AllowableClass=R.ReadU32(); Item.AllowableRace=R.ReadU32(); Item.ItemLevel=R.ReadU32(); Item.RequiredLevel=R.ReadU32();
     // The remainder follows AzerothCore's WotLK SMSG_ITEM_QUERY_SINGLE_RESPONSE.
     if (R.CanRead(44))
     {
-        R.Skip(32); Item.MaxStack=FMath::Max(int32(R.ReadU32()),1); Item.ContainerSlots=R.ReadU32();
+        Item.RequiredSkill=R.ReadU32(); Item.RequiredSkillRank=R.ReadU32(); Item.RequiredSpell=R.ReadU32(); R.Skip(8);
+        Item.RequiredReputationFaction=R.ReadU32(); Item.RequiredReputationRank=R.ReadU32(); R.Skip(4);
+        Item.MaxStack=FMath::Max(int32(R.ReadU32()),1); Item.ContainerSlots=R.ReadU32();
         const uint32 Stats=R.ReadU32();
         if (Stats>10 || !R.CanRead(Stats*8+261)) return;
         for(uint32 I=0; I<Stats; ++I) { const uint32 Type=R.ReadU32(); Item.Stats.Emplace(Type,int32(R.ReadU32())); }
@@ -199,7 +201,7 @@ void FWowPacketHandler::HandleItemQueryResponse(FPacketReader& R)
             const uint32 Spell=R.ReadU32(),Trigger=R.ReadU32(); R.Skip(16);
             if(Spell && (Trigger==0 || Trigger==5) && !Item.UseSpellId) Item.UseSpellId=Spell;
         }
-        R.Skip(4); Item.Description=R.ReadCString();
+        Item.Bonding=R.ReadU32(); Item.Description=R.ReadCString();
         if(!R.CanRead(64)) return;
         R.Skip(44); Item.MaxDurability=R.ReadU32(); R.Skip(8); Item.BagFamily=R.ReadU32();
     }

@@ -34,6 +34,7 @@
 #include "Formats/Dbc/CharacterFacialHairStylesDbc.h"
 #include "Formats/Dbc/CharStartOutfitDbc.h"
 #include "Formats/Dbc/TaxiNodesDbc.h"
+#include "Formats/Dbc/ItemUiDbc.h"
 
 class FMpqManager;
 
@@ -44,6 +45,7 @@ public:
 
     bool LoadAll(FMpqManager& Mpq);
     void LoadDeferred(FMpqManager& Mpq);
+    const FItemUiDbc& ItemUi() const { return ItemUiDbc; }
     float StatRatio(FName Table,uint32 Id) const { const auto* Values=StatRatios.Find(Table); const auto* Value=Values?Values->Find(Id):nullptr; return Value?*Value:0.f; }
     struct FTitle { uint32 Mask=0; FString Male,Female; };
     const FTitle* Title(uint32 Mask) const { return Titles.Find(Mask); }
@@ -191,6 +193,7 @@ private:
     FCharacterFacialHairStylesDbc CharacterFacialHairStylesDbc;
     FCharStartOutfitDbc CharStartOutfitDbc;
     FTaxiNodesDbc TaxiNodesDbc;
+    FItemUiDbc ItemUiDbc;
     TMap<uint32,FGlyph> GlyphProperties;
     TMap<uint32,FGlyphSlot> GlyphSlots;
     bool bLoaded = false;

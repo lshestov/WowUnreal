@@ -1,4 +1,9 @@
 #include "WowConnectionManager.h"
+
+uint32 UWowConnectionManager::GetCursorItemCount() const
+{
+    const auto* Item=GetCursorItem(); return Item?(CursorPayload.SplitCount?CursorPayload.SplitCount:uint32(FMath::Max(1,Item->GetStackCount()))):0;
+}
 #include "WowUpdateFields.h"
 
 const FWowItemEntity* UWowConnectionManager::ResolveCursorSource(uint8 Bag,uint8 Slot) const
@@ -25,4 +30,5 @@ const FWowItemEntity* UWowConnectionManager::GetCursorItem() const
 void UWowConnectionManager::RefreshItemCursor()
 {
     if(CursorPayload.Type==ECursorPayloadType::Item && !GetCursorItem()) ClearCursorPayload();
+    if(CursorPayload.Type==ECursorPayloadType::Merchant && !HasCursorMerchantPayload()) ClearCursorPayload();
 }
