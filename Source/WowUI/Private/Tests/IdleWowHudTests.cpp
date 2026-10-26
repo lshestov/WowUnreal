@@ -642,6 +642,44 @@ bool FHudInventoryItems::RunTest(const FString&)
     TestTrue(TEXT("Server display resolves an existing MPQ icon"),Display && F.Frames.LoadUITexture(TEXT("Interface\\Icons\\")+Display->Icon1));
     return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudNestedVirtualFrames,"WowUnreal.Hud.NestedVirtualFrames",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudNestedVirtualFrames::RunTest(const FString&)
+{
+    FHudFixture F;
+    FWowFrameDef Parent; Parent.Name=TEXT("NestedVirtualParent"); Parent.Parent=TEXT("UIParent"); Parent.Width=300; Parent.Height=100;
+    FWowFrameDef Child; Child.Name=TEXT("NestedVirtualPurchase"); Child.Type=EWowFrameType::Button; Child.bVirtual=true; Child.Width=120; Child.Height=20;
+    Child.Scripts.Add({TEXT("OnLoad"),TEXT("self.ready=true"),TEXT("")}); Parent.Children.Add(Child);
+    F.Frames.CreateFrame(Parent); const auto Handle=F.Frames.FindFrame(Child.Name);
+    TestTrue(TEXT("A nested virtual attribute does not suppress the concrete widget"),Handle>=0 && F.Frames.GetWidgetForHandle(Handle)!=nullptr);
+    TestTrue(TEXT("Nested child scripts run on its real Lua object"),F.Lua.ExecuteString(TEXT("assert(NestedVirtualPurchase.ready and NestedVirtualPurchase:GetParent()==NestedVirtualParent)")));
+    FWowFrameDef Template; Template.Name=TEXT("TopLevelVirtualOnly"); Template.bVirtual=true;
+    const auto TemplateHandle=F.Frames.CreateFrame(Template);
+    TestTrue(TEXT("Top-level virtual frames remain templates without widgets"),F.Frames.GetWidgetForHandle(TemplateHandle)==nullptr);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudBankApi,"WowUnreal.Hud.BankApi",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudBankApi::RunTest(const FString&)
+{
+    FHudFixture F; TStrongObjectPtr<UWowConnectionManager> Connection(NewObject<UWowConnectionManager>());
+    auto& H=Connection->PacketHandler; H.EntityManager.LocalPlayerGuid=1; H.EntityManager.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER);
+    F.Context.ConnectionManager=Connection.Get(); F.Context.EntityManager=&H.EntityManager; H.CurrentBankerGuid=1;
+    TestTrue(TEXT("Stock bank IDs distinguish generic, worn-bag and bank-bag slots"),F.Lua.ExecuteString(TEXT(R"LUA(
+        assert(BankButtonIDToInvSlotID(1)==40 and BankButtonIDToInvSlotID(28)==67)
+        assert(BankButtonIDToInvSlotID(5,1)==68 and BankButtonIDToInvSlotID(11,1)==74)
+        assert(GetInventorySlotInfo('Bag0Slot')==20 and GetInventorySlotInfo('Bag3Slot')==23)
+        assert(GetInventorySlotInfo('Bag1')==68 and GetInventorySlotInfo('Bag7')==74)
+        assert(GetNumBankSlots()==0 and not select(2,GetNumBankSlots()))
+        assert(not PutItemInBag(68)); CloseBankFrame(); CloseBankFrame()
+    )LUA")));
+    TestEqual(TEXT("Repeated close is idempotent"),H.CurrentBankerGuid,uint64(0));
+    auto* Player=H.EntityManager.GetLocalPlayer(); Player->SetField(PlayerField::BYTES_2,1u<<16);
+    TestTrue(TEXT("Original APIs expose purchased slots from server fields"),F.Lua.ExecuteString(TEXT("assert(GetNumBankSlots()==1 and not select(2,GetNumBankSlots()))")));
+    Player->SetField(PlayerField::BYTES_2,7u<<16);
+    TestTrue(TEXT("The server's seventh purchased slot hides further purchases"),F.Lua.ExecuteString(TEXT("assert(GetNumBankSlots()==7 and select(2,GetNumBankSlots()))")));
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudMerchantApi,"WowUnreal.Hud.MerchantApi",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FHudMerchantApi::RunTest(const FString&)
 {

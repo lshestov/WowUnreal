@@ -26,6 +26,7 @@ void WowLuaApi::RegisterAll(lua_State* L)
     RegisterStubs(L);
     RegisterItemApi(L);
     RegisterMerchantApi(L);
+    RegisterBankApi(L);
     RegisterCursorApi(L);
     RegisterSpellApi(L);
     RegisterClassApi(L);

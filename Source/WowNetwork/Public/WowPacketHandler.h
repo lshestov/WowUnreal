@@ -164,6 +164,7 @@ public:
     FWowLootState Loot;
     TMap<uint32,FWowItemTemplate> ItemTemplates;
     FWowMerchantState Merchant;
+    uint64 CurrentBankerGuid=0;
     TMap<uint64,FWowItemRefundInfo> ItemRefunds;
     TSet<uint64> RequestedItemRefunds;
     uint32 TotalPlayedTime=0;
@@ -281,6 +282,8 @@ public:
     FOnDuelUpdated OnDuelUpdated;
     FOnPetBarUpdated OnPetBarUpdated;
     FOnBankOpened OnBankOpened;
+    DECLARE_MULTICAST_DELEGATE_OneParam(FBankSlotResult,uint32);
+    FBankSlotResult OnBankSlotResult;
     FOnQuestDialog OnQuestDialog;
     FOnQuestRewardDialog OnQuestRewardDialog;
     FOnQuestAccepted OnQuestAccepted;

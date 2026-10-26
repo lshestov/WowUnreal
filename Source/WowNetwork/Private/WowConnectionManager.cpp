@@ -128,7 +128,7 @@ void UWowConnectionManager::SelectRealm(int32 I)
             PacketHandler.KnownSpells.Reset(); PacketHandler.ActionButtons.Reset(); PacketHandler.QuestLog.Reset(); PacketHandler.ResetTalentState(); PacketHandler.Reputations.Reset();
             PacketHandler.SpellCooldowns.Reset(); PacketHandler.SpellCooldownInfo.Reset(); PacketHandler.CombatHistory.Reset();
             PacketHandler.GroupInfo=FWowGroupInfo(); PacketHandler.PetActionBar=FWowPetActionBarState();
-            PacketHandler.Merchant.Clear();
+            PacketHandler.Merchant.Clear(); PacketHandler.CurrentBankerGuid=0;
             RepairCursor=false; PacketHandler.GuildCanRepair=false; PacketHandler.GuildRepairRequested=false; PacketHandler.GuildRepairId=0; PacketHandler.GuildWithdrawMoney=0; PacketHandler.GuildRoster.Reset(); PacketHandler.GuildRankAccess.Reset(); PacketHandler.GuildInfoText.Empty(); PacketHandler.ItemRefunds.Empty(); PacketHandler.RequestedItemRefunds.Empty(); PacketHandler.TotalPlayedTime=0; PacketHandler.PlayedTimeReceived=0; PacketHandler.PlayedTimeRequested=false;
             PacketHandler.WeaponProficiency=PacketHandler.ArmorProficiency=0; PacketHandler.HasWeaponProficiency=PacketHandler.HasArmorProficiency=false;
             RequestCharacterList(); return;
@@ -622,6 +622,7 @@ bool UWowConnectionManager::PlaceCursorIntoActionSlot(int32 SlotIndex)
 
 bool UWowConnectionManager::PlaceCursorIntoContainerSlot(uint8 DestinationBag, uint8 DestinationSlot)
 {
+    if(((DestinationBag==255 && DestinationSlot>=39 && DestinationSlot<74) || (DestinationBag>=67 && DestinationBag<=73)) && !PacketHandler.CurrentBankerGuid) return false;
     if(HasCursorMerchantPayload())
     {
         if(!SendBuyVendorSlotIntoBag(CursorPayload.SourceVendorSlot,1,DestinationBag,DestinationSlot)) return false;
@@ -671,7 +672,7 @@ bool UWowConnectionManager::PlaceCursorIntoFirstFreeContainerSlot(uint8 Destinat
         return false;
     }
 
-    const uint64 BagGuid = DestinationBag>=19 && DestinationBag<=22?Player->GetBagGuid(DestinationBag-18):0;
+    const uint64 BagGuid = DestinationBag>=19 && DestinationBag<=22?Player->GetBagGuid(DestinationBag-18):DestinationBag>=67 && DestinationBag<=73 && PacketHandler.CurrentBankerGuid?Player->GetBankBagGuid(DestinationBag-67):0;
     if (BagGuid == 0)
     {
         return false;
@@ -1538,7 +1539,7 @@ void UWowConnectionManager::Disconnect()
     }
 
     PacketHandler.EntityManager.Clear();
-    PacketHandler.Merchant.Clear();
+    PacketHandler.Merchant.Clear(); PacketHandler.CurrentBankerGuid=0;
     RepairCursor=false; PacketHandler.GuildCanRepair=false; PacketHandler.GuildRepairRequested=false; PacketHandler.GuildRepairId=0; PacketHandler.GuildWithdrawMoney=0; PacketHandler.GuildRoster.Reset(); PacketHandler.GuildRankAccess.Reset(); PacketHandler.GuildInfoText.Empty(); PacketHandler.ItemRefunds.Empty(); PacketHandler.RequestedItemRefunds.Empty(); PacketHandler.TotalPlayedTime=0; PacketHandler.PlayedTimeReceived=0; PacketHandler.PlayedTimeRequested=false;
     PacketHandler.WeaponProficiency=PacketHandler.ArmorProficiency=0; PacketHandler.HasWeaponProficiency=PacketHandler.HasArmorProficiency=false;
     PacketHandler.CombatHistory.Reset();

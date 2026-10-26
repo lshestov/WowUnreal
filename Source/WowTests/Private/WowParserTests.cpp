@@ -773,6 +773,38 @@ bool FMerchantPackets::RunTest(const FString&)
     TestFalse(TEXT("Rejected operations queued no extra packet"),WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload));
     return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBankPackets,"WowUnreal.UI.BankPackets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FBankPackets::RunTest(const FString&)
+{
+    auto* Connection=NewObject<UWowConnectionManager>(); const auto Socket=WowTestUtils::AttachTestWorldSocket(*Connection,0);
+    auto& H=Connection->PacketHandler; auto& E=H.EntityManager; E.LocalPlayerGuid=1;
+    auto& P=E.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER);
+    constexpr uint64 ItemGuid=0x4000000000000088ull;
+    auto& Item=E.PromoteToTyped(ItemGuid,WowTypeMask::OBJECT|WowTypeMask::ITEM); Item.Entry=2589; Item.SetField(ItemField::STACK_COUNT,5);
+    WowTestUtils::SetGuidField64(P,PlayerField::PACK_SLOT_START,ItemGuid);
+    uint32 Opcode=0; TArray<uint8> Payload;
+    TestFalse(TEXT("Closed banks cannot accept automatic moves or bag purchases"),Connection->SendBankItem(255,23,true) || Connection->SendBuyBankSlot());
+    TArray<uint8> Open; const uint64 Banker=0xF130000012345678ull; Open.Append(reinterpret_cast<const uint8*>(&Banker),8);
+    bool Observed=false; H.OnBankOpened.AddLambda([&](uint64 Guid){ Observed=Guid==Banker && H.CurrentBankerGuid==Banker; });
+    H.HandlePacket(WowOpcode::SMSG_SHOW_BANK,Open); TestTrue(TEXT("Bank identity is ready before the original UI event"),Observed);
+    TestTrue(TEXT("Deposit queues only bag and slot"),Connection->SendBankItem(255,23,true) && WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload) && Opcode==0x0283 && Payload==TArray<uint8>({255,23}));
+    TestTrue(TEXT("Deposit leaves authoritative inventory unchanged"),P.GetField64(PlayerField::PACK_SLOT_START)==ItemGuid);
+    WowTestUtils::SetGuidField64(P,PlayerField::PACK_SLOT_START,0); WowTestUtils::SetGuidField64(P,PlayerField::BANK_SLOT_START,ItemGuid);
+    TestTrue(TEXT("Withdrawal uses the physical bank slot"),Connection->SendBankItem(255,39,false) && WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload) && Opcode==0x0282 && Payload==TArray<uint8>({255,39}));
+    TestTrue(TEXT("Bag-slot purchase includes full banker GUID"),Connection->SendBuyBankSlot() && WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload) && Opcode==0x01B9 && Payload==Open);
+    TestEqual(TEXT("A purchase request cannot optimistically grant a bank slot"),E.GetLocalPlayer()->GetBankBagSlotCount(),uint8(0));
+    uint32 Result=MAX_uint32; H.OnBankSlotResult.AddLambda([&](uint32 Code){ Result=Code; });
+    H.HandlePacket(0x01BA,{1,0,0}); TestEqual(TEXT("Truncated results cannot notify the bank UI"),Result,MAX_uint32);
+    H.HandlePacket(0x01BA,{1,0,0,0}); TestEqual(TEXT("Insufficient funds retains its separate error code"),Result,1u);
+    P.SetField(PlayerField::BYTES_2,1u<<16); // An authoritative player-field update.
+    H.HandlePacket(0x01BA,{3,0,0,0});
+    TestTrue(TEXT("Successful server acknowledgement sees the updated bank-slot count"),Result==3 && E.GetLocalPlayer()->GetBankBagSlotCount()==1);
+    Connection->PickupBagItemCursor(255,39,2589); TestTrue(TEXT("Open bank can hold a bank stack"),Connection->HasCursorItemPayload());
+    Connection->CloseBank(); TestTrue(TEXT("Closing invalidates cached bank selections"),!Connection->HasCursorItemPayload() && !H.CurrentBankerGuid);
+    TestFalse(TEXT("Closed bank cannot pick its cached items"),Connection->SendBankItem(255,39,false));
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMerchantGuildState,"WowUnreal.UI.MerchantGuildState",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FMerchantGuildState::RunTest(const FString&)
 {

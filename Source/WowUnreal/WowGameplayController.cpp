@@ -439,6 +439,7 @@ void AWowGameplayController::BindEntityEvents()
 		{
             if(UIManager && UIManager->IsUILoaded())
             {
+                if(ConnectionManager->PacketHandler.CurrentBankerGuid) { ConnectionManager->CloseBank(); FireUIEvent(TEXT("BANKFRAME_CLOSED")); }
                 for(const auto& Item:Items) ConnectionManager->RequestItemTemplate(Item.ItemId);
                 FireUIEvent(TEXT("MERCHANT_SHOW")); return;
             }
@@ -503,6 +504,12 @@ void AWowGameplayController::BindEntityEvents()
 	ConnectionManager->PacketHandler.OnBankOpened.AddLambda(
 		[this](uint64 BankerGuid)
 		{
+
+            if(UIManager && UIManager->IsUILoaded())
+            {
+                if(ConnectionManager->PacketHandler.Merchant.Open) { ConnectionManager->CloseMerchant(); FireUIEvent(TEXT("MERCHANT_CLOSED")); }
+                FireUIEvent(TEXT("BANKFRAME_OPENED")); return;
+            }
 			if (UIManager)
 			{
 				UIManager->ShowBankWindow();
@@ -510,6 +517,13 @@ void AWowGameplayController::BindEntityEvents()
 
 			UE_LOG(LogWowGameplay, Log, TEXT("Opened bank window for banker %llu"), BankerGuid);
 		});
+    ConnectionManager->PacketHandler.OnBankSlotResult.AddLambda([this](uint32 Result)
+    {
+        if(Result==3) { FireUIEvent(TEXT("PLAYERBANKBAGSLOTS_CHANGED")); return; }
+        const TCHAR* Key=Result==0?TEXT("ERR_BANKSLOT_FAILED_TOO_MANY"):Result==1?TEXT("ERR_BANKSLOT_INSUFFICIENT_FUNDS"):TEXT("ERR_BANKSLOT_NOTBANKER");
+        const auto* Events=UIManager?UIManager->GetEventSystem():nullptr;
+        FireUIEvent(TEXT("UI_ERROR_MESSAGE"),{Events?Events->ResolveText(Key):Key});
+    });
 
 	ConnectionManager->PacketHandler.OnQuestDialog.AddLambda(
 		[this](const FWowQuestDetails& QuestDetails)
@@ -4594,6 +4608,11 @@ void AWowGameplayController::OnPlayerInventoryUpdated()
 	FireUIEvent(TEXT("UNIT_INVENTORY_CHANGED"),{TEXT("player")});
 	FireUIEvent(TEXT("UPDATE_INVENTORY_DURABILITY"));
     if(ConnectionManager && ConnectionManager->PacketHandler.Merchant.Open) FireUIEvent(TEXT("MERCHANT_UPDATE"));
+    if(ConnectionManager && ConnectionManager->PacketHandler.CurrentBankerGuid && UIManager && UIManager->GetEventSystem())
+    {
+        for(int32 Slot=1;Slot<=35;++Slot) UIManager->GetEventSystem()->FireEventNumbers(TEXT("PLAYERBANKSLOTS_CHANGED"),{double(Slot)});
+        FireUIEvent(TEXT("PLAYERBANKBAGSLOTS_CHANGED"));
+    }
 }
 
 void AWowGameplayController::OnUnitHealthUpdate(uint64 EntityGuid)

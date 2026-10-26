@@ -164,7 +164,7 @@ static uint64 ResolveDirectUnitGuid(const FWowLuaContext* Ctx, const FString& Un
     if(UnitToken.Equals(TEXT("npc"),ESearchCase::IgnoreCase) && Ctx->ConnectionManager)
     {
         const auto& Handler=Ctx->ConnectionManager->PacketHandler;
-        return Handler.Merchant.Open?Handler.Merchant.Guid:Handler.GossipMenu.Guid;
+        return Handler.Merchant.Open?Handler.Merchant.Guid:Handler.CurrentBankerGuid?Handler.CurrentBankerGuid:Handler.GossipMenu.Guid;
     }
 
     if (UnitToken.Equals(TEXT("focus"), ESearchCase::IgnoreCase))
@@ -4223,7 +4223,7 @@ static int L_GetInventorySlotInfo(lua_State* L)
     else if (strcmp(slotName, "RangedSlot") == 0) { slotId = 18; tex = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Ranged"; }
     else if (strcmp(slotName, "TabardSlot") == 0) { slotId = 19; tex = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Tabard"; }
     else if (strcmp(slotName, "AmmoSlot") == 0) { slotId = 0; tex = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Ammo"; }
-    else if (strncmp(slotName, "Bag", 3) == 0) { slotId = 20 + (slotName[3] - '0'); tex = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Bag"; }
+    else if (strncmp(slotName, "Bag", 3) == 0) { slotId = (FString(UTF8_TO_TCHAR(slotName)).EndsWith(TEXT("Slot"))?20:67) + (slotName[3] - '0'); tex = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Bag"; }
 
     lua_pushnumber(L, slotId);
     lua_pushstring(L, tex);

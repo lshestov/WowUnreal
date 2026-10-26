@@ -1664,6 +1664,9 @@ int64 FWowFrameManager::CreateFrame(const FWowFrameDef& Def)
 	for (const FWowFrameDef& ChildDef : Resolved.Children)
 	{
 		FWowFrameDef ChildWithParent = ChildDef;
+        // FrameXML only registers virtual templates at the document's top level.
+        // CSimpleFrame::LoadXML creates nested <Frames> children directly.
+        ChildWithParent.bVirtual=false;
 		if (ChildWithParent.Parent.IsEmpty() && !Resolved.Name.IsEmpty())
 		{
 			ChildWithParent.Parent = Resolved.Name;

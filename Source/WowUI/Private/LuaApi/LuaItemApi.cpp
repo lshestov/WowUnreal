@@ -222,7 +222,9 @@ int Use(lua_State* L)
     const int32 Bag=luaL_checkinteger(L,1),Slot=luaL_checkinteger(L,2); uint8 B,S;
     if(!Position(C,Bag,Slot,B,S)) return 0;
     auto* Item=BagItem(C,Bag,Slot); const auto* T=Item?Template(C,Item->Entry):nullptr;
+    if((Bag==-1 || (Bag>=5 && Bag<=11)) && !C->ConnectionManager->PacketHandler.CurrentBankerGuid) return 0;
     if(Item && C->ConnectionManager->IsRepairMode()) { C->ConnectionManager->SendRepairItems(Item->Guid); return 0; }
+    if(Item && C->ConnectionManager->PacketHandler.CurrentBankerGuid) { C->ConnectionManager->SendBankItem(B,S,Bag>=0 && Bag<=4); return 0; }
     if(Item && C->ConnectionManager->PacketHandler.Merchant.Open)
     {
         auto& H=C->ConnectionManager->PacketHandler;
@@ -464,6 +466,17 @@ int WowLuaApi::SetActionTooltip(lua_State* L)
 }
 void WowLuaApi::RegisterItemApi(lua_State* L)
 {
+    RegisterItem(L,"PickupBagFromSlot",[](lua_State* S)->int {
+        auto* C=GetContext(S); const int32 Slot=luaL_checkinteger(S,1);
+        if(C && C->ConnectionManager && ((Slot>=20 && Slot<=23) || (Slot>=68 && Slot<=74))) if(auto* Item=Equipped(C,Slot)) C->ConnectionManager->PickupBagItemCursor(255,uint8(Slot-1),Item->Entry,ItemLinkForUi(C,Item->Entry)); return 0;
+    });
+    RegisterItem(L,"PutItemInBag",[](lua_State* S)->int {
+        auto* C=GetContext(S); const int32 Slot=luaL_checkinteger(S,1); auto* N=C?C->ConnectionManager:nullptr;
+        const bool Valid=(Slot>=20 && Slot<=23) || (Slot>=68 && Slot<=74 && N && N->PacketHandler.CurrentBankerGuid);
+        const bool Held=N && N->HasCursorItemPayload();
+        if(Valid && Held) { if(Equipped(C,Slot)) N->PlaceCursorIntoFirstFreeContainerSlot(uint8(Slot-1)); else N->PlaceCursorIntoContainerSlot(255,uint8(Slot-1)); }
+        lua_pushboolean(S,Held); return 1;
+    });
     RegisterItem(L,"GetContainerItemPurchaseInfo",[](lua_State* S)->int {
         auto* C=GetContext(S); auto* Item=PurchaseItem(S,C,3); const auto* Info=RefundInfo(C,Item); if(!Info) return 0;
         int32 Count=0; for(uint32 Id:Info->Items) Count+=Id!=0;

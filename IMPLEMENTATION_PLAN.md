@@ -344,12 +344,12 @@ build, automation, native autologin and rendered screenshot verification):
     Verified 88 tests and native 20-step/four-image character/dress-up/book/menu
     regression: centered titles, left spell labels and visible equipment/empty-slot
     icons with positive geometry. Natural image dimensions remain correct.
-  - [?] Merchant protocol and authoritative cache: full GUIDs, sparse server slots,
+  - [x] Merchant protocol and authoritative cache: full GUIDs, sparse server slots,
     complete buy/buy-in-slot/buyback/repair requests, stock acknowledgements and
     separate buy/sell error results; direct interaction for plain vendor NPCs.
     Purchases use complete 21/29-byte requests; sales use uint32 counts (20 bytes),
     including stacks above 255. Stock and balances wait for server updates.
-  - [?] Original merchant window, purchase/sale/buyback/repair server state.
+  - [x] Original merchant window, purchase/sale/buyback/repair server state.
     Original goods, buyback, stack selection, target bag slots, repair cursor and
     individual/all/guild repair APIs use cached server items and DBC costs.
     Refund quotes retain sparse token costs and online-played-time expiry;
@@ -361,9 +361,26 @@ build, automation, native autologin and rendered screenshot verification):
     45-step/five-image buy/sell/buyback/buy-in-slot/cancel cycle and controlled
     individual repair of a temporary weapon. Server DB confirms original money,
     equipment, durability, bags and position restored; QA items removed.
-  - [ ] Original bank, mailbox and trade windows with authoritative round trips.
+  - [?] Original bank with authoritative deposit/withdraw, explicit slot drops,
+    split/merge, bag-slot prices and purchase confirmation/result handling.
+    Bind the server banker before opening FrameXML; support bank-bag inventory
+    IDs and reject cached bank operations after close. Stock numeric bank events
+    refresh icons/counts and slot availability. Nested virtual attributes no longer
+    suppress concrete child frames, restoring the stock Purchase button while
+    preserving top-level templates. Verified Windows build, 94 automation tests
+    plus focused server-acknowledgement regressions, and a native 38-step/five-image
+    bank-service cycle including the actual insufficient-funds response. Successful
+    purchase/full-slot updates are tested in isolation; the live bankSlots value
+    remains zero. Server DB confirms all original item GUIDs, counts, durability
+    and money unchanged, with an empty bank after the round trip.
+  - [ ] Original mailbox and authoritative send/read/take/return/delete handling.
+  - [ ] Original trade window and authoritative offer/accept/cancel round trips.
 - [ ] 5. Chat/combat/macros: hyperlinks, remaining combat events and macro execution families.
 - [ ] 6. Maps: points of interest, tracking, interior minimaps and original map bootstrap.
+  - [ ] Server near teleports: handle the actual 12340 MSG_MOVE_TELEPORT_ACK
+    request (packed GUID, order counter, MovementInfo) and reply with packed GUID;
+    update actor/camera and shared map position. Current legacy handler is bound
+    to other opcodes and misses same-map teleports, including GM verification.
 - [ ] 7. Group/special windows: party/loot, PvP, dungeon finder and achievements.
   - [ ] Restore NPC portrait captures and friendly NPC unit-frame reactions.
 

@@ -453,6 +453,7 @@ void UWowUIManager::TickWorldImages(UWorld* World)
         NextItemComparisonUpdate=Now+.2; LuaVM->BeginCallback();
         WowLuaApi::UpdateItemComparisons(LuaVM->GetState());
         WowLuaApi::UpdateMerchant(LuaVM->GetState());
+        WowLuaApi::UpdateBank(LuaVM->GetState());
     }
 }
 
@@ -463,6 +464,7 @@ void UWowUIManager::ProcessPendingReload()
     if(!bReloadRequested || !bUILoaded || !RootCanvas || !LoadedMpq || !LoadedCache) return;
     bReloadRequested=false;
     if(ConnectionManager) ConnectionManager->CloseMerchant();
+    if(ConnectionManager) ConnectionManager->CloseBank();
     // Recreate the VM only after its active callback has returned to the game loop.
     FWowSavedVariables::SaveAll(LuaVM->GetState());
     auto Resolver=UIContext->ResolveActor;

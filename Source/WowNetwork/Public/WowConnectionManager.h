@@ -100,6 +100,9 @@ public:
     const FWowItemEntity* GetCursorItem() const;
     uint32 GetCursorItemCount() const;
     void RequestItemRefundInfo(uint64 Guid);
+    bool SendBankItem(uint8 Bag,uint8 Slot,bool Deposit);
+    bool SendBuyBankSlot();
+    void CloseBank();
     bool SendItemRefund(uint64 Guid);
     void RefreshItemCursor();
     bool DropActionCursor();

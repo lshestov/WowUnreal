@@ -8,6 +8,7 @@ uint32 UWowConnectionManager::GetCursorItemCount() const
 
 const FWowItemEntity* UWowConnectionManager::ResolveCursorSource(uint8 Bag,uint8 Slot) const
 {
+    if(((Bag==255 && Slot>=39 && Slot<74) || (Bag>=67 && Bag<=73)) && !PacketHandler.CurrentBankerGuid) return nullptr;
     const auto& Entities=PacketHandler.EntityManager; const auto* Player=Entities.GetLocalPlayer(); if(!Player) return nullptr;
     uint64 Guid=0;
     if(Bag==255 && Slot<74) Guid=Player->GetField64(PlayerField::INV_SLOT_HEAD+uint16(Slot)*2);

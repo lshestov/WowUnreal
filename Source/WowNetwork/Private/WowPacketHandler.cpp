@@ -202,6 +202,7 @@ void FWowPacketHandler::HandlePacket(uint16 Opcode, const TArray<uint8>& Data)
         FPacketReader R(Data); if(R.CanRead(9)) { R.ReadFloat(); R.ReadU8(); const uint32 Count=R.ReadU32(); if(Count<=128 && R.CanRead(Count*8)) for(uint32 N=0;N<Count;++N) { const uint32 I=R.ReadU32(); const int32 Standing=int32(R.ReadU32()); if(Reputations.IsValidIndex(I)) Reputations[I].Standing=Standing; } }
     }
     HandlerFunc* Found = Handlers.Find(Opcode);
+    if(Opcode==0x01BA && Data.Num()>=4) { FPacketReader BankResult(Data); OnBankSlotResult.Broadcast(BankResult.ReadU32()); }
     if(Opcode==0x03FE && Data.Num()>=4)
     {
         FPacketReader Withdraw(Data); const uint32 Money=Withdraw.ReadU32(); GuildWithdrawMoney=Money==MAX_uint32?-1:int64(Money); OnVendorUpdated.Broadcast();
@@ -3165,6 +3166,7 @@ void FWowPacketHandler::HandleShowBank(FPacketReader& R)
     }
 
     uint64 BankerGuid = R.ReadU64();
+    CurrentBankerGuid=BankerGuid;
 
     UE_LOG(LogWowPacket, Log, TEXT("SHOW_BANK: Bank opened by banker GUID %llu"), BankerGuid);
     OnBankOpened.Broadcast(BankerGuid);
