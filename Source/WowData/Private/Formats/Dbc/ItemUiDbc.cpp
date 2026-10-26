@@ -39,6 +39,11 @@ bool FItemUiDbc::Load(FMpqManager& Mpq)
     {
         Enchants.Empty(); for(uint32 I=0;I<Parser.GetRecordCount();++I) { FEnchant Row; Row.Name=Parser.GetString(I,14); Row.Gem=Parser.GetUInt(I,33); Enchants.Add(Parser.GetUInt(I,0),MoveTemp(Row)); }
     }
+    if(Read(TEXT("ChatChannels.dbc"),37))
+    {
+        ChannelDefinitions.Empty(); for(uint32 I=0;I<Parser.GetRecordCount();++I)
+        {FChatChannel Row; Row.Id=Parser.GetUInt(I,0); Row.Flags=Parser.GetUInt(I,1); Row.Pattern=Parser.GetString(I,3); Row.Name=Parser.GetString(I,20); if(Row.Id && !Row.Name.IsEmpty()) ChannelDefinitions.Add(MoveTemp(Row));}
+    }
     return Complete;
 }
 uint32 FItemUiDbc::RepairCost(uint32 Level,uint32 Quality,uint32 Class,uint32 Subclass,uint32 Lost,float Discount) const

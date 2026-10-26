@@ -127,7 +127,7 @@ void UWowConnectionManager::SelectRealm(int32 I)
             PacketHandler.EntityManager.LocalPlayerGuid=0; TargetGuid=0; CursorPayload=FCursorPayloadState();
             PacketHandler.KnownSpells.Reset(); PacketHandler.ActionButtons.Reset(); PacketHandler.QuestLog.Reset(); PacketHandler.ResetTalentState(); PacketHandler.Reputations.Reset();
             PacketHandler.SpellCooldowns.Reset(); PacketHandler.SpellCooldownInfo.Reset(); PacketHandler.CombatHistory.Reset();
-            PacketHandler.GroupInfo=FWowGroupInfo(); PacketHandler.PetActionBar=FWowPetActionBarState();
+            PacketHandler.GroupInfo=FWowGroupInfo(); PacketHandler.PetActionBar=FWowPetActionBarState(); PacketHandler.ResetChannels();
             PacketHandler.Merchant.Clear(); PacketHandler.CurrentBankerGuid=0; ResetMailState(); ResetTradeState();
             RepairCursor=false; PacketHandler.GuildCanRepair=false; PacketHandler.GuildRepairRequested=false; PacketHandler.GuildRepairId=0; PacketHandler.GuildWithdrawMoney=0; PacketHandler.GuildRoster.Reset(); PacketHandler.GuildRankAccess.Reset(); PacketHandler.GuildInfoText.Empty(); PacketHandler.ItemRefunds.Empty(); PacketHandler.RequestedItemRefunds.Empty(); PacketHandler.TotalPlayedTime=0; PacketHandler.PlayedTimeReceived=0; PacketHandler.PlayedTimeRequested=false;
             PacketHandler.WeaponProficiency=PacketHandler.ArmorProficiency=0; PacketHandler.HasWeaponProficiency=PacketHandler.HasArmorProficiency=false;
@@ -296,8 +296,16 @@ TArray<uint8> UWowConnectionManager::BuildChatPacket(const FString& Message,int3
 void UWowConnectionManager::SendChatMessage(const FString& Message,int32 Type,const FString& Target,int32 Language)
 {
     if(!WorldSocket || State!=EWowSessionState::WorldInGame || Message.IsEmpty() || ((Type==7 || Type==17) && Target.IsEmpty())) return;
-    WorldSocket->SendPacket(WowOpcode::CMSG_MESSAGECHAT,BuildChatPacket(Message,Type,Target,Language));
-    UE_LOG(LogWowNet, Log, TEXT("Sent chat (type=%d language=%d target=%s): %s"), Type,Language,*Target,*Message);
+    FString Recipient=Target;
+    if(Type==17)
+    {
+        const auto* Channel=PacketHandler.FindChannel(Target);
+        if(!Channel && Target.IsNumeric()) Channel=PacketHandler.Channels.FindByPredicate([&](const FWowChannel& Row){return Row.Number==FCString::Atoi(*Target);});
+        if(!Channel || Channel->Leaving) return;
+        Recipient=Channel->Name;
+    }
+    WorldSocket->SendPacket(WowOpcode::CMSG_MESSAGECHAT,BuildChatPacket(Message,Type,Recipient,Language));
+    UE_LOG(LogWowNet, Log, TEXT("Sent chat (type=%d language=%d target=%s): %s"), Type,Language,*Recipient,*Message);
 }
 
 void UWowConnectionManager::SendSetSelection(int64 InTargetGuid)
@@ -1534,6 +1542,7 @@ void UWowConnectionManager::SendLearnPreviewTalents(const TArray<FWowTalentInfo>
 void UWowConnectionManager::Disconnect()
 {
     CancelGlyphUse();
+    PacketHandler.ResetChannels();
     if (WorldSocket.IsValid())
     {
         WorldSocket->Disconnect();

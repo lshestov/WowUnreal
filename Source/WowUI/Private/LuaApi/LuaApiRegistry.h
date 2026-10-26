@@ -14,6 +14,7 @@ struct FWowEntity;
 struct FWowSpellBookView;
 struct FWowCombatLogView;
 struct FWowClassUiView;
+struct FWowChannelUiView;
 struct FWowItemTemplate;
 struct FWowItemEntity;
 
@@ -27,6 +28,8 @@ struct FWowLuaContext
     TSharedPtr<FWowSpellBookView> SpellBook;
     TSharedPtr<FWowCombatLogView> CombatLog;
     TSharedPtr<FWowClassUiView> ClassUi;
+    TSharedPtr<FWowChannelUiView> Channels;
+    TFunction<uint32()> ResolveArea;
     TFunction<AActor*(uint64)> ResolveActor;
     TFunction<void()> ReloadUI;
     TMap<FName,int32> SelectedRows;
@@ -48,6 +51,8 @@ namespace WowLuaApi
     void RegisterMailApi(lua_State* L);
     void UpdateMail(lua_State* L);
     void RegisterTradeApi(lua_State* L);
+    void RegisterChannelApi(lua_State* L);
+    void UpdateChannels(lua_State* L);
     void UpdateTrade(lua_State* L);
     int SetTradePlayerItemTooltip(lua_State* L);
     int SetTradeTargetItemTooltip(lua_State* L);

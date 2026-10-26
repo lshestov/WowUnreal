@@ -1144,6 +1144,28 @@ struct FWowGlyphChange
     uint16 Before=0,After=0;
 };
 
+struct FWowChannelMember { uint64 Guid=0; uint8 Flags=0; };
+struct FWowChannel
+{
+    FString Name;
+    int32 Number=0;
+    uint32 Id=0,Count=0;
+    uint8 Flags=0;
+    TArray<FWowChannelMember> Members;
+    bool RosterKnown=false,RosterPending=false,Leaving=false;
+    double RequestAt=0;
+};
+struct FWowChannelJoin { int32 Number=0,Window=1; uint32 Id=0; double Deadline=0; };
+struct FWowChannelNotice
+{
+    FString Channel,Player;
+    uint64 Actor=0,Target=0;
+    uint32 Id=0;
+    int32 Number=0,Window=1;
+    uint8 Type=0,Flags=0,OldFlags=0;
+    double ReceivedAt=0;
+};
+
 // Friend information for the social system
 struct FWowFriendInfo
 {

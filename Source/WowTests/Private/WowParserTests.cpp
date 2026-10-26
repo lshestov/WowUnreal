@@ -890,6 +890,37 @@ bool FMailPackets::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChannelPackets,"WowUnreal.UI.ChannelPackets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FChannelPackets::RunTest(const FString&)
+{
+    auto* C=NewObject<UWowConnectionManager>(); const auto Socket=WowTestUtils::AttachTestWorldSocket(*C,0); auto& H=C->PacketHandler; H.EntityManager.LocalPlayerGuid=1;
+    const auto Put=[](TArray<uint8>& B,const auto Value){const int32 At=B.AddUninitialized(sizeof(Value)); FMemory::Memcpy(B.GetData()+At,&Value,sizeof(Value));};
+    const auto Text=[](TArray<uint8>& B,const FString& Value){const FTCHARToUTF8 V(*Value); B.Append(reinterpret_cast<const uint8*>(V.Get()),V.Length()); B.Add(0);};
+    TArray<uint8> Expected; Put(Expected,uint32(0)); Put(Expected,uint8(0)); Put(Expected,uint8(0)); Text(Expected,TEXT("QaChannel")); Text(Expected,TEXT(""));
+    uint32 Opcode=0; TArray<uint8> Data;
+    TestTrue(TEXT("Join sends the full Wrath request without inventing membership"),C->JoinChannel(TEXT("QaChannel")) && H.Channels.IsEmpty() && H.ChannelJoins.Num()==1 && WowTestUtils::DequeueClientPacket(*Socket,Opcode,Data) && Opcode==0x0097 && Data==Expected);
+    TestFalse(TEXT("An in-flight join is not duplicated"),C->JoinChannel(TEXT("QaChannel")));
+    TArray<uint8> Joined; Put(Joined,uint8(2)); Text(Joined,TEXT("QaChannel")); Put(Joined,uint8(1)); Put(Joined,uint32(0)); Put(Joined,uint32(0));
+    auto Partial=Joined; Partial.Pop(); H.HandlePacket(0x0099,Partial); TestTrue(TEXT("A partial join leaves the pending state intact"),H.Channels.IsEmpty() && H.ChannelJoins.Num()==1);
+    H.HandlePacket(0x0099,Joined);
+    if(!TestTrue(TEXT("The server join establishes local ordinal four"),H.Channels.Num()==1 && H.Channels[0].Number==4 && H.ChannelJoins.IsEmpty())) return false;
+    TestTrue(TEXT("Roster requests retain authoritative loading state"),C->RequestChannelRoster(TEXT("qachannel")) && WowTestUtils::DequeueClientPacket(*Socket,Opcode,Data) && Opcode==0x03D2 && H.Channels[0].RosterPending);
+    TArray<uint8> Roster; Put(Roster,uint8(1)); Text(Roster,TEXT("QaChannel")); Put(Roster,uint8(1)); Put(Roster,uint32(2)); Put(Roster,uint64(1)); Put(Roster,uint8(3)); Put(Roster,uint64(2)); Put(Roster,uint8(0)); H.HandlePacket(0x009B,Roster);
+    TestTrue(TEXT("A full roster replaces members and completes the request"),H.Channels[0].RosterKnown && !H.Channels[0].RosterPending && H.Channels[0].Members.Num()==2 && H.Channels[0].Members[0].Flags==3);
+    Partial=Roster; Partial.Pop(); H.HandlePacket(0x009B,Partial); TestEqual(TEXT("Truncation retains the previous valid roster"),H.Channels[0].Members.Num(),2);
+    TArray<uint8> Updated; Put(Updated,uint64(2)); Put(Updated,uint8(2)); Put(Updated,uint8(1)); Put(Updated,uint32(2)); Text(Updated,TEXT("QaChannel")); H.HandlePacket(0x03F2,Updated);
+    TestEqual(TEXT("Live role updates change the matching member"),H.Channels[0].Members[1].Flags,uint8(2));
+    TArray<uint8> Removed; Put(Removed,uint64(2)); Put(Removed,uint8(1)); Put(Removed,uint32(1)); Text(Removed,TEXT("QaChannel")); H.HandlePacket(0x03F1,Removed); TestEqual(TEXT("Watch removals retain the remaining member"),H.Channels[0].Members.Num(),1);
+    C->SendChatMessage(TEXT("private probe"),17,TEXT("4"),7);
+    TestTrue(TEXT("Numeric chat targets resolve to the confirmed channel name"),WowTestUtils::DequeueClientPacket(*Socket,Opcode,Data) && Opcode==WowOpcode::CMSG_MESSAGECHAT && Data==UWowConnectionManager::BuildChatPacket(TEXT("private probe"),17,TEXT("QaChannel"),7));
+    C->SendChatMessage(TEXT("no destination"),17,TEXT("99"),7); TestFalse(TEXT("An unknown ordinal cannot send a channel message"),WowTestUtils::DequeueClientPacket(*Socket,Opcode,Data));
+    TestTrue(TEXT("Leave retains membership until the server reply"),C->LeaveChannel(TEXT("QaChannel")) && H.Channels.Num()==1 && H.Channels[0].Leaving && WowTestUtils::DequeueClientPacket(*Socket,Opcode,Data) && Opcode==0x0098);
+    TArray<uint8> Left; Put(Left,uint8(3)); Text(Left,TEXT("QaChannel")); Put(Left,uint32(0)); Put(Left,uint8(0)); H.HandlePacket(0x0099,Left);
+    TestTrue(TEXT("A matching leave clears the actual channel"),H.Channels.IsEmpty() && H.ChannelNotices.Last().Number==4);
+    TestTrue(TEXT("Invalid names and oversized passwords are rejected without a request"),!C->JoinChannel(TEXT("4bad")) && !C->JoinChannel(TEXT("bad|link")) && !C->JoinChannel(TEXT("QaChannel"),FString::ChrN(32,'x')) && !WowTestUtils::DequeueClientPacket(*Socket,Opcode,Data));
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTradePackets,"WowUnreal.UI.TradePackets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FTradePackets::RunTest(const FString&)
 {

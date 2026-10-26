@@ -72,6 +72,7 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(0x04B5,&FWowPacketHandler::HandleItemRefundResult);
     Handlers.Add(WowOpcode::SMSG_GUILD_EVENT,              &FWowPacketHandler::HandleGuildEvent);
     Handlers.Add(WowOpcode::SMSG_CHANNEL_NOTIFY,           &FWowPacketHandler::HandleChannelNotify);
+    Handlers.Add(0x009B,&FWowPacketHandler::HandleChannelList);
     Handlers.Add(WowOpcode::SMSG_GROUP_LIST,               &FWowPacketHandler::HandleGroupList);
     Handlers.Add(WowOpcode::MSG_RAID_TARGET_UPDATE,        &FWowPacketHandler::HandleRaidTargetUpdate);
     Handlers.Add(WowOpcode::MSG_RAID_READY_CHECK,          &FWowPacketHandler::HandleRaidReadyCheck);
@@ -204,6 +205,7 @@ void FWowPacketHandler::HandlePacket(uint16 Opcode, const TArray<uint8>& Data)
     {
         FPacketReader R(Data); if(R.CanRead(9)) { R.ReadFloat(); R.ReadU8(); const uint32 Count=R.ReadU32(); if(Count<=128 && R.CanRead(Count*8)) for(uint32 N=0;N<Count;++N) { const uint32 I=R.ReadU32(); const int32 Standing=int32(R.ReadU32()); if(Reputations.IsValidIndex(I)) Reputations[I].Standing=Standing; } }
     }
+    if(Opcode==0x03F0 || Opcode==0x03F1 || Opcode==0x03F2) {FPacketReader Users(Data); HandleChannelUserList(Users,Opcode==0x03F1);}
     HandlerFunc* Found = Handlers.Find(Opcode);
     if(Opcode==0x01BA && Data.Num()>=4) { FPacketReader BankResult(Data); OnBankSlotResult.Broadcast(BankResult.ReadU32()); }
     if(Opcode==0x03FE && Data.Num()>=4)
@@ -1535,16 +1537,6 @@ void FWowPacketHandler::HandleGuildEvent(FPacketReader& R)
 
 // ── SMSG_CHANNEL_NOTIFY ─────────────────────────────────────────────────────
 // uint8 type, FString channelName
-
-void FWowPacketHandler::HandleChannelNotify(FPacketReader& R)
-{
-    if (!R.CanRead(1)) return;
-
-    uint8 Type = R.ReadU8();
-    FString ChannelName = R.ReadCString();
-
-    UE_LOG(LogWowPacket, Log, TEXT("CHANNEL_NOTIFY: type=%d channel='%s'"), Type, *ChannelName);
-}
 
 // ── SMSG_GROUP_LIST ─────────────────────────────────────────────────────────
 // uint8 groupFlags, uint8 selfSubgroup, uint8 selfFlags, uint8 selfRoles,

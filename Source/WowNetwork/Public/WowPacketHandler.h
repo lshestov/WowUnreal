@@ -225,6 +225,13 @@ public:
     /** ── Social System ──────────────────────────────────────────────────── */
     /** Friends list */
     TArray<FWowFriendInfo> FriendsList;
+    TArray<FWowChannel> Channels;
+    TMap<FString,FWowChannelJoin> ChannelJoins;
+    TArray<FWowChannelNotice> ChannelNotices;
+    uint32 ChannelRevision=1;
+    FWowChannel* FindChannel(const FString& Name);
+    const FWowChannel* FindChannel(const FString& Name) const;
+    void ResetChannels();
 
     /** Guild roster */
     TArray<FWowGuildMember> GuildRoster;
@@ -430,6 +437,8 @@ private:
     void HandleItemRefundResult(FPacketReader& R);
     void HandleGuildEvent(FPacketReader& R);
     void HandleChannelNotify(FPacketReader& R);
+    void HandleChannelList(FPacketReader& R);
+    void HandleChannelUserList(FPacketReader& R,bool Remove);
     void HandleGroupList(FPacketReader& R);
     void HandleRaidTargetUpdate(FPacketReader& R);
     void HandleRaidReadyCheck(FPacketReader& R);

@@ -264,8 +264,6 @@ void WowLuaApi::RegisterPanelApi(lua_State* L)
     RegisterPanel(L,"GetAdjustedSkillPoints",[](lua_State* S)->int { const auto Rows=Skills(GetContext(S)); int32 Points=0; for(const auto& Row:Rows) Points+=Row.Temporary; lua_pushinteger(S,Points); return 1; });
     RegisterPanel(L,"SetGuildRosterSelection",[](lua_State* S)->int { return Selection(S,TEXT("guild"),true); });
     RegisterPanel(L,"GetGuildRosterSelection",[](lua_State* S)->int { return Selection(S,TEXT("guild"),false); });
-    RegisterPanel(L,"SetSelectedDisplayChannel",[](lua_State* S)->int { return Selection(S,TEXT("channel"),true); });
-    RegisterPanel(L,"GetSelectedDisplayChannel",[](lua_State* S)->int { return Selection(S,TEXT("channel"),false); });
     RegisterPanel(L,"GetAccountExpansionLevel",[](lua_State* S)->int { lua_pushinteger(S,2); return 1; });
     RegisterPanel(L,"HasKey",[](lua_State* S)->int { auto* C=GetContext(S); const auto* P=C && C->EntityManager?C->EntityManager->GetLocalPlayer():nullptr; bool Found=false; if(P) for(int32 I=0; I<32; ++I) Found|=P->GetField64(PlayerField::BASE+0x015C+I*2)!=0; lua_pushboolean(S,Found); return 1; });
     RegisterPanel(L,"IsPossessBarVisible",[](lua_State* S)->int { const auto* E=ResolveUnitToken(S); lua_pushboolean(S,E && E->IsUnit() && E->GetField64(UnitField::CHARM)!=0); return 1; });

@@ -456,6 +456,7 @@ void UWowUIManager::TickWorldImages(UWorld* World)
         WowLuaApi::UpdateBank(LuaVM->GetState());
         WowLuaApi::UpdateMail(LuaVM->GetState());
         WowLuaApi::UpdateTrade(LuaVM->GetState());
+        WowLuaApi::UpdateChannels(LuaVM->GetState());
     }
 }
 

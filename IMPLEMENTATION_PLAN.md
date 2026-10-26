@@ -401,16 +401,25 @@ build, automation, native autologin and rendered screenshot verification):
     QA peers use native authentication/Warden and are deleted through the server;
     original inventory and zero money are verified after each run. See Docs/Trade.md.
 - [ ] 5. Chat/combat/macros: hyperlinks, remaining combat events and macro execution families.
-  - [?] Native chat hyperlink areas from real text blocks, original click/hover
+  - [x] Native chat hyperlink areas from real text blocks, original click/hover
     signatures and default hyperlink-only mouse input, including wrapped links.
     Original item/spell references and player whisper editor; real GetSpell tuple,
     header control spacing and optional texture colors for ChannelFrame bootstrap.
     Verified Windows build, 100-test regression, added tooltip/geometry/color cases
     and two native 26-step/four-image runs. See Docs/ChatLinks.md.
-  - [ ] Channel membership/roster APIs and original channel-window state.
+  - [?] Channel membership/roster APIs and original channel-window state.
+    Server-confirmed joins/leaves, atomic member lists/watch updates, local
+    channel numbers, chat-window filters and moderation requests. Original
+    categories, collapse/selection and owner roles; viewport-local cursor and
+    nil-relative-frame SetPoint fixes restore stock context menus. Verified
+    Windows build, 103-test regression, focused geometry/API checks and native
+    private-channel round trips with rendered roster/chat/menu captures.
+    Zone channel selection depends on the actual area resolver in stage 6.
   - [ ] Remaining combat-log event families and original formatter integration.
   - [ ] Advanced macro execution families and acknowledgement-driven sequences.
 - [ ] 6. Maps: points of interest, tracking, interior minimaps and original map bootstrap.
+  - [ ] Resolve actual zone/subzone from streamed terrain areas and join/replace
+    built-in zone channels using their real DBC definitions and server replies.
   - [ ] Server near teleports: handle the actual 12340 MSG_MOVE_TELEPORT_ACK
     request (packed GUID, order counter, MovementInfo) and reply with packed GUID;
     update actor/camera and shared map position. Current legacy handler is bound

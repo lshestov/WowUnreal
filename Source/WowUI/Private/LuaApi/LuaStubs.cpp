@@ -1385,6 +1385,21 @@ static int L_GetGameTime(lua_State* L)
 // ─── Screen / resolution ────────────────────────────────────────────────────────
 // WoW returns screen dimensions in UI coordinate units (height is always 768 base,
 // width varies with aspect ratio).  Addons use these to position frames correctly.
+static int L_GetCursorPosition(lua_State* L)
+{
+    if(const auto* C=WowLuaApi::GetContext(L); C && C->FrameManager)
+    {
+        auto& Frames=*C->FrameManager;
+        const auto Root=Frames.GetLayoutRect(Frames.FindFrame(TEXT("UIParent")));
+        const FVector2D Pointer=Frames.GetPointerPosition()/Frames.GetScreenScale();
+        // The pointer is viewport-local, while WoW uses a bottom-left origin.
+        // Match GetEffectiveScale so stock cursor-anchored menus undo UI scaling.
+        lua_pushnumber(L,Pointer.X*Frames.GetUIScale());
+        lua_pushnumber(L,(Root.W-Pointer.Y)*Frames.GetUIScale());
+    }
+    else {lua_pushnumber(L,0); lua_pushnumber(L,0);}
+    return 2;
+}
 static int L_GetScreenWidth(lua_State* L)
 {
     FVector2D Size(1920, 1080);
@@ -5017,33 +5032,7 @@ lua_pushboolean(L2, PLATFORM_MAC);
         return 1;
     });
     lua_register(L, "GetMouseFocus", [](lua_State* L2) -> int { lua_pushnil(L2); return 1; });
-    lua_register(L, "GetMousePosition", [](lua_State* L2) -> int {
-        if (FSlateApplication::IsInitialized())
-        {
-            FVector2D CursorPos = FSlateApplication::Get().GetCursorPos();
-            // Convert to WoW UI coordinates by dividing by UIScale (viewport_height / 768.0)
-            if (GEngine && GEngine->GameViewport)
-            {
-                FViewport* Viewport = GEngine->GameViewport->Viewport;
-                if (Viewport)
-                {
-                    FIntPoint ViewportSize = Viewport->GetSizeXY();
-                    float UIScale = ViewportSize.Y / 768.0f;
-                    float WowX = CursorPos.X / UIScale;
-                    float WowY = CursorPos.Y / UIScale;
-                    lua_pushnumber(L2, WowX);
-                    lua_pushnumber(L2, WowY);
-                    return 2;
-                }
-            }
-            lua_pushnumber(L2, CursorPos.X);
-            lua_pushnumber(L2, CursorPos.Y);
-            return 2;
-        }
-        lua_pushnumber(L2, 0);
-        lua_pushnumber(L2, 0);
-        return 2;
-    });
+    lua_register(L, "GetMousePosition", L_GetCursorPosition);
 
     // Zone/Map functions — real implementations registered earlier (L_GetRealZoneText etc.)
 
@@ -5563,33 +5552,7 @@ lua_pushboolean(L2, PLATFORM_MAC);
     lua_register(L, "GetNumVoiceSessions", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
     lua_register(L, "GetTrackingTexture", [](lua_State* L2) -> int { lua_pushnil(L2); return 1; });
     lua_register(L, "GetExistingLocales", [](lua_State* L2) -> int { lua_pushstring(L2, "enUS"); return 1; });
-    lua_register(L, "GetCursorPosition", [](lua_State* L2) -> int {
-        if (FSlateApplication::IsInitialized())
-        {
-            FVector2D CursorPos = FSlateApplication::Get().GetCursorPos();
-            // Convert to WoW UI coordinates by dividing by UIScale (viewport_height / 768.0)
-            if (GEngine && GEngine->GameViewport)
-            {
-                FViewport* Viewport = GEngine->GameViewport->Viewport;
-                if (Viewport)
-                {
-                    FIntPoint ViewportSize = Viewport->GetSizeXY();
-                    float UIScale = ViewportSize.Y / 768.0f;
-                    lua_pushnumber(L2, CursorPos.X / UIScale);
-                    lua_pushnumber(L2, CursorPos.Y / UIScale);
-                    return 2;
-                }
-            }
-            lua_pushnumber(L2, CursorPos.X);
-            lua_pushnumber(L2, CursorPos.Y);
-        }
-        else
-        {
-            lua_pushnumber(L2, 0);
-            lua_pushnumber(L2, 0);
-        }
-        return 2;
-    });
+    lua_register(L, "GetCursorPosition", L_GetCursorPosition);
     lua_register(L, "GetNumWorldStateUI", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
     lua_register(L, "GetWatchedFactionInfo", [](lua_State* L2) -> int {
         lua_pushstring(L2, "");

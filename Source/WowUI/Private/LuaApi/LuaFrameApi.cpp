@@ -705,7 +705,7 @@ static int LF_SetPoint(lua_State* L)
 	}
 	else
 	{
-		// SetPoint("POINT", nil, nil, x, y) or SetPoint("POINT", x, y)
+		// SetPoint("POINT", nil, relativePoint, x, y) or numeric offsets.
 		Anchor.RelativePoint = Anchor.Point;
 		if (lua_isnumber(L, 3))
 		{
@@ -714,6 +714,7 @@ static int LF_SetPoint(lua_State* L)
 		}
 		else
 		{
+			Anchor.RelativePoint = ParseAnchorPoint(luaL_optstring(L,4,PointStr));
 			Anchor.OffsetX = static_cast<float>(luaL_optnumber(L, 5, 0));
 			Anchor.OffsetY = static_cast<float>(luaL_optnumber(L, 6, 0));
 		}

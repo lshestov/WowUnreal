@@ -535,6 +535,34 @@ bool FHudTextureTemplates::RunTest(const FString&)
     TestTrue(TEXT("Updated normal caption color is visible"),Text && FMath::IsNearlyEqual(Text->GetColorAndOpacity().GetSpecifiedColor().G,.8f));
     return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudChannels,"WowUnreal.Hud.ChannelApi",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudChannels::RunTest(const FString&)
+{
+    FString Path; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false; FMpqManager Mpq; if(!Mpq.Initialize(Path)) return false;
+    auto& Dbc=FDbcStore::Get(); if(!Dbc.IsLoaded()) Dbc.LoadAll(Mpq); if(!Dbc.IsDeferredLoaded()) Dbc.LoadDeferred(Mpq);
+    TestTrue(TEXT("Client channel definitions include localized shortcuts"),Dbc.ItemUi().ChatChannels().Num()>2);
+    FHudFixture F; TStrongObjectPtr<UWowConnectionManager> C(NewObject<UWowConnectionManager>()); auto& H=C->PacketHandler; H.EntityManager.LocalPlayerGuid=1; H.PlayerNameCache.Add(1,TEXT("Main"));
+    FWowChannel Channel; Channel.Name=TEXT("QaChannel"); Channel.Number=4; Channel.Flags=1; Channel.Count=1; Channel.RosterKnown=true; Channel.Members.Add({1,3}); H.Channels.Add(Channel);
+    F.Context.ConnectionManager=C.Get(); F.Context.EntityManager=&H.EntityManager;
+    F.Frames.UpdateMouseHover(100*F.Frames.GetScreenScale(),200*F.Frames.GetScreenScale());
+    return TestTrue(TEXT("Original channel lists, member roles, selection, categories and window filters use real cache state"),F.Lua.ExecuteString(TEXT(R"LUA(
+        local x,y=GetCursorPosition(); local scale=UIParent:GetEffectiveScale(); assert(math.abs(x/scale-100)<.001 and math.abs(y/scale-(UIParent:GetHeight()-200))<.001,'viewport-local bottom-left cursor')
+        CursorMenu=CreateFrame('Frame','CursorMenu',UIParent); CursorMenu:SetSize(100,80); CursorMenu:SetPoint('TOPLEFT',nil,'BOTTOMLEFT',100,200)
+        local _,_,relative=CursorMenu:GetPoint(); assert(relative=='BOTTOMLEFT' and math.abs(CursorMenu:GetTop()-200)<.001,'nil relative frame retains explicit anchor')
+        local n,name,unknown=GetChannelName('qachannel'); assert(n==4 and name=='QaChannel' and unknown==0)
+        assert(GetChannelName(4)==4 and GetChannelName(9)==0 and select('#',GetChannelList())==2)
+        local number,channel=GetChannelList(); assert(number==4 and channel=='QaChannel')
+        assert(GetChatWindowChannels(1)=='QaChannel' and GetChatWindowChannels(2)==nil)
+        AddChatWindowChannel(2,'QaChannel'); assert(GetChatWindowChannels(2)=='QaChannel'); RemoveChatWindowChannel(2,'QaChannel'); assert(GetChatWindowChannels(2)==nil)
+        local custom,selected
+        for i=1,GetNumDisplayChannels() do local name,header,collapsed,num,count,active,category=GetChannelDisplayInfo(i); if header and category=='CHANNEL_CATEGORY_CUSTOM' then custom=i end; if not header and num==4 then assert(name=='QaChannel' and active==1 and count==1 and category=='CHANNEL_CATEGORY_CUSTOM'); selected=i end end
+        assert(custom and selected); SetSelectedDisplayChannel(selected); assert(GetSelectedDisplayChannel()==selected and GetNumChannelMembers(selected)==1)
+        local name,owner,moderator,muted=GetChannelRosterInfo(selected,1); assert(name=='Main' and owner==1 and moderator==1 and muted==nil and select('#',GetChannelRosterInfo(selected,1))==6)
+        assert(IsDisplayChannelOwner(selected)==1,'owner indexed'); assert(IsDisplayChannelModerator(selected)==1,'moderator indexed'); assert(IsDisplayChannelOwner()==1,'owner selected'); assert(IsDisplayChannelModerator()==1,'moderator selected'); assert(GetActiveVoiceChannel()==nil,'voice disabled')
+        CollapseChannelHeader(custom); assert(GetSelectedDisplayChannel()==nil,'collapsed selection '..tostring(GetSelectedDisplayChannel())); ExpandChannelHeader(custom); assert(GetSelectedDisplayChannel()==selected,'expanded selection '..tostring(GetSelectedDisplayChannel())..' expected '..selected)
+    )LUA")));
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudLinkTooltips,"WowUnreal.Hud.LinkTooltips",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FHudLinkTooltips::RunTest(const FString&)
 {
