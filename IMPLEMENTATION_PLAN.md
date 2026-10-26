@@ -320,14 +320,22 @@ build, automation, native autologin and rendered screenshot verification):
     quality-aware delete dialog, and Escape releases a selection. Verified 85
     tests plus native 36-step split/cancel/7+3/merge/delete-cancel/delete-confirm
     cycle and four nonempty screenshots. QA cloth restored to zero in server DB.
-  - [?] Equipped-item comparison: original shopping-tooltip Lua, correct item
+  - [x] Equipped-item comparison: original shopping-tooltip Lua, correct item
     name/link tuple, 3.3.5 equipment masks and dual-slot order, signed template
     stats/DPS/armor and automatic modifier/preference updates. Retain mixed
     tooltip row order, anchor adjustments and minimum widths; clear old contexts.
     Verified 86 automation tests and a native 20-step run/three screenshots for
     shield vs two-hander, armor gain, preference off and spellbook regression.
     Equipment is unchanged; comparison preference restored after verification.
-  - [ ] Independent dress-up model/item preview, rotation, undress and reset.
+  - [?] Independent character/dress-up model previews: build MPQ-backed UI actors
+    with real customization/equipment, preserve per-slot try-on choices and handle
+    two-handed/offhand replacement. Stock control-click, rotation buttons, Undress,
+    Reset and reopen work without modifying world meshes or server inventory.
+    Model scale is independent of frame layout; transparent HDR captures retain
+    the original backdrop and fit physical mesh vertices, not animation bounds.
+    Handle frames created before the network player and release hidden UI actors.
+    Verified 87 automation tests plus focused regressions, native 26-step/six-image
+    run with full-body paperdoll, shield/robe/boots, reset and unchanged gear/money.
   - [ ] Original merchant window, purchase/sale/buyback/repair server state.
   - [ ] Original bank, mailbox and trade windows with authoritative round trips.
 - [ ] 5. Chat/combat/macros: hyperlinks, remaining combat events and macro execution families.

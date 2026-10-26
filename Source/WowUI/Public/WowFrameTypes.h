@@ -176,6 +176,7 @@ struct WOWUI_API FWowFrameDef
 	float Height = 0.f;
 
 	float Scale = 1.f;
+    float ModelScale=1.f;
 	EWowFrameStrata Strata = EWowFrameStrata::MEDIUM;
 	int32 FrameLevel = 0;
 	int32 FrameID = 0; // WoW XML "id" attribute

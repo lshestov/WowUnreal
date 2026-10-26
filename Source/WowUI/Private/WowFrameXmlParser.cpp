@@ -780,6 +780,7 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 	Def.bClampedToScreen=Node.attribute("clampedToScreen").as_bool(false);
 	Def.bMotionScriptsWhileDisabled=Node.attribute("motionScriptsWhileDisabled").as_bool(false);
 	Def.Scale = Node.attribute("scale").as_float(1.f);
+    if(Def.Type==EWowFrameType::Model || Def.Type==EWowFrameType::PlayerModel || Def.Type==EWowFrameType::DressUpModel || Def.Type==EWowFrameType::TabardModel) { Def.ModelScale=Def.Scale; Def.Scale=1; }
 
 	const char* Strata = Node.attribute("frameStrata").as_string("");
 	if (Strata[0]) Def.Strata = FWowFrameXmlParser::ParseStrata(UTF8_TO_TCHAR(Strata));
@@ -1220,6 +1221,7 @@ static FWowFrameDef ParseFrameNode(const FXmlNode* Node)
 	Def.bMotionScriptsWhileDisabled=Node->GetAttribute(TEXT("motionScriptsWhileDisabled")).Equals(TEXT("true"),ESearchCase::IgnoreCase);
 	const FString Scale = Node->GetAttribute(TEXT("scale"));
 	if (!Scale.IsEmpty()) Def.Scale = FCString::Atof(*Scale);
+    if(Def.Type==EWowFrameType::Model || Def.Type==EWowFrameType::PlayerModel || Def.Type==EWowFrameType::DressUpModel || Def.Type==EWowFrameType::TabardModel) { Def.ModelScale=Def.Scale; Def.Scale=1; }
 
 	FString StrataStr = Node->GetAttribute(TEXT("frameStrata"));
 	if (!StrataStr.IsEmpty()) Def.Strata = FWowFrameXmlParser::ParseStrata(StrataStr);

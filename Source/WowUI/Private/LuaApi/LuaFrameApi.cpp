@@ -66,6 +66,51 @@ static int64 GetOptionalFrameHandle(lua_State* L, int ArgIdx = 1)
 	return Handle;
 }
 
+static int LF_ModelScalar(lua_State* L,bool Scale,bool Get)
+{
+    const char* Key=Scale?"__modelScale":"__modelFacing"; auto* C=WowLuaApi::GetContext(L); const int64 H=GetFrameHandle(L,1);
+    if(Get)
+    {
+        lua_getfield(L,1,Key);
+        if(lua_isnil(L,-1)) { lua_pop(L,1); const auto* Def=C && C->FrameManager?C->FrameManager->GetFrameDef(H):nullptr; lua_pushnumber(L,Scale?(Def?Def->ModelScale:1):0); }
+        return 1;
+    }
+    const float Value=luaL_checknumber(L,2); if(!FMath::IsFinite(Value) || (Scale && Value<0)) return 0;
+    lua_pushnumber(L,Value); lua_setfield(L,1,Key);
+    if(C && C->FrameManager)
+    {
+        const auto& Callback=Scale?C->FrameManager->OnModelScale:C->FrameManager->OnModelFacing;
+        if(Callback) Callback(H,Value);
+    }
+    return 0;
+}
+static int LF_ModelPosition(lua_State* L,bool Get)
+{
+    if(Get)
+    {
+        lua_getfield(L,1,"__modelPosition");
+        if(lua_istable(L,-1)) { const int32 Table=lua_gettop(L); for(int32 I=1;I<=3;++I) lua_rawgeti(L,Table,I); return 3; }
+        lua_pushnumber(L,0); lua_pushnumber(L,0); lua_pushnumber(L,0); return 3;
+    }
+    const FVector Value(luaL_checknumber(L,2),luaL_checknumber(L,3),luaL_checknumber(L,4)); if(Value.ContainsNaN()) return 0;
+    lua_newtable(L); for(int32 I=1;I<=3;++I) { lua_pushvalue(L,I+1); lua_rawseti(L,-2,I); } lua_setfield(L,1,"__modelPosition");
+    auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager && C->FrameManager->OnModelPosition) C->FrameManager->OnModelPosition(GetFrameHandle(L,1),Value);
+    return 0;
+}
+static int LF_ModelUnit(lua_State* L)
+{
+    auto* C=WowLuaApi::GetContext(L); if(!C || !C->FrameManager) return 0;
+    if(lua_isnoneornil(L,2)) { lua_settop(L,1); lua_getfield(L,1,"__modelUnit"); }
+    const int64 H=GetFrameHandle(L,1);
+    if(const auto* Def=C->FrameManager->GetFrameDef(H); Def && Def->Type==EWowFrameType::GameTooltip) { C->FrameManager->TooltipSetUnit(H,UTF8_TO_TCHAR(luaL_checkstring(L,2))); return 0; }
+    if(C->FrameManager->OnUnitModel)
+    {
+        const auto* Entity=WowLuaApi::ResolveUnitToken(L,2);
+        lua_pushvalue(L,2); lua_setfield(L,1,"__modelUnit"); C->FrameManager->OnUnitModel(H,Entity?Entity->Guid:0);
+    }
+    return 0;
+}
+
 static int64 GetMouseQueryHandle(lua_State* L, int ArgIdx = 1)
 {
 	luaL_checktype(L, ArgIdx, LUA_TTABLE);
@@ -3265,7 +3310,7 @@ static const luaL_Reg FrameMethods[] =
 	{"GetMinResize", [](lua_State* L)->int { return LF_ResizeBounds(L,false,true); }},
 
 	// Texture methods on frames
-	{"SetRotation", [](lua_State* L) -> int { return 0; }},
+	{"SetRotation", [](lua_State* L) -> int { return LF_ModelScalar(L,false,false); }},
 	{"SetSequence", [](lua_State* L) -> int { return 0; }},
 	{"SetDesaturated", LF_TextureDesaturated},
 	{"IsDesaturated", [](lua_State* L) -> int { lua_getfield(L,1,"__desaturated"); lua_pushboolean(L,lua_toboolean(L,-1)); return 1; }},
@@ -3383,39 +3428,23 @@ static const luaL_Reg FrameMethods[] =
 
 	// Model/Dress methods
 	{"SetModel", [](lua_State* L) -> int { return 0; }},
-	{"SetModelScale", [](lua_State* L) -> int { return 0; }},
-	{"SetPosition", [](lua_State* L) -> int { return 0; }},
-	{"SetFacing", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager && C->FrameManager->OnModelFacing) C->FrameManager->OnModelFacing(GetFrameHandle(L,1),luaL_checknumber(L,2)); return 0; }},
-	{"SetUnit", [](lua_State* L) -> int {
-		// Check if this is a tooltip frame
-		FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-		if (Ctx && Ctx->FrameManager)
-		{
-			int64 Handle = GetFrameHandle(L, 1);
-			const FWowFrameDef* FrameDef = Ctx->FrameManager->GetFrameDef(Handle);
-			if (FrameDef && FrameDef->Type == EWowFrameType::GameTooltip)
-			{
-				const char* UnitToken = luaL_checkstring(L, 2);
-				Ctx->FrameManager->TooltipSetUnit(Handle, UTF8_TO_TCHAR(UnitToken));
-				return 0;
-			}
-		}
-		if(Ctx && Ctx->FrameManager && Ctx->FrameManager->OnUnitModel)
-		{
-			auto* Entity=WowLuaApi::ResolveUnitToken(L,2);
-			Ctx->FrameManager->OnUnitModel(GetFrameHandle(L,1),Entity?Entity->Guid:0);
-		}
-		return 0;
-	}},
+	{"SetModelScale", [](lua_State* L) -> int { return LF_ModelScalar(L,true,false); }},
+    {"GetModelScale", [](lua_State* L) -> int { return LF_ModelScalar(L,true,true); }},
+	{"SetPosition", [](lua_State* L) -> int { return LF_ModelPosition(L,false); }},
+    {"GetPosition", [](lua_State* L) -> int { return LF_ModelPosition(L,true); }},
+	{"SetFacing", [](lua_State* L) -> int { return LF_ModelScalar(L,false,false); }},
+    {"GetFacing", [](lua_State* L) -> int { return LF_ModelScalar(L,false,true); }},
+	{"SetUnit", LF_ModelUnit},
 	{"SetCreature", [](lua_State* L) -> int { return 0; }},
 	{"SetCamera", [](lua_State* L) -> int { return 0; }},
-	{"RefreshUnit", [](lua_State* L) -> int { return 0; }},
+	{"RefreshUnit", LF_ModelUnit},
 	{"SetPortraitZoom", [](lua_State* L) -> int { return 0; }},
 	{"ClearModel", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager && C->FrameManager->OnUnitModel) C->FrameManager->OnUnitModel(GetFrameHandle(L,1),0); return 0; }},
 	{"HasCustomBackground", [](lua_State* L) -> int { lua_pushboolean(L, 0); return 1; }},
 	{"SetCustomRace", [](lua_State* L) -> int { return 0; }},
-	{"Undress", [](lua_State* L) -> int { return 0; }},
-	{"TryOn", [](lua_State* L) -> int { return 0; }},
+	{"Undress", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager && C->FrameManager->OnModelDress) C->FrameManager->OnModelDress(GetFrameHandle(L,1),false); return 0; }},
+    {"Dress", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager && C->FrameManager->OnModelDress) C->FrameManager->OnModelDress(GetFrameHandle(L,1),true); return 0; }},
+	{"TryOn", WowLuaApi::TryOnItem},
 
 	// Minimap methods
 	{"SetZoom", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->MinimapZoom=FMath::Clamp(int32(luaL_checkinteger(L,2)),0,5); return 0; }},

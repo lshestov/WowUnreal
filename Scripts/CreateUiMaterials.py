@@ -89,6 +89,15 @@ link(opacity, alpha, 'A')
 link(blend, alpha, 'B')
 edit.connect_material_property(alpha, '', unreal.MaterialProperty.MP_OPACITY)
 
+model = material('M_WowUiModel')
+model_texture = node(model, unreal.MaterialExpressionTextureSampleParameter2D)
+model_texture.set_editor_property('parameter_name', 'Image')
+model_texture.set_editor_property('texture', unreal.load_asset('/Engine/EngineResources/WhiteSquareTexture'))
+edit.connect_material_property(model_texture, 'RGB', unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+model_alpha = node(model, unreal.MaterialExpressionOneMinus)
+link(model_texture, model_alpha, 'Input', 'A')
+edit.connect_material_property(model_alpha, '', unreal.MaterialProperty.MP_OPACITY)
+
 cooldown = material('M_WowUiCooldown')
 delta = centered_uv(cooldown)
 x = node(cooldown, unreal.MaterialExpressionComponentMask)
@@ -185,7 +194,7 @@ for name, blend_mode in [('M_WowUiRegion', unreal.BlendMode.BLEND_TRANSLUCENT),
     edit.connect_material_property(alpha, '', unreal.MaterialProperty.MP_OPACITY)
     regions.append(region)
 
-for asset in [image, cooldown, additive] + regions:
+for asset in ([model] if '-UiModelOnly' in unreal.SystemLibrary.get_command_line() else [image, model, cooldown, additive] + regions):
     edit.layout_material_expressions(asset)
     edit.recompile_material(asset)
     if not unreal.EditorAssetLibrary.save_loaded_asset(asset):

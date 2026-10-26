@@ -607,6 +607,7 @@ void FWowFrameManager::MergeTemplate(FWowFrameDef& Target, const FWowFrameDef& T
 
 	// Size — use template size if target doesn't specify
 	if (Target.Scale == 1.f) Target.Scale = Template.Scale;
+    if(Target.ModelScale==1.f) Target.ModelScale=Template.ModelScale;
 	if (Target.Width == 0.f && Template.Width > 0.f) Target.Width = Template.Width;
 	if (Target.Height == 0.f && Template.Height > 0.f) Target.Height = Template.Height;
 

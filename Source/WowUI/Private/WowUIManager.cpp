@@ -126,6 +126,10 @@ void UWowUIManager::InitializeCore()
 	FrameManager->OnPortrait=[this](const FString& Name,uint64 Guid){ ModelRenderer->Portrait(Name,Guid); };
 	FrameManager->OnUnitModel=[this](int64 Handle,uint64 Guid){ ModelRenderer->Model(Handle,Guid); };
 	FrameManager->OnModelFacing=[this](int64 Handle,float Yaw){ ModelRenderer->Facing(Handle,Yaw); };
+    FrameManager->OnModelScale=[this](int64 Handle,float Value){ ModelRenderer->Scale(Handle,Value); };
+    FrameManager->OnModelPosition=[this](int64 Handle,const FVector& Value){ ModelRenderer->Position(Handle,Value); };
+    FrameManager->OnModelTryOn=[this](int64 Handle,uint32 Id,uint32 Type){ ModelRenderer->TryOn(Handle,Id,Type); };
+    FrameManager->OnModelDress=[this](int64 Handle,bool Dressed){ ModelRenderer->Dress(Handle,Dressed); };
 
 	UE_LOG(LogWowUIManager, Log, TEXT("WoW UI Manager initialized (Lua VM + FrameManager + EventSystem)"));
 }
@@ -190,6 +194,7 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 	FrameManager->SetFontManager(FontManager.Get());
 	FrameManager->SetMpqManager(Mpq);
 	FrameManager->SetAssetCache(AssetCache);
+    ModelRenderer->SetAssets(Mpq,AssetCache);
 
 	if (FrameManager->FindFrame(TEXT("UIParent")) == -1)
 	{

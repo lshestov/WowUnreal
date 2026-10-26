@@ -683,6 +683,42 @@ bool FHudItemComparison::RunTest(const FString&)
     TestTrue(TEXT("Offhand comparison falls back to the equipped two-hander"),F.Lua.ExecuteString(TEXT("assert(Compare:SetHyperlinkCompareItem('item:1003',1) and Compare:GetItem()=='Main Sword'); assert(not Compare:SetHyperlinkCompareItem('item:1003',2))")));
     return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudDressUpApi,"WowUnreal.Hud.DressUpPreviewApi",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudDressUpApi::RunTest(const FString&)
+{
+    FHudFixture F; TStrongObjectPtr<UWowConnectionManager> Connection(NewObject<UWowConnectionManager>());
+    auto& Entities=Connection->PacketHandler.EntityManager; Entities.LocalPlayerGuid=1;
+    auto& Player=Entities.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER);
+    Player.SetField(PlayerField::INV_SLOT_HEAD+15*2,123);
+    F.Context.ConnectionManager=Connection.Get(); F.Context.EntityManager=&Entities;
+    FWowItemTemplate Chest; Chest.Id=2370; Chest.InventoryType=5; Connection->PacketHandler.ItemTemplates.Add(Chest.Id,Chest);
+    FWowItemTemplate Food; Food.Id=117; Connection->PacketHandler.ItemTemplates.Add(Food.Id,Food);
+    uint64 Unit=0; float Facing=0,Scale=0; FVector Position=FVector::ZeroVector; TArray<uint32> Tried; TArray<bool> Dressed;
+    F.Frames.OnUnitModel=[&](int64,uint64 Guid){Unit=Guid;}; F.Frames.OnModelFacing=[&](int64,float Value){Facing=Value;};
+    F.Frames.OnModelScale=[&](int64,float Value){Scale=Value;}; F.Frames.OnModelPosition=[&](int64,const FVector& Value){Position=Value;};
+    F.Frames.OnModelTryOn=[&](int64,uint32 Id,uint32 Type){ Tried.Add(Id); TestEqual(TEXT("Preview receives real inventory type"),Type,5u); };
+    F.Frames.OnModelDress=[&](int64,bool Value){Dressed.Add(Value);};
+    const char* Xml="<Ui><DressUpModel name='PreviewModel' parent='UIParent' scale='2'><Size x='316' y='331'/><Anchors><Anchor point='CENTER'/></Anchors></DressUpModel></Ui>";
+    TArray<uint8> Bytes; Bytes.Append(reinterpret_cast<const uint8*>(Xml),FCStringAnsi::Strlen(Xml));
+    const auto Parsed=FWowFrameXmlParser::ParseXml(Bytes,TEXT("DressUpScaleFixture")); if(!TestEqual(TEXT("Model XML parsed"),Parsed.Num(),1)) return false;
+    const int64 H=F.Frames.CreateFrame(Parsed[0].FrameDef); F.Events.CreateFrameObject(H,TEXT("PreviewModel"));
+    TestEqual(TEXT("XML model scale does not stretch the UI frame"),F.Frames.GetFrameDef(H)->Scale,1.f);
+    TestEqual(TEXT("XML retains the independent model scale"),F.Frames.GetFrameDef(H)->ModelScale,2.f);
+    TestTrue(TEXT("Stock model setters, getters, try-on, reset and refresh reach the renderer"),F.Lua.ExecuteString(TEXT(R"LUA(
+        assert(PreviewModel:GetScale()==1 and PreviewModel:GetModelScale()==2)
+        PreviewModel:SetUnit('player'); PreviewModel:SetRotation(.61); assert(math.abs(PreviewModel:GetFacing()-.61)<.001)
+        PreviewModel:SetFacing(1.5); PreviewModel:SetModelScale(1.25); PreviewModel:SetPosition(.2,-.3,.4)
+        assert(PreviewModel:GetFacing()==1.5 and PreviewModel:GetModelScale()==1.25)
+        local x,y,z=PreviewModel:GetPosition(); assert(math.abs(x-.2)<.001 and math.abs(y+.3)<.001 and math.abs(z-.4)<.001)
+        assert(IsDressableItem('item:2370') and not IsDressableItem('item:117'))
+        PreviewModel:TryOn('item:2370'); PreviewModel:TryOn('item:117'); PreviewModel:Undress(); PreviewModel:Dress(); PreviewModel:RefreshUnit()
+    )LUA")));
+    TestEqual(TEXT("Refresh retains the source unit"),Unit,uint64(1)); TestEqual(TEXT("Facing request"),Facing,1.5f); TestEqual(TEXT("Scale request"),Scale,1.25f);
+    TestTrue(TEXT("Position request"),Position.Equals(FVector(.2,-.3,.4),.001)); TestEqual(TEXT("Only wearable item is tried"),Tried.Num(),1);
+    TestTrue(TEXT("Undress and reset have distinct requests"),Dressed.Num()==2 && !Dressed[0] && Dressed[1]);
+    TestEqual(TEXT("Preview never mutates authoritative equipment"),Player.GetField(PlayerField::INV_SLOT_HEAD+15*2),123u);
+    return true;
+}
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUiWindowMovement,"WowUnreal.Hud.WindowMovement",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FUiWindowMovement::RunTest(const FString&)
 {

@@ -399,6 +399,12 @@ int WowLuaApi::SetHyperlinkCompareItem(lua_State* L)
     }
     lua_pushboolean(L,1); return 1;
 }
+int WowLuaApi::TryOnItem(lua_State* L)
+{
+    auto* C=GetContext(L); const uint32 Id=ItemId(L,2); const auto* T=Template(C,Id);
+    if(C && C->FrameManager && C->FrameManager->OnModelTryOn && T && T->InventoryType) C->FrameManager->OnModelTryOn(Handle(L),Id,T->InventoryType);
+    return 0;
+}
 int WowLuaApi::SetActionTooltip(lua_State* L)
 {
     auto* C=GetContext(L); const int32 Slot=luaL_checkinteger(L,2)-1; if(!C || !C->ConnectionManager || !C->FrameManager || !C->ConnectionManager->PacketHandler.ActionButtons.IsValidIndex(Slot)) return 0;
@@ -410,6 +416,7 @@ int WowLuaApi::SetActionTooltip(lua_State* L)
 }
 void WowLuaApi::RegisterItemApi(lua_State* L)
 {
+    RegisterItem(L,"IsDressableItem",[](lua_State* S)->int { const auto* T=Template(GetContext(S),ItemId(S,1)); if(T && T->InventoryType) lua_pushboolean(S,1); else lua_pushnil(S); return 1; });
     RegisterItem(L,"GetItemStats",[](lua_State* S)->int { const auto* T=Template(GetContext(S),ItemId(S,1)); return T?PushStats(S,ItemStats(T),2):0; });
     RegisterItem(L,"GetItemStatDelta",[](lua_State* S)->int { auto* C=GetContext(S); const auto* A=Template(C,ItemId(S,1)); const auto* B=Template(C,ItemId(S,2)); return A && B?PushStats(S,ItemDelta(A,B),3):0; });
     RegisterItem(L,"IsItemAction",[](lua_State* S)->int { auto* C=GetContext(S); const int32 I=luaL_checkinteger(S,1)-1; const auto* Actions=C && C->ConnectionManager?&C->ConnectionManager->PacketHandler.ActionButtons:nullptr; lua_pushboolean(S,Actions && Actions->IsValidIndex(I) && ((*Actions)[I]>>24)==128); return 1; });
@@ -487,5 +494,6 @@ int WowLuaApi::SetInventoryItemTooltip(lua_State*) { return 0; }
 int WowLuaApi::SetHyperlinkTooltip(lua_State*) { return 0; }
 int WowLuaApi::SetHyperlinkCompareItem(lua_State*) { return 0; }
 void WowLuaApi::UpdateItemComparisons(lua_State*) {}
+int WowLuaApi::TryOnItem(lua_State*) { return 0; }
 int WowLuaApi::SetActionTooltip(lua_State*) { return 0; }
 #endif

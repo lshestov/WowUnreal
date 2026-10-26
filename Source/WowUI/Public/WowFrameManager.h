@@ -262,6 +262,10 @@ public:
 	TFunction<void(const FString&,uint64)> OnPortrait;
 	TFunction<void(int64,uint64)> OnUnitModel;
 	TFunction<void(int64,float)> OnModelFacing;
+    TFunction<void(int64,float)> OnModelScale;
+    TFunction<void(int64,const FVector&)> OnModelPosition;
+    TFunction<void(int64,uint32,uint32)> OnModelTryOn;
+    TFunction<void(int64,bool)> OnModelDress;
 	bool DispatchDragStart(int64 Handle,const FString& Button);
 	void DispatchDragStop(int64 Handle,const FString& Button);
 
