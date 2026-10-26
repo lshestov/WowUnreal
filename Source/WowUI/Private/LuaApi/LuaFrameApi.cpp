@@ -1314,19 +1314,10 @@ static int LF_TextureSetTexture(lua_State* L)
 			NamedImage->SetBrush(Brush);
 			lua_getfield(L,1,"__alpha"); NamedImage->SetRenderOpacity(luaL_optnumber(L,-1,1)); lua_pop(L,1);
 
-			// If the slot was auto-sized (from creation with no explicit size),
-			// update it to match the texture dimensions × UIScale.
-			if (UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(NamedImage->Slot))
-			{
-				FVector2D CurrentSize = Slot->GetSize();
-				if (CurrentSize.X <= 0.f || CurrentSize.Y <= 0.f)
-				{
-					float UIScale = Ctx->FrameManager->GetUIScale();
-					Slot->SetAutoSize(false);
-					Slot->SetSize(FVector2D(Brush.ImageSize.X * UIScale, Brush.ImageSize.Y * UIScale));
-				}
-			}
-			ApplyTextureStyle(L); return 0;
+            // Stretched canvas slots store edge offsets, not a requested size.
+            // Resolve natural dimensions through region layout; changing those
+            // offsets here can turn a 37px equipment icon into negative geometry.
+            ApplyTextureStyle(L); Ctx->FrameManager->InvalidateTextLayout(); return 0;
 		}
 
 		// Fallback: try parent handle approach (dynamic textures from CreateTexture)

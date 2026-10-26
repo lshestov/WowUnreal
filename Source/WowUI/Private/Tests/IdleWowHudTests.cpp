@@ -123,6 +123,30 @@ bool FHudScaledAnchors::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudFontAlignment,"WowUnreal.Hud.FontAlignmentInheritance",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudFontAlignment::RunTest(const FString&)
+{
+    FHudFixture F;
+    const char* Xml=R"XML(<Ui>
+      <Font name="AlignedBase" justifyH="LEFT" justifyV="BOTTOM"/><Font name="AlignedDerived" inherits="AlignedBase"/>
+      <Frame name="AlignedPanel" parent="UIParent"><Size x="300" y="100"/><Anchors><Anchor point="CENTER"/></Anchors><Layers><Layer>
+        <FontString name="AlignedDefault" text="Centered title"><Size x="280" y="20"/><Anchors><Anchor point="TOP"/></Anchors></FontString>
+        <FontString name="AlignedInherited" inherits="AlignedDerived" text="Inherited"><Size x="280" y="20"/><Anchors><Anchor point="CENTER"/></Anchors></FontString>
+        <FontString name="AlignedOverride" inherits="AlignedDerived" text="Override" justifyH="RIGHT" justifyV="TOP"><Size x="280" y="20"/><Anchors><Anchor point="BOTTOM"/></Anchors></FontString>
+      </Layer></Layers></Frame></Ui>)XML";
+    TArray<uint8> Bytes; Bytes.Append(reinterpret_cast<const uint8*>(Xml),FCStringAnsi::Strlen(Xml));
+    const auto Parsed=FWowFrameXmlParser::ParseXml(Bytes,TEXT("FontAlignmentFixture"));
+    for(const auto& Dir:Parsed) if(Dir.Type==FWowXmlDirective::EType::Font) FWowEventSystem::RegisterFontDefinition(&F.Lua,nullptr,Dir); else if(Dir.Type==FWowXmlDirective::EType::Frame) F.Frames.CreateFrame(Dir.FrameDef);
+    TestTrue(TEXT("Default, inherited and explicit XML alignment reach rendered labels"),F.Lua.ExecuteString(TEXT(R"LUA(
+        assert(AlignedDefault:GetJustifyH()=='CENTER' and AlignedDefault:GetJustifyV()=='MIDDLE')
+        assert(AlignedInherited:GetJustifyH()=='LEFT' and AlignedInherited:GetJustifyV()=='BOTTOM')
+        assert(AlignedOverride:GetJustifyH()=='RIGHT' and AlignedOverride:GetJustifyV()=='TOP')
+        local plain=AlignedPanel:CreateFontString('AlignedDynamic'); assert(plain:GetJustifyH()=='CENTER')
+        local inherited=AlignedPanel:CreateFontString('AlignedDynamicInherited',nil,'AlignedDerived'); assert(inherited:GetJustifyH()=='LEFT' and inherited:GetJustifyV()=='BOTTOM')
+        inherited:SetJustifyH('RIGHT'); assert(inherited:GetJustifyH()=='RIGHT')
+    )LUA")));
+    return true;
+}
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudLiveResources, "WowUnreal.Hud.LiveResourcesAndStance",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FHudLiveResources::RunTest(const FString&)
@@ -1266,6 +1290,21 @@ bool FHudTextureStyles::RunTest(const FString&)
     FString Path; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false;
     FMpqManager Mpq; if(!Mpq.Initialize(Path)) return false;
     FHudFixture F; F.Frames.SetMpqManager(&Mpq); FWowAssetCache Cache; F.Frames.SetAssetCache(&Cache);
+    TestTrue(TEXT("Stretched and naturally sized texture fixtures use public APIs"),F.Lua.ExecuteString(TEXT(R"LUA(
+        StretchOwner=CreateFrame('Frame','StretchOwner',UIParent); StretchOwner:SetSize(37,37); StretchOwner:SetPoint('CENTER')
+        StretchIcon=StretchOwner:CreateTexture('StretchIcon'); StretchIcon:SetAllPoints(StretchOwner)
+        NaturalIconFixture=StretchOwner:CreateTexture('NaturalIconFixture'); NaturalIconFixture:SetPoint('CENTER')
+    )LUA")));
+    F.Frames.RefreshLayout(); const auto* Stretch=F.Frames.GetNamedTexture(TEXT("StretchIcon"));
+    const auto* StretchSlot=Stretch?Cast<UCanvasPanelSlot>(Stretch->Slot):nullptr;
+    if(!TestNotNull(TEXT("Stretch region has a canvas slot"),StretchSlot)) return false;
+    const auto Offsets=StretchSlot->GetOffsets(); const auto Anchors=StretchSlot->GetAnchors();
+    TestTrue(TEXT("Changing an image does not replace edge offsets with its file dimensions"),F.Lua.ExecuteString(TEXT(R"LUA(
+        StretchIcon:SetTexture('Interface\\Icons\\Ability_Kick'); NaturalIconFixture:SetTexture('Interface\\Icons\\Ability_Kick')
+    )LUA")));
+    TestTrue(TEXT("Stretched slot margins and anchor fractions survive texture assignment"),StretchSlot->GetOffsets()==Offsets && StretchSlot->GetAnchors()==Anchors);
+    F.Frames.RefreshLayout();
+    TestTrue(TEXT("Natural images still take their file size and stretched images keep their owner size"),F.Lua.ExecuteString(TEXT("assert(StretchIcon:GetWidth()==37 and StretchIcon:GetHeight()==37 and NaturalIconFixture:GetWidth()==64 and NaturalIconFixture:GetHeight()==64)")));
     TestTrue(TEXT("Desaturation keeps the editable region and crop state"),F.Lua.ExecuteString(TEXT(R"LUA(
         StyleOwner=CreateFrame('Frame','StyleOwner',UIParent); StyleOwner:SetSize(100,100); StyleOwner:SetPoint('CENTER')
         StyledIcon=StyleOwner:CreateTexture('StyledIcon','ARTWORK'); StyledIcon:SetSize(64,64); StyledIcon:SetPoint('CENTER')

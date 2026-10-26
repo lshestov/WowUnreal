@@ -224,6 +224,7 @@ TArray<FWowXmlDirective> ParseXmlWithFXmlFallback(const FString& XmlContent, con
 			}
 
 			Dir.FontFlags = Child->GetAttribute(TEXT("flags"));
+            Dir.FontJustifyH=Child->GetAttribute(TEXT("justifyH")); Dir.FontJustifyV=Child->GetAttribute(TEXT("justifyV"));
 			if(const auto* Color=Child->FindChildNode(TEXT("Color")))
 			{
 				const auto Read=[Color](const TCHAR* Key,float Default) { const FString Value=Color->GetAttribute(Key); return Value.IsEmpty()?Default:FCString::Atof(*Value); };
@@ -535,6 +536,7 @@ static FWowFontStringElement ParseFontStringNode(const FXmlNode* Node)
 	FString JV = Node->GetAttribute(TEXT("justifyV"));
 	if (!JH.IsEmpty()) FS.JustifyH = JH;
 	if (!JV.IsEmpty()) FS.JustifyV = JV;
+    FS.bHasJustifyH=!JH.IsEmpty(); FS.bHasJustifyV=!JV.IsEmpty();
 
 	// Size
 	const FXmlNode* SizeNode = Node->FindChildNode(TEXT("Size"));
@@ -966,7 +968,9 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 						FS.ParentKey = UTF8_TO_TCHAR(Tex.attribute("parentKey").as_string());
 						FS.Text = UTF8_TO_TCHAR(Tex.attribute("text").as_string());
 						FS.Inherits = UTF8_TO_TCHAR(Tex.attribute("inherits").as_string());
-						FS.JustifyH = UTF8_TO_TCHAR(Tex.attribute("justifyH").as_string("LEFT"));
+                        FS.JustifyH=UTF8_TO_TCHAR(Tex.attribute("justifyH").as_string("CENTER"));
+                        FS.JustifyV=UTF8_TO_TCHAR(Tex.attribute("justifyV").as_string("MIDDLE"));
+                        FS.bHasJustifyH=bool(Tex.attribute("justifyH")); FS.bHasJustifyV=bool(Tex.attribute("justifyV"));
 
 						// Size
 						pugi::xml_node FSSize = Tex.child("Size");
@@ -1472,6 +1476,7 @@ TArray<FWowXmlDirective> FWowFrameXmlParser::ParseXml(const TArray<uint8>& Data,
 			Dir.FontName = UTF8_TO_TCHAR(Child.attribute("name").as_string());
 			Dir.FontInherits = UTF8_TO_TCHAR(Child.attribute("inherits").as_string());
 			Dir.FontFlags = UTF8_TO_TCHAR(Child.attribute("flags").as_string());
+            Dir.FontJustifyH=UTF8_TO_TCHAR(Child.attribute("justifyH").as_string()); Dir.FontJustifyV=UTF8_TO_TCHAR(Child.attribute("justifyV").as_string());
 			Dir.FontHeight = Child.attribute("height").as_float(0.0f);
 			if(const auto Color=Child.child("Color")) Dir.FontColor=FLinearColor(Color.attribute("r").as_float(1),Color.attribute("g").as_float(1),Color.attribute("b").as_float(1),Color.attribute("a").as_float(1));
 

@@ -320,7 +320,7 @@ FString FWowFrameManager::CreateFontStringRegion(int64 Parent,const FString& Nam
     if(!Canvas) return {};
     FString Key=Name; if(Key.IsEmpty()) { int32 Id=RegionLayouts.Num(); do { Key=FString::Printf(TEXT("_DynamicFontString%d"),Id++); } while(NamedFontStringWidgets.Contains(Key)); }
     FWowFrameDef Def; Def.Name=GetFrameName(Parent); const auto Rect=GetLayoutRect(Parent); Def.Width=Rect.Z; Def.Height=Rect.W;
-    FWowLayer Layer; Layer.Level=EWowDrawLayer::OVERLAY; FWowFontStringElement Text; Text.Name=Key; Text.Inherits=Inherits; Text.JustifyH=TEXT("LEFT"); Layer.FontStrings.Add(Text); Def.Layers.Add(Layer);
+    FWowLayer Layer; Layer.Level=EWowDrawLayer::OVERLAY; FWowFontStringElement Text; Text.Name=Key; Text.Inherits=Inherits; Layer.FontStrings.Add(Text); Def.Layers.Add(Layer);
     CreateLayerContent(Canvas,Def,Parent); SetRegionPoint(Key,FWowAnchor(),true); return Key;
 }
 
@@ -1057,6 +1057,9 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 				}
 				NamedFontStringWidgets.Add(FS.Name, TextWidget);
 				if(EventSystem && !FS.Inherits.IsEmpty()) EventSystem->ApplyRegionFont(FS.Name,FS.Inherits);
+                // Explicit region attributes override attributes of the font object.
+                if(FS.bHasJustifyH) TextWidget->SetJustification(FS.JustifyH==TEXT("LEFT")?ETextJustify::Left:FS.JustifyH==TEXT("RIGHT")?ETextJustify::Right:ETextJustify::Center);
+                if(FS.bHasJustifyV) if(auto* Label=Cast<UWowTextBlock>(TextWidget)) Label->SetVerticalJustification(FS.JustifyV);
 				if(FS.FontHeight>0) TextWidget->SetFont(FontInfo);
 				if(FS.bHasColor) TextWidget->SetColorAndOpacity(FS.Color);
 				// Warn if fontstring name still contains unresolved $parent

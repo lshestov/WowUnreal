@@ -327,7 +327,7 @@ build, automation, native autologin and rendered screenshot verification):
     Verified 86 automation tests and a native 20-step run/three screenshots for
     shield vs two-hander, armor gain, preference off and spellbook regression.
     Equipment is unchanged; comparison preference restored after verification.
-  - [?] Independent character/dress-up model previews: build MPQ-backed UI actors
+  - [x] Independent character/dress-up model previews: build MPQ-backed UI actors
     with real customization/equipment, preserve per-slot try-on choices and handle
     two-handed/offhand replacement. Stock control-click, rotation buttons, Undress,
     Reset and reopen work without modifying world meshes or server inventory.
@@ -336,6 +336,14 @@ build, automation, native autologin and rendered screenshot verification):
     Handle frames created before the network player and release hidden UI actors.
     Verified 87 automation tests plus focused regressions, native 26-step/six-image
     run with full-body paperdoll, shield/robe/boots, reset and unchanged gear/money.
+  - [?] Shared FrameXML text alignment and texture replacement layout: retain
+    original centered defaults, font-object alignment inheritance (including addon
+    font definitions) and explicit per-region overrides. Preserve stretched texture
+    anchors when setting a new image; canvas offsets are not natural file sizes.
+    Native texture diagnostics expose real geometry, resources, UVs and opacity.
+    Verified 88 tests and native 20-step/four-image character/dress-up/book/menu
+    regression: centered titles, left spell labels and visible equipment/empty-slot
+    icons with positive geometry. Natural image dimensions remain correct.
   - [ ] Original merchant window, purchase/sale/buyback/repair server state.
   - [ ] Original bank, mailbox and trade windows with authoritative round trips.
 - [ ] 5. Chat/combat/macros: hyperlinks, remaining combat events and macro execution families.

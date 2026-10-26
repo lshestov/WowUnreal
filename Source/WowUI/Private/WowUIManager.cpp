@@ -265,36 +265,8 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
             if(FrameManager) FrameManager->LoadTextureDefinition(Dir.TextureDef,Dir.TextureParent);
             break;
         case FWowXmlDirective::EType::Font:
-		{
-			if (FontManager && !Dir.FontName.IsEmpty())
-			{
-				FontManager->RegisterFontMapping(Dir.FontName, Dir.FontInherits, static_cast<int32>(Dir.FontHeight));
-#if HAS_LUA
-                lua_State* L=LuaVM->GetState(); lua_getglobal(L,"CreateFont"); lua_pushstring(L,TCHAR_TO_UTF8(*Dir.FontName));
-                if(lua_pcall(L,1,1,0)==0)
-                {
-                    const int32 FontIndex=lua_gettop(L);
-                    if(!Dir.FontInherits.IsEmpty())
-                    {
-                        lua_getglobal(L,TCHAR_TO_UTF8(*Dir.FontInherits));
-                        if(lua_istable(L,-1)) for(const char* Key:{"__fontPath","__fontFlags","__textColorR","__textColorG","__textColorB","__textColorA"}) { lua_getfield(L,-1,Key); lua_setfield(L,FontIndex,Key); }
-                        lua_pop(L,1);
-                    }
-                    lua_pushinteger(L,FontManager->GetFontSize(Dir.FontName)); lua_setfield(L,FontIndex,"__fontSize");
-                    if(!Dir.FontFlags.IsEmpty()) { lua_pushstring(L,TCHAR_TO_UTF8(*Dir.FontFlags)); lua_setfield(L,FontIndex,"__fontFlags"); }
-                    if(Dir.FontColor.IsSet())
-                    {
-                        const auto Color=Dir.FontColor.GetValue(); const float Values[]={Color.R,Color.G,Color.B,Color.A}; const char* Keys[]={"__textColorR","__textColorG","__textColorB","__textColorA"};
-                        for(int32 I=0;I<4;++I) { lua_pushnumber(L,Values[I]); lua_setfield(L,FontIndex,Keys[I]); }
-                    }
-                }
-                else UE_LOG(LogWowUIManager,Error,TEXT("Cannot create font %s: %hs"),*Dir.FontName,lua_tostring(L,-1));
-                lua_pop(L,1);
-#endif
-				UE_LOG(LogWowUIManager, Verbose, TEXT("Registered FrameXML Font: %s"), *Dir.FontName);
-			}
-			break;
-		}
+            FWowEventSystem::RegisterFontDefinition(LuaVM.Get(),FontManager.Get(),Dir);
+            break;
 		}
 	}
 

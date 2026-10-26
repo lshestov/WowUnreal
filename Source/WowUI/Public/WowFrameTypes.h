@@ -92,6 +92,7 @@ struct FWowFontStringElement
 	TArray<FWowAnchor> Anchors;
 	FString JustifyH = TEXT("CENTER");
 	FString JustifyV = TEXT("MIDDLE");
+    bool bHasJustifyH=false,bHasJustifyV=false;
 	FLinearColor Color = FLinearColor::White;
 	float FontHeight = 0.f;
 	FString FontFlags; // OUTLINE, THICKOUTLINE, MONOCHROME
@@ -225,4 +226,5 @@ struct FWowXmlDirective
 	float FontHeight = 0.f;
 	FString FontFlags;
 	TOptional<FLinearColor> FontColor;
+    FString FontJustifyH,FontJustifyV;
 };

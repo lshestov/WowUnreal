@@ -16,6 +16,9 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/TextBlock.h"
+#include "Components/Image.h"
+#include "Engine/Texture2D.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Engine/World.h"
 #include "Dom/JsonObject.h"
@@ -433,6 +436,22 @@ struct FWowGameplayProbe
                 Row->SetNumberField(TEXT("opacity"),Text->GetRenderOpacity()); Row->SetNumberField(TEXT("visibility"),int32(Text->GetVisibility()));
                 Row->SetStringField(TEXT("desired"),Text->GetDesiredSize().ToString()); Row->SetStringField(TEXT("color"),Text->GetColorAndOpacity().GetSpecifiedColor().ToString());
                 if(const auto* Slot=Cast<UCanvasPanelSlot>(Text->Slot)) { Row->SetStringField(TEXT("slotSize"),Slot->GetSize().ToString()); Row->SetStringField(TEXT("slotPosition"),Slot->GetPosition().ToString()); }
+            }
+            if(const auto* Image=Frames->GetNamedTexture(Name))
+            {
+                const auto& Brush=Image->GetBrush(); auto* Resource=Brush.GetResourceObject();
+                Row->SetStringField(TEXT("resource"),GetNameSafe(Resource)); Row->SetStringField(TEXT("resourceClass"),Resource?Resource->GetClass()->GetName():TEXT(""));
+                Row->SetNumberField(TEXT("opacity"),Image->GetRenderOpacity()); Row->SetNumberField(TEXT("visibility"),int32(Image->GetVisibility()));
+                Row->SetNumberField(TEXT("drawAs"),int32(Brush.DrawAs)); Row->SetStringField(TEXT("color"),Image->GetColorAndOpacity().ToString());
+                Row->SetStringField(TEXT("geometry"),Image->GetCachedGeometry().GetLocalSize().ToString());
+                if(const FBox2D UV=Brush.GetUVRegion(); UV.bIsValid) { Row->SetStringField(TEXT("uvMin"),UV.Min.ToString()); Row->SetStringField(TEXT("uvMax"),UV.Max.ToString()); }
+                if(auto* Material=Cast<UMaterialInstanceDynamic>(Resource))
+                {
+                    Row->SetStringField(TEXT("material"),GetNameSafe(Material->Parent));
+                    Resource=Material->K2_GetTextureParameterValue(TEXT("Image")); Row->SetStringField(TEXT("imageTexture"),GetNameSafe(Resource));
+                    for(const auto Parameter:{TEXT("Desaturation"),TEXT("OpaqueImage"),TEXT("Circle")}) { float Value=0; Material->GetScalarParameterValue(FMaterialParameterInfo(Parameter),Value); Row->SetNumberField(Parameter,Value); }
+                }
+                if(const auto* Texture=Cast<UTexture2D>(Resource)) { Row->SetNumberField(TEXT("textureWidth"),Texture->GetSizeX()); Row->SetNumberField(TEXT("textureHeight"),Texture->GetSizeY()); Row->SetBoolField(TEXT("textureResource"),Texture->GetResource()!=nullptr); }
             }
             Inspections->SetObjectField(Name,Row); Done=true;
         }

@@ -2,6 +2,7 @@
 #include "WowLuaVM.h"
 #include "WowFrameTypes.h"
 #include "WowFrameManager.h"
+#include "WowFontManager.h"
 #include "LuaApi/LuaApiRegistry.h"
 
 #if __has_include("lua.h")
@@ -771,6 +772,35 @@ void FWowEventSystem::ApplyRegionFont(const FString& RegionName,const FString& F
     {
         lua_getfield(L,-1,"SetFontObject"); lua_pushvalue(L,-2); lua_getglobal(L,TCHAR_TO_UTF8(*FontName));
         if(lua_pcall(L,2,0,0)!=0) UE_LOG(LogWowEvent,Warning,TEXT("Font inheritance failed: %s"),UTF8_TO_TCHAR(lua_tostring(L,-1)));
+    }
+    lua_settop(L,Top);
+#endif
+}
+
+void FWowEventSystem::RegisterFontDefinition(FWowLuaVM* VM,FWowFontManager* Fonts,const FWowXmlDirective& Definition)
+{
+    if(Definition.FontName.IsEmpty()) return;
+    if(Fonts) Fonts->RegisterFontMapping(Definition.FontName,Definition.FontInherits,int32(Definition.FontHeight));
+#if HAS_LUA
+    if(!VM || !VM->GetState()) return;
+    auto* L=VM->GetState(); const int32 Top=lua_gettop(L);
+    lua_getglobal(L,"CreateFont"); lua_pushstring(L,TCHAR_TO_UTF8(*Definition.FontName));
+    if(lua_pcall(L,1,1,0)!=0) { UE_LOG(LogWowEvent,Error,TEXT("Cannot create font %s: %hs"),*Definition.FontName,lua_tostring(L,-1)); lua_settop(L,Top); return; }
+    const int32 Font=lua_gettop(L);
+    if(!Definition.FontInherits.IsEmpty())
+    {
+        lua_getglobal(L,TCHAR_TO_UTF8(*Definition.FontInherits));
+        if(lua_istable(L,-1)) for(const char* Key:{"__fontPath","__fontSize","__fontFlags","__textColorR","__textColorG","__textColorB","__textColorA","__justifyH","__justifyV"}) { lua_getfield(L,-1,Key); lua_setfield(L,Font,Key); }
+        lua_pop(L,1);
+    }
+    if(Fonts || Definition.FontHeight>0) { lua_pushnumber(L,Definition.FontHeight>0?Definition.FontHeight:Fonts->GetFontSize(Definition.FontName)); lua_setfield(L,Font,"__fontSize"); }
+    if(!Definition.FontFlags.IsEmpty()) { lua_pushstring(L,TCHAR_TO_UTF8(*Definition.FontFlags)); lua_setfield(L,Font,"__fontFlags"); }
+    if(!Definition.FontJustifyH.IsEmpty()) { lua_pushstring(L,TCHAR_TO_UTF8(*Definition.FontJustifyH)); lua_setfield(L,Font,"__justifyH"); }
+    if(!Definition.FontJustifyV.IsEmpty()) { lua_pushstring(L,TCHAR_TO_UTF8(*Definition.FontJustifyV)); lua_setfield(L,Font,"__justifyV"); }
+    if(Definition.FontColor.IsSet())
+    {
+        const auto Color=Definition.FontColor.GetValue(); const float Values[]={Color.R,Color.G,Color.B,Color.A}; const char* Keys[]={"__textColorR","__textColorG","__textColorB","__textColorA"};
+        for(int32 I=0;I<4;++I) { lua_pushnumber(L,Values[I]); lua_setfield(L,Font,Keys[I]); }
     }
     lua_settop(L,Top);
 #endif
