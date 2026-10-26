@@ -189,6 +189,30 @@ static bool TableRepresentsRegion(lua_State* L, int Idx = 1)
 	return bHasTextWidget;
 }
 
+static int LF_CreateAnimationGroup(lua_State* L)
+{
+    luaL_checktype(L,1,LUA_TTABLE); auto* C=WowLuaApi::GetContext(L);
+    FWowAnimationDef Def; Def.Type=TEXT("AnimationGroup"); Def.Name=UTF8_TO_TCHAR(luaL_optstring(L,2,""));
+    lua_pushvalue(L,1); if(C && C->EventSystem && C->EventSystem->CreateAnimationGroup(Def)) return 1;
+    lua_pushnil(L); return 1;
+}
+
+static int LF_StopAnimating(lua_State* L)
+{
+    luaL_checktype(L,1,LUA_TTABLE); lua_getfield(L,1,"__animationGroups");
+    if(lua_istable(L,-1)) for(int32 I=1;I<=int32(lua_objlen(L,-1));++I)
+    {
+        lua_rawgeti(L,-1,I); lua_getfield(L,-1,"Stop"); lua_pushvalue(L,-2);
+        if(lua_pcall(L,1,0,0)!=0) return lua_error(L); lua_pop(L,1);
+    }
+    return 0;
+}
+static int LF_GetAnimationGroups(lua_State* L)
+{
+    luaL_checktype(L,1,LUA_TTABLE); lua_getfield(L,1,"__animationGroups"); if(!lua_istable(L,-1)) return 0;
+    const int32 Table=lua_gettop(L),Count=lua_objlen(L,Table); for(int32 I=1;I<=Count;++I) lua_rawgeti(L,Table,I); return Count;
+}
+
 static int LF_PlayObject(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
@@ -3054,6 +3078,9 @@ static const luaL_Reg FrameMethods[] =
 	{"Hide", LF_Hide},
 	{"IsShown", LF_IsShown},
 	{"IsVisible", LF_IsVisible},
+	{"CreateAnimationGroup", LF_CreateAnimationGroup},
+    {"StopAnimating", LF_StopAnimating},
+    {"GetAnimationGroups", LF_GetAnimationGroups},
 	{"Play", LF_PlayObject},
 	{"Stop", LF_StopObject},
 	{"IsPlaying", LF_IsObjectPlaying},
@@ -3467,6 +3494,7 @@ static const luaL_Reg FrameMethods[] =
 	{"SetTexture", LF_TextureSetTexture},
 	{"SetTexCoord", LF_TextureSetTexCoord},
 	{"SetTalent", WowLuaApi::SetTalentTooltip},
+    {"SetGlyph", WowLuaApi::SetGlyphTooltip},
 	{"GetTexCoord", LF_GetTexCoord},
 	{"GetTexture", [](lua_State* L) -> int {
 		luaL_checktype(L, 1, LUA_TTABLE);

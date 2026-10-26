@@ -1,5 +1,6 @@
 #include "Formats/Dbc/SpellDbc.h"
 #include "Internationalization/Regex.h"
+#include "Math/BasicMathExpressionEvaluator.h"
 
 bool FSpellDbc::LoadTimes(const FDbcParser& Parser,bool Cast)
 {
@@ -42,6 +43,18 @@ FString FSpellDbc::Description(uint32 Id,int32 Level,bool Aura) const
         Result+=Value.IsEmpty()?Match.GetCaptureGroup(0):Value; Previous=Match.GetMatchEnding();
     }
     Result+=Text.Mid(Previous);
+    // DBC descriptions contain numeric expressions such as ${$s1/10}.
+    // Evaluate only the arithmetic grammar, after resolving spell tokens.
+    FRegexMatcher Formula(FRegexPattern(TEXT("\\$\\{([^{}]+)\\}")),Result);
+    FString Expanded; Previous=0; FBasicMathExpressionEvaluator Evaluator;
+    while(Formula.FindNext())
+    {
+        Expanded+=Result.Mid(Previous,Formula.GetMatchBeginning()-Previous);
+        const auto Number=Evaluator.Evaluate(*Formula.GetCaptureGroup(1));
+        Expanded+=Number.IsValid() && FMath::IsFinite(Number.GetValue())?FString::Printf(TEXT("%g"),Number.GetValue()):Formula.GetCaptureGroup(0);
+        Previous=Formula.GetMatchEnding();
+    }
+    Result=Expanded+Result.Mid(Previous);
     FRegexMatcher Plural(FRegexPattern(TEXT("\\$[lLgG]([^:;]*):([^;]*);")),Result); FString Clean; Previous=0;
     while(Plural.FindNext()) { Clean+=Result.Mid(Previous,Plural.GetMatchBeginning()-Previous)+Plural.GetCaptureGroup(2); Previous=Plural.GetMatchEnding(); }
     return Clean+Result.Mid(Previous);

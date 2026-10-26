@@ -1039,6 +1039,85 @@ bool FUiIncrementalGc::RunTest(const FString&)
     TestTrue(TEXT("Incremental collection bounds transient memory"),Peak<F.Lua.GetMemoryLimit()*9/10);
     return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudTextureAnimations,"WowUnreal.Hud.TextureAnimations",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudTextureAnimations::RunTest(const FString&)
+{
+    FHudFixture F;
+    const char* Xml=R"XML(<Ui><Texture name="SparkleTemplate" virtual="true"><Size x="13" y="13"/>
+      <Animations><AnimationGroup name="$parentMotion" parentKey="motion"><Translation name="$parentTranslate" parentKey="translate" duration="1"/></AnimationGroup></Animations></Texture>
+      <Frame name="AnimationOwner"><Size x="200" y="200"/><Anchors><Anchor point="CENTER"/></Anchors>
+       <Layers><Layer><Texture name="$parentGlow" parentKey="glow"><Size x="50" y="50"/><Anchors><Anchor point="CENTER"/></Anchors><Color a="0"/>
+        <Animations><AnimationGroup name="$parentPulse" parentKey="pulse"><Alpha duration="1" change="1"/><Scripts><OnFinished>self:GetParent():Hide(); self.finished=true;</OnFinished></Scripts></AnimationGroup></Animations>
+       </Texture></Layer></Layers></Frame></Ui>)XML";
+    TArray<uint8> Bytes; Bytes.Append(reinterpret_cast<const uint8*>(Xml),FCStringAnsi::Strlen(Xml));
+    const auto Parsed=FWowFrameXmlParser::ParseXml(Bytes,TEXT("TextureAnimations"));
+    for(const auto& D:Parsed) if(D.Type==FWowXmlDirective::EType::Texture) F.Frames.LoadTextureDefinition(D.TextureDef,D.TextureParent); else F.Frames.CreateFrame(D.FrameDef);
+    TestTrue(TEXT("Animation groups retain canonical parents and XML keys"),F.Lua.ExecuteString(TEXT(R"LUA(
+        assert(AnimationOwner.glow.pulse:GetParent()==AnimationOwner.glow)
+        assert(AnimationOwnerGlowPulse==AnimationOwner.glow.pulse)
+        AnimationOwner.glow:Show(); AnimationOwner.glow.pulse:Play()
+        Particle=AnimationOwner:CreateTexture('Particle','OVERLAY','SparkleTemplate'); Particle:SetPoint('CENTER',AnimationOwner,'CENTER',10,20)
+        assert(Particle.motion.translate:GetParent()==Particle.motion)
+        Particle.motion.translate:SetOffset(40,60); Particle.motion.translate:Play()
+        AnimationButton=CreateFrame('Button','AnimationButton',AnimationOwner); AnimationButton:SetSize(40,40); AnimationButton:SetPoint('CENTER')
+        AnimationButton:SetScript('OnEnter',function(self) self.enters=(self.enters or 0)+1 end)
+        AnimationButton:SetScript('OnLeave',function(self) self.leaves=(self.leaves or 0)+1 end)
+    )LUA")));
+    F.Frames.RefreshLayout(); const auto R=F.Frames.GetLayoutRect(F.Frames.FindFrame(TEXT("AnimationButton"))); const float S=F.Frames.GetScreenScale();
+    F.Frames.UpdateMouseHover((R.X+R.Z*.5f)*S,(R.Y+R.W*.5f)*S);
+    F.Events.TickOnUpdate(.5f);
+    F.Frames.UpdateMouseHover((R.X+R.Z*.5f)*S,(R.Y+R.W*.5f)*S);
+    TestTrue(TEXT("Alpha and translation progress using elapsed time"),F.Lua.ExecuteString(TEXT(R"LUA(
+        assert(math.abs(AnimationOwner.glow:GetAlpha()-.5)<.001 and Particle.motion:IsPlaying())
+        assert(AnimationButton.enters==1 and not AnimationButton.leaves)
+        local _,_,_,x,y=Particle:GetPoint(); assert(math.abs(x-30)<.001 and math.abs(y-50)<.001)
+    )LUA")));
+    F.Events.TickOnUpdate(.6f);
+    TestTrue(TEXT("Completion restores base transform and invokes the texture handler"),F.Lua.ExecuteString(TEXT(R"LUA(
+        assert(not AnimationOwner.glow:IsShown() and AnimationOwner.glow.pulse.finished)
+        assert(not Particle.motion:IsPlaying()); local _,_,_,x,y=Particle:GetPoint(); assert(x==10 and y==20)
+        local g=Particle:CreateAnimationGroup(); local a=g:CreateAnimation('Translation'); a:SetOffset(10,0); a:SetDuration(1)
+        g:SetScript('OnStop',function(self) self.stopped=true end); g:Play(); g:Pause(); assert(g:IsPaused()); g:Play(); g:Stop(); assert(g.stopped and g:IsStopped()); g:Play(); Particle:StopAnimating(); assert(g:IsStopped() and select(2,Particle:GetAnimationGroups())==g)
+    )LUA")));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudGlyphSockets,"WowUnreal.Hud.GlyphSockets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudGlyphSockets::RunTest(const FString&)
+{
+    FString Path; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false; FMpqManager Mpq; if(!Mpq.Initialize(Path)) return false;
+    auto& D=FDbcStore::Get(); if(!D.IsLoaded()) D.LoadAll(Mpq); if(!D.IsDeferredLoaded()) D.LoadDeferred(Mpq);
+    const auto* Use=D.Spells().GetById(58403); if(!TestNotNull(TEXT("Warrior glyph item use spell exists"),Use)) return false;
+    uint32 Id=0; for(int32 I=0;I<3;++I) if(Use->Effect[I]==74) Id=Use->EffectMiscValue[I];
+    const auto* Glyph=D.Glyph(Id); if(!TestNotNull(TEXT("Use spell resolves real glyph metadata"),Glyph)) return false;
+    TestTrue(TEXT("Glyph formulas resolve after spell tokens"),!D.Spells().Description(Glyph->Spell,20).Contains(TEXT("$")));
+    TestTrue(TEXT("Canonical major and minor slot metadata is loaded"),D.GlyphSlot(21) && D.GlyphSlot(21)->Type==0 && D.GlyphSlot(22) && D.GlyphSlot(22)->Type==1 && Glyph->Type==0);
+    FHudFixture F; TStrongObjectPtr<UWowConnectionManager> Connection(NewObject<UWowConnectionManager>()); auto& H=Connection->PacketHandler; auto& E=H.EntityManager; E.LocalPlayerGuid=1;
+    auto& P=E.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER); P.SetField(UnitField::BYTES_0,(1u<<8)|1u); P.SetField(UnitField::LEVEL,20); P.SetField(PlayerField::GLYPHS_ENABLED,3);
+    for(int32 I=0;I<6;++I) P.SetField(PlayerField::GLYPH_SLOTS_1+I,21+I);
+    H.TalentGroups.SetNum(2); H.HasTalentInfo=true; H.TalentGroups[0].Glyphs[0]=Id;
+    F.Context.ConnectionManager=Connection.Get(); F.Context.EntityManager=&E;
+    TestTrue(TEXT("Socket tuples use authoritative group glyphs and player unlock bits"),F.Lua.ExecuteString(TEXT(R"LUA(
+        assert(GetNumGlyphSockets()==6)
+        local enabled,kind,spell,icon=GetGlyphSocketInfo(1); assert(enabled==1 and kind==1 and spell and icon)
+        local enabled2,kind2,spell2=GetGlyphSocketInfo(2); assert(enabled2==1 and kind2==2 and spell2==nil)
+        local enabled3,kind3=GetGlyphSocketInfo(3); assert(enabled3==nil and kind3==2)
+        assert(select(3,GetGlyphSocketInfo(1,2))==nil and GetGlyphLink(1):find('glyph:21:') and GetGlyphLink(2)=='')
+        assert(GetGlyphSocketInfo(0)==nil and GetGlyphSocketInfo(7)==nil and not SpellIsTargeting() and not GlyphMatchesSocket(1))
+        assert(not PlaceGlyphInSocket(1)); SpellStopTargeting(); RemoveGlyphFromSocket(1)
+        GlyphTip=CreateFrame('GameTooltip','GlyphTip',UIParent); GlyphTip:SetOwner(UIParent,'ANCHOR_RIGHT'); GlyphTip:SetGlyph(1)
+    )LUA")));
+    const auto* Tip=F.Frames.GetTooltipState(F.Frames.FindFrame(TEXT("GlyphTip")));
+    TestTrue(TEXT("Glyph tooltip uses the actual glyph spell"),Tip && Tip->SpellId==Glyph->Spell && Tip->Lines.Num()>=3);
+    TestEqual(TEXT("Removal requests wait for the server rather than clearing cache"),H.TalentGroups[0].Glyphs[0],uint16(Id));
+    TestTrue(TEXT("Locked glyph slots have a complete multiline tooltip"),F.Lua.ExecuteString(TEXT("GlyphTip:SetGlyph(4)")));
+    F.Frames.RefreshLayout(); const auto Rect=F.Frames.GetLayoutRect(F.Frames.FindFrame(TEXT("GlyphTip")));
+    const auto* Last=F.Frames.GetNamedFontString(TEXT("GlyphTipTextLeft3"));
+    const auto* Slot=Last?Cast<UCanvasPanelSlot>(Last->Slot):nullptr;
+    TestTrue(TEXT("The final wrapped line fits inside the tooltip border"),Last && Slot && Slot->GetPosition().Y+Last->GetDesiredSize().Y<=(Rect.W-4)*F.Frames.GetUIScale());
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudTextureStyles,"WowUnreal.Hud.TextureStyles",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FHudTextureStyles::RunTest(const FString&)
 {

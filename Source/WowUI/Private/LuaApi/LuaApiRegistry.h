@@ -38,6 +38,8 @@ namespace WowLuaApi
     void RegisterItemApi(lua_State* L);
     void RegisterSpellApi(lua_State* L);
     void RegisterClassApi(lua_State* L);
+    void RegisterGlyphApi(lua_State* L);
+    int SetGlyphTooltip(lua_State* L);
     int SetTalentTooltip(lua_State* L);
     void RegisterUnitApi(lua_State* L);
     void RegisterPanelApi(lua_State* L);

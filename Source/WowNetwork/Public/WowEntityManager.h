@@ -17,10 +17,19 @@ public:
 
     /** Find an entity, returns nullptr if not found */
     FWowEntity* Find(uint64 Guid);
+    const FWowEntity* Find(uint64 Guid) const { const auto* Entry=Entities.Find(Guid); return Entry?Entry->Get():nullptr; }
 
     /** Typed find helpers */
     FWowItemEntity* FindItem(uint64 Guid);
     FWowContainerEntity* FindContainer(uint64 Guid);
+    const FWowItemEntity* FindItem(uint64 Guid) const
+    {
+        const auto* E=Find(Guid); return E && (E->GetEntityKind()==EWowEntityKind::Item || E->GetEntityKind()==EWowEntityKind::Container)?static_cast<const FWowItemEntity*>(E):nullptr;
+    }
+    const FWowContainerEntity* FindContainer(uint64 Guid) const
+    {
+        const auto* E=Find(Guid); return E && E->GetEntityKind()==EWowEntityKind::Container?static_cast<const FWowContainerEntity*>(E):nullptr;
+    }
     FWowUnitEntity* FindUnit(uint64 Guid);
     FWowPlayerEntity* FindPlayer(uint64 Guid);
     FWowGameObjectEntity* FindGameObject(uint64 Guid);

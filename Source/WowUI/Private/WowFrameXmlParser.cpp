@@ -441,6 +441,37 @@ static TArray<FWowAnchor> ParseAnchors(const FXmlNode* AnchorsNode)
 	return Result;
 }
 
+// Preserve the hierarchy: an animation group belongs to its texture, not the frame.
+static FWowAnimationDef ParseAnimationNode(const FXmlNode* Node)
+{
+    FWowAnimationDef D; D.Type=Node->GetTag(); D.Name=Node->GetAttribute(TEXT("name")); D.ParentKey=Node->GetAttribute(TEXT("parentKey"));
+    D.Looping=Node->GetAttribute(TEXT("looping")); D.Smoothing=Node->GetAttribute(TEXT("smoothing"));
+    const auto Number=[Node](const TCHAR* Key,float Default=0.f) { const auto V=Node->GetAttribute(Key); return V.IsEmpty()?Default:FCString::Atof(*V); };
+    D.Duration=Number(TEXT("duration")); D.StartDelay=Number(TEXT("startDelay")); D.EndDelay=Number(TEXT("endDelay"));
+    D.Change=Number(TEXT("change")); D.Order=int32(Number(TEXT("order"),1)); D.X=Number(TEXT("offsetX")); D.Y=Number(TEXT("offsetY"));
+    for(const auto* C:Node->GetChildrenNodes())
+    {
+        if(C->GetTag()==TEXT("Scripts")) for(const auto* H:C->GetChildrenNodes()) D.Scripts.Add(H->GetTag(),H->GetContent());
+        else D.Children.Add(ParseAnimationNode(C));
+    }
+    return D;
+}
+#if HAS_PUGIXML
+static FWowAnimationDef ParseAnimationNode(const pugi::xml_node& Node)
+{
+    FWowAnimationDef D; D.Type=UTF8_TO_TCHAR(Node.name()); D.Name=UTF8_TO_TCHAR(Node.attribute("name").as_string()); D.ParentKey=UTF8_TO_TCHAR(Node.attribute("parentKey").as_string());
+    D.Looping=UTF8_TO_TCHAR(Node.attribute("looping").as_string()); D.Smoothing=UTF8_TO_TCHAR(Node.attribute("smoothing").as_string());
+    D.Duration=Node.attribute("duration").as_float(); D.StartDelay=Node.attribute("startDelay").as_float(); D.EndDelay=Node.attribute("endDelay").as_float();
+    D.Change=Node.attribute("change").as_float(); D.Order=Node.attribute("order").as_int(1); D.X=Node.attribute("offsetX").as_float(); D.Y=Node.attribute("offsetY").as_float();
+    for(auto C:Node.children())
+    {
+        if(FCStringAnsi::Strcmp(C.name(),"Scripts")==0) for(auto H:C.children()) D.Scripts.Add(UTF8_TO_TCHAR(H.name()),UTF8_TO_TCHAR(H.child_value()));
+        else D.Children.Add(ParseAnimationNode(C));
+    }
+    return D;
+}
+#endif
+
 // ─── Helper: parse Texture element ─────────────────────────────────────────────
 
 static FWowTextureElement ParseTextureNode(const FXmlNode* Node)
@@ -449,6 +480,9 @@ static FWowTextureElement ParseTextureNode(const FXmlNode* Node)
 	Tex.Name = Node->GetAttribute(TEXT("name"));
     Tex.Inherits=Node->GetAttribute(TEXT("inherits")); Tex.bVirtual=Node->GetAttribute(TEXT("virtual")).Equals(TEXT("true"),ESearchCase::IgnoreCase);
 	Tex.ParentKey = Node->GetAttribute(TEXT("parentKey"));
+    Tex.bHidden=Node->GetAttribute(TEXT("hidden")).Equals(TEXT("true"),ESearchCase::IgnoreCase);
+    Tex.bSetAllPoints=Node->GetAttribute(TEXT("setAllPoints")).Equals(TEXT("true"),ESearchCase::IgnoreCase);
+    if(const auto* Anim=Node->FindChildNode(TEXT("Animations"))) for(const auto* C:Anim->GetChildrenNodes()) Tex.Animations.Add(ParseAnimationNode(C));
 	Tex.File = Node->GetAttribute(TEXT("file"));
 	Tex.bAdditive=Node->GetAttribute(TEXT("alphaMode")).Equals(TEXT("ADD"),ESearchCase::IgnoreCase);
 
@@ -918,7 +952,8 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 								TexColor.attribute("a").as_float(1.0f));
 						}
 
-						L.Textures.Add(T);
+						if(const auto Anim=Tex.child("Animations")) for(auto C:Anim.children()) T.Animations.Add(ParseAnimationNode(C));
+                        L.Textures.Add(T);
 					}
 					else if (TexTag == TEXT("FontString"))
 					{

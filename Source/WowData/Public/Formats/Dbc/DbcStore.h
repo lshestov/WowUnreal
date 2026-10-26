@@ -70,6 +70,10 @@ public:
     const TArray<FFaction>& Factions() const { return UiFactions; }
     const TArray<FCurrency>& Currencies() const { return UiCurrencies; }
 
+    struct FGlyph { uint32 Spell=0,Type=0,Icon=0; };
+    struct FGlyphSlot { uint32 Type=0,Tooltip=0; };
+    const FGlyph* Glyph(uint32 Id) const { return GlyphProperties.Find(Id); }
+    const FGlyphSlot* GlyphSlot(uint32 Id) const { return GlyphSlots.Find(Id); }
     FMapDbc& Maps() { return MapDbc; }
     FAreaTableDbc& AreaTable() { return AreaTableDbc; }
     FLightDbc& Lights() { return LightDbc; }
@@ -187,6 +191,8 @@ private:
     FCharacterFacialHairStylesDbc CharacterFacialHairStylesDbc;
     FCharStartOutfitDbc CharStartOutfitDbc;
     FTaxiNodesDbc TaxiNodesDbc;
+    TMap<uint32,FGlyph> GlyphProperties;
+    TMap<uint32,FGlyphSlot> GlyphSlots;
     bool bLoaded = false;
     bool bDeferredLoaded = false;
 };

@@ -502,6 +502,10 @@ void FDbcStore::LoadDeferred(FMpqManager& Mpq)
     if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\SkillLineAbility.dbc"),Parser)) SpellBookDbc.LoadAbilities(Parser);
     if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\SkillRaceClassInfo.dbc"),Parser)) SpellBookDbc.LoadRaceClassInfo(Parser);
     if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\CreatureFamily.dbc"),Parser)) TalentTabDbc.LoadPetFamilies(Parser);
+    if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\GlyphProperties.dbc"),Parser) && Parser.GetFieldCount()>=4)
+    { GlyphProperties.Reset(); for(uint32 I=0;I<Parser.GetRecordCount();++I) GlyphProperties.Add(Parser.GetUInt(I,0),{Parser.GetUInt(I,1),Parser.GetUInt(I,2),Parser.GetUInt(I,3)}); }
+    if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\GlyphSlot.dbc"),Parser) && Parser.GetFieldCount()>=3)
+    { GlyphSlots.Reset(); for(uint32 I=0;I<Parser.GetRecordCount();++I) GlyphSlots.Add(Parser.GetUInt(I,0),{Parser.GetUInt(I,1),Parser.GetUInt(I,2)}); }
     if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\WorldMapOverlay.dbc"),Parser) && Parser.GetFieldCount()>=13)
     {
         MapOverlays.Reset();

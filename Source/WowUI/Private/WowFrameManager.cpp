@@ -840,7 +840,9 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 			FSlateBrush TransparentBrush;
 			TransparentBrush.DrawAs = ESlateBrushDrawType::NoDrawType;
 			ImgWidget->SetBrush(TransparentBrush);
-			ImgWidget->SetColorAndOpacity(Tex.VertexColor);
+			auto Tint=Tex.VertexColor;
+            if(!Tex.Animations.IsEmpty()) { ImgWidget->SetRenderOpacity(Tint.A); Tint.A=1; }
+            ImgWidget->SetColorAndOpacity(Tint);
 			if (Tex.bHidden)
 			{
 				ImgWidget->SetVisibility(ESlateVisibility::Collapsed);
@@ -2068,6 +2070,9 @@ void FWowFrameManager::DebugDumpLayout() const
 
 int64 FWowFrameManager::HitTestFrames(float ScreenX, float ScreenY) const
 {
+    // OnUpdate animations can invalidate geometry before the pointer pass.
+    // Rebuild the full cache so movement never becomes a spurious OnLeave.
+    if(bLayoutDirty) const_cast<FWowFrameManager*>(this)->RefreshLayout();
     const float X = ScreenX / RawViewportScale, Y = ScreenY / RawViewportScale;
     int64 Best = -1;
     int32 BestZ = MIN_int32;
@@ -2748,6 +2753,27 @@ void FWowFrameManager::TooltipUpdateDisplay(int64 TooltipHandle)
 		return Text;
 	};
 
+    const auto Measure=[&](UTextBlock* Label,const FString& Text)->FVector2D
+    {
+        if(!Label) return FVector2D::ZeroVector;
+        Label->SetText(FText::FromString(Text)); Label->SetAutoWrapText(false); Label->SetWrapTextAt(0);
+        if(auto* Rich=Cast<UWowTextBlock>(Label)) Rich->RefreshRichStyle(UIScale);
+        Label->ForceLayoutPrepass(); return Label->GetDesiredSize()/UIScale;
+    };
+    float ContentWidth=FMath::Max(1.f,State->MinimumWidth);
+    for(int32 I=0;I<State->Lines.Num();++I)
+    {
+        const auto& Line=State->Lines[I]; const auto Size=Measure(EnsureText(I+1,false),Line.Text);
+        ContentWidth=FMath::Max(ContentWidth,float(Line.bWrapText?FMath::Min(300.,Size.X):Size.X));
+    }
+    for(int32 I=0;I<State->DoubleLines.Num();++I)
+    {
+        const auto& Line=State->DoubleLines[I]; const int32 Index=State->Lines.Num()+I+1;
+        const auto Left=Measure(EnsureText(Index,false),Line.LeftText),Right=Measure(EnsureText(Index,true),Line.RightText);
+        ContentWidth=FMath::Max(ContentWidth,float(Left.X+Right.X+12));
+    }
+    ContentWidth=(FMath::CeilToFloat(ContentWidth*UIScale)+1)/UIScale;
+
 	// Update FontString widgets with tooltip lines
 	int32 LineIndex = 0;
 
@@ -2763,7 +2789,8 @@ void FWowFrameManager::TooltipUpdateDisplay(int64 TooltipHandle)
 		if (LeftTextBlock)
 		{
 			LeftTextBlock->SetText(FText::FromString(Line.Text));
-			LeftTextBlock->SetAutoWrapText(Line.bWrapText); LeftTextBlock->SetWrapTextAt(Line.bWrapText?300*UIScale:0);
+			LeftTextBlock->SetAutoWrapText(false); LeftTextBlock->SetWrapTextAt(Line.bWrapText?ContentWidth*UIScale:0);
+            if(auto* Rich=Cast<UWowTextBlock>(LeftTextBlock)) Rich->RefreshRichStyle(UIScale);
 			LeftTextBlock->SetColorAndOpacity(FSlateColor(Line.Color));
 			LeftTextBlock->SetVisibility(ESlateVisibility::Visible);
 			LeftTextBlock->ForceLayoutPrepass();
@@ -2814,29 +2841,7 @@ void FWowFrameManager::TooltipUpdateDisplay(int64 TooltipHandle)
 		}
 	}
 
-	// Calculate and set tooltip size based on content
-	float TooltipWidth = State->MinimumWidth;
-	float TooltipHeight = 0.f;
-	const float LineHeight = 14.f;
-	const float Padding = 16.f; // Padding around tooltip content
-
-	// Calculate width based on text content
-	for (const FTooltipLine& Line : State->Lines)
-	{
-		// Estimate text width (this is a simplification)
-		float EstimatedWidth = WowUiPlainText(Line.Text).Len() * 6.f;
-		if(Line.bWrapText) EstimatedWidth=FMath::Min(300.f,EstimatedWidth);
-		TooltipWidth = FMath::Max(TooltipWidth, EstimatedWidth);
-	}
-
-	for (const FTooltipDoubleLine& DoubleLine : State->DoubleLines)
-	{
-		float EstimatedWidth = (DoubleLine.LeftText.Len() + DoubleLine.RightText.Len()) * 7.f;
-		TooltipWidth = FMath::Max(TooltipWidth, EstimatedWidth);
-	}
-
-	TooltipHeight = TextY+8;
-	TooltipWidth += Padding;
+    const float TooltipWidth=ContentWidth+16,TooltipHeight=TextY+8;
 
 	// Set the tooltip frame size
 	SetFrameSize(TooltipHandle, TooltipWidth, TooltipHeight);

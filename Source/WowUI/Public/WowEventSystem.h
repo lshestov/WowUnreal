@@ -6,6 +6,7 @@ class FWowLuaVM;
 class FWowFrameManager;
 struct FWowFrameDef;
 struct FWowTextureElement;
+struct FWowAnimationDef;
 struct lua_State;
 
 /**
@@ -50,6 +51,9 @@ public:
 	void CreateTextureRegionGlobal(const FString& RegionName, int64 ParentHandle = -1, const FString& ObjectType = TEXT("Texture"), const FString& InitialText = FString());
 	void ApplyRegionFont(const FString& RegionName,const FString& FontName);
 	void InitializeTextureRegion(const FWowTextureElement& Texture,const FString& Layer);
+    /** Parent is on top of the Lua stack; pushes its new animation group. */
+    bool CreateAnimationGroup(const FWowAnimationDef& Definition);
+    void TickAnimations(float DeltaTime);
 
 	/** Alias an existing named Lua global object to another global name. */
 	void AliasGlobalObject(const FString& ExistingName, const FString& AliasName);
@@ -88,6 +92,7 @@ public:
 private:
 	FWowLuaVM* LuaVM = nullptr;
 	FWowFrameManager* FrameManager = nullptr;
+    int32 AnimationFactoryRef=-2,AnimationTickRef=-2;
 
 	/** Event name -> set of registered frame handles */
 	TMap<FString, TSet<int64>> EventRegistrations;

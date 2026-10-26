@@ -129,8 +129,17 @@ public:
     /** Auto-equip an inventory item from the specified bag/slot. */
     void SendAutoEquipItem(uint8 SourceBag, uint8 SourceSlot);
     void SendSwapItem(uint8 SourceBag,uint8 SourceSlot,uint8 DestinationBag,uint8 DestinationSlot);
-    void SendUseItem(uint8 Bag,uint8 Slot,uint64 ItemGuid,uint32 SpellId,uint64 ExplicitTargetGuid=0);
-    static TArray<uint8> BuildUseItemPacket(uint8 Bag,uint8 Slot,uint64 ItemGuid,uint32 SpellId,uint64 ExplicitTargetGuid=0);
+    void SendUseItem(uint8 Bag,uint8 Slot,uint64 ItemGuid,uint32 SpellId,uint64 ExplicitTargetGuid=0,int32 GlyphSocket=-1);
+    struct FPendingGlyph { uint64 ItemGuid=0; uint32 Spell=0,Property=0; uint8 Bag=255,Slot=0,Group=0; };
+    FPendingGlyph PendingGlyph;
+    FOnWowCursorChanged OnGlyphTargetingChanged;
+    bool BeginGlyphUse(uint8 Bag,uint8 Slot,uint64 ItemGuid,uint32 SpellId);
+    bool HasPendingGlyph() const;
+    bool GlyphMatchesSocket(uint32 Socket) const;
+    bool PlaceGlyph(uint32 Socket);
+    void CancelGlyphUse();
+    void SendRemoveGlyph(uint32 Socket);
+    static TArray<uint8> BuildUseItemPacket(uint8 Bag,uint8 Slot,uint64 ItemGuid,uint32 SpellId,uint64 ExplicitTargetGuid=0,uint32 GlyphSocket=0);
     void SendSetTitle(int32 TitleIndex);
 
     /** Auto-store an equipped or bag item into the requested destination bag. */

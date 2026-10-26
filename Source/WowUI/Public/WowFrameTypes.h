@@ -45,6 +45,16 @@ struct FWowAnchor
 	float OffsetY = 0.f;
 };
 
+/** Native XML animation data; names remain relative to the immediate owner. */
+struct FWowAnimationDef
+{
+    FString Type,Name,ParentKey,Looping,Smoothing;
+    float Duration=0,StartDelay=0,EndDelay=0,Change=0,X=0,Y=0;
+    int32 Order=1;
+    TMap<FString,FString> Scripts;
+    TArray<FWowAnimationDef> Children;
+};
+
 /** A texture element within a layer */
 struct FWowTextureElement
 {
@@ -56,6 +66,7 @@ struct FWowTextureElement
 	FString Name;
 	FString ParentKey;
 	FString File;
+    TArray<FWowAnimationDef> Animations;
 	float Width = 0.f;
 	float Height = 0.f;
 	TArray<FWowAnchor> Anchors;

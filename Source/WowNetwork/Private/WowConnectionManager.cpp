@@ -2,6 +2,7 @@
 #include "Net/WowAuthSocket.h"
 #include "Net/WowWorldSocket.h"
 #include "WowOpcodes.h"
+#include "Formats/Dbc/DbcStore.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowNet, Log, All);
 
@@ -959,12 +960,13 @@ void UWowConnectionManager::SendSwapItem(uint8 SourceBag,uint8 SourceSlot,uint8 
     WorldSocket->SendPacket(WowOpcode::CMSG_SWAP_ITEM,{DestinationBag,DestinationSlot,SourceBag,SourceSlot});
 }
 
-TArray<uint8> UWowConnectionManager::BuildUseItemPacket(uint8 Bag,uint8 Slot,uint64 ItemGuid,uint32 SpellId,uint64 ExplicitTargetGuid)
+TArray<uint8> UWowConnectionManager::BuildUseItemPacket(uint8 Bag,uint8 Slot,uint64 ItemGuid,uint32 SpellId,uint64 ExplicitTargetGuid,uint32 GlyphSocket)
 {
+    if(GlyphSocket>=6) return {};
     TArray<uint8> Data={Bag,Slot,0}; // bag, slot, cast count
     Data.Append(reinterpret_cast<const uint8*>(&SpellId),4);
     Data.Append(reinterpret_cast<const uint8*>(&ItemGuid),8);
-    const uint32 Glyph=0,TargetMask=ExplicitTargetGuid?2:0; // no inferred hostile target for consumables
+    const uint32 Glyph=GlyphSocket,TargetMask=ExplicitTargetGuid?2:0; // no inferred hostile target for consumables
     Data.Append(reinterpret_cast<const uint8*>(&Glyph),4); Data.Add(0);
     Data.Append(reinterpret_cast<const uint8*>(&TargetMask),4);
     if(ExplicitTargetGuid)
@@ -976,10 +978,12 @@ TArray<uint8> UWowConnectionManager::BuildUseItemPacket(uint8 Bag,uint8 Slot,uin
     return Data;
 }
 
-void UWowConnectionManager::SendUseItem(uint8 Bag,uint8 Slot,uint64 ItemGuid,uint32 SpellId,uint64 ExplicitTargetGuid)
+void UWowConnectionManager::SendUseItem(uint8 Bag,uint8 Slot,uint64 ItemGuid,uint32 SpellId,uint64 ExplicitTargetGuid,int32 GlyphSocket)
 {
     if(!WorldSocket.IsValid() || State!=EWowSessionState::WorldInGame || !ItemGuid || !SpellId) return;
-    WorldSocket->SendPacket(WowOpcode::CMSG_USE_ITEM,BuildUseItemPacket(Bag,Slot,ItemGuid,SpellId,ExplicitTargetGuid));
+    if(GlyphSocket<0) if(const auto* Spell=FDbcStore::Get().Spells().GetById(SpellId)) for(const uint32 Effect:Spell->Effect) if(Effect==74) { BeginGlyphUse(Bag,Slot,ItemGuid,SpellId); return; }
+    if(GlyphSocket>=6) return;
+    WorldSocket->SendPacket(WowOpcode::CMSG_USE_ITEM,BuildUseItemPacket(Bag,Slot,ItemGuid,SpellId,ExplicitTargetGuid,GlyphSocket<0?0:GlyphSocket));
 }
 
 void UWowConnectionManager::SendSetTitle(int32 TitleIndex)
@@ -1489,6 +1493,7 @@ void UWowConnectionManager::SendLearnPreviewTalents(const TArray<FWowTalentInfo>
 
 void UWowConnectionManager::Disconnect()
 {
+    CancelGlyphUse();
     if (WorldSocket.IsValid())
     {
         WorldSocket->Disconnect();

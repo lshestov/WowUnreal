@@ -277,7 +277,12 @@ void AWowGameplayController::SetupInputComponent()
 void AWowGameplayController::BindEntityEvents()
 {
 	if (!ConnectionManager) return;
-	ConnectionManager->OnCursorChanged.AddWeakLambda(this,[this]()
+	ConnectionManager->OnGlyphTargetingChanged.AddWeakLambda(this,[this]()
+    {
+        FireUIEvent(ConnectionManager->HasPendingGlyph()?TEXT("USE_GLYPH"):TEXT("CURRENT_SPELL_CAST_CHANGED"));
+        FireUIEvent(TEXT("CURSOR_UPDATE"));
+    });
+    ConnectionManager->OnCursorChanged.AddWeakLambda(this,[this]()
 	{
 		FireUIEvent(TEXT("CURSOR_UPDATE"));
 		FireUIEvent(ConnectionManager->HasCursorPayload()?TEXT("ACTIONBAR_SHOWGRID"):TEXT("ACTIONBAR_HIDEGRID"));
@@ -5132,6 +5137,11 @@ void AWowGameplayController::OnEscapeKey()
 	{
 		return; // Don't process escape when typing in chat
 	}
+
+    if(ConnectionManager && ConnectionManager->HasPendingGlyph())
+    {
+        ConnectionManager->CancelGlyphUse(); return;
+    }
 
 	// 1. Stop auto-attack
 	if (bIsAutoAttacking)

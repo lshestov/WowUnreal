@@ -3,6 +3,8 @@
 #include "WowConnectionManager.h"
 #include "UObject/StrongObjectPtr.h"
 #include "WowPcmSoundWave.h"
+#include "Mpq/MpqManager.h"
+#include "Formats/Dbc/DbcStore.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 namespace
@@ -13,6 +15,35 @@ struct FWire
     template<typename T> FWire& Add(T Value) { Data.Append(reinterpret_cast<const uint8*>(&Value),sizeof(Value)); return *this; }
     FWire& Text(const char* Value) { Data.Append(reinterpret_cast<const uint8*>(Value),FCStringAnsi::Strlen(Value)+1); return *this; }
 };
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGameplayGlyphTargeting,"WowUnreal.Gameplay.GlyphTargeting",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FGameplayGlyphTargeting::RunTest(const FString&)
+{
+    FString Path; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false; FMpqManager Mpq; if(!Mpq.Initialize(Path)) return false;
+    auto& D=FDbcStore::Get(); if(!D.IsLoaded()) D.LoadAll(Mpq); if(!D.IsDeferredLoaded()) D.LoadDeferred(Mpq);
+    TStrongObjectPtr<UWowConnectionManager> Connection(NewObject<UWowConnectionManager>()); auto& H=Connection->PacketHandler; auto& E=H.EntityManager;
+    E.LocalPlayerGuid=1; auto& Player=E.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER);
+    const uint64 Guid=0x4000000000000021ull; auto& Item=E.PromoteToTyped(Guid,WowTypeMask::OBJECT|WowTypeMask::ITEM); Item.SetField(ItemField::STACK_COUNT,2);
+    Player.SetField(PlayerField::PACK_SLOT_START,uint32(Guid&0xffffffffull)); Player.SetField(PlayerField::PACK_SLOT_START+1,uint32(Guid>>32));
+    Player.SetField(PlayerField::GLYPH_SLOTS_1,21); Player.SetField(PlayerField::GLYPH_SLOTS_1+1,22); Player.SetField(PlayerField::GLYPHS_ENABLED,3);
+    TestTrue(TEXT("A glyph item enters targeting without consuming its stack"),Connection->BeginGlyphUse(255,23,Guid,58403) && Connection->HasPendingGlyph() && Item.GetField(ItemField::STACK_COUNT)==2);
+    TestTrue(TEXT("Only matching slot types accept the selected glyph"),Connection->GlyphMatchesSocket(0) && !Connection->GlyphMatchesSocket(1) && !Connection->GlyphMatchesSocket(6));
+    H.ActiveTalentGroup=1; TestFalse(TEXT("Switching specs invalidates the staged glyph use"),Connection->HasPendingGlyph()); H.ActiveTalentGroup=0;
+    Player.SetField(PlayerField::PACK_SLOT_START,0); Player.SetField(PlayerField::PACK_SLOT_START+1,0);
+    TestTrue(TEXT("Moving or replacing the item prevents applying a stale slot"),!Connection->HasPendingGlyph() && !Connection->GlyphMatchesSocket(0) && !Connection->PlaceGlyph(0));
+    Connection->CancelGlyphUse(); TestTrue(TEXT("Cancellation clears targeting without inventory changes"),Connection->PendingGlyph.ItemGuid==0 && Item.GetField(ItemField::STACK_COUNT)==2);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGameplayGlyphPackets,"WowUnreal.Gameplay.GlyphPackets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FGameplayGlyphPackets::RunTest(const FString&)
+{
+    const uint64 Guid=0x4000000000000021ull; const auto Data=UWowConnectionManager::BuildUseItemPacket(255,23,Guid,58403,0,5); FPacketReader R(Data);
+    TestTrue(TEXT("Glyph use retains the ordinary item-use header"),Data.Num()==24 && R.ReadU8()==255 && R.ReadU8()==23 && R.ReadU8()==0 && R.ReadU32()==58403 && R.ReadU64()==Guid);
+    TestTrue(TEXT("Selected glyph socket is a full uint32 before cast flags and target mask"),R.ReadU32()==5 && R.ReadU8()==0 && R.ReadU32()==0);
+    TestTrue(TEXT("An out-of-range socket cannot become an item-use packet"),UWowConnectionManager::BuildUseItemPacket(255,23,Guid,58403,0,6).IsEmpty());
+    return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGameplayTalentRequests,"WowUnreal.Gameplay.TalentRequests",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)

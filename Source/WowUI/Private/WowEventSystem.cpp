@@ -659,7 +659,12 @@ void FWowEventSystem::CreateTextureRegionGlobal(const FString& RegionName, int64
 	lua_State* L = LuaVM->GetState();
 	if (!L) return;
 
-	// Create a Lua table for this texture region with the frame metatable
+	if(ObjectType==TEXT("Animation"))
+    {
+        lua_getglobal(L,TCHAR_TO_UTF8(*RegionName)); const bool Exists=lua_istable(L,-1)!=0; lua_pop(L,1);
+        if(Exists) return;
+    }
+    // Create a Lua table for this texture region with the frame metatable
 	lua_newtable(L);
 
 	// Store the name
@@ -710,6 +715,8 @@ void FWowEventSystem::InitializeTextureRegion(const FWowTextureElement& Texture,
     {
         if(!Texture.File.IsEmpty()) { lua_pushstring(L,TCHAR_TO_UTF8(*Texture.File)); lua_setfield(L,-2,"__texture"); }
         lua_pushstring(L,TCHAR_TO_UTF8(*Layer)); lua_setfield(L,-2,"__drawLayer");
+        if(!Texture.Animations.IsEmpty()) { lua_pushnumber(L,Texture.VertexColor.A); lua_setfield(L,-2,"__alpha"); }
+        for(const auto& Definition:Texture.Animations) if(CreateAnimationGroup(Definition)) lua_pop(L,1);
         lua_pushstring(L,Texture.bAdditive?"ADD":"BLEND"); lua_setfield(L,-2,"__blendMode");
         const double Values[]={Texture.Left,Texture.Right,Texture.Top,Texture.Bottom}; const char* Keys[]={"__texLeft","__texRight","__texTop","__texBottom"};
         for(int32 I=0;I<4;++I) { lua_pushnumber(L,Values[I]); lua_setfield(L,-2,Keys[I]); }
@@ -1530,7 +1537,7 @@ void FWowEventSystem::EndOnLoadBatch()
 void FWowEventSystem::TickOnUpdate(float DeltaTime)
 {
 #if HAS_LUA
-	if (!LuaVM || !LuaVM->IsInitialized() || OnUpdateFrames.Num() == 0)
+	if (!LuaVM || !LuaVM->IsInitialized())
 	{
 		return;
 	}
@@ -1538,6 +1545,7 @@ void FWowEventSystem::TickOnUpdate(float DeltaTime)
 	lua_State* L = LuaVM->GetState();
 	if (!L) return;
 
+	TickAnimations(DeltaTime);
 	LuaVM->CollectGarbageIfNeeded(0.60);
 
 	TArray<int64> Handles = OnUpdateFrames.Array();

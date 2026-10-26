@@ -288,7 +288,15 @@ build, automation, native autologin and rendered screenshot verification):
     through texture replacement. Own reproducible UI materials contain no game
     images. Verified 77 tests, focused highlight regression, 14 native steps and
     four screenshots including grayscale locked talents and circular portraits.
-  - [ ] Glyph metadata/socket APIs, targeting/application/removal and original panel.
+  - [?] Glyph metadata/socket APIs, targeting/application/removal and original panel.
+    Real item targeting validates socket type/unlocks, item position and active spec;
+    Escape cancels without consuming items. Apply/remove wait for server state.
+    Texture templates retain real timed Alpha/Translation groups and parent keys;
+    shared hit testing refreshes animation-invalidated geometry without false leave
+    events. Spell descriptions evaluate numeric DBC expressions safely, and wrapped
+    tooltips measure native text. Verified 81 tests plus focused regressions;
+    final native 29-step use/cancel/apply/remove run and six nonempty screenshots
+    show correct tooltips and restore all glyphs/items. No glyph/animation Lua errors.
   - [ ] Live spell-rank replacement and complete class-window regression.
 - [ ] 4. Inventory: split/delete, compare/try-on, merchant/bank/mail/trade round trips.
 - [ ] 5. Chat/combat/macros: hyperlinks, remaining combat events and macro execution families.
