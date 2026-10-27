@@ -477,7 +477,7 @@ build, automation, native autologin and rendered screenshot verification):
     native main-hall/upper-room/reload/outdoor round trip. The guarded route
     restores original position/UI and verifies unchanged health, inventory,
     money, level, XP and exploration. See Docs/IndoorMinimap.md.
-- [?] 7. Group/special windows: party/loot, PvP, dungeon finder and achievements.
+- [x] 7. Group/special windows: party/loot, PvP, dungeon finder and achievements.
   - [x] Restore NPC/player portrait captures with authored M2 cameras and the
     runtime head-socket cache. Verified Windows build, 117 regression tests
     (three existing warning tests), corrected fixture and final two-test check,
@@ -557,7 +557,7 @@ build, automation, native autologin and rendered screenshot verification):
       fading discovered during the dungeon-finder routes.
       Verified six focused checks and a 21-step native route with four
       inspected captures. See Docs/MessageFrames.md.
-  - [?] Complete achievements, criteria, tracking and comparison state.
+  - [x] Complete achievements, criteria, tracking and comparison state.
     Original catalog/categories/ranks, authoritative snapshots and criteria,
     statistics, points/dates/icons, numeric earned notifications and chat links,
     per-character tracking/restoration and isolated player comparisons.
@@ -565,6 +565,9 @@ build, automation, native autologin and rendered screenshot verification):
     recorded warning cases), native 84/89-step routes at 1280x720/1920x1080,
     and 23 validated, inspected captures. Tracking survives ReloadUI; server
     completion removes it and actual chat links open the original tooltip.
+    Next-iteration verification confirmed the clean published package: 888
+    matching source files, no extra sources or local patches, identical staged/
+    packaged/installed executables, restored fixtures and no clients online.
     See Docs/Achievements.md.
 
 - [x] Stock options category placement and text: numeric-offset SetPoint overloads, runtime $parent references, constrained description wrapping, and XML markup rendered without asset paths while Lua keeps original strings. Verified 64 automation tests and native category clicks, character/spellbook windows and rendered screenshots.

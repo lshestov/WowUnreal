@@ -58,3 +58,9 @@ AzerothCore refuses achievement gains in GM mode. The owned test character
 disables that mode before requesting completions and criteria checks; normal
 server packets drive the UI. Both disposable accounts are removed, and the
 verification wrapper checks that existing characters/inventories are unchanged.
+
+Next-iteration verification of the clean published package confirms 888 matching
+source files, no extra sources, no local patches, equal executable hashes in
+build/package/runtime, 146 passing tests, both native routes and all 23 captures.
+The worktree is clean, the installed revision matches published main, both QA
+fixtures are restored, no verification clients remain and the realm is empty.
