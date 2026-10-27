@@ -4,6 +4,7 @@
 class FWowFrameManager;
 struct FWowLuaContext;
 class UWorld;
+struct FWowGuildEmblem;
 
 /** Independent UI character models and camera views of live unit portraits. */
 class FWowUiModelRenderer
@@ -18,6 +19,7 @@ public:
     void Position(int64 Handle,const FVector& Value);
     void TryOn(int64 Handle,uint32 ItemId,uint32 Type);
     void Dress(int64 Handle,bool Dressed);
+    void Tabard(int64 Handle,const FWowGuildEmblem& Value,uint32 Display);
     void SetAssets(class FMpqManager* InMpq,class FWowAssetCache* InCache) { Mpq=InMpq; Cache=InCache; }
     void Tick(UWorld* World);
 private:

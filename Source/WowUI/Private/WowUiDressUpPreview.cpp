@@ -29,12 +29,19 @@ bool FWowUiDressUpPreview::Rebuild(UWorld* World,FWowLuaContext& Context,FMpqMan
     const auto* Player=Context.EntityManager->FindPlayer(Guid); if(!Player) return false;
     uint32 CurrentHash=HashCombine(GetTypeHash(Player->GetPlayerBytes()),GetTypeHash(Player->GetPlayerBytes2()));
     CurrentHash=HashCombine(CurrentHash,GetTypeHash(Player->GetRaceId()|(Player->GetGenderId()<<8)));
-    for(int32 Slot=0;Slot<19;++Slot) CurrentHash=HashCombine(CurrentHash,GetTypeHash(Player->GetEquipmentItemGuid(Slot)));
+    for(int32 Slot=0;Slot<19;++Slot) {CurrentHash=HashCombine(CurrentHash,GetTypeHash(Player->GetEquipmentItemGuid(Slot))); CurrentHash=HashCombine(CurrentHash,GetTypeHash(Player->GetField(PlayerField::VISIBLE_ITEM_BASE+Slot*2)));}
+    const auto* Guild=Context.ConnectionManager->PacketHandler.Guilds.Find(Player->GetField(PlayerField::GUILD_ID));
+    if(Guild) for(uint32 Value:Guild->Emblem) CurrentHash=HashCombineFast(CurrentHash,Value);
     if(CurrentHash!=SourceHash) Dirty=true;
     if(!Dirty) return Actor.IsValid();
     auto* Connection=Context.ConnectionManager;
     TMap<int32,uint32> Items;
-    if(!Undressed) for(int32 Slot=0;Slot<19;++Slot) if(const auto* Item=Context.EntityManager->FindItem(Player->GetEquipmentItemGuid(Slot))) Items.Add(Slot,Item->Entry);
+    if(!Undressed) for(int32 Slot=0;Slot<19;++Slot)
+    {
+        uint32 Entry=Player->GetField(PlayerField::VISIBLE_ITEM_BASE+Slot*2);
+        if(const auto* Item=Context.EntityManager->FindItem(Player->GetEquipmentItemGuid(Slot))) Entry=Item->Entry;
+        if(Entry) Items.Add(Slot,Entry);
+    }
     for(const auto& Override:Overrides) Items.Add(Override.Key,Override.Value);
     bool Ready=true;
     for(const auto& Item:Items) if(Item.Value && !Connection->PacketHandler.ItemTemplates.Contains(Item.Value)) { Connection->RequestItemTemplate(Item.Value); Ready=false; }
@@ -69,6 +76,8 @@ bool FWowUiDressUpPreview::Rebuild(UWorld* World,FWowLuaContext& Context,FMpqMan
                 Params.Equipment.Add({Display,Item.Key==16?Attach::LeftHand:Attach::RightHand}); break;
         }
     }
+    if(Guild && Items.FindRef(18)==5976) {Body.UseGuildEmblem=true; Body.GuildEmblem={Guild->Emblem[0],Guild->Emblem[1],Guild->Emblem[2],Guild->Emblem[3],Guild->Emblem[4]};}
+    if(HasTabardPreview) {Body.TabardDisplayId=TabardDisplay; Body.UseGuildEmblem=true; Body.GuildEmblem=Emblem;}
     FVector Location(0,0,-100000); if(Context.ResolveActor) if(auto* Live=Context.ResolveActor(Guid)) Location=Live->GetActorLocation()-FVector(0,0,10000);
     auto* NewActor=FWowCharacterBuilder::SpawnCharacterWithEquipment(World,Mpq,Cache,Params,Location);
     if(!NewActor) return false;

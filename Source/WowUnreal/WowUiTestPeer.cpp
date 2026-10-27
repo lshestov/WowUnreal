@@ -121,6 +121,18 @@ void FWowUiTestPeer::Tick()
 bool FWowUiTestPeer::Command(const FString& Action,int32 Slot,uint32 Value)
 {
     if(!Ready()) return false;
+    if(Action==TEXT("guild_accept"))
+    {
+        auto& H=Client->PacketHandler; const FString MasterName=H.PlayerNameCache.FindRef(MasterGuid);
+        if(MasterName.IsEmpty() || H.GuildInviter!=MasterName || H.GuildInvitation.IsEmpty()) return false;
+        Client->SendRawPacket(0x84,{}); H.GuildInviter.Empty(); H.GuildInvitation.Empty(); return true;
+    }
+    if(Action==TEXT("guild_leave"))
+    {
+        const auto* P=Client->PacketHandler.EntityManager.GetLocalPlayer();
+        if(!P || !P->GetField(PlayerField::GUILD_ID) || P->GetField(PlayerField::GUILD_RANK)==0) return false;
+        Client->SendRawPacket(0x8D,{}); return true;
+    }
     if(Action==TEXT("loot_roll"))
     {
         if(Slot<0 || Slot>3 || !Value || !Client->PacketHandler.GroupInfo.FindMember(MasterGuid)) return false;

@@ -417,6 +417,7 @@ void AWowGameplayController::BindEntityEvents()
 	{
 		if (GameUI) GameUI->ShowGossip(Menu);
 	});
+    ConnectionManager->PacketHandler.OnGossipClosed.AddLambda([this](){if(GameUI) GameUI->HideQuestDialog();});
 	ConnectionManager->PacketHandler.OnQuestLogChanged.AddLambda([this]()
 	{
 		if(ConnectionManager) for(const auto& Quest:ConnectionManager->PacketHandler.QuestLog) ConnectionManager->RequestQuestTemplate(Quest.QuestId);
@@ -2603,9 +2604,15 @@ void AWowGameplayController::SetupLocalPlayerCharacterModel(const FWowEntity& En
 		Gear.Slot=Slot; Gear.DisplayId=Item->DisplayId; Gear.InventoryType=Item->InventoryType;
 		Equipment.Add(Gear);
 	}
+    FWowGuildEmblem Emblem; const FWowGuildEmblem* EmblemPtr=nullptr;
+    if(Entity.GetField(PlayerField::VISIBLE_ITEM_BASE+18*2)==5976)
+    {
+        const auto* Guild=ConnectionManager->PacketHandler.Guilds.Find(Entity.GetField(PlayerField::GUILD_ID));
+        if(Guild) {Emblem={Guild->Emblem[0],Guild->Emblem[1],Guild->Emblem[2],Guild->Emblem[3],Guild->Emblem[4]}; EmblemPtr=&Emblem; Appearance.Add(Emblem.Hash());}
+    }
 	if (!bMetadataReady || (Appearance==LocalPlayerAppearance && PlayerChar->GetMesh()->GetSkeletalMeshAsset())) return;
 	PlayerChar->SetCharacterModelWithEquipment(World,CachedMpq,CachedAssetCache,
-		RaceId,Gender,SkinColor,Face,HairStyle,HairColor,FacialHair,&Equipment);
+		RaceId,Gender,SkinColor,Face,HairStyle,HairColor,FacialHair,&Equipment,EmblemPtr);
 	LocalPlayerAppearance=MoveTemp(Appearance);
 }
 

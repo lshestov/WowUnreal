@@ -265,6 +265,9 @@ struct FWowGameplayProbe
         }
         else if (Op==TEXT("profile"))
         {
+            // UE's frame/thread counters describe the preceding frame. The
+            // first observation predates this interval (often UI bootstrap).
+            if(!bInvoked) {bInvoked=true; return;}
             Profile.FindOrAdd(TEXT("frameMs")).Add(FApp::GetDeltaTime()*1000);
             Profile.FindOrAdd(TEXT("gameThreadMs")).Add(FPlatformTime::ToMilliseconds(GGameThreadTime));
             Profile.FindOrAdd(TEXT("renderThreadMs")).Add(FPlatformTime::ToMilliseconds(GRenderThreadTime));
@@ -275,7 +278,7 @@ struct FWowGameplayProbe
             Profile.FindOrAdd(TEXT("uiLayoutMs")).Add(C.LastLayoutMilliseconds);
             Profile.FindOrAdd(TEXT("uiWidgetsMs")).Add(C.LastWidgetMilliseconds);
             if (auto* Lua=C.UIManager->GetLuaVM()) Profile.FindOrAdd(TEXT("luaMiB")).Add(Lua->GetMemoryUsage()/(1024.0*1024));
-            Done=Now-StepStarted>=FMath::Clamp(Step->GetNumberField(TEXT("seconds")),1.0,30.0);
+            Done=Now-StepStarted>=FMath::Clamp(Step->GetNumberField(TEXT("seconds")),1.0,60.0);
         }
         else if (Op==TEXT("select_entry"))
         {
@@ -354,6 +357,12 @@ struct FWowGameplayProbe
         else if (Op==TEXT("wait_landed")) { const auto* Character=Cast<ACharacter>(C.GetPawn()); Done=bJumpObserved && Character && Character->GetCharacterMovement()->IsMovingOnGround() && Now-StepStarted>.5; if(Done)bJumpRequested=false; }
         else if(Op==TEXT("wait_floor")) { const auto* Character=Cast<ACharacter>(C.GetPawn()); Done=Character && Character->GetCharacterMovement()->IsMovingOnGround() && Character->GetCharacterMovement()->CurrentFloor.IsWalkableFloor(); }
         else if (Op==TEXT("wait_menu")) Done=(Handler.GossipMenu.Guid==C.TargetGuid && (Handler.GossipMenu.Quests.Num() || Handler.GossipMenu.Options.Num())) || (Handler.QuestDetails.QuestGiverGuid==C.TargetGuid && C.GameUI->GetShownQuestId()!=0);
+        else if(Op==TEXT("gossip_option"))
+        {
+            const FString Text=Step->GetStringField(TEXT("textContains"));
+            if(Handler.GossipMenu.Guid==C.TargetGuid) for(const auto& Option:Handler.GossipMenu.Options) if(!Text.IsEmpty() && Option.Text.Contains(Text,ESearchCase::IgnoreCase))
+            {C.GameUI->SelectGossipOption(Option.Id); Done=true; break;}
+        }
         else if (Op==TEXT("quest")) { if (C.GameUI->GetShownQuestId()!=uint32(Step->GetIntegerField(TEXT("id")))) C.GameUI->SelectGossipQuest(Step->GetIntegerField(TEXT("id"))); Done=true; }
         else if (Op==TEXT("wait_dialog")) Done=C.GameUI->GetShownQuestId()==uint32(Step->GetIntegerField(TEXT("id")));
         else if (Op==TEXT("accept")) { C.GameUI->AcceptQuest(); Done=true; }

@@ -504,12 +504,18 @@ build, automation, native autologin and rendered screenshot verification):
     Server-owned corpse position/lifetime. Windows build, 129-test regression,
     a 126-step/eight-image group route and 39-step/three-image coin/auto route;
     disposable accounts removed and existing characters unchanged. See Docs/Loot.md.
-  - [?] Stream large WMO cities and wait for their building collision at login.
+  - [x] Stream large WMO cities and wait for their building collision at login.
     Stormwind's 286 groups no longer hit the old 100-group skip. Nearest-first,
     one-group-per-frame jobs and bounded object starts keep streaming responsive.
     Verified 134-test regression and a native tabard/vendor route inside the
     loaded Stormwind shop. See Docs/Maps.md.
-  - [ ] Complete guild/inspect/tabard panels and their server-backed state.
+  - [?] Complete guild/inspect/tabard panels and their server-backed state.
+    Atomic guild/inspect/emblem packets, original roster/rank/info/log controls,
+    remote equipment/talents/honor and server-confirmed tabard customization.
+    Windows build, 134-test regression and focused final checks; 78-step guild
+    and 45-step physical tabard routes with 13 validated, inspected captures.
+    Disposable accounts/guilds removed, existing characters unchanged.
+    See Docs/GuildInspectTabard.md.
   - [ ] Complete PvP/battleground panels and queue/status/scoreboard protocol.
   - [ ] Complete dungeon-finder browsing, role/queue/proposal state and controls.
   - [ ] Complete achievements, criteria, tracking and comparison state.

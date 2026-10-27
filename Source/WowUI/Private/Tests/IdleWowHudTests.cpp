@@ -103,6 +103,16 @@ bool FHudAnonymousHierarchy::RunTest(const FString&)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudInlineXmlScript,"WowUnreal.Hud.InlineXmlScript",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudStructuralAnchors,"WowUnreal.Hud.StructuralAnchors",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudStructuralAnchors::RunTest(const FString&)
+{
+    FHudFixture F; const char* Xml="<Ui><Frame name='AnchoredPanel'><Size x='400' y='300'/><Anchors><Anchor point='CENTER'/></Anchors><Frames><Frame name='Structural'><Layers><Layer><Texture name='ExternalArt'><Size x='160' y='100'/><Anchors><Anchor point='TOPRIGHT' relativeTo='AnchoredPanel'/></Anchors></Texture></Layer></Layers><Frames><Button name='ExternalButton'><Size x='32' y='24'/><Anchors><Anchor point='CENTER' relativeTo='ExternalArt'/></Anchors></Button></Frames></Frame></Frames></Frame><Frame name='GhostMenu'><Size x='128' y='30'/><Layers><Layer><Texture name='GhostRight'><Size x='40' y='20'/><Anchors><Anchor point='RIGHT'/></Anchors></Texture><Texture name='GhostLeft'><Size x='40' y='20'/><Anchors><Anchor point='RIGHT' relativeTo='GhostRight' relativePoint='LEFT'/></Anchors></Texture></Layer></Layers></Frame></Ui>";
+    TArray<uint8> Bytes; Bytes.Append(reinterpret_cast<const uint8*>(Xml),FCStringAnsi::Strlen(Xml)); const auto Parsed=FWowFrameXmlParser::ParseXml(Bytes,TEXT("StructuralFixture")); if(Parsed.Num()!=2) return false;
+    for(const auto& D:Parsed) F.Frames.CreateFrame(D.FrameDef); F.Frames.RefreshLayout(); const int64 Button=F.Frames.FindFrame(TEXT("ExternalButton")); const auto R=F.Frames.GetLayoutRect(Button),Panel=F.Frames.GetLayoutRect(F.Frames.FindFrame(TEXT("AnchoredPanel")));
+    TestTrue(TEXT("An external region paints through an unpositioned structural owner"),F.Frames.IsRegionOwnerDrawn(TEXT("ExternalArt")) && F.Frames.IsFrameDrawn(Button) && R.X>Panel.X+200 && R.Z==32);
+    const float S=F.Frames.GetScreenScale(); TestEqual(TEXT("Its descendant has a real click rectangle"),F.Frames.HitTestFrames((R.X+16)*S,(R.Y+12)*S),Button);
+    TestTrue(TEXT("References between a menu's own regions cannot position an unanchored menu"),F.Frames.GetWidgetForHandle(F.Frames.FindFrame(TEXT("GhostMenu")))->GetVisibility()==ESlateVisibility::Collapsed); F.Frames.SetFrameVisible(F.Frames.FindFrame(TEXT("Structural")),false); TestFalse(TEXT("Explicitly hiding the structural owner still hides its content"),F.Frames.IsFrameDrawn(Button)); return true;
+}
 bool FHudInlineXmlScript::RunTest(const FString&)
 {
     FHudFixture F;
@@ -316,6 +326,38 @@ bool FHudGroupState::RunTest(const FString&)
     TestTrue(TEXT("Roster selection follows the GUID after preceding member removal"),F.Lua.ExecuteString(TEXT("assert(GetRaidRosterSelection()==2 and UnitName('raid2')=='Beta' and GetNumPartyMembers()==0)")));
     H.ResetGroupState(); WowLuaApi::UpdateGroupState(F.Lua.GetState());
     TestTrue(TEXT("Group destruction clears frame identities and raid selection"),F.Lua.ExecuteString(TEXT("assert(GetNumPartyMembers()==0 and GetNumRaidMembers()==0 and not UnitExists('party1') and GetRaidRosterSelection()==0)")));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudGuildState,"WowUnreal.Hud.GuildState",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudGuildState::RunTest(const FString&)
+{
+    FHudFixture F; TStrongObjectPtr<UWowConnectionManager> C(NewObject<UWowConnectionManager>()); auto& H=C->PacketHandler;
+    F.Context.ConnectionManager=C.Get(); F.Context.EntityManager=&H.EntityManager; H.EntityManager.LocalPlayerGuid=1;
+    auto& P=H.EntityManager.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER); P.SetField(PlayerField::GUILD_ID,7); P.SetField(PlayerField::GUILD_RANK,0);
+    FWowPacketHandler::FGuildMetadata G; G.Id=7; G.Name=TEXT("QA UI Guild"); G.Ranks={TEXT("Guild Master"),TEXT("Officer")}; H.Guilds.Add(7,G);
+    H.GuildRankAccess.SetNum(2); H.GuildRankAccess[0].Rights=0x1DF1FF; H.GuildRankAccess[1].Rights=0x43;
+    FWowGuildMember A; A.Guid=1; A.Name=TEXT("Uiqzeta"); A.Status=1; A.RankId=0; A.Level=80; A.Class=8; A.OfficerNote=TEXT("Secret");
+    FWowGuildMember B=A; B.Guid=2; B.Name=TEXT("Uiqalpha"); B.Status=3; B.RankId=1; B.Class=1;
+    FWowGuildMember D=B; D.Guid=3; D.Name=TEXT("Uiqoffline"); D.Status=0; D.DaysOffline=1.5; H.GuildRoster={A,B,D};
+    TestTrue(TEXT("Stock roster exposes online flags, correct guild metadata, classes, notes and offline filtering"),F.Lua.ExecuteString(TEXT(R"LUA(
+        LOCALIZED_CLASS_NAMES_MALE={MAGE='Mage',WARRIOR='Warrior'}; AFK='Away'; DND='Do Not Disturb'
+        assert(IsInGuild() and IsGuildLeader() and CanEditOfficerNote())
+        local guild,rank,index=GetGuildInfo('player'); assert(guild=='QA UI Guild' and rank=='Guild Master' and index==0)
+        assert(GetNumGuildMembers()==2 and select(2,GetNumGuildMembers())==2 and GetNumGuildMembers(true)==3)
+        local name,rank,index,level,class,zone,note,officer,online,status,file=GetGuildRosterInfo(1)
+        assert(name=='Uiqalpha' and rank=='Officer' and index==1 and class=='Warrior' and online and status=='Away' and file=='WARRIOR')
+        SetGuildRosterSelection(1); SortGuildRoster('name'); assert(GetGuildRosterInfo(GetGuildRosterSelection())=='Uiqalpha')
+        SetGuildRosterShowOffline(true); assert(GetNumGuildMembers()==3 and GetGuildRosterShowOffline())
+        GuildControlSetRank(2); assert(not select(5,GuildControlGetRankFlags())); GuildControlSetRankFlag(5,true); assert(select(5,GuildControlGetRankFlags()))
+        GuildControlSetRank(2); assert(not select(5,GuildControlGetRankFlags()))
+    )LUA")));
+    P.SetField(PlayerField::GUILD_RANK,1);
+    TestTrue(TEXT("Officer-only data and controls are denied when the server rank has no permission"),F.Lua.ExecuteString(TEXT("assert(not IsGuildLeader() and not CanEditOfficerNote() and not CanViewOfficerNote()); for i=1,GetNumGuildMembers() do assert(select(8,GetGuildRosterInfo(i))=='') end")));
+    TestTrue(TEXT("Observe membership data availability"),F.Lua.ExecuteString(TEXT("GuildMembershipEvents=0; GuildMembershipWatch=CreateFrame('Frame'); GuildMembershipWatch:RegisterEvent('PLAYER_GUILD_UPDATE'); GuildMembershipWatch:SetScript('OnEvent',function(self,event,unit) assert(unit=='player'); GuildMembershipEvents=GuildMembershipEvents+1; if IsInGuild() then assert(GetGuildInfo('player')=='QA UI Guild') end end)")));
+    H.Guilds.Remove(7); WowLuaApi::UpdateGuildState(F.Lua.GetState()); TestTrue(TEXT("Membership notification waits for actual guild/rank metadata"),F.Lua.ExecuteString(TEXT("assert(GuildMembershipEvents==0)")));
+    H.Guilds.Add(7,G); WowLuaApi::UpdateGuildState(F.Lua.GetState()); TestTrue(TEXT("Available metadata publishes membership once"),F.Lua.ExecuteString(TEXT("assert(GuildMembershipEvents==1)")));
+    P.SetField(PlayerField::GUILD_ID,0); WowLuaApi::UpdateGuildState(F.Lua.GetState()); TestTrue(TEXT("Leaving clears private bank metadata and publishes actual player membership"),H.GuildBankTabNames.IsEmpty() && F.Lua.ExecuteString(TEXT("assert(not IsInGuild() and GetGuildInfo('player')==nil and GuildMembershipEvents==2)")));
     return true;
 }
 

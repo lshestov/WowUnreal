@@ -128,6 +128,15 @@ FWowItemEntity* Equipped(FWowLuaContext* C,int32 Slot)
 {
     return C && C->EntityManager?C->EntityManager->FindItem(InventoryGuid(C,Slot)):nullptr;
 }
+FWowItemEntity* UnitEquipped(lua_State* L,int32 UnitIndex,int32 Slot)
+{
+    auto* C=WowLuaApi::GetContext(L); if(!C || !C->EntityManager) return nullptr;
+    if(lua_isnumber(L,UnitIndex)) return Equipped(C,Slot); // Historical one-argument local query.
+    const auto* U=WowLuaApi::ResolveUnitToken(L,UnitIndex); if(!U || !U->IsPlayer()) return nullptr;
+    if(U->Guid==C->EntityManager->LocalPlayerGuid) return Equipped(C,Slot);
+    auto* H=C->ConnectionManager?&C->ConnectionManager->PacketHandler:nullptr;
+    return H && H->Inspect.Guid==U->Guid && H->Inspect.Ready?H->Inspect.Items.Find(Slot):nullptr;
+}
 int Info(lua_State* L)
 {
     auto* C=WowLuaApi::GetContext(L); const uint32 Id=ItemId(L,1); const auto* T=Template(C,Id);
@@ -158,13 +167,19 @@ int BagLink(lua_State* L)
 int InventoryTexture(lua_State* L)
 {
     auto* C=WowLuaApi::GetContext(L); const int32 Slot=luaL_checkinteger(L,lua_gettop(L)>=2?2:1);
-    auto* Item=Equipped(C,Slot);
+    auto* Item=UnitEquipped(L,1,Slot);
     if(Item) lua_pushstring(L,TCHAR_TO_UTF8(*Icon(Template(C,Item->Entry)))); else lua_pushnil(L); return 1;
 }
 int InventoryLink(lua_State* L)
 {
-    auto* C=WowLuaApi::GetContext(L); auto* Item=Equipped(C,luaL_checkinteger(L,lua_gettop(L)>=2?2:1));
-    if(Item) lua_pushstring(L,TCHAR_TO_UTF8(*Link(Template(C,Item->Entry),Item->Entry))); else lua_pushnil(L); return 1;
+    auto* C=WowLuaApi::GetContext(L); auto* Item=UnitEquipped(L,1,luaL_checkinteger(L,lua_gettop(L)>=2?2:1));
+    if(Item)
+    {
+        uint32 Gems[4]={}; for(int32 I=0;I<4;++I) if(const auto* E=FDbcStore::Get().ItemUi().Enchant(Item->GetField(ItemField::ENCHANTMENT_1_1+(I+2)*3))) Gems[I]=E->Gem;
+        const FString Fields=FString::Printf(TEXT(":%u:%u:%u:%u:%u:%d:%u:0:0|h"),Item->GetField(ItemField::ENCHANTMENT_1_1),Gems[0],Gems[1],Gems[2],Gems[3],int32(Item->GetField(ItemField::RANDOM_PROPERTIES_ID)),Item->GetField(ItemField::PROPERTY_SEED));
+        const FString Value=Link(Template(C,Item->Entry),Item->Entry).Replace(TEXT(":0:0:0:0:0:0:0:0:0|h"),*Fields); lua_pushstring(L,TCHAR_TO_UTF8(*Value));
+    }
+    else lua_pushnil(L); return 1;
 }
 void Texture(lua_State* L,int32 Index,const FString& Path)
 {
@@ -395,7 +410,7 @@ int WowLuaApi::SetBagItemTooltip(lua_State* L)
 int WowLuaApi::SetInventoryItemTooltip(lua_State* L)
 {
     auto* C=GetContext(L); if(!C || !C->FrameManager) return 0;
-    auto* Item=Equipped(C,luaL_checkinteger(L,3)); const int64 H=Handle(L);
+    auto* Item=UnitEquipped(L,2,luaL_checkinteger(L,3)); const int64 H=Handle(L);
     if(Item) ItemTooltip(L,C,H,Template(C,Item->Entry),Item->Entry,Item); else C->FrameManager->SetFrameVisible(H,false);
     lua_pushboolean(L,Item!=nullptr); lua_pushboolean(L,0); lua_pushinteger(L,Item?ItemRepairCost(C,*Item):0); return 3;
 }
@@ -612,7 +627,7 @@ void WowLuaApi::RegisterItemApi(lua_State* L)
     RegisterItem(L,"PutItemInBackpack",[](lua_State* S)->int { auto* C=GetContext(S); lua_pushboolean(S,C && C->ConnectionManager && C->ConnectionManager->PlaceCursorIntoFirstFreeContainerSlot(255)); return 1; });
     RegisterItem(L,"PutItemInBag",[](lua_State* S)->int { auto* C=GetContext(S); const int32 Slot=luaL_checkinteger(S,1); lua_pushboolean(S,C && C->ConnectionManager && Slot>=20 && Slot<=23 && C->ConnectionManager->PlaceCursorIntoFirstFreeContainerSlot(Slot-1)); return 1; });
     RegisterItem(L,"GetContainerItemID",[](lua_State* S)->int { auto* Item=BagItem(GetContext(S),luaL_checkinteger(S,1),luaL_checkinteger(S,2)); if(Item) lua_pushinteger(S,Item->Entry); else lua_pushnil(S); return 1; });
-    RegisterItem(L,"GetInventoryItemID",[](lua_State* S)->int { auto* Item=Equipped(GetContext(S),luaL_checkinteger(S,2)); if(Item) lua_pushinteger(S,Item->Entry); else lua_pushnil(S); return 1; });
+    RegisterItem(L,"GetInventoryItemID",[](lua_State* S)->int { auto* Item=UnitEquipped(S,1,luaL_checkinteger(S,2)); if(Item) lua_pushinteger(S,Item->Entry); else lua_pushnil(S); return 1; });
     RegisterItem(L,"GetBagName",[](lua_State* S)->int { auto* C=GetContext(S); const int32 Bag=luaL_checkinteger(S,1); if(Bag==0) lua_pushstring(S,"Backpack"); else { auto* Item=Equipped(C,Bag+19); const auto* T=Item?Template(C,Item->Entry):nullptr; if(T) lua_pushstring(S,TCHAR_TO_UTF8(*T->Name)); else lua_pushnil(S); } return 1; });
     RegisterItem(L,"GetContainerNumSlots",[](lua_State* S)->int { lua_pushinteger(S,Slots(GetContext(S),luaL_checkinteger(S,1))); return 1; });
     RegisterItem(L,"GetContainerItemQuestInfo",[](lua_State* S)->int {
@@ -624,9 +639,9 @@ void WowLuaApi::RegisterItemApi(lua_State* L)
         if(!Item || !Item->GetField(ItemField::MAX_DURABILITY)) { lua_pushnil(S); return 1; }
         lua_pushinteger(S,Item->GetField(ItemField::DURABILITY)); lua_pushinteger(S,Item->GetField(ItemField::MAX_DURABILITY)); return 2;
     });
-    RegisterItem(L,"GetInventoryItemCount",[](lua_State* S)->int { auto* Item=Equipped(GetContext(S),luaL_checkinteger(S,2)); lua_pushinteger(S,Item?FMath::Max(Item->GetStackCount(),1):0); return 1; });
-    RegisterItem(L,"GetInventoryItemQuality",[](lua_State* S)->int { auto* C=GetContext(S); auto* Item=Equipped(C,luaL_checkinteger(S,2)); const auto* T=Item?Template(C,Item->Entry):nullptr; if(T) lua_pushinteger(S,T->Quality); else lua_pushnil(S); return 1; });
-    RegisterItem(L,"GetInventoryItemBroken",[](lua_State* S)->int { auto* Item=Equipped(GetContext(S),luaL_checkinteger(S,2)); lua_pushboolean(S,Item && Item->GetField(ItemField::MAX_DURABILITY)>0 && Item->GetField(ItemField::DURABILITY)==0); return 1; });
+    RegisterItem(L,"GetInventoryItemCount",[](lua_State* S)->int { auto* Item=UnitEquipped(S,1,luaL_checkinteger(S,2)); lua_pushinteger(S,Item?FMath::Max(Item->GetStackCount(),1):0); return 1; });
+    RegisterItem(L,"GetInventoryItemQuality",[](lua_State* S)->int { auto* C=GetContext(S); auto* Item=UnitEquipped(S,1,luaL_checkinteger(S,2)); const auto* T=Item?Template(C,Item->Entry):nullptr; if(T) lua_pushinteger(S,T->Quality); else lua_pushnil(S); return 1; });
+    RegisterItem(L,"GetInventoryItemBroken",[](lua_State* S)->int { auto* Item=UnitEquipped(S,1,luaL_checkinteger(S,2)); lua_pushboolean(S,Item && Item->GetField(ItemField::MAX_DURABILITY)>0 && Item->GetField(ItemField::DURABILITY)==0); return 1; });
     RegisterItem(L,"GetItemIcon",[](lua_State* S)->int { lua_pushstring(S,TCHAR_TO_UTF8(*Icon(Template(GetContext(S),ItemId(S,1))))); return 1; });
     RegisterItem(L,"GetItemQualityColor",[](lua_State* S)->int { const auto C=Quality(luaL_checkinteger(S,1)); const FColor Byte=C.ToFColor(false); lua_pushnumber(S,C.R); lua_pushnumber(S,C.G); lua_pushnumber(S,C.B); lua_pushstring(S,TCHAR_TO_UTF8(*FString::Printf(TEXT("ff%02x%02x%02x"),Byte.R,Byte.G,Byte.B))); return 4; });
 }

@@ -149,6 +149,7 @@ int32 GroupCount(FWowLuaContext* C,bool Pet)
 
 int WowLuaApi::SetTalentTooltip(lua_State* L)
 {
+    if(Flag(L,4)) return SetInspectTalentTooltip(L);
     auto* C=Context(L); if(!C || !C->FrameManager) return 0;
     const bool Pet=Flag(L,5); const int32 G=Group(L,C,6,Pet);
     const auto* N=NodeAt(C,luaL_checkinteger(L,2)-1,luaL_checkinteger(L,3)-1,Pet);

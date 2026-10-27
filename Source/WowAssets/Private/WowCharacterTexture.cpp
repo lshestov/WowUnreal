@@ -842,4 +842,13 @@ void FWowCharacterTexture::ApplyEquipmentOverlays(TArray<uint8>& Composite, uint
     // TABARD: overlays [3]=TORSO_UPPER, [4]=TORSO_LOWER
     TArray<uint32> TabardRegions = {3, 4};
     ApplyItemOverlays(Equipment.TabardDisplayId, TabardRegions);
+    if(Equipment.UseGuildEmblem && Equipment.GuildEmblem.Valid()) for(uint32 RegionIndex:{3u,4u})
+    {
+        const auto* Region=RegionCoords.Find(RegionIndex); if(!Region) continue;
+        for(const auto& Path:Equipment.GuildEmblem.Textures(RegionIndex==3))
+        {
+            uint32 W=0,H=0; const auto Pixels=LoadBlpAsRGBA(Mpq,Path,W,H);
+            if(Pixels.Num()) PasteRegionWithAlpha(Composite,Pixels,CompositeW,CompositeH,W,H,Region->X,Region->Y,Region->W,Region->H);
+        }
+    }
 }

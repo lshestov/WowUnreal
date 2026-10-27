@@ -517,7 +517,8 @@ void AWowPlayerCharacter::SetupAnimationController(UWowAnimationController* Anim
 }
 
 void AWowPlayerCharacter::SetCharacterModelWithEquipment(UWorld* World, FMpqManager* Mpq, FWowAssetCache* Cache,
-	uint8 Race, uint8 Gender, uint8 SkinColor, uint8 Face, uint8 HairStyle, uint8 HairColor, uint8 FacialHair, const TArray<FWowCharacterEquipment>* Equipment)
+	uint8 Race, uint8 Gender, uint8 SkinColor, uint8 Face, uint8 HairStyle, uint8 HairColor, uint8 FacialHair, const TArray<FWowCharacterEquipment>* Equipment,
+    const FWowGuildEmblem* GuildEmblem)
 {
 	if (!World || !Mpq || !Cache)
 	{
@@ -615,6 +616,7 @@ void AWowPlayerCharacter::SetCharacterModelWithEquipment(UWorld* World, FMpqMana
 
 	UE_LOG(LogWowPlayerChar, Log, TEXT("Setting character model with equipment: Race=%d Gender=%d Chest=%d Pants=%d"),
 		Race, Gender, Params.BodyEquipment.ChestDisplayId, Params.BodyEquipment.PantsDisplayId);
+    if(GuildEmblem && GuildEmblem->Valid()) {Params.BodyEquipment.UseGuildEmblem=true; Params.BodyEquipment.GuildEmblem=*GuildEmblem;}
 
 	FWowEquipmentManager::ClearEquipment(GetMesh());
 	// Remove any existing skeletal mesh components (except the default one)

@@ -168,6 +168,8 @@ namespace UnitField
 // Player fields (offset from UNIT_END) — subset
 namespace PlayerField
 {
+    inline constexpr uint16 GUILD_ID = UnitField::END + 0x0003;
+    inline constexpr uint16 GUILD_RANK = UnitField::END + 0x0004;
     inline constexpr uint16 BASE = UnitField::END;
 
     inline constexpr uint16 FLAGS         = BASE + 0x0002;

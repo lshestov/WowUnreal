@@ -217,6 +217,20 @@ public:
     bool LastTalentPacketValid=false,LastTalentUpdateIsPet=false,LastTalentGroupChanged=false;
     uint64 TalentRevision=0;
     uint64 PlayerTalentRevision=0,PetTalentRevision=0;
+    struct FInspectState
+    {
+        uint64 Guid=0;
+        uint32 Revision=0,HonorRevision=0,FreePoints=0,TodayKills=0,YesterdayKills=0,TodayHonor=0,YesterdayHonor=0,LifetimeKills=0;
+        uint8 Active=0;
+        bool Ready=false,HonorReady=false;
+        TArray<FWowTalentGroup> Groups;
+        TMap<int32,FWowItemEntity> Items;
+        struct FArena {uint32 Id=0,Rating=0,Games=0,Wins=0,Played=0,Personal=0;};
+        FArena Arena[3];
+    } Inspect;
+    struct FArenaIdentity {uint32 Id=0,Size=0,Background=0,Emblem=0,EmblemColor=0,Border=0,BorderColor=0; FString Name;};
+    TMap<uint32,FArenaIdentity> ArenaIdentities;
+    void ResetInspectState(uint64 Guid=0);
     TArray<FWowGlyphChange> LastGlyphChanges;
     void ResetTalentState();
 
@@ -289,6 +303,22 @@ public:
     bool GuildCanRepair=false,GuildRepairRequested=false;
     uint32 GuildRepairId=0;
     int64 GuildWithdrawMoney=0;
+    struct FGuildMetadata {uint32 Id=0; FString Name; TArray<FString> Ranks; uint32 Emblem[5]={0,0,0,0,0};};
+    struct FGuildEvent {uint32 Sequence=0; uint8 Type=0; TArray<FString> Text; uint64 Guid=0;};
+    struct FGuildLog {uint8 Type=0,Rank=0; uint64 First=0,Second=0; uint32 Seconds=0;};
+    TMap<uint32,FGuildMetadata> Guilds;
+    TMap<uint32,double> GuildQueries;
+    TArray<FGuildEvent> GuildEvents;
+    TArray<FGuildLog> GuildLogs;
+    uint32 GuildRevision=1,GuildLogRevision=1,GuildInviteRevision=1,GuildResultRevision=1,NextGuildEvent=1;
+    uint32 GuildResultCommand=0,GuildResultCode=0;
+    FString GuildResultName,GuildInviter,GuildInvitation;
+    uint8 GuildBankTabs=0;
+    struct FGuildBankTabName {FString Name,Icon;};
+    TArray<FGuildBankTabName> GuildBankTabNames;
+    FWowGuildRankAccess GuildBankMemberAccess;
+    struct FTabardState {uint64 Vendor=0; bool Open=false,Pending=false,HasResult=false; uint32 Revision=0,ResultRevision=0,Error=0; double SentAt=0;} Tabard;
+    void ResetGuildState();
 
     /** Group/Party information */
     FWowGroupInfo GroupInfo;
@@ -403,6 +433,7 @@ public:
     FOnProficiencySet OnProficiencySet;
     FOnGossipMessage OnGossipMessage;
     FOnGossipMenu OnGossipMenu;
+    FSimpleMulticastDelegate OnGossipClosed;
     FOnQuestLogChanged OnQuestLogChanged;
     FOnInitialSpells OnInitialSpells;
     FOnActionButtonsUpdated OnActionButtonsUpdated;
@@ -492,6 +523,10 @@ private:
 
     // Talent handlers
     void HandleTalentsInfo(FPacketReader& R);
+    void HandleInspectTalents(FPacketReader& R);
+    void HandleInspectHonor(FPacketReader& R);
+    void HandleInspectArena(FPacketReader& R);
+    void HandleArenaIdentity(FPacketReader& R);
     void HandleLearnedSpell(FPacketReader& R);
     void HandleSupersededSpell(FPacketReader& R);
     void ReplaceSpellActions(uint32 OldId,uint32 NewId);
@@ -501,6 +536,14 @@ private:
     void HandleFriendList(FPacketReader& R);
     void HandleFriendStatus(FPacketReader& R);
     void HandleGuildRoster(FPacketReader& R);
+    void HandleGuildQuery(FPacketReader& R);
+    void HandleGuildInvite(FPacketReader& R);
+    void HandleGuildResult(FPacketReader& R);
+    void HandleGuildLog(FPacketReader& R);
+    void HandleGuildPermissions(FPacketReader& R);
+    void HandleGuildBankMetadata(FPacketReader& R);
+    void HandleTabardOpen(FPacketReader& R);
+    void HandleTabardResult(FPacketReader& R);
     void HandleItemRefundInfo(FPacketReader& R);
     void HandleItemRefundResult(FPacketReader& R);
     void HandleGuildEvent(FPacketReader& R);
@@ -566,6 +609,7 @@ private:
 
     // ── NPC interaction handlers ────────────────────────────────────────────
     void HandleGossipMessage(FPacketReader& R);
+    void HandleGossipComplete(FPacketReader& R);
 
     // ── Mail system handlers ────────────────────────────────────────────────
     void HandleShowMailbox(FPacketReader& R);

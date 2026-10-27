@@ -70,6 +70,13 @@ void FWowFrameManager::SetFrameScale(int64 Handle, float Scale)
     if(Entry->Widget.IsValid()) ApplyAnchors(Entry->Widget.Get(),Entry->Def);
 }
 
+bool FWowFrameManager::HasExternalRegionAnchors(const FWowFrameDef& Def)
+{
+    TSet<FString> Internal;
+    TFunction<void(const FWowFrameDef&)> Collect=[&](const FWowFrameDef& F) {Internal.Add(F.Name); for(const auto& Layer:F.Layers) {for(const auto& T:Layer.Textures) Internal.Add(T.Name); for(const auto& T:Layer.FontStrings) Internal.Add(T.Name);} for(const auto& Child:F.Children) Collect(Child);}; Collect(Def);
+    const auto External=[&](const auto& Region) {for(const auto& A:Region.Anchors) if(!A.RelativeTo.IsEmpty() && !Internal.Contains(A.RelativeTo)) {const auto* Owner=RegionOwners.Find(A.RelativeTo); if(Owner && Internal.Contains(*Owner)) continue; const auto R=GetFrameRect(A.RelativeTo); if(R.W>0 && R.H>0) return true;} return false;};
+    for(const auto& Layer:Def.Layers) {for(const auto& T:Layer.Textures) if(External(T)) return true; for(const auto& T:Layer.FontStrings) if(External(T)) return true;} return false;
+}
 FWowFrameManager::FFrameRect FWowFrameManager::CalculateFrameRect(const FWowFrameDef& Def)
 {
     const FFrameRect Parent = GetFrameRect(Def.Parent);
@@ -80,6 +87,7 @@ FWowFrameManager::FFrameRect FWowFrameManager::CalculateFrameRect(const FWowFram
         Def.Height > 0 ? Def.Height * Scale : Parent.H);
     if (Def.Anchors.IsEmpty())
     {
+        if(Def.Width<=0 && Def.Height<=0 && HasExternalRegionAnchors(Def)) return Parent;
         return FFrameRect(); // Unanchored frames have no screen rectangle in WoW.
     }
     const auto Target = [&](const FWowAnchor& A)

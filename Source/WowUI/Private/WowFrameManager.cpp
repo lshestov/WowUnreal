@@ -1828,14 +1828,14 @@ void FWowFrameManager::UpdateFrameVisibility(int64 Handle)
     auto* Entry=Frames.Find(Handle);
     if(!Entry || !Entry->Widget.IsValid()) return;
     bool Visible=IsFrameHierarchyShown(Handle);
-    // Unpositioned frames and unresolved parents cannot be drawn. Walk the
-    // definitions rather than cached native visibility, which may be stale.
+    // An unpositioned structural frame can own regions anchored elsewhere.
+    // Its canvas stays transparent while those regions and their children paint.
     int32 Depth=0;
     for(int64 Ancestor=Handle;Visible && Ancestor>=0 && Depth++<64;Ancestor=GetParentHandle(Ancestor))
     {
         const auto* Parent=Frames.Find(Ancestor);
         if(!Parent) break;
-        if(!Parent->Def.bVirtual && !Parent->Def.bSetAllPoints && Parent->Def.Anchors.IsEmpty()) Visible=false;
+        if(!Parent->Def.bVirtual && !Parent->Def.bSetAllPoints && Parent->Def.Anchors.IsEmpty() && !HasExternalRegionAnchors(Parent->Def)) Visible=false;
         if(!Parent->Def.Parent.IsEmpty() && Parent->ParentHandle<0) Visible=false;
     }
     Entry->Widget->SetVisibility(Visible ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
@@ -2201,6 +2201,7 @@ void FWowFrameManager::TickWidgetEvents()
 	{
 		if (!Pair.Value.IsValid()) continue;
 		FString CurrentText = Pair.Value->GetText().ToString();
+		if(NumericEditBoxes.Contains(Pair.Key)) {FString Digits; for(TCHAR C:CurrentText) if(C>='0' && C<='9') Digits.AppendChar(C); CurrentText=MoveTemp(Digits);}
 		if(const auto* Limit=EditBoxMaxLetters.Find(Pair.Key); Limit && *Limit>0 && CurrentText.Len()>*Limit) CurrentText.LeftInline(*Limit);
 		if(const auto* Limit=EditBoxMaxBytes.Find(Pair.Key); Limit && *Limit>0)
 			while(CurrentText.Len() && FTCHARToUTF8(*CurrentText).Length()>*Limit) CurrentText.LeftChopInline(1);
@@ -2225,6 +2226,7 @@ void FWowFrameManager::TickWidgetEvents()
 	{
 		auto* Edit=GetMultiLineEditBoxWidget(Handle); if(!Edit || !IsFrameHierarchyShown(Handle)) continue;
 		FString Text=Edit->LuaText();
+		if(NumericEditBoxes.Contains(Handle)) {FString Digits; for(TCHAR C:Text) if(C>='0' && C<='9') Digits.AppendChar(C); Text=MoveTemp(Digits);}
 		if(const auto* Limit=EditBoxMaxLetters.Find(Handle); Limit && *Limit>0 && Text.Len()>*Limit) Text.LeftInline(*Limit);
 		if(const auto* Limit=EditBoxMaxBytes.Find(Handle); Limit && *Limit>0) while(Text.Len() && FTCHARToUTF8(*Text).Length()>*Limit) Text.LeftChopInline(1);
 		if(Text!=Edit->LuaText()) Edit->SetText(FText::FromString(Text));

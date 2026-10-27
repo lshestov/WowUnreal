@@ -1752,8 +1752,7 @@ FString FWowEventSystem::OpcodeToEvent(uint16 Opcode)
 	case 0x0257: return TEXT("PLAYER_MONEY");
 
 	// Guild
-	case 0x008A: return TEXT("GUILD_ROSTER_UPDATE");             // SMSG_GUILD_ROSTER (correct opcode)
-	case 0x0092: return TEXT("GUILD_MOTD");                      // SMSG_GUILD_EVENT
+	case 0x008A: case 0x0092: return TEXT(""); // Validated guild state is bridged with typed arguments.
 
 	// Loot events follow validated state and retain typed display-slot arguments.
 

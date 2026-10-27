@@ -19,8 +19,12 @@ struct FWowMapUiView;
 struct FWowMinimapUiView;
 struct FWowGroupUiView;
 struct FWowLootUiView;
+struct FWowGuildUiView;
+struct FWowInspectUiView;
+struct FWowTabardUiView;
 struct FWowItemTemplate;
 struct FWowItemEntity;
+struct FWowGuildEmblem;
 
 /** Context passed to Lua API functions so they can access game state */
 struct FWowLuaContext
@@ -37,12 +41,16 @@ struct FWowLuaContext
     TSharedPtr<FWowMinimapUiView> Minimap;
     TSharedPtr<FWowGroupUiView> GroupUi;
     TSharedPtr<FWowLootUiView> LootUi;
+    TSharedPtr<FWowGuildUiView> GuildUi;
+    TSharedPtr<FWowInspectUiView> InspectUi;
+    TSharedPtr<FWowTabardUiView> TabardUi;
     TFunction<uint32()> ResolveDungeonFloor;
     TFunction<uint32()> ResolveArea;
     uint32 LastAreaId=0,LastZoneId=0;
     uint32 LastWmoHash=0;
     TFunction<AActor*(uint64)> ResolveActor;
     TFunction<void()> ReloadUI;
+    TFunction<void(int64,const FWowGuildEmblem&,uint32)> TabardPreview;
     TMap<FName,int32> SelectedRows;
     TMap<FString,uint64> UnitReactionState;
     uint64 FocusGuid=0;
@@ -98,6 +106,14 @@ namespace WowLuaApi
     void UpdateGroupState(lua_State* L);
     void RegisterLootApi(lua_State* L);
     void UpdateLootState(lua_State* L);
+    void RegisterGuildApi(lua_State* L);
+    void UpdateGuildState(lua_State* L);
+    void RegisterInspectApi(lua_State* L);
+    void UpdateInspectState(lua_State* L);
+    int SetInspectTalentTooltip(lua_State* L);
+    void RegisterTabardApi(lua_State* L);
+    void UpdateTabardState(lua_State* L);
+    int TabardModelMethod(lua_State* L,int32 Method);
     int SetLootItemTooltip(lua_State* L);
     int SetLootRollItemTooltip(lua_State* L);
     int32 UnitReactionRank(const FWowLuaContext* Context,const FWowEntity* From,const FWowEntity* To);

@@ -124,6 +124,10 @@ void FWowUiModelRenderer::Facing(int64 Handle,float Radians)
     Views.FindOrAdd(Handle).Facing=Radians;
     if(auto* S=Slots.Find(FString::Printf(TEXT("Model_%lld"),Handle))) { (*S)->Yaw=FMath::RadiansToDegrees(Radians); (*S)->NextCapture=0; }
 }
+void FWowUiModelRenderer::Tabard(int64 Handle,const FWowGuildEmblem& Value,uint32 Display)
+{
+    if(auto* S=Slots.Find(FString::Printf(TEXT("Model_%lld"),Handle)); S && (*S)->Preview) {(*S)->Preview->Tabard(Value,Display); (*S)->NextCapture=0;}
+}
 void FWowUiModelRenderer::Scale(int64 Handle,float Value)
 {
     Views.FindOrAdd(Handle).Scale=Value;

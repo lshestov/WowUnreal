@@ -164,7 +164,7 @@ static uint64 ResolveDirectUnitGuid(const FWowLuaContext* Ctx, const FString& Un
     if(UnitToken.Equals(TEXT("npc"),ESearchCase::IgnoreCase) && Ctx->ConnectionManager)
     {
         const auto& Handler=Ctx->ConnectionManager->PacketHandler;
-        return Handler.CurrentTrade.bTradeOpen?Handler.CurrentTrade.TraderGuid:Handler.Merchant.Open?Handler.Merchant.Guid:Handler.CurrentBankerGuid?Handler.CurrentBankerGuid:Handler.GossipMenu.Guid;
+        return Handler.Tabard.Open?Handler.Tabard.Vendor:Handler.CurrentTrade.bTradeOpen?Handler.CurrentTrade.TraderGuid:Handler.Merchant.Open?Handler.Merchant.Guid:Handler.CurrentBankerGuid?Handler.CurrentBankerGuid:Handler.GossipMenu.Guid;
     }
 
     if (UnitToken.Equals(TEXT("focus"), ESearchCase::IgnoreCase))

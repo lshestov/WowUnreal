@@ -16,7 +16,7 @@ int32 UWowQaCharacterCommandlet::Main(const FString& Params)
     FString Path,Mode,Text,Account,Password,Name,Token;
     TSharedPtr<FJsonObject> Config;
     if(!FParse::Value(*Params,TEXT("fixture="),Path) || !FParse::Value(*Params,TEXT("mode="),Mode)
-        || FPaths::GetCleanFilename(Path)!=TEXT("wowunreal-ui-primary-fixture.json") || (Mode!=TEXT("prepare") && Mode!=TEXT("delete"))
+        || FPaths::GetCleanFilename(Path)!=TEXT("wowunreal-ui-primary-fixture.json") || (Mode!=TEXT("prepare") && Mode!=TEXT("delete") && Mode!=TEXT("disband"))
         || !FFileHelper::LoadFileToString(Text,*Path) || Text.Len()>16384
         || !FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Text),Config) || !Config) return 1;
     if(!Config->TryGetStringField(TEXT("account"),Account) || !Config->TryGetStringField(TEXT("password"),Password)
@@ -28,12 +28,21 @@ int32 UWowQaCharacterCommandlet::Main(const FString& Params)
     for(TCHAR C:Token) if(!FChar::IsHexDigit(C)) return 1;
     double ExpectedNumber=0; Config->TryGetNumberField(TEXT("guid"),ExpectedNumber);
     if(ExpectedNumber<0 || ExpectedNumber>MAX_uint32 || FMath::FloorToDouble(ExpectedNumber)!=ExpectedNumber) return 1;
-    const uint64 Expected=uint64(ExpectedNumber); if(Mode==TEXT("delete") && !Expected) return 1;
+    const uint64 Expected=uint64(ExpectedNumber); if(Mode!=TEXT("prepare") && !Expected) return 1;
+    double ClassNumber=8; Config->TryGetNumberField(TEXT("class"),ClassNumber); if(ClassNumber!=1 && ClassNumber!=8) return 1;
+    FString GuildName; double GuildNumber=0; TSet<uint64> Owned;
+    if(Mode==TEXT("disband"))
+    {
+        if(!Config->TryGetStringField(TEXT("qaGuildName"),GuildName) || !Config->TryGetNumberField(TEXT("qaGuildId"),GuildNumber)
+            || !GuildName.StartsWith(TEXT("QA UI ")) || GuildName.Len()!=14 || GuildNumber<1 || GuildNumber>MAX_uint32 || FMath::FloorToDouble(GuildNumber)!=GuildNumber) return 1;
+        Owned.Add(Expected); const TSharedPtr<FJsonObject>* Secondary=nullptr;
+        if(Config->TryGetObjectField(TEXT("secondary"),Secondary)) {double Peer=0; (*Secondary)->TryGetNumberField(TEXT("guid"),Peer); if(Peer>=1 && Peer<=MAX_uint32) Owned.Add(uint64(Peer));}
+    }
 
     TStrongObjectPtr<UWowConnectionManager> Client(NewObject<UWowConnectionManager>());
     Client->Login(Account,Password,TEXT("127.0.0.1"),3724);
     const double End=FPlatformTime::Seconds()+90;
-    bool Creating=false,Deleting=false; uint64 Guid=0; FString Result;
+    bool Creating=false,Deleting=false,Entering=false,Queried=false,Disbanding=false; uint64 Guid=0; FString Result;
     while(FPlatformTime::Seconds()<End)
     {
         FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
@@ -55,10 +64,28 @@ int32 UWowQaCharacterCommandlet::Main(const FString& Params)
             {
                 Guid=uint64(Characters[0].Guid); if(Expected && Guid!=Expected) break;
                 if(Mode==TEXT("prepare")) {Result=TEXT("prepared"); break;}
-                if(!Deleting) {Deleting=true; Client->DeleteCharacter(int64(Guid));}
+                if(Mode==TEXT("disband")) {if(!Entering) {Entering=true; Client->EnterWorld(int64(Guid));}}
+                else if(!Deleting) {Deleting=true; Client->DeleteCharacter(int64(Guid));}
             }
             else if(Mode==TEXT("delete")) {Result=TEXT("deleted"); break;}
-            else if(!Creating) {Creating=true; Client->CreateCharacter(Name,1,8,0);}
+            else if(!Creating) {Creating=true; Client->CreateCharacter(Name,1,uint8(ClassNumber),0);}
+        }
+        else if(State==EWowSessionState::WorldInGame && Mode==TEXT("disband"))
+        {
+            auto& H=Client->PacketHandler; const auto* P=H.EntityManager.GetLocalPlayer();
+            if(P)
+            {
+                const uint32 Guild=P->GetField(PlayerField::GUILD_ID);
+                if(!Guild && Disbanding) {Result=TEXT("disbanded"); break;}
+                if(Guild!=uint32(GuildNumber) || P->GetField(PlayerField::GUILD_RANK)!=0) break;
+                if(!Queried) {Queried=true; TArray<uint8> B; B.Append(reinterpret_cast<const uint8*>(&Guild),4); Client->SendRawPacket(0x54,B); Client->SendRawPacket(0x89,{});}
+                const auto* G=H.Guilds.Find(Guild);
+                if(G && !H.GuildRoster.IsEmpty() && !Disbanding)
+                {
+                    bool Safe=G->Name==GuildName; for(const auto& Member:H.GuildRoster) Safe&=Owned.Contains(Member.Guid);
+                    if(!Safe) break; Disbanding=true; Client->SendRawPacket(0x8F,{});
+                }
+            }
         }
         FPlatformProcess::Sleep(.01f);
     }

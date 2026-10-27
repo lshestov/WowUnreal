@@ -132,6 +132,7 @@ void UWowUIManager::InitializeCore()
     FrameManager->OnModelPosition=[this](int64 Handle,const FVector& Value){ ModelRenderer->Position(Handle,Value); };
     FrameManager->OnModelTryOn=[this](int64 Handle,uint32 Id,uint32 Type){ ModelRenderer->TryOn(Handle,Id,Type); };
     FrameManager->OnModelDress=[this](int64 Handle,bool Dressed){ ModelRenderer->Dress(Handle,Dressed); };
+    UIContext->TabardPreview=[this](int64 Handle,const FWowGuildEmblem& Value,uint32 Display){ModelRenderer->Tabard(Handle,Value,Display);};
 
 	UE_LOG(LogWowUIManager, Log, TEXT("WoW UI Manager initialized (Lua VM + FrameManager + EventSystem)"));
 }
@@ -464,6 +465,9 @@ void UWowUIManager::TickWorldImages(UWorld* World)
         NextItemComparisonUpdate=Now+.2; LuaVM->BeginCallback();
         WowLuaApi::UpdateGroupState(LuaVM->GetState());
         WowLuaApi::UpdateLootState(LuaVM->GetState());
+        WowLuaApi::UpdateGuildState(LuaVM->GetState());
+        WowLuaApi::UpdateInspectState(LuaVM->GetState());
+        WowLuaApi::UpdateTabardState(LuaVM->GetState());
         WowLuaApi::UpdateUnitReactions(LuaVM->GetState());
         WowLuaApi::UpdateMinimapState(LuaVM->GetState());
         WowLuaApi::UpdateMapState(LuaVM->GetState());

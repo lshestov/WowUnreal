@@ -77,6 +77,7 @@ struct FTooltipState
 class WOWUI_API FWowFrameManager
 {
 public:
+	TSet<int64> NumericEditBoxes;
 	/** Fired when a SecureActionButton with type="action" is clicked. Slot is 0-based. */
 	FOnSecureActionDispatch OnSecureActionDispatch;
 	/** Fired when a SecureActionButton with type="spell" is clicked. */
@@ -482,6 +483,7 @@ private:
 	TSet<FString> ResolvingRects;
 	FVector2D LayoutViewport = FVector2D::ZeroVector;
 	FFrameRect CalculateFrameRect(const FWowFrameDef& Def);
+    bool HasExternalRegionAnchors(const FWowFrameDef& Def);
 
 	UWidget* CreateWidgetForFrame(const FWowFrameDef& Def, int64 Handle, int64 ParentHandle = -1);
 	void UpdateFrameVisibility(int64 Handle);

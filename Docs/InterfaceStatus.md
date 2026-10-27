@@ -40,6 +40,10 @@ compatibility work.
   eligibility and countdowns, confirmed results and master-recipient selection.
   Saved auto-loot/Shift behaviour and actual item/money chat notifications;
   see [loot](Loot.md). Corpse models follow server positions and lifetime.
+- Original guild roster, notes, ranks/permissions, information and event log;
+  read-only equipment/talent/honor inspection; and the tabard vendor's editor,
+  acknowledged emblem purchase and equipped appearance. All use real server
+  state; see [guild, inspection and tabards](GuildInspectTabard.md).
 - Game menu, window close order, logout and character re-entry, ReloadUI and
   saved per-character UI preferences. Windowed mode remains the initial mode.
 - Audio volume/toggles, window mode and resolution, gamma, texture quality,
@@ -105,7 +109,7 @@ The Windows Editor and packaged Development client are built from the same
 source tree. `WowUnreal.Hud`, `WowUnreal.UI`, `WowUnreal.Gameplay` and the related
 player, collision, equipment, lighting, rendering, traversal and performance
 suites cover both isolated controls and live protocol state. The interface
-regression set, including runtime animation, contains 124 tests. Existing optional character texture-layout
+regression set, including runtime animation, contains 134 tests. Existing optional character texture-layout
 DBC and test-fixture size warnings remain.
 
 Native gameplay probes exercise live server state and rendered UI at 1280x720
@@ -127,7 +131,6 @@ Full WoW UI compatibility is **not complete**. In particular:
 - Complete PvP/battleground, LFG and achievement panels and protocol support.
   Unit relationships and selection colours are implemented separately; see
   [faction/reputation reactions](UnitReactions.md).
-- Guild/inspect/tabard panels and their remaining server-backed state.
 - Legacy options without an engine-side implementation; persisting a CVar
   does not imply that its associated rendering or gameplay feature exists.
 - MP3 music decoding. WAV playback and finite UI-sound lifetime are supported.

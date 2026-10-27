@@ -7,6 +7,7 @@
 #include "WowEventSystem.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "HAL/FileManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowAddon, Log, All);
 
@@ -130,7 +131,16 @@ bool ProcessXmlDirectivesRecursive(
 	FWowFrameManager* FrameManager,
 	TSet<FString>& VisitedXmlFiles)
 {
-	const FString NormalizedXmlPath = NormalizeWowPath(XmlPath);
+	FString NormalizedXmlPath = NormalizeWowPath(XmlPath);
+    // Stock addons use unqualified common FrameXML includes (for example the
+    // inspect window's PVPFrameTemplates.xml). Resolve that shared search root
+    // only after checking the addon-local file, preserving local overrides.
+    TArray<FString> Parts; NormalizedXmlPath.ParseIntoArray(Parts,TEXT("\\"),true);
+    if(Mpq && Parts.Num()==4 && Parts[0].Equals(TEXT("Interface"),ESearchCase::IgnoreCase) && Parts[1].Equals(TEXT("AddOns"),ESearchCase::IgnoreCase)
+        && !Mpq->FileExists(NormalizedXmlPath) && !IFileManager::Get().FileExists(*FPaths::Combine(Mpq->GetDataPath(),NormalizedXmlPath.Replace(TEXT("\\"),TEXT("/")))))
+    {
+        const FString Common=TEXT("Interface\\FrameXML\\")+Parts[3]; if(Mpq->FileExists(Common)) NormalizedXmlPath=Common;
+    }
 	const FString VisitKey = NormalizedXmlPath.ToLower();
 	if (VisitedXmlFiles.Contains(VisitKey))
 	{

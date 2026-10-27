@@ -3116,6 +3116,12 @@ static int LF_TooltipSetUnit(lua_State* L)
 
 static const luaL_Reg FrameMethods[] =
 {
+    {"InitializeTabardColors",[](lua_State* L)->int {return WowLuaApi::TabardModelMethod(L,0);}},
+    {"CycleVariation",[](lua_State* L)->int {return WowLuaApi::TabardModelMethod(L,1);}},
+    {"GetUpperEmblemTexture",[](lua_State* L)->int {return WowLuaApi::TabardModelMethod(L,2);}},
+    {"GetLowerEmblemTexture",[](lua_State* L)->int {return WowLuaApi::TabardModelMethod(L,3);}},
+    {"CanSaveTabardNow",[](lua_State* L)->int {return WowLuaApi::TabardModelMethod(L,4);}},
+    {"Save",[](lua_State* L)->int {return WowLuaApi::TabardModelMethod(L,5);}},
 	// Core
 	{"GetName", LF_GetName},
 	{"GetObjectType", LF_GetObjectType},
@@ -3238,7 +3244,10 @@ static const luaL_Reg FrameMethods[] =
 	{"SetOrientation", LF_SetOrientation},
 
 	// EditBox
+	{"SetNumeric", [](lua_State* L)->int {auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) {const int64 H=GetFrameHandle(L); const bool Enabled=lua_toboolean(L,2)!=0 && (!lua_isnumber(L,2) || lua_tonumber(L,2)!=0); if(Enabled) C->FrameManager->NumericEditBoxes.Add(H); else C->FrameManager->NumericEditBoxes.Remove(H);} return 0;}},
+	{"IsNumeric", [](lua_State* L)->int {auto* C=WowLuaApi::GetContext(L); lua_pushboolean(L,C && C->FrameManager && C->FrameManager->NumericEditBoxes.Contains(GetFrameHandle(L))); return 1;}},
 	{"SetMaxLetters", LF_SetMaxLetters},
+	{"GetFieldSize", [](lua_State* L)->int {auto* C=WowLuaApi::GetContext(L); const int64 H=GetFrameHandle(L); int32 Limit=C && C->FrameManager?C->FrameManager->EditBoxMaxBytes.FindRef(H):0; if(Limit<=0 && C && C->FrameManager) Limit=C->FrameManager->EditBoxMaxLetters.FindRef(H); lua_pushinteger(L,Limit>0?Limit:32767); return 1;}},
 	{"SetMaxBytes", [](lua_State* L)->int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->EditBoxMaxBytes.Add(GetFrameHandle(L),FMath::Max(int32(luaL_checkinteger(L,2)),0)); return 0; }},
 	{"GetMaxBytes", [](lua_State* L)->int { auto* C=WowLuaApi::GetContext(L); lua_pushinteger(L,C && C->FrameManager?C->FrameManager->EditBoxMaxBytes.FindRef(GetFrameHandle(L)):0); return 1; }},
 	{"IgnoreDepth", [](lua_State* L)->int { return 0; }},

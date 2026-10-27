@@ -57,6 +57,8 @@ void FWowPacketHandler::HandleGossipMessage(FPacketReader& R)
     OnGossipMenu.Broadcast(GossipMenu);
 }
 
+void FWowPacketHandler::HandleGossipComplete(FPacketReader& R)
+{if(R.Remaining()) return; GossipMenu=FWowGossipMenu(); OnGossipClosed.Broadcast();}
 void FWowPacketHandler::HandleQuestgiverQuestList(FPacketReader& R)
 {
     if (!R.CanRead(9)) return;

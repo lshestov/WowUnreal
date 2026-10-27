@@ -1,5 +1,6 @@
 #pragma once
 #include "CoreMinimal.h"
+#include "WowGuildEmblem.h"
 
 class UTexture2D;
 class FMpqManager;
@@ -75,6 +76,8 @@ public:
         uint32 BeltDisplayId = 0;
         uint32 CapeDisplayId = 0;
         bool bIsRobeEquipped = false;  // True if chest item is a robe (InventoryType 20)
+        bool UseGuildEmblem=false;
+        FWowGuildEmblem GuildEmblem;
     };
 
     /**
