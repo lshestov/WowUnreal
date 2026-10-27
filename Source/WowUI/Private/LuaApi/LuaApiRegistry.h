@@ -16,6 +16,7 @@ struct FWowCombatLogView;
 struct FWowClassUiView;
 struct FWowChannelUiView;
 struct FWowMapUiView;
+struct FWowMinimapUiView;
 struct FWowItemTemplate;
 struct FWowItemEntity;
 
@@ -31,6 +32,7 @@ struct FWowLuaContext
     TSharedPtr<FWowClassUiView> ClassUi;
     TSharedPtr<FWowChannelUiView> Channels;
     TSharedPtr<FWowMapUiView> Map;
+    TSharedPtr<FWowMinimapUiView> Minimap;
     TFunction<uint32()> ResolveDungeonFloor;
     TFunction<uint32()> ResolveArea;
     uint32 LastAreaId=0,LastZoneId=0;
@@ -60,6 +62,8 @@ namespace WowLuaApi
     void RegisterWorldMapApi(lua_State* L);
     void RegisterQuestMapApi(lua_State* L);
     void UpdateMapArt(lua_State* L);
+    void RegisterMinimapApi(lua_State* L);
+    void UpdateMinimapState(lua_State* L);
     void UpdateMapState(lua_State* L);
     uint32 ResolveAreaId(const FWowLuaContext* Context);
     void UpdateChannels(lua_State* L);

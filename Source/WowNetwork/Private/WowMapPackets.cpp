@@ -5,6 +5,8 @@ void FWowPacketHandler::ResetMapState()
     ServerAreaMapId=MAX_uint32; ServerZoneId=ServerAreaId=0;
     QuestPois.Reset(); QuestPoiRequests.Reset(); GossipPoi=FGossipPoi(); WorldStates.Reset();
     CorpseMarker=FDeathMarker(); ReleaseMarker=FDeathMarker(); CorpseKnown=CorpseRequested=false; CorpseDeadline=0;
+    QuestGiverStatuses.Reset(); ++QuestGiverStatusRevision; GameObjectTemplates.Reset(); GameObjectQueries.Reset(); MissingGameObjects.Reset();
+    MinimapPing=FMinimapPing(); ++MinimapPingRevision;
     ++WorldStateRevision; ++QuestPoiRevision; ++MapPoiRevision;
 }
 void UWowConnectionManager::RequestQuestPois()

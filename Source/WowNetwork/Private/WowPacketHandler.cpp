@@ -116,6 +116,9 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(0x216,&FWowPacketHandler::HandleCorpseQuery);
     Handlers.Add(0x378,&FWowPacketHandler::HandleDeathRelease);
     Handlers.Add(0x224,&FWowPacketHandler::HandleGossipPoi);
+    Handlers.Add(0x418,&FWowPacketHandler::HandleQuestgiverStatuses);
+    Handlers.Add(0x05F,&FWowPacketHandler::HandleGameObjectQueryResponse);
+    Handlers.Add(0x1D5,&FWowPacketHandler::HandleMinimapPing);
     Handlers.Add(WowOpcode::SMSG_TRANSFER_PENDING,  &FWowPacketHandler::HandleTransferPending);
     Handlers.Add(WowOpcode::SMSG_NEW_WORLD,         &FWowPacketHandler::HandleNewWorld);
 
@@ -1755,26 +1758,10 @@ void FWowPacketHandler::HandleWho(FPacketReader& R)
 
 void FWowPacketHandler::HandleQuestgiverStatus(FPacketReader& R)
 {
-    if (!R.CanRead(9)) return;
-
-    uint64 Guid = R.ReadU64();
-    uint8 Status = R.ReadU8();
-
-    const TCHAR* StatusMsg = TEXT("Unknown");
-    switch (Status)
-    {
-    case 0: StatusMsg = TEXT("None"); break;
-    case 1: StatusMsg = TEXT("Unavailable"); break;
-    case 2: StatusMsg = TEXT("Chat"); break;
-    case 3: StatusMsg = TEXT("Incomplete"); break;
-    case 4: StatusMsg = TEXT("Reward Rep"); break;
-    case 5: StatusMsg = TEXT("Available Rep"); break;
-    case 6: StatusMsg = TEXT("Available"); break;
-    case 7: StatusMsg = TEXT("Reward2"); break;
-    case 8: StatusMsg = TEXT("Reward"); break;
-    }
-
-    UE_LOG(LogWowPacket, Log, TEXT("QUESTGIVER_STATUS: guid=%llu status=%d (%s)"), Guid, Status, StatusMsg);
+    if(R.Remaining()!=9) return;
+    const uint64 Guid=R.ReadU64(); const uint8 Status=R.ReadU8();
+    if(!Guid || Status>10) return;
+    QuestGiverStatuses.Add(Guid,Status); ++QuestGiverStatusRevision;
 }
 
 // ── SMSG_QUEST_UPDATE_ADD_KILL ───────────────────────────────────────────

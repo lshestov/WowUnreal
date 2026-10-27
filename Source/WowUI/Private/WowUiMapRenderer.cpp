@@ -1,5 +1,6 @@
 #include "WowUiMapRenderer.h"
 #include "WowMapUi.h"
+#include "WowMinimapUi.h"
 #include "WowFrameManager.h"
 #include "LuaApi/LuaApiRegistry.h"
 #include "WowConnectionManager.h"
@@ -86,6 +87,9 @@ void FWowUiMapRenderer::Tick(UWorld* World)
     const FVector Pos=Position(); const uint32 MapId=Context.ConnectionManager->PacketHandler.CurrentMapId;
     const auto* Map=FDbcStore::Get().Maps().GetById(MapId);
     const auto* Player=Context.EntityManager->GetLocalPlayer(); const float Facing=Player->Movement.Orientation;
+    auto& Mini=WowMinimapUi::View(&Context);
+    if(Mini.OwnsTooltip && !Frames.IsFrameDrawn(Frames.FindFrame(TEXT("Minimap"))))
+    {const int64 T=Frames.FindFrame(TEXT("GameTooltip")); const auto* S=Frames.GetTooltipState(T); if(S && S->OwnerHandle==Frames.FindFrame(TEXT("Minimap"))) Frames.SetFrameVisible(T,false); Mini.OwnsTooltip=false;}
     if(MiniImage.IsValid() && MiniTarget.IsValid() && Frames.IsFrameDrawn(Frames.FindFrame(TEXT("Minimap"))) && Map)
     {
         UKismetRenderingLibrary::ClearRenderTarget2D(World,MiniTarget.Get(),FLinearColor::Black);
@@ -94,14 +98,40 @@ void FWowUiMapRenderer::Tick(UWorld* World)
         if(Canvas)
         {
             const float X=32-Pos.Y/(1600.f/3),Y=32-Pos.X/(1600.f/3);
-            const float TileSize=256.f*FMath::Pow(1.5f,Frames.MinimapZoom-2);
+            const float Radius=WowMinimapUi::Radius(&Context);
+            const float TileSize=256.f*(1600.f/3)/(2*Radius);
+            const float Angle=Mini.Rotates?Facing:0;
+            const auto Rotate=[&](FVector2D P){P-=FVector2D(128); return FVector2D(128)+FVector2D(P.X*FMath::Cos(Angle)-P.Y*FMath::Sin(Angle),P.X*FMath::Sin(Angle)+P.Y*FMath::Cos(Angle));};
             for(int32 DY=-1; DY<=1; ++DY) for(int32 DX=-1; DX<=1; ++DX)
             {
                 const int32 TX=FMath::FloorToInt(X)+DX,TY=FMath::FloorToInt(Y)+DY;
                 const FString Key=FString::Printf(TEXT("%s\\map%d_%d.blp"),*Map->InternalName,TX,TY).ToLower();
-                if(const auto* Hash=TileNames.Find(Key)) if(auto* Tile=Texture(TEXT("Textures\\Minimap\\")+*Hash)) Canvas->K2_DrawTexture(Tile,FVector2D(128+(TX-X)*TileSize,128+(TY-Y)*TileSize),FVector2D(TileSize),FVector2D::ZeroVector,FVector2D::UnitVector,FLinearColor::White,BLEND_Opaque);
+                if(const auto* Hash=TileNames.Find(Key)) if(auto* Tile=Texture(TEXT("Textures\\Minimap\\")+*Hash)) Canvas->K2_DrawTexture(Tile,Rotate(FVector2D(128+(TX-X)*TileSize,128+(TY-Y)*TileSize)),FVector2D(TileSize),FVector2D::ZeroVector,FVector2D::UnitVector,FLinearColor::White,BLEND_Opaque,FMath::RadiansToDegrees(Angle),FVector2D::ZeroVector);
             }
-            Arrow(Canvas,FVector2D(128),-Facing,8);
+            const auto Handle=Frames.FindFrame(TEXT("Minimap")); const auto Rect=Frames.GetLayoutRect(Handle); const auto Blips=WowMinimapUi::Blips(&Context);
+            const uint32 MarkerHash=HashCombineFast(Context.ConnectionManager->PacketHandler.QuestGiverStatusRevision,Mini.TrackingHash);
+            if(MarkerHash!=Mini.MarkerLogHash)
+            {
+                Mini.MarkerLogHash=MarkerHash;
+                UE_LOG(LogWowLuaFrame,Log,TEXT("Minimap: tracking=%s nearby=%d questgivers=%d radius=%.2f"),*Mini.CommonKey,Blips.Num(),Context.ConnectionManager->PacketHandler.QuestGiverStatuses.Num(),Radius);
+            }
+            const FString* Hover=nullptr; const FVector2D Pointer=Frames.GetPointerPosition()/FMath::Max(.001f,Frames.GetScreenScale());
+            if(auto* Icons=Texture(Mini.BlipTexture)) for(const auto& B:Blips)
+            {
+                const auto P=WowMinimapUi::Offset(&Context,Pos,B.Position,Radius,Facing);
+                // ObjectIcons uses the 8x2 object/class UV table; the separate
+                // 8x4 table in build 12340 belongs to the vehicle atlas.
+                Canvas->K2_DrawTexture(Icons,FVector2D(128)+P*256-FVector2D(8),FVector2D(16),FVector2D((B.Icon&7)/8.,(B.Icon>>3)/2.),FVector2D(1./8,1./2),FLinearColor::White);
+                const FVector2D Screen(Rect.X+Rect.Z*(.5+P.X),Rect.Y+Rect.W*(.5+P.Y));
+                if(Frames.IsMouseOverFrame(Handle) && FVector2D::DistSquared(Screen,Pointer)<=FMath::Square(Rect.Z/256*10)) Hover=&B.Name;
+            }
+            const int64 Tooltip=Frames.FindFrame(TEXT("GameTooltip"));
+            if(Hover && Tooltip>=0) {Frames.TooltipSetOwner(Tooltip,Handle,TEXT("ANCHOR_CURSOR")); Frames.TooltipSetText(Tooltip,*Hover); Frames.SetFrameVisible(Tooltip,true); Mini.OwnsTooltip=true;}
+            else if(Mini.OwnsTooltip) {const auto* State=Frames.GetTooltipState(Tooltip); if(State && State->OwnerHandle==Handle) Frames.SetFrameVisible(Tooltip,false); Mini.OwnsTooltip=false;}
+            const auto ArrowSize=Mini.PlayerSize*256/FVector2D(FMath::Max(1.,Rect.Z),FMath::Max(1.,Rect.W))*Frames.GetEffectiveFrameScale(Handle);
+            if(auto* Art=Texture(Mini.PlayerTexture)) Canvas->K2_DrawTexture(Art,FVector2D(128)-ArrowSize/2,ArrowSize,FVector2D::ZeroVector,FVector2D::UnitVector,FLinearColor::White,BLEND_Translucent,Mini.Rotates?0:-FMath::RadiansToDegrees(Facing),FVector2D(.5));
+            else Arrow(Canvas,FVector2D(128),Mini.Rotates?0:-Facing,8);
+            if(auto* Compass=Frames.GetNamedTexture(TEXT("MinimapCompassTexture"))) Compass->SetRenderTransformAngle(Mini.Rotates?FMath::RadiansToDegrees(Facing):0);
         }
         UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(World,Draw);
     }

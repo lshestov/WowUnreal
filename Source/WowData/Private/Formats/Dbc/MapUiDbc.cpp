@@ -53,6 +53,9 @@ bool FMapUiDbc::Load(FMpqManager& Mpq)
     {FWmoArea W; W.Root=P.GetUInt(I,1); W.NameSet=P.GetUInt(I,2); W.Group=P.GetUInt(I,3); W.Flags=P.GetUInt(I,9); W.AreaId=P.GetUInt(I,10); W.Name=P.GetString(I,11); WmoAreaRows.Add(MoveTemp(W));}
     ZoneMasks.Reset();
     Vehicles.Reset();
+    ResourceLocks.Reset();
+    if(Read(TEXT("Lock.dbc"),33)) for(uint32 I=0;I<P.GetRecordCount();++I)
+    {uint32 Mask=0; for(uint32 J=0;J<8;++J) if(P.GetUInt(I,1+J)==2) {const uint32 Index=P.GetUInt(I,9+J); if(Index>0 && Index<=32) Mask|=1u<<(Index-1);} if(Mask) ResourceLocks.Add(P.GetUInt(I,0),Mask);}
     if(Read(TEXT("Vehicle.dbc"),40)) for(uint32 I=0;I<P.GetRecordCount();++I) Vehicles.Add(P.GetUInt(I,0),{P.GetUInt(I,1),P.GetUInt(I,34)});
     for(const auto& A:AreaRows) if(!A.AreaId)
     {

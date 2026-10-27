@@ -15,6 +15,7 @@
 #include "WowAddonLoader.h"
 #include "../WowUiCursorRenderer.h"
 #include "../WowMapUi.h"
+#include "../WowMinimapUi.h"
 #include "Formats/DbcParser.h"
 #include "Misc/Paths.h"
 #include "HAL/FileManager.h"
@@ -537,6 +538,70 @@ bool FHudTextureTemplates::RunTest(const FString&)
     TestTrue(TEXT("Updated normal caption color is visible"),Text && FMath::IsNearlyEqual(Text->GetColorAndOpacity().GetSpecifiedColor().G,.8f));
     return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudMinimapTracking,"WowUnreal.Hud.MinimapTracking",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudMinimapTracking::RunTest(const FString&)
+{
+    FString Path; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false; FMpqManager Mpq; if(!Mpq.Initialize(Path)) return false;
+    auto& Dbc=FDbcStore::Get(); if(!Dbc.IsLoaded()) Dbc.LoadAll(Mpq); if(!Dbc.IsDeferredLoaded()) Dbc.LoadDeferred(Mpq);
+    FHudFixture F; TStrongObjectPtr<UWowConnectionManager> C(NewObject<UWowConnectionManager>()); auto& H=C->PacketHandler; H.EntityManager.LocalPlayerGuid=1;
+    H.EntityManager.PromoteToTyped(1,WowTypeMask::PLAYER|WowTypeMask::UNIT); auto* P=H.EntityManager.GetLocalPlayer(); P->SetField(UnitField::HEALTH,449); P->SetField(UnitField::FACTIONTEMPLATE,12); P->SetField(UnitField::BYTES_0,1|(1<<8));
+    F.Context.ConnectionManager=C.Get(); F.Context.EntityManager=&H.EntityManager;
+    if(!TestTrue(TEXT("Stock single-selection menu, tuple types, saved common tracking, zoom and textures"),F.Lua.ExecuteString(TEXT(R"LUA(
+        IdleWowUIState={}; Mini=CreateFrame('Minimap','Minimap',UIParent); Mini:SetSize(140,140); Mini:SetPoint('CENTER')
+        assert(GetNumTrackingTypes()==13 and GetTrackingInfo(0)==nil and GetTrackingInfo(14)==nil)
+        local name,icon,active,category=GetTrackingInfo(1); assert(name=='Repair' and icon=='Interface\\Minimap\\Tracking\\Repair' and active==nil and category=='other' and select('#',GetTrackingInfo(1))==4)
+        SetTracking(1); assert(select(3,GetTrackingInfo(1))==1 and GetTrackingTexture()==icon and GetCVar('minimapTrackedInfo')=='MINIMAP_TRACKING_REPAIR')
+        TrackTip=CreateFrame('GameTooltip','TrackTip',UIParent); TrackTip:SetOwner(Mini,'ANCHOR_RIGHT'); TrackTip:SetTracking(); assert(TrackTip:IsShown() and TrackTip:NumLines()==1 and TrackTip:GetSpell()==nil)
+        SetTracking(2); assert(select(3,GetTrackingInfo(1))==nil and select(3,GetTrackingInfo(2))==1)
+        SetTracking(999); assert(select(3,GetTrackingInfo(2))==1); SetTracking(nil); assert(GetTrackingTexture()=='Interface\\Minimap\\Tracking\\None')
+        ZoomEvents=0; Mini:RegisterEvent('MINIMAP_UPDATE_ZOOM'); Mini:SetScript('OnEvent',function() ZoomEvents=ZoomEvents+1 end)
+        Mini:SetZoom(5); Mini:SetZoom(5); assert(Mini:GetZoom()==5 and Mini:GetZoomLevels()==6 and ZoomEvents==1 and GetCVar('minimapZoom')=='5')
+        Mini:SetZoom(9); assert(Mini:GetZoom()==5 and ZoomEvents==1); Mini:SetZoom(-1); assert(Mini:GetZoom()==0 and ZoomEvents==2)
+        Mini:SetPlayerTexture('CustomArrow'); Mini:SetPlayerTextureWidth(18); Mini:SetPlayerTextureHeight(20); Mini:SetBlipTexture('CustomBlips'); Mini:SetStaticArrowTexture('CustomNorth')
+    )LUA")))) return false;
+    auto& V=WowMinimapUi::View(&F.Context); TestTrue(TEXT("Custom minimap assets retain their dimensions"),V.PlayerTexture==TEXT("CustomArrow") && V.PlayerSize.Equals(FVector2D(18,20)) && V.BlipTexture==TEXT("CustomBlips") && V.StaticArrowTexture==TEXT("CustomNorth"));
+    P->SetField(UnitField::BYTES_0,1|(8<<8)); TestEqual(TEXT("Mage does not offer ammunition, poisons or stables"),WowMinimapUi::Tracking(&F.Context).Num(),12);
+    H.KnownSpells.Add(1494); const auto Rows=WowMinimapUi::Tracking(&F.Context); TestTrue(TEXT("Only learned tracking auras enter the spell section"),Rows.Num()==13 && Rows[0].Spell==1494);
+    P->Auras[0].bActive=true; P->Auras[0].SpellId=1494; WowLuaApi::UpdateMinimapState(F.Lua.GetState());
+    TestTrue(TEXT("Server aura acknowledges the learned tracking spell"),F.Lua.ExecuteString(TEXT("local name,icon,active,category=GetTrackingInfo(1); assert(name=='Track Beasts' and active==1 and category=='spell' and GetTrackingTexture()==icon and GetCVar('minimapTrackedInfo')=='')")));
+    P->Auras[0].bActive=false; WowLuaApi::UpdateMinimapState(F.Lua.GetState()); TestEqual(TEXT("Removed aura stops spell tracking"),WowMinimapUi::TrackingSpell(&F.Context),0u);
+    auto& N=H.EntityManager.PromoteToTyped(2,WowTypeMask::UNIT); N.Entry=10; N.Movement.Position=FVector(10,0,0); N.SetField(UnitField::HEALTH,50); N.SetField(UnitField::FACTIONTEMPLATE,12); N.SetField(UnitField::NPC_FLAGS,0x1000); H.CreatureNameCache.Add(10,TEXT("Repair vendor"));
+    V.CommonKey=TEXT("MINIMAP_TRACKING_REPAIR"); auto Blips=WowMinimapUi::Blips(&F.Context);
+    TestTrue(TEXT("Only matching nearby friendly vendors appear"),Blips.Num()==1 && Blips[0].Guid==2 && Blips[0].Icon==8 && Blips[0].Name==TEXT("Repair vendor"));
+    N.SetField(UnitField::FACTIONTEMPLATE,29); TestTrue(TEXT("Hostile vendor flags do not create friendly service dots"),WowMinimapUi::Blips(&F.Context).IsEmpty()); N.SetField(UnitField::FACTIONTEMPLATE,12);
+    V.CommonKey.Empty(); H.QuestGiverStatuses.Add(2,10); Blips=WowMinimapUi::Blips(&F.Context); TestTrue(TEXT("Actual reward status is a completed quest dot"),Blips.Num()==1 && Blips[0].Icon==10);
+    H.QuestGiverStatuses.Add(2,2); TestTrue(TEXT("Trivial available quests require their tracking selection"),WowMinimapUi::Blips(&F.Context).IsEmpty()); V.CommonKey=TEXT("MINIMAP_TRACKING_TRIVIAL_QUESTS"); Blips=WowMinimapUi::Blips(&F.Context); TestTrue(TEXT("Low-level selection exposes the real quest status"),Blips.Num()==1 && Blips[0].Icon==9);
+    H.QuestGiverStatuses.Empty(); V.CommonKey.Empty(); H.CreatureTypes.Add(10,1); P->SetField(PlayerField::BASE+0x36A,1); Blips=WowMinimapUi::Blips(&F.Context); TestTrue(TEXT("Tracking creature bitmasks uses DBC faction reaction"),Blips.Num()==1 && Blips[0].Icon==7);
+    N.SetField(UnitField::BYTES_1,4<<16); TestTrue(TEXT("Untrackable units remain hidden"),WowMinimapUi::Blips(&F.Context).IsEmpty()); N.SetField(UnitField::BYTES_1,0); N.Movement.Position.X=200; TestTrue(TEXT("Dots outside the stock 0.8-radius bound are culled"),WowMinimapUi::Blips(&F.Context).IsEmpty()); H.EntityManager.Remove(2);
+    auto& G=H.EntityManager.PromoteToTyped(3,WowTypeMask::GAMEOBJECT); G.Entry=100; G.SetField(GameObjectField::BYTES_1,19<<8); H.GameObjectTemplates.Add(100); H.GameObjectTemplates[100].Name=TEXT("Actual mailbox"); V.CommonKey=TEXT("MINIMAP_TRACKING_MAILBOX"); Blips=WowMinimapUi::Blips(&F.Context); TestTrue(TEXT("Mailboxes use the real gameobject type and query name"),Blips.Num()==1 && Blips[0].Guid==3 && Blips[0].Name==TEXT("Actual mailbox"));
+    G.SetField(GameObjectField::FLAGS,0x10); TestTrue(TEXT("Not-selectable gameobjects do not leak tracking markers"),WowMinimapUi::Blips(&F.Context).IsEmpty());
+    const auto East=WowMinimapUi::Offset(&F.Context,FVector::ZeroVector,FVector(0,-10,0),100,PI/2); V.Rotates=true; const auto Rotated=WowMinimapUi::Offset(&F.Context,FVector::ZeroVector,FVector(0,-10,0),100,PI/2); TestTrue(TEXT("Rotating minimap transforms markers into player-facing coordinates"),East.Equals(FVector2D(.05,0),.0001) && Rotated.Equals(FVector2D(0,.05),.0001));
+    V.Rotates=false; F.Frames.MinimapZoom=0; TestTrue(TEXT("Stock outdoor and indoor radii differ"),FMath::IsNearlyEqual(WowMinimapUi::Radius(&F.Context),233.33333f,.001f) && WowMinimapUi::Radius(&F.Context,true)==150);
+    TestTrue(TEXT("Local ping delivers numeric normalized coordinates through the original event"),F.Lua.ExecuteString(TEXT("Mini:RegisterEvent('MINIMAP_PING'); Mini:SetScript('OnEvent',function(self,event,unit,x,y) if event=='MINIMAP_PING' then assert(unit=='player' and type(x)=='number' and type(y)=='number'); PingSeen=true end end); Mini:PingLocation(14,7)"))); WowLuaApi::UpdateMinimapState(F.Lua.GetState());
+    TestTrue(TEXT("Local ping is immediate without a group packet and responds to zoom"),F.Lua.ExecuteString(TEXT("assert(PingSeen); local x,y=Mini:GetPingPosition(); assert(math.abs(x-.1)<.001 and math.abs(y-.05)<.001); Mini:SetZoom(5); local xx,yy=Mini:GetPingPosition(); assert(xx>x and yy>y)")));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudMinimapPackets,"WowUnreal.Hud.MinimapPackets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudMinimapPackets::RunTest(const FString&)
+{
+    FWowPacketHandler H; H.EntityManager.LocalPlayerGuid=1; TArray<uint8> Data;
+    const auto U32=[&](uint32 V){Data.Append(reinterpret_cast<const uint8*>(&V),4);}; const auto U64=[&](uint64 V){Data.Append(reinterpret_cast<const uint8*>(&V),8);}; const auto Float=[&](float V){Data.Append(reinterpret_cast<const uint8*>(&V),4);};
+    U32(2); U64(2); Data.Add(10); U64(3); Data.Add(8);
+    H.QuestGiverStatuses.Add(9,5); for(int32 N=0;N<Data.Num();++N) {TArray<uint8> Prefix; Prefix.Append(Data.GetData(),N); H.HandlePacket(0x418,Prefix); TestTrue(TEXT("Partial status lists cannot publish earlier rows"),H.QuestGiverStatuses.Num()==1 && H.QuestGiverStatuses.FindRef(9)==5);}
+    H.HandlePacket(0x418,Data); TestTrue(TEXT("Complete status list replaces stale rows atomically"),H.QuestGiverStatuses.Num()==2 && H.QuestGiverStatuses.FindRef(2)==10 && !H.QuestGiverStatuses.Contains(9));
+    auto Invalid=Data; Invalid[12]=11; H.HandlePacket(0x418,Invalid); TestEqual(TEXT("Invalid status list does not publish"),H.QuestGiverStatuses.FindRef(2),uint8(10));
+    Data.Reset(); U64(4); Data.Add(7); H.HandlePacket(0x183,Data); TestEqual(TEXT("Single questgiver updates use the same cache"),H.QuestGiverStatuses.FindRef(4),uint8(7));
+    Data.Reset(); U32(0); H.HandlePacket(0x418,Data); TestTrue(TEXT("A valid empty status list clears markers"),H.QuestGiverStatuses.IsEmpty());
+    Data.Reset(); U32(100); U32(19); U32(5); for(const char* S:{"Mailbox","","","","","",""}) {Data.Append(reinterpret_cast<const uint8*>(S),FCStringAnsi::Strlen(S)); Data.Add(0);} for(int32 I=0;I<24;++I) U32(I); Float(1); for(int32 I=0;I<6;++I) U32(0);
+    H.GameObjectQueries.Add(100,1); for(int32 N=0;N<Data.Num();++N) {TArray<uint8> Prefix; Prefix.Append(Data.GetData(),N); H.HandlePacket(0x05F,Prefix); TestTrue(TEXT("Partial object queries retain pending state without publishing"),H.GameObjectTemplates.IsEmpty() && H.GameObjectQueries.Contains(100));}
+    H.HandlePacket(0x05F,Data); TestTrue(TEXT("Original query layout supplies names, type and all lock data"),H.GameObjectTemplates.Contains(100) && H.GameObjectTemplates[100].Name==TEXT("Mailbox") && H.GameObjectTemplates[100].Type==19 && H.GameObjectTemplates[100].Data[23]==23 && !H.GameObjectQueries.Contains(100));
+    H.GameObjectQueries.Add(101,1); Data.Reset(); U32(0x80000065); H.HandlePacket(0x05F,Data); TestTrue(TEXT("Missing query results are cached only for requested entries"),H.MissingGameObjects.Contains(101) && !H.GameObjectQueries.Contains(101));
+    Data.Reset(); U64(1); Float(-8895); Float(-88); for(int32 N=0;N<Data.Num();++N) {TArray<uint8> Prefix; Prefix.Append(Data.GetData(),N); H.HandlePacket(0x1D5,Prefix); TestEqual(TEXT("Partial ping is atomic"),H.MinimapPingRevision,0u);} H.HandlePacket(0x1D5,Data); TestTrue(TEXT("Ping carries absolute world coordinates"),H.MinimapPingRevision==1 && H.MinimapPing.Position.Equals(FVector(-8895,-88,0)));
+    Data[0]=9; H.HandlePacket(0x1D5,Data); TestEqual(TEXT("Non-group ping cannot spoof a marker"),H.MinimapPingRevision,1u);
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudAreaZones,"WowUnreal.Hud.AreaZones",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FHudAreaZones::RunTest(const FString&)
 {

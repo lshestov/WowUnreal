@@ -3516,6 +3516,10 @@ static FString GetDefaultCVarValue(const FString& Name)
 {
     static const TMap<FString, FString> ExplicitDefaults = {
         { TEXT("questpoi"), TEXT("1") },
+        { TEXT("minimaptrackedinfo"), TEXT("") },
+        { TEXT("minimapzoom"), TEXT("0") },
+        { TEXT("minimapinsidezoom"), TEXT("0") },
+        { TEXT("rotateminimap"), TEXT("0") },
         { TEXT("miniworldmap"), TEXT("0") },
         { TEXT("advancedworldmap"), TEXT("0") },
         { TEXT("worldmapopacity"), TEXT("0") },

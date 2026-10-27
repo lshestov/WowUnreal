@@ -41,6 +41,7 @@ public:
     const TArray<FLandmark>& Landmarks() const {return LandmarkRows;}
     const TArray<FWmoArea>& WmoAreas() const {return WmoAreaRows;}
     const FVehicle* Vehicle(uint32 Id) const {return Vehicles.Find(Id);}
+    uint32 ResourceLockMask(uint32 Id) const {return ResourceLocks.FindRef(Id);}
     const FArea* Area(uint32 Id) const;
     const FFloor* Floor(uint32 Id) const;
     const FContinent* Continent(uint32 MapId) const;
@@ -58,4 +59,5 @@ private:
     TArray<FWmoArea> WmoAreaRows;
     TMap<uint32,TArray<uint32>> ZoneMasks;
     TMap<uint32,FVehicle> Vehicles;
+    TMap<uint32,uint32> ResourceLocks;
 };

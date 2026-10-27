@@ -45,6 +45,7 @@ void WowLuaApi::RegisterAll(lua_State* L)
     FWowCombatLogUi::RegisterApi(L);
     RegisterFrameApi(L);
     RegisterQuestMapApi(L);
+    RegisterMinimapApi(L);
 #endif
 }
 

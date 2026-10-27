@@ -448,7 +448,7 @@ build, automation, native autologin and rendered screenshot verification):
     (two existing warnings), optional/truncated/invalid packet checks and a native
     two-metre server round trip with two rendered captures and exact position
     restoration. See Docs/Movement.md.
-  - [?] Original world map: stock FrameXML bootstrap/panels, actual continent and
+  - [x] Original world map: stock FrameXML bootstrap/panels, actual continent and
     localized zone selection, physical hit masks and transforms, explored
     overlays, dungeon floors, player arrows/ping, landmarks/gossip and real
     server quest POIs/polygons/tooltips. Corpse/release packet caches and strict
@@ -458,7 +458,16 @@ build, automation, native autologin and rendered screenshot verification):
     with nine inspected captures, sub-second opening, an actual floor-button
     click, objective toggles and ReloadUI. Temporary quest and original
     position/UI were restored exactly. See Docs/Maps.md.
-  - [ ] Real tracking selection/blips and WMO interior minimap tiles.
+  - [?] Original minimap tracking: class-filtered learned spells and common
+    services, real server quest dots, resource locks, mailboxes, loaded group
+    members and pets, dot tooltips, original ObjectIcons UVs, stock zoom radii,
+    rotating tiles/compass/player arrow, world-coordinate local/group pings,
+    and character preferences retained across ReloadUI. Atomic questgiver,
+    gameobject-query and ping packet caches. Verified Windows package, 113
+    regression tests (two existing warning tests), focused tooltip/API checks
+    and a final 31-step/six-image native menu/selection/zoom/ping/rotation/reload
+    route; all images validated and inspected. See Docs/Minimap.md.
+  - [ ] WMO interior minimap tiles, areas and floor resolution.
 - [ ] 7. Group/special windows: party/loot, PvP, dungeon finder and achievements.
   - [ ] Restore NPC portrait captures and friendly NPC unit-frame reactions.
 

@@ -230,6 +230,14 @@ public:
     uint32 CurrentMapId=0;
     uint32 ServerAreaMapId=MAX_uint32,ServerZoneId=0,ServerAreaId=0;
     uint32 WorldStateRevision=0,QuestPoiRevision=0,MapPoiRevision=0;
+    TMap<uint64,uint8> QuestGiverStatuses;
+    uint32 QuestGiverStatusRevision=0;
+    struct FGameObjectTemplate {uint32 Entry=0,Type=0,Display=0,Data[24]={}; FString Name; float Scale=1;};
+    TMap<uint32,FGameObjectTemplate> GameObjectTemplates;
+    TMap<uint32,double> GameObjectQueries;
+    TSet<uint32> MissingGameObjects;
+    struct FMinimapPing {uint64 Guid=0; uint32 Map=0; FVector Position=FVector::ZeroVector; double At=0;} MinimapPing;
+    uint32 MinimapPingRevision=0;
     struct FQuestPoi {uint32 Id=0,MapId=0,AreaId=0,Floor=0,Priority=0,Flags=0; int32 Objective=-1; TArray<FIntPoint> Points;};
     TMap<uint32,TArray<FQuestPoi>> QuestPois;
     TMap<uint32,double> QuestPoiRequests;
@@ -443,6 +451,9 @@ private:
 
     // Quest handlers
     void HandleQuestgiverStatus(FPacketReader& R);
+    void HandleQuestgiverStatuses(FPacketReader& R);
+    void HandleGameObjectQueryResponse(FPacketReader& R);
+    void HandleMinimapPing(FPacketReader& R);
     void HandleQuestQueryResponse(FPacketReader& R);
     void HandleQuestgiverQuestDetails(FPacketReader& R);
     void HandleQuestgiverOfferReward(FPacketReader& R);
