@@ -29,7 +29,7 @@ int32 UWowQaCharacterCommandlet::Main(const FString& Params)
     double ExpectedNumber=0; Config->TryGetNumberField(TEXT("guid"),ExpectedNumber);
     if(ExpectedNumber<0 || ExpectedNumber>MAX_uint32 || FMath::FloorToDouble(ExpectedNumber)!=ExpectedNumber) return 1;
     const uint64 Expected=uint64(ExpectedNumber); if(Mode!=TEXT("prepare") && !Expected) return 1;
-    double ClassNumber=8; Config->TryGetNumberField(TEXT("class"),ClassNumber); if(ClassNumber!=1 && ClassNumber!=8) return 1;
+    double ClassNumber=8; Config->TryGetNumberField(TEXT("class"),ClassNumber); if(ClassNumber!=1 && ClassNumber!=5 && ClassNumber!=8) return 1;
     FString GuildName; double GuildNumber=0; TSet<uint64> Owned;
     const bool ArenaDisband=Mode==TEXT("disband_arena");
     if(Mode==TEXT("disband") || ArenaDisband)

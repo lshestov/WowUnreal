@@ -33,7 +33,10 @@ pre-existing characters and their inventory records. Failure leaves a recovery
 fixture instead of deleting unrelated data or concealing a state difference.
 
 Multiplayer probes accept indexed coordinator-owned peers. Every additional
-peer has a fresh private fixture below the primary UserDir, its own registration
+connection has an independent class selection from warrior/priest/mage, so a
+five-account dungeon route can supply actual tank/healer/damage roles. The
+primary plus four peers retain separate ownership and cleanup checks.
+Every additional peer has a fresh private fixture below the primary UserDir, its own registration
 proof and an explicit cleanup guard. Every connection is stopped and deleted
 before success; the outer coordinator closes all account guards. Arena damage
 and completion require exactly four distinct owned players, active two-player

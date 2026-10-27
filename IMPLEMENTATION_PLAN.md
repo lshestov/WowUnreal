@@ -535,10 +535,19 @@ build, automation, native autologin and rendered screenshot verification):
       Docs/DungeonFinder.md.
     - [ ] Complete role checks, five-player proposals, teleport and group controls;
       verify native disposable multiplayer routes and rendered screenshots.
-      - [?] Load WDT global WMO maps and hold world entry until their collision
+      - [?] Premade role checks, accepted/declined proposals, original ready
+        status and minimap teleport controls. Verified six focused checks and
+        a 127-step five-account route with nine inspected captures and three
+        explicit Unreal garbage collections between map transfers.
+      - [ ] Verify separate-player matchmaking, vote kicks, backfill and random
+        completion rewards through rendered multiplayer routes.
+      - [x] Load WDT global WMO maps and hold world entry until their collision
         is ready (required by Stockades/Ragefire Chasm dungeon transfers).
         Verified build, five focused checks and a native 30-step route through
         Stockades/Ragefire/world with three inspected, nonempty captures.
+    - [ ] Complete original raid-browser listings, search results and controls.
+    - [ ] Fix stock character-frame bootstrap identity and timed notification
+      fading discovered during the dungeon-finder routes.
   - [ ] Complete achievements, criteria, tracking and comparison state.
 
 - [x] Stock options category placement and text: numeric-offset SetPoint overloads, runtime $parent references, constrained description wrapping, and XML markup rendered without asset paths while Lua keeps original strings. Verified 64 automation tests and native category clicks, character/spellbook windows and rendered screenshots.

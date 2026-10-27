@@ -14,8 +14,24 @@
 #include "WowTerrainTile.h"
 #include "Formats/WmoParser.h"
 #include "Formats/WdtParser.h"
+#include "WowTerrainMaterial.h"
+#include "WowWaterMaterial.h"
+#include "Materials/Material.h"
+#include "UObject/GarbageCollection.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIdleWowMaterialLifetime,"WowUnreal.World.MaterialCacheLifetime",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FIdleWowMaterialLifetime::RunTest(const FString&)
+{
+    TWeakObjectPtr<UMaterial> Terrain=FWowTerrainMaterial::GetBaseMaterial(),Object=FWowTerrainMaterial::GetSimpleObjectMaterial(),Water=FWowWaterMaterial::GetWaterMaterial(),Lava=FWowWaterMaterial::GetLavaMaterial(),Slime=FWowWaterMaterial::GetSlimeMaterial();
+    if(!TestTrue(TEXT("All runtime base materials are available"),Terrain.IsValid() && Object.IsValid() && Water.IsValid() && Lava.IsValid() && Slime.IsValid())) return false;
+    // A dungeon transfer can remove every terrain/doodad reference before the
+    // next map uses these caches. Raw static pointers do not participate in GC.
+    CollectGarbage(RF_NoFlags);
+    TestTrue(TEXT("Cached terrain material survives a map without terrain"),Terrain.IsValid()); TestTrue(TEXT("Cached object material survives a map without doodads"),Object.IsValid());
+    TestTrue(TEXT("Cached water material survives collection"),Water.IsValid()); TestTrue(TEXT("Cached lava material survives collection"),Lava.IsValid()); TestTrue(TEXT("Cached slime material survives collection"),Slime.IsValid());
+    return true;
+}
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIdleWowGlobalWmo,"WowUnreal.World.GlobalWmoMaps",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FIdleWowGlobalWmo::RunTest(const FString&)
 {

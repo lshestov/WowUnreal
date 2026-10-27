@@ -1,4 +1,6 @@
 #include "WowWaterMaterial.h"
+#include "UObject/StrongObjectPtr.h"
+#include "Misc/ScopeExit.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #if WITH_EDITOR
@@ -21,8 +23,9 @@ DEFINE_LOG_CATEGORY_STATIC(LogWowWaterMat, Log, All);
 
 UMaterial* FWowWaterMaterial::GetWaterMaterial()
 {
-	static UMaterial* CachedMat = nullptr;
-	if (CachedMat && CachedMat->IsValidLowLevel()) return CachedMat;
+	static TStrongObjectPtr<UMaterial> Retained;
+	if(Retained.IsValid()) return Retained.Get();
+	UMaterial* CachedMat=nullptr; ON_SCOPE_EXIT {Retained.Reset(CachedMat);};
 	CachedMat = LoadObject<UMaterial>(nullptr, TEXT("/Game/Materials/M_WowWater"));
 	if (CachedMat) return CachedMat;
 
@@ -132,8 +135,9 @@ UMaterial* FWowWaterMaterial::GetWaterMaterial()
 
 UMaterial* FWowWaterMaterial::GetLavaMaterial()
 {
-	static UMaterial* CachedMat = nullptr;
-	if (CachedMat && CachedMat->IsValidLowLevel()) return CachedMat;
+	static TStrongObjectPtr<UMaterial> Retained;
+	if(Retained.IsValid()) return Retained.Get();
+	UMaterial* CachedMat=nullptr; ON_SCOPE_EXIT {Retained.Reset(CachedMat);};
 	CachedMat = LoadObject<UMaterial>(nullptr, TEXT("/Game/Materials/M_WowLava"));
 	if (CachedMat) return CachedMat;
 
@@ -224,8 +228,9 @@ UMaterial* FWowWaterMaterial::GetLavaMaterial()
 
 UMaterial* FWowWaterMaterial::GetSlimeMaterial()
 {
-	static UMaterial* CachedMat = nullptr;
-	if (CachedMat && CachedMat->IsValidLowLevel()) return CachedMat;
+	static TStrongObjectPtr<UMaterial> Retained;
+	if(Retained.IsValid()) return Retained.Get();
+	UMaterial* CachedMat=nullptr; ON_SCOPE_EXIT {Retained.Reset(CachedMat);};
 	CachedMat = LoadObject<UMaterial>(nullptr, TEXT("/Game/Materials/M_WowSlime"));
 	if (CachedMat) return CachedMat;
 

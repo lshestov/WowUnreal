@@ -1,4 +1,6 @@
 #include "WowTerrainMaterial.h"
+#include "UObject/StrongObjectPtr.h"
+#include "Misc/ScopeExit.h"
 #include "Formats/AdtTypes.h"
 #include "Formats/BlpParser.h"
 #include "WowTextureFactory.h"
@@ -151,8 +153,9 @@ UMaterialInstanceDynamic* FWowTerrainMaterial::CreateChunkMaterial(
 
 UMaterial* FWowTerrainMaterial::GetBaseMaterial()
 {
-    static UMaterial* CachedMat = nullptr;
-    if (CachedMat && CachedMat->IsValidLowLevel()) return CachedMat;
+    static TStrongObjectPtr<UMaterial> Retained;
+    if(Retained.IsValid()) return Retained.Get();
+    UMaterial* CachedMat=nullptr; ON_SCOPE_EXIT {Retained.Reset(CachedMat);};
 
     // Try loading a pre-compiled material asset (created by Scripts/CreateTerrainPreviewMaterial.py)
     const TCHAR* MatPaths[] = {
@@ -440,8 +443,9 @@ UTexture2D* FWowTerrainMaterial::LoadBlpTexture(const FString& Path, FMpqManager
 
 UMaterial* FWowTerrainMaterial::GetSimpleObjectMaterial()
 {
-    static UMaterial* CachedMat = nullptr;
-    if (CachedMat && CachedMat->IsValidLowLevel()) return CachedMat;
+    static TStrongObjectPtr<UMaterial> Retained;
+    if(Retained.IsValid()) return Retained.Get();
+    UMaterial* CachedMat=nullptr; ON_SCOPE_EXIT {Retained.Reset(CachedMat);};
 
     // Try loading pre-compiled version first
     const TCHAR* MatPaths[] = {

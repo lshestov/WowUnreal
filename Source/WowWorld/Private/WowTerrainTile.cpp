@@ -1,4 +1,5 @@
 #include "WowTerrainTile.h"
+#include "UObject/StrongObjectPtr.h"
 #include "WowRuntimeMeshMaterials.h"
 #include "WowTerrainMeshBuilder.h"
 #include "WowTerrainMaterial.h"
@@ -26,12 +27,12 @@ AWowTerrainTile::AWowTerrainTile()
 
 UMaterialInterface* AWowTerrainTile::GetDefaultTerrainMaterial() const
 {
-    static UMaterial* DefaultMat = nullptr;
+    static TStrongObjectPtr<UMaterial> DefaultMat;
     if (!DefaultMat)
     {
-        DefaultMat = LoadObject<UMaterial>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
+        DefaultMat.Reset(LoadObject<UMaterial>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial")));
     }
-    return DefaultMat;
+    return DefaultMat.Get();
 }
 
 void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY, FMpqManager* Mpq, FWowAssetCache* Cache, TSet<uint32>* SpawnedWmoIds)

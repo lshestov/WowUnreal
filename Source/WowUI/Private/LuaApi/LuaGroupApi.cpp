@@ -90,7 +90,7 @@ void WowLuaApi::RegisterGroupApi(lua_State* L)
     Reg(L,"DeclineGroup",[](lua_State* S)->int {auto* C=GetContext(S); if(C && C->ConnectionManager && !C->ConnectionManager->PacketHandler.PendingGroupInviter.IsEmpty()) {if(Send(C,0x0073)) C->ConnectionManager->PacketHandler.PendingGroupInviter.Empty();} return 0;});
     Reg(L,"LeaveParty",[](lua_State* S)->int {auto* C=GetContext(S); if(C && C->ConnectionManager && !C->ConnectionManager->PacketHandler.GroupInfo.IsEmpty()) Send(C,0x007B); return 0;});
     Reg(L,"UninviteUnit",[](lua_State* S)->int {
-        auto* C=GetContext(S); const uint64 Guid=GuidArg(S); if(!Officer(C) || !Guid || Guid==Local(C)) return 0;
+        auto* C=GetContext(S); const uint64 Guid=GuidArg(S); const auto* N=Connection(S); if(!N || (!Officer(C) && !N->PacketHandler.GroupInfo.IsLfgGroup()) || !Guid || Guid==Local(C) || !N->PacketHandler.GroupInfo.FindMember(Guid)) return 0;
         TArray<uint8> Bytes; Add(Bytes,Guid); Text(Bytes,UTF8_TO_TCHAR(luaL_optstring(S,2,""))); Send(C,0x0076,Bytes); return 0;
     });
     Reg(L,"PromoteToLeader",[](lua_State* S)->int {SetLeader(S,false,true); return 0;});

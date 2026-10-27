@@ -1,4 +1,6 @@
 #include "WowCharacterBuilder.h"
+#include "UObject/StrongObjectPtr.h"
+#include "Misc/ScopeExit.h"
 #include "WowSkeletalMeshBuilder.h"
 #include "WowCharacterTexture.h"
 #include "WowEquipmentManager.h"
@@ -48,8 +50,9 @@ namespace
 {
 UMaterial* GetCharacterMaterial()
 {
-    static UMaterial* CachedMat = nullptr;
-    if (CachedMat && CachedMat->IsValidLowLevel()) return CachedMat;
+    static TStrongObjectPtr<UMaterial> Retained;
+    if(Retained.IsValid()) return Retained.Get();
+    UMaterial* CachedMat=nullptr; ON_SCOPE_EXIT {Retained.Reset(CachedMat);};
 
     // Try loading a pre-compiled version first
     const TCHAR* MatPaths[] = {

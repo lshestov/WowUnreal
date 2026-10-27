@@ -24,9 +24,14 @@ void FWowPacketHandler::RegisterLfgHandlers()
     Handlers.Add(0x36F,&FWowPacketHandler::HandleLfgPlayerInfo); Handlers.Add(0x372,&FWowPacketHandler::HandleLfgPartyInfo);
     Handlers.Add(0x367,&FWowPacketHandler::HandleLfgPlayerUpdate); Handlers.Add(0x368,&FWowPacketHandler::HandleLfgPartyUpdate);
     Handlers.Add(0x364,&FWowPacketHandler::HandleLfgJoinResult); Handlers.Add(0x365,&FWowPacketHandler::HandleLfgQueue); Handlers.Add(0x398,&FWowPacketHandler::HandleLfgDisabled);
+    Handlers.Add(0x363,&FWowPacketHandler::HandleLfgRoles); Handlers.Add(0x2BB,&FWowPacketHandler::HandleLfgRoleChosen); Handlers.Add(0x361,&FWowPacketHandler::HandleLfgProposal);
+    Handlers.Add(0x36D,&FWowPacketHandler::HandleLfgBoot); Handlers.Add(0x293,&FWowPacketHandler::HandleLfgContinue); Handlers.Add(0x200,&FWowPacketHandler::HandleLfgTeleport); Handlers.Add(0x1FF,&FWowPacketHandler::HandleLfgReward);
 }
 void FWowPacketHandler::ResetLfgState()
-{const uint32 Revision=Lfg.Revision+1,Info=Lfg.InfoRevision+1,Queue=Lfg.QueueRevision+1,Result=Lfg.ResultRevision+1; Lfg=FWowLfgState(); Lfg.Revision=Revision; Lfg.InfoRevision=Info; Lfg.QueueRevision=Queue; Lfg.ResultRevision=Result;}
+{
+    FWowLfgState Fresh; Fresh.Revision=Lfg.Revision+1; Fresh.InfoRevision=Lfg.InfoRevision+1; Fresh.QueueRevision=Lfg.QueueRevision+1; Fresh.ResultRevision=Lfg.ResultRevision+1;
+    Fresh.RoleRevision=Lfg.RoleRevision+1; Fresh.ChosenRevision=Lfg.ChosenRevision+1; Fresh.ProposalRevision=Lfg.ProposalRevision+1; Fresh.BootRevision=Lfg.BootRevision+1; Fresh.ContinueRevision=Lfg.ContinueRevision+1; Fresh.TeleportRevision=Lfg.TeleportRevision+1; Fresh.RewardRevision=Lfg.RewardRevision+1; Lfg=MoveTemp(Fresh);
+}
 void FWowPacketHandler::HandleLfgPlayerInfo(FPacketReader& R)
 {
     if(!R.CanRead(1)) return; const uint8 Count=R.ReadU8(); if(Count>64) return; TMap<uint32,FWowLfgState::FReward> Rewards; FWowLfgState::FLocks Rows;
@@ -51,7 +56,10 @@ void FWowPacketHandler::ParseLfgUpdate(FPacketReader& R,bool Party)
     }
     if(R.Remaining()) return; auto& Target=Party?Lfg.Party:Lfg.Player;
     Selection.QueuedAt=Selection.Queued?(Target.Queued && Target.QueuedAt>0?Target.QueuedAt:FPlatformTime::Seconds()):0;
-    Target=MoveTemp(Selection); ++Lfg.Revision;
+    Target=MoveTemp(Selection);
+    if((Target.Update==7 || Target.Update==8 || Target.Update==9 || Target.Update==10) && Lfg.Proposal.Valid && Lfg.Proposal.State==0) {Lfg.Proposal.State=Target.Update==10?2:1; Lfg.Proposal.At=FPlatformTime::Seconds(); ++Lfg.ProposalRevision;}
+    if((Target.Update==4 || Target.Update==6 || Target.Update==7) && Lfg.RoleCheck.State==2) {Lfg.RoleCheck.State=Target.Update==6?6:5; ++Lfg.RoleRevision;}
+    ++Lfg.Revision;
 }
 void FWowPacketHandler::HandleLfgJoinResult(FPacketReader& R)
 {
@@ -69,3 +77,43 @@ void FWowPacketHandler::HandleLfgQueue(FPacketReader& R)
     Q.At=FPlatformTime::Seconds(); Lfg.Queue=Q; ++Lfg.QueueRevision;
 }
 void FWowPacketHandler::HandleLfgDisabled(FPacketReader& R) {if(R.Remaining()) return; Lfg.Disabled=true; ++Lfg.Revision;}
+void FWowPacketHandler::HandleLfgRoles(FPacketReader& R)
+{
+    if(!R.CanRead(6)) return; FWowLfgState::FRoleCheck Check; Check.State=R.ReadU32(); const uint8 Initial=R.ReadU8(),Count=R.ReadU8();
+    if(Check.State>6 || Initial>1 || Count>50 || !R.CanRead(Count*4+1)) return; Check.Initializing=Initial!=0;
+    for(uint8 I=0;I<Count;++I) {const uint32 Id=R.ReadU32()&0xFFFFFF; if(!Id || Check.Dungeons.Contains(Id)) return; Check.Dungeons.Add(Id);}
+    const uint8 Members=R.ReadU8(); if(Members>5 || !R.CanRead(Members*14)) return; TSet<uint64> Guids;
+    for(uint8 I=0;I<Members;++I) {FWowLfgState::FRoleMember M; M.Guid=R.ReadU64(); const uint8 Ready=R.ReadU8(); M.Roles=R.ReadU32(); M.Level=R.ReadU8(); if(!M.Guid || Guids.Contains(M.Guid) || Ready>1 || (M.Roles&~15u) || M.Level>80) return; M.Ready=Ready!=0; Guids.Add(M.Guid); Check.Members.Add(M);}
+    if(R.Remaining()) return; Lfg.RoleCheck=MoveTemp(Check); ++Lfg.RoleRevision; ++Lfg.Revision;
+}
+void FWowPacketHandler::HandleLfgRoleChosen(FPacketReader& R)
+{
+    if(R.Remaining()!=13) return; FWowLfgState::FRoleMember M; M.Guid=R.ReadU64(); const uint8 Ready=R.ReadU8(); M.Roles=R.ReadU32(); if(!M.Guid || Ready>1 || (M.Roles&~15u)) return; M.Ready=Ready!=0;
+    Lfg.Chosen=M; ++Lfg.ChosenRevision; if(Lfg.ChosenEvents.Num()>=64) Lfg.ChosenEvents.RemoveAt(0); Lfg.ChosenEvents.Add({Lfg.ChosenRevision,M});
+}
+void FWowPacketHandler::HandleLfgProposal(FPacketReader& R)
+{
+    if(!R.CanRead(15)) return; FWowLfgState::FProposal P; P.Dungeon=R.ReadU32()&0xFFFFFF; P.State=R.ReadU8(); P.Id=R.ReadU32(); P.Encounters=R.ReadU32(); const uint8 Silent=R.ReadU8(),Count=R.ReadU8();
+    if(!P.Dungeon || !P.Id || P.State>2 || Silent>1 || Count<1 || Count>5 || !R.CanRead(Count*9)) return; P.Silent=Silent!=0; int32 Self=0;
+    for(uint8 I=0;I<Count;++I) {FWowLfgState::FProposalMember M; M.Roles=R.ReadU32(); uint8 Flags[5]; for(auto& F:Flags) {F=R.ReadU8(); if(F>1) return;} if((M.Roles&~15u) || !(M.Roles&14) || (Flags[4] && !Flags[3])) return; M.Self=Flags[0]!=0; M.InDungeon=Flags[1]!=0; M.SameGroup=Flags[2]!=0; M.Answered=Flags[3]!=0; M.Accepted=Flags[4]!=0; Self+=M.Self?1:0; P.Members.Add(M);}
+    if(R.Remaining() || Self!=1) return; P.Valid=true; P.At=FPlatformTime::Seconds(); Lfg.Proposal=MoveTemp(P); ++Lfg.ProposalRevision; ++Lfg.Revision;
+}
+void FWowPacketHandler::HandleLfgBoot(FPacketReader& R)
+{
+    if(!R.CanRead(27)) return; FWowLfgState::FBoot B; const uint8 Progress=R.ReadU8(),Voted=R.ReadU8(),Agree=R.ReadU8(); if(Progress>1 || Voted>1 || Agree>1 || (Agree && !Voted)) return;
+    B.Progress=Progress!=0; B.Voted=Voted!=0; B.Agree=Agree!=0; B.Victim=R.ReadU64(); B.Votes=R.ReadU32(); B.Agrees=R.ReadU32(); const uint32 Left=R.ReadU32(); B.Needed=R.ReadU32();
+    if(!B.Victim || B.Votes>5 || B.Agrees>B.Votes || B.Needed>5 || !LfgText(R,B.Reason) || R.Remaining()) return;
+    B.Deadline=FPlatformTime::Seconds()+(B.Progress?FMath::Min(Left,120u):0); Lfg.Boot=MoveTemp(B); ++Lfg.BootRevision;
+}
+void FWowPacketHandler::HandleLfgContinue(FPacketReader& R)
+{if(R.Remaining()!=4) return; const uint32 Id=R.ReadU32()&0xFFFFFF; if(!Id) return; Lfg.ContinueDungeon=Id; ++Lfg.ContinueRevision;}
+void FWowPacketHandler::HandleLfgTeleport(FPacketReader& R)
+{if(R.Remaining()!=4) return; const uint32 Error=R.ReadU32(); if(Error>8) return; Lfg.TeleportError=Error; ++Lfg.TeleportRevision;}
+void FWowPacketHandler::HandleLfgReward(FPacketReader& R)
+{
+    if(!R.CanRead(13)) return; const uint32 Random=R.ReadU32()&0xFFFFFF,Specific=R.ReadU32()&0xFFFFFF; const uint8 Done=R.ReadU8(); const uint32 Count=R.ReadU32();
+    if(!Random || !Specific || Done>1 || Count!=1) return; FWowLfgState::FReward RewardData;
+    // Reward() consumes the leading done flag; the final-reward packet inserts a count after it.
+    TArray<uint8> Tail; Tail.Add(Done); Tail.Append(R.Data+R.Pos,R.Remaining()); FPacketReader Reader(Tail); if(!Reward(Reader,RewardData) || Reader.Remaining()) return;
+    Lfg.RewardRandom=Random; Lfg.RewardSpecific=Specific; Lfg.FinalReward=MoveTemp(RewardData); ++Lfg.RewardRevision;
+}

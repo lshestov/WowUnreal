@@ -469,6 +469,13 @@ private:
     void HandleLfgJoinResult(FPacketReader& R);
     void HandleLfgQueue(FPacketReader& R);
     void HandleLfgDisabled(FPacketReader& R);
+    void HandleLfgRoles(FPacketReader& R);
+    void HandleLfgRoleChosen(FPacketReader& R);
+    void HandleLfgProposal(FPacketReader& R);
+    void HandleLfgBoot(FPacketReader& R);
+    void HandleLfgContinue(FPacketReader& R);
+    void HandleLfgTeleport(FPacketReader& R);
+    void HandleLfgReward(FPacketReader& R);
     void RegisterPvpHandlers();
     void HandleBattlefieldStatus(FPacketReader& R);
     void HandleBattlefieldList(FPacketReader& R);

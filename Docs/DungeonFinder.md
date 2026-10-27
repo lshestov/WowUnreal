@@ -26,9 +26,31 @@ publishing a revision. Connection reset clears all previous character data.
 Automation checks cover packet atomicity, reward/lock replacement, catalog
 tuples, class roles, server restrictions and the original table contracts.
 
-Role checks, proposals, dungeon transfers, vote kicks and raid-browser search
-results require additional verification; a working browser does not establish
-that those multiplayer routes are complete.
+Role checks and proposals retain bounded member snapshots, real server IDs,
+assigned roles, answers and encounter masks. Encounter names/icons come from
+DungeonEncounter.dbc. The original role dialog, invitation and ready-status
+window receive typed events. Declining roles never emits a role-chosen event
+with an empty role list. A bounded sequence preserves simultaneous role-change
+messages, rather than collapsing several replies into one.
+
+Queue removal also ends a pending proposal when the server does not send a
+separate proposal result to the declining player. Accept/decline, role answers
+and teleport requests wait for authoritative replies. The minimap's original
+menu can teleport out and back into the same LFG dungeon. Party restrictions
+use the server's LFG_RESTRICTED flag: a full premade party can remain
+unrestricted. All four stock party frames expose actual health and resources.
+
+Verified: six focused checks and a 127-step five-account route through role
+decline/retry, proposal decline/retry, accepted ready status, Stockades entry,
+teleport out/back, group departure and cleanup. Nine rendered captures were
+validated and inspected. The route explicitly collects Unreal garbage three
+times between map transfers. All five accounts/characters are disposable;
+pre-existing characters and inventories remain unchanged.
+
+Vote-kick, backfill and final-reward packets/APIs are implemented but still
+require native multiplayer verification. Separate-player matchmaking and
+raid-browser search/listings remain pending; the premade route does not
+establish those paths as complete.
 
 ## Dungeon map prerequisite
 
@@ -47,3 +69,10 @@ Verified in a rendered disposable-account route: Stockades (26 groups),
 Ragefire Chasm (12 groups), valid walkable floors and return to Azeroth. The
 parser/lifecycle check also covers truncated WDT files, incomplete trailing
 chunks, the unchanged Deadmines terrain path and old-model cleanup.
+
+The repeated dungeon route exposed raw static base-material caches that could
+outlive their UObjects after leaving the last actor using a material. The
+material-lifetime regression reproduced collection of all five tested base
+materials before the fix. Terrain, object, character, fallback and liquid
+material caches now hold strong Unreal references. The regression and the
+rendered route's explicit garbage collections verify their lifetime.

@@ -45,6 +45,19 @@ bool FLfgPacketsTest::RunTest(const FString&)
     FLfgWire Result; Result.Add(uint32(17)).Add(uint32(2)); H.HandlePacket(0x364,Result.B); TestEqual(TEXT("Empty lock data is legitimately omitted from join results"),H.Lfg.Result,17u);
     FLfgWire Empty; Empty.Add(uint8(0)).Add(uint32(0)); H.HandlePacket(0x36F,Empty.B); TestTrue(TEXT("An empty authoritative snapshot clears obsolete locks and rewards"),H.Lfg.Rewards.IsEmpty() && H.Lfg.Locks.IsEmpty() && H.Lfg.InfoReady);
     H.ResetLfgState(); TestTrue(TEXT("Connection reset removes previous character LFG data"),!H.Lfg.InfoReady && H.Lfg.PartyLocks.IsEmpty() && !H.Lfg.Player.Queued && !H.Lfg.Queue.At);
+    FLfgWire Role; Role.Add(uint32(2)).Add(uint8(1)).Add(uint8(1)).Add(uint32(6)).Add(uint8(2)).Add(uint64(42)).Add(uint8(1)).Add(uint32(2)).Add(uint8(20)).Add(uint64(1)).Add(uint8(0)).Add(uint32(0)).Add(uint8(20)); Atomic(0x363,Role.B,[&]{return H.Lfg.RoleRevision;});
+    TestTrue(TEXT("Role check keeps leader-first ordering and unanswered participants"),H.Lfg.RoleCheck.State==2 && H.Lfg.RoleCheck.Members[0].Guid==42 && !H.Lfg.RoleCheck.Members[1].Ready);
+    FLfgWire Chosen; Chosen.Add(uint64(1)).Add(uint8(1)).Add(uint32(8)); Atomic(0x2BB,Chosen.B,[&]{return H.Lfg.ChosenRevision;});
+    FLfgWire Proposal; Proposal.Add(uint32(6)).Add(uint8(0)).Add(uint32(99)).Add(uint32(3)).Add(uint8(0)).Add(uint8(2));
+    Proposal.Add(uint32(2)).Add(uint8(0)).Add(uint8(0)).Add(uint8(1)).Add(uint8(1)).Add(uint8(1)); Proposal.Add(uint32(8)).Add(uint8(1)).Add(uint8(0)).Add(uint8(1)).Add(uint8(0)).Add(uint8(0)); Atomic(0x361,Proposal.B,[&]{return H.Lfg.ProposalRevision;});
+    TestTrue(TEXT("Proposal preserves the server ID, boss mask and each answer"),H.Lfg.Proposal.Id==99 && H.Lfg.Proposal.Encounters==3 && H.Lfg.Proposal.Members[0].Accepted && H.Lfg.Proposal.Members[1].Self && !H.Lfg.Proposal.Members[1].Answered);
+    auto Duplicate=Proposal.B; Duplicate[19]=1; const auto Before=H.Lfg.ProposalRevision; H.HandlePacket(0x361,Duplicate); TestEqual(TEXT("Two self rows cannot replace a proposal"),H.Lfg.ProposalRevision,Before);
+    H.HandlePacket(0x368,{7,0}); TestTrue(TEXT("Authoritative queue removal ends pending proposals and role checks even when no separate result arrives"),H.Lfg.Proposal.State==1 && H.Lfg.RoleCheck.State==5);
+    FLfgWire Boot; Boot.Add(uint8(1)).Add(uint8(0)).Add(uint8(0)).Add(uint64(42)).Add(uint32(1)).Add(uint32(1)).Add(uint32(90)).Add(uint32(3)).Text("Owned QA test"); Atomic(0x36D,Boot.B,[&]{return H.Lfg.BootRevision;});
+    TestTrue(TEXT("Boot state retains victim, reason, votes and a monotonic deadline"),H.Lfg.Boot.Victim==42 && H.Lfg.Boot.Agrees==1 && H.Lfg.Boot.Reason==TEXT("Owned QA test") && H.Lfg.Boot.Deadline>FPlatformTime::Seconds());
+    FLfgWire Final; Final.Add(uint32(258)).Add(uint32(6)).Add(uint8(0)).Add(uint32(1)).Add(uint32(100)).Add(uint32(200)).Add(uint32(0)).Add(uint32(0)).Add(uint8(1)).Add(uint32(51999)).Add(uint32(123)).Add(uint32(1)); Atomic(0x1FF,Final.B,[&]{return H.Lfg.RewardRevision;});
+    TestTrue(TEXT("Completion reward skips the wire count without shifting amounts/items"),H.Lfg.RewardSpecific==6 && H.Lfg.FinalReward.Experience==200 && H.Lfg.FinalReward.Items[0].Id==51999);
+    H.ResetLfgState(); TestTrue(TEXT("Reset clears outstanding role, proposal, vote and reward snapshots"),!H.Lfg.Proposal.Valid && H.Lfg.RoleCheck.Members.IsEmpty() && !H.Lfg.Boot.Progress && H.Lfg.FinalReward.Items.IsEmpty());
     return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLfgUiTest,"WowUnreal.Hud.LfgCatalogAndState",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
@@ -71,6 +84,17 @@ bool FLfgUiTest::RunTest(const FString&)
     H.Lfg.Player.Has=true; H.Lfg.Player.Queued=true; H.Lfg.Player.Dungeons={258}; H.Lfg.Queue.Dungeon=258; H.Lfg.Queue.At=FPlatformTime::Seconds(); H.Lfg.Queue.Elapsed=30;
     TestTrue(TEXT("Queue mode comes from server and original table argument is updated in place"),Lua.ExecuteString(TEXT("assert(GetLFGMode()=='queued'); local queued={old=true}; GetLFGQueuedList(queued); assert(queued[258] and queued.old==nil); local valid,_,tank,heal,dps,kind,name,avg,tw,hw,dw,mw,at=GetLFGQueueStats(); assert(valid and tank==1 and heal==1 and dps==3 and kind==6 and avg==-1 and GetTime()-at>=30)")));
     H.Lfg.Locks.Add(258,4); TestTrue(TEXT("Server restrictions override locally eligible levels"),Lua.ExecuteString(TEXT("assert(not IsLFGDungeonJoinable(258) and GetLFDChoiceLockedState()[258]==4 and GetRandomDungeonBestChoice()==nil)")));
+    TestTrue(TEXT("Original encounter definitions are available"),D.LfgUi().Encounters().Num()>0);
+    H.Lfg.RoleCheck.State=2; H.Lfg.RoleCheck.Dungeons={6}; H.Lfg.RoleCheck.Members.Add({1,0,20,false});
+    TestTrue(TEXT("Observe original role and proposal events"),Lua.ExecuteString(TEXT("LfgEvents={}; LfgWatch=CreateFrame('Frame'); for _,e in ipairs({'LFG_ROLE_CHECK_SHOW','LFG_ROLE_CHECK_HIDE','LFG_PROPOSAL_SHOW','LFG_PROPOSAL_UPDATE'}) do LfgWatch:RegisterEvent(e) end; LfgWatch:SetScript('OnEvent',function(self,e) LfgEvents[e]=(LfgEvents[e] or 0)+1 end)")));
+    ++H.Lfg.RoleRevision; WowLuaApi::UpdateLfgState(Lua.GetState()); TestTrue(TEXT("A server role request shows its popup once"),Lua.ExecuteString(TEXT("assert(LfgEvents.LFG_ROLE_CHECK_SHOW==1)")));
+    TestTrue(TEXT("Pending roles override the queue and expose actual dungeon slots"),Lua.ExecuteString(TEXT("assert(GetLFGMode()=='rolecheck'); local active,slots,members=GetLFGRoleUpdate(); assert(active and slots==1 and members==1); local kind,id=GetLFGRoleUpdateSlot(1); assert(kind==1 and id==6)")));
+    H.Lfg.RoleCheck.State=1; ++H.Lfg.RoleRevision; H.Lfg.Proposal.Valid=true; H.Lfg.Proposal.Dungeon=6; H.Lfg.Proposal.Id=99; H.Lfg.Proposal.Members.Add({8,true,false,false,false,false}); ++H.Lfg.ProposalRevision;
+    WowLuaApi::UpdateLfgState(Lua.GetState()); TestTrue(TEXT("Completing roles hides the popup and a new server proposal opens once"),Lua.ExecuteString(TEXT("assert(LfgEvents.LFG_ROLE_CHECK_HIDE==1 and LfgEvents.LFG_PROPOSAL_SHOW==1 and LfgEvents.LFG_PROPOSAL_UPDATE==1)")));
+    TestTrue(TEXT("Stock proposal tuples preserve pending and accepted booleans"),Lua.ExecuteString(TEXT("assert(GetLFGMode()=='proposal'); local exists,kind,id,name,texture,role,answered,total,done,members=GetLFGProposal(); assert(exists and kind==1 and id==6 and name=='Deadmines' and role=='DAMAGER' and not answered and members==1); local leader,role,level,responded,accepted=GetLFGProposalMember(1); assert(not leader and role=='DAMAGER' and level==20 and not responded and not accepted)")));
+    H.Lfg.Proposal.Members[0].Answered=H.Lfg.Proposal.Members[0].Accepted=true; ++H.Lfg.ProposalRevision; WowLuaApi::UpdateLfgState(Lua.GetState()); TestTrue(TEXT("Only a received proposal answer changes readiness; updates do not reopen the dialog"),Lua.ExecuteString(TEXT("assert(select(7,GetLFGProposal())); assert(select(4,GetLFGProposalMember(1)) and select(5,GetLFGProposalMember(1))); assert(LfgEvents.LFG_PROPOSAL_SHOW==1 and LfgEvents.LFG_PROPOSAL_UPDATE==2)")));
+    H.GroupInfo.RawGroupType=WowGroupType::LFG|WowGroupType::LFG_RESTRICTED; H.GroupInfo.LfgDungeon=6; H.CurrentMapId=36;
+    TestTrue(TEXT("Restrictions and dungeon presence follow the real LFG group and selected map"),Lua.ExecuteString(TEXT("assert(HasLFGRestrictions() and IsInLFGDungeon())")));
     WowLuaApi::ClearContext(Lua.GetState()); Lua.Shutdown(); return true;
 }
 #endif

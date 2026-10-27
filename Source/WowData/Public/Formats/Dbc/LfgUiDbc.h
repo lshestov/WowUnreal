@@ -11,12 +11,15 @@ public:
         uint32 Entry() const {return Id|(Type<<24);}
     };
     struct FGroup {uint32 Id=0,Order=0,Type=0; FString Name;};
+    struct FEncounter {uint32 Id=0,Map=0,Difficulty=0,Order=0,Index=0,Icon=0; FString Name;};
     bool Load(FMpqManager& Mpq);
     const FDungeon* Dungeon(uint32 Id) const {return DungeonRows.Find(Id&0xFFFFFF);}
     const FGroup* Group(uint32 Id) const {return GroupRows.Find(Id);}
     const TMap<uint32,FDungeon>& Dungeons() const {return DungeonRows;}
     const TMap<uint32,FGroup>& Groups() const {return GroupRows;}
+    const TArray<FEncounter>& Encounters() const {return EncounterRows;}
 private:
     TMap<uint32,FDungeon> DungeonRows;
     TMap<uint32,FGroup> GroupRows;
+    TArray<FEncounter> EncounterRows;
 };

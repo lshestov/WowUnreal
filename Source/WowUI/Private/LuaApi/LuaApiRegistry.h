@@ -121,6 +121,7 @@ namespace WowLuaApi
     void RegisterLfgApi(lua_State* L);
     void UpdateLfgState(lua_State* L);
     int SetLfgRewardTooltip(lua_State* L);
+    int SetLfgCompletionRewardTooltip(lua_State* L);
     void UpdatePvpState(lua_State* L);
     void UpdateTabardState(lua_State* L);
     int TabardModelMethod(lua_State* L,int32 Method);

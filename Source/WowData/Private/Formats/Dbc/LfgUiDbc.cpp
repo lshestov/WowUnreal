@@ -3,7 +3,7 @@
 #include "Mpq/MpqManager.h"
 bool FLfgUiDbc::Load(FMpqManager& Mpq)
 {
-    DungeonRows.Reset(); GroupRows.Reset(); FDbcParser P; TArray<uint8> Bytes;
+    DungeonRows.Reset(); GroupRows.Reset(); EncounterRows.Reset(); FDbcParser P; TArray<uint8> Bytes;
     if(!Mpq.ReadFile(TEXT("DBFilesClient\\LFGDungeons.dbc"),Bytes) || !P.Parse(Bytes) || P.GetFieldCount()!=49) return false;
     for(uint32 I=0;I<P.GetRecordCount();++I)
     {
@@ -12,5 +12,7 @@ bool FLfgUiDbc::Load(FMpqManager& Mpq)
     }
     if(!Mpq.ReadFile(TEXT("DBFilesClient\\LFGDungeonGroup.dbc"),Bytes) || !P.Parse(Bytes) || P.GetFieldCount()!=21) return false;
     for(uint32 I=0;I<P.GetRecordCount();++I) {FGroup G; G.Id=P.GetUInt(I,0); G.Name=P.GetString(I,1); G.Order=P.GetUInt(I,18); G.Type=P.GetUInt(I,20); GroupRows.Add(G.Id,MoveTemp(G));}
+    if(!Mpq.ReadFile(TEXT("DBFilesClient\\DungeonEncounter.dbc"),Bytes) || !P.Parse(Bytes) || P.GetFieldCount()!=23) return false;
+    for(uint32 I=0;I<P.GetRecordCount();++I) {FEncounter E; E.Id=P.GetUInt(I,0); E.Map=P.GetUInt(I,1); E.Difficulty=P.GetUInt(I,2); E.Order=P.GetUInt(I,3); E.Index=P.GetUInt(I,4); E.Name=P.GetString(I,5); E.Icon=P.GetUInt(I,22); EncounterRows.Add(MoveTemp(E));}
     return true;
 }

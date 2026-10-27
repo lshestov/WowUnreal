@@ -4,6 +4,7 @@
 #include "Serialization/JsonSerializer.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Formats/Dbc/DbcStore.h"
 
 namespace
 {
@@ -126,6 +127,32 @@ void FWowUiTestPeer::Tick()
 bool FWowUiTestPeer::Command(const FString& Action,int32 Slot,uint32 Value)
 {
     if(!Ready()) return false;
+    if(Action.StartsWith(TEXT("lfg_")))
+    {
+        const auto& H=Client->PacketHandler; const auto* P=H.EntityManager.GetLocalPlayer(); if(!P || !H.GroupInfo.FindMember(MasterGuid)) return false;
+        const uint8 Class=P->GetClassId(); const uint32 Available=9u|((Class==1 || Class==2 || Class==6 || Class==11)?2u:0u)|((Class==2 || Class==5 || Class==7 || Class==11)?4u:0u);
+        const auto Packet=[&](uint32 Op,const TArray<uint8>& Bytes){Client->SendRawPacket(Op,Bytes); return true;};
+        const auto Append=[](TArray<uint8>& Bytes,auto V){Bytes.Append(reinterpret_cast<const uint8*>(&V),sizeof(V));}; TArray<uint8> Bytes;
+        if(Action==TEXT("lfg_join"))
+        {
+            const auto* D=FDbcStore::Get().LfgUi().Dungeon(Value); if(!D || H.GroupInfo.LeaderGuid!=CharacterGuid || Slot<0 || (uint32(Slot)&~Available) || !(Slot&14)) return false;
+            Append(Bytes,uint32(Slot)); Bytes.Add(0); Bytes.Add(0); Bytes.Add(1); Append(Bytes,D->Entry()); Bytes.Add(3); Bytes.AddZeroed(4); return Packet(0x35C,Bytes);
+        }
+        if(Action==TEXT("lfg_role"))
+        {
+            if(H.Lfg.RoleCheck.State!=2 || Slot<0 || (uint32(Slot)&~Available)) return false; Bytes.Add(uint8(Slot)); return Packet(0x36A,Bytes);
+        }
+        if(Action==TEXT("lfg_proposal"))
+        {
+            const auto& Proposal=H.Lfg.Proposal; if(!Proposal.Valid || Proposal.State!=0 || Slot<0 || Slot>1) return false;
+            for(const auto& M:Proposal.Members) if(M.Self && M.Answered) return true;
+            Append(Bytes,Proposal.Id); Bytes.Add(uint8(Slot)); return Packet(0x362,Bytes);
+        }
+        if(Action==TEXT("lfg_teleport")) {if(!H.GroupInfo.IsLfgGroup() || Slot<0 || Slot>1) return false; Bytes.Add(uint8(Slot)); return Packet(0x370,Bytes);}
+        if(Action==TEXT("lfg_vote")) {if(!H.Lfg.Boot.Progress || Slot<0 || Slot>1) return false; if(H.Lfg.Boot.Voted) return true; Bytes.Add(uint8(Slot)); return Packet(0x36C,Bytes);}
+        if(Action==TEXT("lfg_leave")) return Packet(0x35D,Bytes);
+        return false;
+    }
     if(Action==TEXT("arena_queue"))
     {
         if(Slot<0 || Slot>2 || Value!=19911) return false;

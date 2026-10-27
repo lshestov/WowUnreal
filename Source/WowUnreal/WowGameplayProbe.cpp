@@ -30,6 +30,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "HAL/FileManager.h"
+#include "UObject/GarbageCollection.h"
 #include "UnrealClient.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/Application/IInputProcessor.h"
@@ -72,7 +73,7 @@ struct FWowGameplayProbe
     TMap<FString,TArray<double>> Profile;
     TSharedPtr<FJsonObject> Inspections=MakeShared<FJsonObject>();
     TSharedPtr<FWowProbeInputGuard> InputGuard;
-    TUniquePtr<FWowUiTestPeer> Peers[3];
+    TUniquePtr<FWowUiTestPeer> Peers[4];
     FWowUiTestPeer* Peer=nullptr;
     TSharedPtr<FJsonObject> FinalReport;
     int32 PeerExitCode=-1;
@@ -294,6 +295,7 @@ struct FWowGameplayProbe
             Done=true;
         }
         else if (Op==TEXT("wait")) Done=Now-StepStarted>=Step->GetNumberField(TEXT("seconds"));
+        else if(Op==TEXT("collect_garbage")) {CollectGarbage(RF_NoFlags); Done=true;}
         else if(Op==TEXT("move_pointer"))
         {
             int32 Width=0,Height=0; C.GetViewportSize(Width,Height);
