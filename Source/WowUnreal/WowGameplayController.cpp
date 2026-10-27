@@ -425,6 +425,7 @@ void AWowGameplayController::BindEntityEvents()
 	ConnectionManager->PacketHandler.OnLootOpened.AddLambda(
 		[this](uint64 LootGuid, uint8 LootType, uint32 Gold, const TArray<FWowLootItem>& Items)
 		{
+			if(UIManager && UIManager->IsUILoaded()) return;
 			if (GameUI)
 			{
 				GameUI->ShowLootWindow(LootGuid, LootType, Gold, Items);
@@ -434,6 +435,7 @@ void AWowGameplayController::BindEntityEvents()
 	ConnectionManager->PacketHandler.OnLootClosed.AddLambda(
 		[this]()
 		{
+			if(UIManager && UIManager->IsUILoaded()) return;
 			if (GameUI)
 			{
 				GameUI->HideLootWindow();
@@ -985,7 +987,7 @@ void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
 		// Instead, smoothly lerp to the server position to avoid teleporting.
 		TObjectPtr<AActor>* ActorPtr = SpawnedEntityActors.Find(Entity.Guid);
 		if (ActorPtr && *ActorPtr && Entity.Movement.Position != FVector::ZeroVector
-			&& !Entity.Movement.bHasActiveSpline && !DeadEntityGuids.Contains(Entity.Guid))
+            && !Entity.Movement.bHasActiveSpline)
 		{
 			FVector UEPos = FWowCoordinate::WowToUE(Entity.Movement.Position);
 			UEPos.Z += NpcGroundOffsets.FindRef(Entity.Guid);
@@ -994,7 +996,7 @@ void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
 				// Smooth interpolation instead of teleporting
 				FVector CurrentPos = (*ActorPtr)->GetActorLocation();
 				float Dist = FVector::Dist(CurrentPos, UEPos);
-				if (Dist > 5000.0f) // > 50 yards = teleport (too far to lerp)
+				if (DeadEntityGuids.Contains(Entity.Guid) || Dist > 5000.0f)
 				{
 					(*ActorPtr)->SetActorLocation(UEPos);
 				}
@@ -1670,6 +1672,11 @@ void AWowGameplayController::OnEntityDeath(uint64 Guid)
 			Entity->Movement.bHasActiveSpline = false;
 			Entity->Movement.SplineWaypoints.Empty();
 			Entity->Movement.MoveFlags = 0;
+            if(const auto* Actor=SpawnedEntityActors.Find(Guid); Actor && IsValid(*Actor) && Entity->Movement.Position!=FVector::ZeroVector)
+            {
+                FVector Feet=FWowCoordinate::WowToUE(Entity->Movement.Position); Feet.Z+=NpcGroundOffsets.FindRef(Guid);
+                if(!Feet.ContainsNaN()) (*Actor)->SetActorLocation(Feet);
+            }
 		}
 	}
 
@@ -1695,32 +1702,15 @@ void AWowGameplayController::OnEntityDeath(uint64 Guid)
 	// current update broadcast, later loot/flag updates and eventual resurrection.
 	// Only server destroy/out-of-range packets remove it from the entity manager.
 
-	// Auto-remove corpse after 60 seconds
-	FTimerHandle TimerHandle;
-	GetWorldTimerManager().SetTimer(TimerHandle, [this, Guid]()
-	{
-		DeadEntityGuids.Remove(Guid);
-		TObjectPtr<AActor>* CorpsePtr = SpawnedEntityActors.Find(Guid);
-		if (CorpsePtr && *CorpsePtr)
-		{
-			(*CorpsePtr)->Destroy();
-		}
-		SpawnedEntityActors.Remove(Guid);
-		EntityNameplates.Remove(Guid);
-		UE_LOG(LogWowGameplay, Log, TEXT("Removed corpse for entity %llu"), Guid);
-	}, 60.0f, false);
+	// Corpse lifetime belongs to the server; a local timeout can hide loot
+    // prematurely or destroy a later resurrection of the same GUID.
 }
 
 void AWowGameplayController::OnEntityDestroyed(uint64 Guid)
 {
 	NpcGroundOffsets.Remove(Guid);
 	NpcReferenceFeet.Remove(Guid);
-	// If this is a dead corpse, keep it visible for looting — don't destroy yet
-	if (DeadEntityGuids.Contains(Guid))
-	{
-		UE_LOG(LogWowGameplay, Log, TEXT("Entity %llu destroyed by server but keeping corpse for looting"), Guid);
-		return;
-	}
+    DeadEntityGuids.Remove(Guid);
 
 	TObjectPtr<AActor>* ActorPtr = SpawnedEntityActors.Find(Guid);
 	if (ActorPtr && *ActorPtr)
@@ -1741,6 +1731,7 @@ void AWowGameplayController::OnEntityDestroyed(uint64 Guid)
 			TargetHighlightCircle->DestroyComponent();
 			TargetHighlightCircle = nullptr;
 		}
+        if(!ConnectionManager || !ConnectionManager->PacketHandler.FindUiUnit(Guid)) SetTarget(0);
 	}
 }
 

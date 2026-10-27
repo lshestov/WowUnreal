@@ -1755,9 +1755,7 @@ FString FWowEventSystem::OpcodeToEvent(uint16 Opcode)
 	case 0x008A: return TEXT("GUILD_ROSTER_UPDATE");             // SMSG_GUILD_ROSTER (correct opcode)
 	case 0x0092: return TEXT("GUILD_MOTD");                      // SMSG_GUILD_EVENT
 
-	// Loot
-	case 0x0160: return TEXT("LOOT_OPENED");                     // SMSG_LOOT_RESPONSE
-	case 0x0161: return TEXT("LOOT_CLOSED");                     // SMSG_LOOT_RELEASE_RESPONSE
+	// Loot events follow validated state and retain typed display-slot arguments.
 
 	// Mail callbacks fire only after validated mailbox/cache updates.
 

@@ -7,6 +7,9 @@
 #include "WowUpdateFields.h"
 #include "WowWorldManager.h"
 #include "Formats/Dbc/DbcStore.h"
+#include "Components/SceneComponent.h"
+#include "Coord/WowCoordinate.h"
+#include "TimerManager.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIdleWowServerMapSelection,"WowUnreal.World.ServerMapSelection",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
@@ -31,10 +34,12 @@ bool FIdleWowDeathLifetimeTest::RunTest(const FString& Parameters)
 {
     UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
     if (!TestNotNull(TEXT("Test world"), World)) return false;
+    GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
     AWowGameplayController* Controller = World->SpawnActor<AWowGameplayController>();
     if (!TestNotNull(TEXT("Gameplay controller"), Controller))
     {
         World->DestroyWorld(false);
+        GEngine->DestroyWorldContext(World);
         return false;
     }
     Controller->ConnectionManager = NewObject<UWowConnectionManager>(Controller);
@@ -46,12 +51,19 @@ bool FIdleWowDeathLifetimeTest::RunTest(const FString& Parameters)
     Npc.SetField(UnitField::HEALTH, 50);
     Npc.SetField(UnitField::MAXHEALTH, 50);
     Entities.OnEntityUpdated.Broadcast(Npc);
+    AActor* Model=World->SpawnActor<AActor>(); auto* Root=NewObject<USceneComponent>(Model); Model->SetRootComponent(Root); Root->RegisterComponent();
+    Model->SetActorLocation(FVector(999,999,999)); Controller->SpawnedEntityActors.Add(NpcGuid,Model); Npc.Movement.Position=FVector(1,2,3);
 
     // Reproduce the fatal path: a positive-to-zero health update invokes death
     // handlers while OnEntityUpdated still holds a reference to the same object.
     Npc.SetField(UnitField::HEALTH, 0);
     Entities.OnEntityUpdated.Broadcast(Npc);
     TestTrue(TEXT("Death preserves the same server entity"), Entities.Find(NpcGuid) == &Npc);
+    TestTrue(TEXT("The rendered corpse uses the current server position, not a stopped visual interpolation"),Model->GetActorLocation().Equals(FWowCoordinate::WowToUE(Npc.Movement.Position),.01));
+    Npc.Movement.Position=FVector(1.5,2.5,3); Entities.OnEntityUpdated.Broadcast(Npc);
+    TestTrue(TEXT("A final server stop correction still reaches a dead actor"),Model->GetActorLocation().Equals(FWowCoordinate::WowToUE(Npc.Movement.Position),.01));
+    World->GetTimerManager().Tick(61.f);
+    TestFalse(TEXT("A local minute-long timeout cannot remove a still-authoritative corpse"),Model->IsActorBeingDestroyed());
     if (FWowEntity* Corpse = Entities.Find(NpcGuid))
     {
         TestEqual(TEXT("Corpse can receive later updates"), Corpse->GetHealth(), 0);
@@ -59,10 +71,15 @@ bool FIdleWowDeathLifetimeTest::RunTest(const FString& Parameters)
         Entities.OnEntityUpdated.Broadcast(*Corpse);
         TestEqual(TEXT("Server can restore health on the same entity"), Corpse->GetHealth(), 50);
     }
+    Npc.SetField(UnitField::HEALTH,0); Entities.OnEntityUpdated.Broadcast(Npc);
+    Controller->TargetGuid=NpcGuid;
     Entities.Remove(NpcGuid);
     TestNull(TEXT("Explicit server removal still removes the entity"), Entities.Find(NpcGuid));
+    TestTrue(TEXT("Server removal also destroys the corpse actor and clears its dead marker"),Model->IsActorBeingDestroyed() && !Controller->SpawnedEntityActors.Contains(NpcGuid) && !Controller->DeadEntityGuids.Contains(NpcGuid));
+    TestEqual(TEXT("A removed corpse also clears its stale target frame"),Controller->TargetGuid,uint64(0));
     Controller->Destroy();
     World->DestroyWorld(false);
+    GEngine->DestroyWorldContext(World);
     return true;
 }
 #endif

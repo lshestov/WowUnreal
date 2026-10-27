@@ -36,6 +36,7 @@ void WowLuaApi::RegisterAll(lua_State* L)
     RegisterGlyphApi(L);
     RegisterUnitApi(L);
     RegisterGroupApi(L);
+    RegisterLootApi(L);
     RegisterPanelApi(L);
     RegisterMapApi(L);
     RegisterWorldMapApi(L);

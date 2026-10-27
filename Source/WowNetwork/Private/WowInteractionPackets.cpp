@@ -105,19 +105,29 @@ void FWowPacketHandler::HandleLootResponse(FPacketReader& R)
     FWowLootState State; State.Guid=R.ReadU64(); State.Type=R.ReadU8();
     if (!State.Type)
     {
-        UE_LOG(LogWowInteraction,Warning,TEXT("Loot denied: guid=%llu reason=%u"),State.Guid,R.ReadU8());
+        if(R.Remaining()!=1) return;
+        LastLootError=R.ReadU8(); LastLootErrorGuid=State.Guid; ++LootErrorRevision;
+        if(PendingLootGuid==State.Guid) PendingLootGuid=0;
+        UE_LOG(LogWowInteraction,Log,TEXT("Loot denied: guid=%llu reason=%u"),State.Guid,LastLootError);
         return;
     }
     if (!R.CanRead(5)) return;
     State.Gold=R.ReadU32(); const uint8 Count=R.ReadU8();
-    if (!R.CanRead(Count*22)) return;
+    if (!State.Guid || R.Remaining()!=Count*22)
+    {UE_LOG(LogWowInteraction,Verbose,TEXT("Rejected loot response: guid=%llu type=%u count=%u remaining=%d"),State.Guid,State.Type,Count,R.Remaining()); return;}
+    TSet<uint8> Slots;
     for (uint32 I=0; I<Count; ++I)
     {
         FWowLootItem Item;
         Item.Index=R.ReadU8(); Item.ItemId=R.ReadU32(); Item.Count=R.ReadU32(); Item.DisplayId=R.ReadU32();
         Item.RandomSuffix=R.ReadU32(); Item.RandomProperty=R.ReadU32(); Item.SlotType=R.ReadU8();
+        if(!Item.ItemId || !Item.Count || Item.SlotType>4 || Slots.Contains(Item.Index))
+        {UE_LOG(LogWowInteraction,Verbose,TEXT("Rejected loot row: index=%u item=%u count=%u slotType=%u"),Item.Index,Item.ItemId,Item.Count,Item.SlotType); return;}
+        Slots.Add(Item.Index);
         State.Items.Add(Item);
     }
+    State.Open=true; State.HasMoneySlot=State.Gold>0; State.Revision=Loot.Revision+1; State.OpenSerial=++LootOpenSerial;
+    PendingLootGuid=0;
     Loot=MoveTemp(State);
     UE_LOG(LogWowInteraction,Log,TEXT("LootOpened: guid=%llu gold=%u items=%d"),Loot.Guid,Loot.Gold,Loot.Items.Num());
     OnLootOpened.Broadcast(Loot.Guid,Loot.Type,Loot.Gold,Loot.Items);
@@ -125,32 +135,43 @@ void FWowPacketHandler::HandleLootResponse(FPacketReader& R)
 
 void FWowPacketHandler::HandleLootRemoved(FPacketReader& R)
 {
-    if (!R.CanRead(1)) return;
+    if (R.Remaining()!=1 || !Loot.Open) return;
     const uint8 Slot=R.ReadU8();
-    Loot.Items.RemoveAll([Slot](const FWowLootItem& Item){return Item.Index==Slot;});
+    auto* Item=Loot.Items.FindByPredicate([Slot](const auto& I){return I.Index==Slot;});
+    if(!Item || Item->bLooted) return; Item->bLooted=true; ++Loot.Revision;
     OnLootOpened.Broadcast(Loot.Guid,Loot.Type,Loot.Gold,Loot.Items);
 }
 
-void FWowPacketHandler::HandleLootClearMoney(FPacketReader&)
+void FWowPacketHandler::HandleLootClearMoney(FPacketReader& R)
 {
-    Loot.Gold=0;
+    if(R.Remaining() || !Loot.Open || !Loot.Gold) return;
+    Loot.Gold=0; ++Loot.Revision;
     OnLootOpened.Broadcast(Loot.Guid,Loot.Type,Loot.Gold,Loot.Items);
 }
 
 void FWowPacketHandler::HandleLootReleaseResponse(FPacketReader& R)
 {
-    if (!R.CanRead(9)) return;
-    const uint64 Guid=R.ReadU64(); const bool Released=R.ReadU8()!=0;
-    if (Released && Guid==Loot.Guid) { Loot=FWowLootState(); OnLootClosed.Broadcast(); }
+    if (R.Remaining()!=9) return;
+    const uint64 Guid=R.ReadU64(); const uint8 Released=R.ReadU8(); if(Released>1) return;
+    if(Guid && PendingLootGuid==Guid && Loot.Guid!=Guid)
+    {PendingLootGuid=0; LastLootErrorGuid=Guid; LastLootError=255; ++LootErrorRevision;}
+    if (Released && Guid==Loot.Guid)
+    {
+        const uint32 Revision=Loot.Revision+1; Loot=FWowLootState(); Loot.Revision=Revision; PendingLootGuid=0;
+        MasterLootGuid=0; MasterLootCandidates.Reset(); ++MasterLootRevision; OnLootClosed.Broadcast();
+    }
 }
 
 void FWowPacketHandler::HandleItemPushResult(FPacketReader& R)
 {
-    if (!R.CanRead(45)) return;
-    const uint64 Guid=R.ReadU64(); R.Skip(12);
-    const uint8 Bag=R.ReadU8(); const uint32 Slot=R.ReadU32(), Item=R.ReadU32(); R.Skip(8);
-    const uint32 Count=R.ReadU32(), Total=R.ReadU32();
-    UE_LOG(LogWowInteraction,Log,TEXT("ItemReceived: player=%llu item=%u count=%u total=%u bag=%u slot=%u"),Guid,Item,Count,Total,Bag,Slot);
+    if (R.Remaining()!=45) return;
+    FWowLootNotification Notice; Notice.Player=R.ReadU64(); const uint32 Received=R.ReadU32(),Created=R.ReadU32(),Show=R.ReadU32();
+    const uint8 Bag=R.ReadU8(); const uint32 Slot=R.ReadU32(); Notice.Item=R.ReadU32(); Notice.RandomSuffix=R.ReadU32(); Notice.RandomProperty=int32(R.ReadU32());
+    Notice.Count=R.ReadU32(); const uint32 Total=R.ReadU32();
+    if(!Notice.Player || !Notice.Item || !Notice.Count || Received>1 || Created>1 || Show>1) return;
+    Notice.Received=Received!=0; Notice.Created=Created!=0;
+    if(Show) RecordLootNotification(Notice);
+    UE_LOG(LogWowInteraction,Log,TEXT("ItemReceived: player=%llu item=%u count=%u total=%u bag=%u slot=%u"),Notice.Player,Notice.Item,Notice.Count,Total,Bag,Slot);
 }
 
 void FWowPacketHandler::RefreshQuestLog()
@@ -204,10 +225,11 @@ void FWowPacketHandler::HandleItemQueryResponse(FPacketReader& R)
         Item.Bonding=R.ReadU32(); Item.Description=R.ReadCString();
         if(!R.CanRead(64)) return;
         R.Skip(44); Item.MaxDurability=R.ReadU32(); R.Skip(8); Item.BagFamily=R.ReadU32();
+        if(R.CanRead(40)) {R.Skip(36); Item.RequiredDisenchantSkill=R.ReadU32();}
     }
     const auto& Stored=ItemTemplates.Add(Item.Id,MoveTemp(Item));
     bool LootChanged=false;
     for (auto& LootItem : Loot.Items) if (LootItem.ItemId==Stored.Id) { LootItem.Name=Stored.Name; LootItem.Quality=Stored.Quality; LootChanged=true; }
-    if (LootChanged) OnLootOpened.Broadcast(Loot.Guid,Loot.Type,Loot.Gold,Loot.Items);
+    if (LootChanged) {++Loot.Revision; OnLootOpened.Broadcast(Loot.Guid,Loot.Type,Loot.Gold,Loot.Items);}
     OnPlayerInventoryUpdate.Broadcast();
 }

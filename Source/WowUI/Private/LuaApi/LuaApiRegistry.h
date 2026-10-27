@@ -18,6 +18,7 @@ struct FWowChannelUiView;
 struct FWowMapUiView;
 struct FWowMinimapUiView;
 struct FWowGroupUiView;
+struct FWowLootUiView;
 struct FWowItemTemplate;
 struct FWowItemEntity;
 
@@ -35,6 +36,7 @@ struct FWowLuaContext
     TSharedPtr<FWowMapUiView> Map;
     TSharedPtr<FWowMinimapUiView> Minimap;
     TSharedPtr<FWowGroupUiView> GroupUi;
+    TSharedPtr<FWowLootUiView> LootUi;
     TFunction<uint32()> ResolveDungeonFloor;
     TFunction<uint32()> ResolveArea;
     uint32 LastAreaId=0,LastZoneId=0;
@@ -94,6 +96,10 @@ namespace WowLuaApi
     void RegisterUnitApi(lua_State* L);
     void RegisterGroupApi(lua_State* L);
     void UpdateGroupState(lua_State* L);
+    void RegisterLootApi(lua_State* L);
+    void UpdateLootState(lua_State* L);
+    int SetLootItemTooltip(lua_State* L);
+    int SetLootRollItemTooltip(lua_State* L);
     int32 UnitReactionRank(const FWowLuaContext* Context,const FWowEntity* From,const FWowEntity* To);
     bool CanUnitAttack(const FWowLuaContext* Context,const FWowEntity* From,const FWowEntity* To);
     FLinearColor UnitSelectionColor(const FWowLuaContext* Context,const FWowEntity* Unit);

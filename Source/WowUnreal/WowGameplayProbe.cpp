@@ -135,13 +135,13 @@ struct FWowGameplayProbe
         }
     }
 
-    uint64 FindEntry(AWowGameplayController& C,uint32 Entry)
+    uint64 FindEntry(AWowGameplayController& C,uint32 Entry,bool IncludeDead=false)
     {
         double Closest=DBL_MAX; uint64 Guid=0;
         for (const auto& Pair : C.SpawnedEntityActors)
         {
             const auto* Entity=C.ConnectionManager->PacketHandler.EntityManager.Find(Pair.Key);
-            if (!Entity || Entity->Entry!=Entry || !Entity->IsUnit() || Entity->GetHealth()<=0 || !IsValid(Pair.Value)) continue;
+            if (!Entity || Entity->Entry!=Entry || !Entity->IsUnit() || (!IncludeDead && Entity->GetHealth()<=0) || !IsValid(Pair.Value)) continue;
             const double Distance=FVector::DistSquared(C.GetPawn()->GetActorLocation(),Pair.Value->GetActorLocation());
             if (Distance<Closest) { Closest=Distance; Guid=Pair.Key; }
         }
@@ -279,7 +279,8 @@ struct FWowGameplayProbe
         }
         else if (Op==TEXT("select_entry"))
         {
-            const uint64 Guid=FindEntry(C,Step->GetIntegerField(TEXT("entry")));
+            bool IncludeDead=false; Step->TryGetBoolField(TEXT("includeDead"),IncludeDead);
+            const uint64 Guid=FindEntry(C,Step->GetIntegerField(TEXT("entry")),IncludeDead);
             if (Guid) { C.SetTarget(Guid); Done=true; }
         }
         else if (Op==TEXT("pick_target"))
@@ -384,7 +385,7 @@ struct FWowGameplayProbe
         }
         else if (Op==TEXT("wait_loot")) Done=Handler.Loot.Guid==C.TargetGuid;
         else if (Op==TEXT("loot_all")) { C.GameUI->LootAll(); Done=true; }
-        else if (Op==TEXT("wait_loot_empty")) Done=Handler.Loot.Guid && !Handler.Loot.Gold && Handler.Loot.Items.IsEmpty();
+        else if (Op==TEXT("wait_loot_empty")) Done=Handler.Loot.Guid && !Handler.Loot.Gold && !Handler.Loot.Items.ContainsByPredicate([](const auto& I){return !I.bLooted;});
         else if (Op==TEXT("close_loot")) { C.GameUI->CloseLoot(); Done=true; }
         else if (Op==TEXT("close_dialog")) { C.GameUI->HideQuestDialog(); Done=true; }
         else if (Op==TEXT("equip"))

@@ -47,6 +47,8 @@ void FWowPacketHandler::ResetGroupState()
 {
     const bool Icons=RaidTargets.HasAnyIcons(),Ready=ReadyCheck.bActive;
     GroupInfo.Clear(); RemoteGroupMembers.Reset(); PendingGroupInviter.Empty(); RaidTargets.Clear(); ReadyCheck.Clear(); ++GroupRevision; ++RemoteGroupRevision;
+    if(!LootRolls.IsEmpty()) {LootRolls.Reset(); ++LootRollRevision;}
+    if(!MasterLootCandidates.IsEmpty()) {MasterLootCandidates.Reset(); MasterLootGuid=0; ++MasterLootRevision;}
     OnGroupUpdated.Broadcast(); if(Icons) OnRaidTargetsUpdated.Broadcast(RaidTargets); if(Ready) OnReadyCheckUpdated.Broadcast(ReadyCheck);
 }
 void FWowPacketHandler::HandleGroupDestroyed(FPacketReader& R) {if(!R.Remaining()) ResetGroupState();}

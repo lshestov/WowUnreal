@@ -36,6 +36,10 @@ compatibility work.
 - Original party frames, raid roster, remote members/pets, focus, subgroup and
   leadership controls, server-confirmed loot settings and ready checks. Remote
   group positions also appear on the map/minimap; see [groups](Groups.md).
+- Original loot window, money/item rows, bind prompts, Need/Greed/Disenchant
+  eligibility and countdowns, confirmed results and master-recipient selection.
+  Saved auto-loot/Shift behaviour and actual item/money chat notifications;
+  see [loot](Loot.md). Corpse models follow server positions and lifetime.
 - Game menu, window close order, logout and character re-entry, ReloadUI and
   saved per-character UI preferences. Windowed mode remains the initial mode.
 - Audio volume/toggles, window mode and resolution, gamma, texture quality,
@@ -123,7 +127,7 @@ Full WoW UI compatibility is **not complete**. In particular:
 - Complete PvP/battleground, LFG and achievement panels and protocol support.
   Unit relationships and selection colours are implemented separately; see
   [faction/reputation reactions](UnitReactions.md).
-- Loot roll/master-looter windows and the guild/inspect/tabard panels.
+- Guild/inspect/tabard panels and their remaining server-backed state.
 - Legacy options without an engine-side implementation; persisting a CVar
   does not imply that its associated rendering or gameplay feature exists.
 - MP3 music decoding. WAV playback and finite UI-sound lifetime are supported.

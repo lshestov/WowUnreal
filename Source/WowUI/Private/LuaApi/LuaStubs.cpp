@@ -3437,6 +3437,7 @@ static FString GetDefaultCVarValue(const FString& Name)
         { TEXT("worldmapopacity"), TEXT("0") },
         { TEXT("trackerfilter"), TEXT("7") },
         { TEXT("chatstyle"), TEXT("classic") },
+        { TEXT("lasttalkedtogm"), TEXT("") },
         { TEXT("uiscale"), TEXT("1") },
         { TEXT("playerstatustext"), TEXT("1") },
         { TEXT("conversationmode"), TEXT("inline") },
@@ -5743,7 +5744,7 @@ lua_pushboolean(L2, PLATFORM_MAC);
     // ── Final batch: remaining missing functions from error log ──
     lua_register(L, "GetChatWindowMessages", ([](lua_State* State) -> int {
         if (luaL_optinteger(State,1,1)!=1) return 0;
-        const char* Groups[]={"SYSTEM","SAY","EMOTE","YELL","WHISPER","PARTY","RAID","GUILD","OFFICER"};
+        const char* Groups[]={"SYSTEM","SAY","EMOTE","YELL","WHISPER","PARTY","RAID","GUILD","OFFICER","LOOT","MONEY","SKILL","OPENING","TRADESKILLS"};
         for (const auto* Group:Groups) lua_pushstring(State,Group);
         return UE_ARRAY_COUNT(Groups);
     }));

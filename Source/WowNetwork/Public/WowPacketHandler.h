@@ -178,6 +178,20 @@ public:
     FWowGossipMenu GossipMenu;
     FWowQuestDetails QuestDetails;
     FWowLootState Loot;
+    uint32 LootOpenSerial=0;
+    TMap<uint32,FWowLootRoll> LootRolls;
+    TArray<FWowLootRollEvent> LootRollEvents;
+    TArray<FWowLootNotification> LootNotifications;
+    uint32 NextLootNotification=1;
+    void RecordLootNotification(FWowLootNotification Notice);
+    uint32 NextLootRollEvent=1;
+    TArray<uint64> MasterLootCandidates;
+    uint64 PendingLootGuid=0,MasterLootGuid=0,LastLootErrorGuid=0;
+    uint32 LootRollRevision=0,NextLootRollId=1,MasterLootRevision=0,LootErrorRevision=0;
+    uint8 LastLootError=0;
+    FWowLootRoll* FindLootRoll(uint64 Guid,uint32 Slot);
+    void ResetLootState();
+    void RecordLootRollEvent(FWowLootRollEvent Event);
     TMap<uint32,FWowItemTemplate> ItemTemplates;
     FWowMerchantState Merchant;
     uint64 CurrentBankerGuid=0;
@@ -416,6 +430,11 @@ private:
     void HandleQuestgiverQuestList(FPacketReader& R);
     void HandleLootRemoved(FPacketReader& R);
     void HandleLootClearMoney(FPacketReader& R);
+    void HandleLootStartRoll(FPacketReader& R);
+    void HandleLootRoll(FPacketReader& R);
+    void HandleLootRollWon(FPacketReader& R);
+    void HandleLootAllPassed(FPacketReader& R);
+    void HandleMasterLootList(FPacketReader& R);
     // Handler function pointer type
     using HandlerFunc = void (FWowPacketHandler::*)(FPacketReader&);
 
@@ -457,6 +476,7 @@ private:
     void HandleLootResponse(FPacketReader& R);
     void HandleLootReleaseResponse(FPacketReader& R);
     void HandleItemPushResult(FPacketReader& R);
+    void HandleLootMoneyNotify(FPacketReader& R);
     void HandleListInventory(FPacketReader& R);
 
     // Quest handlers

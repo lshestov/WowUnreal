@@ -43,7 +43,13 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(WowOpcode::SMSG_INVENTORY_CHANGE_FAILURE, &FWowPacketHandler::HandleInventoryChangeFailure);
     Handlers.Add(WowOpcode::SMSG_LOOT_RESPONSE,            &FWowPacketHandler::HandleLootResponse);
     Handlers.Add(WowOpcode::SMSG_LOOT_RELEASE_RESPONSE,    &FWowPacketHandler::HandleLootReleaseResponse);
+    Handlers.Add(0x02A1,&FWowPacketHandler::HandleLootStartRoll);
+    Handlers.Add(0x02A2,&FWowPacketHandler::HandleLootRoll);
+    Handlers.Add(0x029F,&FWowPacketHandler::HandleLootRollWon);
+    Handlers.Add(0x029E,&FWowPacketHandler::HandleLootAllPassed);
+    Handlers.Add(0x02A4,&FWowPacketHandler::HandleMasterLootList);
     Handlers.Add(WowOpcode::SMSG_ITEM_PUSH_RESULT,         &FWowPacketHandler::HandleItemPushResult);
+    Handlers.Add(0x0163,&FWowPacketHandler::HandleLootMoneyNotify);
 
     // Vendor system handlers
     Handlers.Add(WowOpcode::SMSG_LIST_INVENTORY,           &FWowPacketHandler::HandleListInventory);

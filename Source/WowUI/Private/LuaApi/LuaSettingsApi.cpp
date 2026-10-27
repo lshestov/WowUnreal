@@ -79,7 +79,7 @@ bool Preference(lua_State* L,const FString& Name,FString& Value)
 int GetCvar(lua_State* L)
 {
     const FString Name=FString(UTF8_TO_TCHAR(luaL_checkstring(L,1))).ToLower(); FString Value;
-    if(NativeValue(L,Name,Value) || Preference(L,Name,Value)) { lua_pushstring(L,TCHAR_TO_UTF8(*Value)); return 1; }
+    if(NativeValue(L,Name,Value) || Preference(L,Name,Value)) { if(Name==TEXT("lasttalkedtogm") && Value==TEXT("0")) Value.Reset(); lua_pushstring(L,TCHAR_TO_UTF8(*Value)); return 1; }
     lua_pushvalue(L,lua_upvalueindex(1)); lua_pushvalue(L,1); lua_call(L,1,1); return 1;
 }
 int SetCvar(lua_State* L)

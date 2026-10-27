@@ -85,6 +85,7 @@ public:
 
 private:
     friend struct FWowGameplayProbe;
+    friend class FIdleWowDeathLifetimeTest;
     TSharedPtr<struct FWowGameplayProbe> GameplayProbe;
     bool bGameplayProbeChecked=false;
     TOptional<FVector2D> GameplayProbePointer;

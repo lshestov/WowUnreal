@@ -23,7 +23,14 @@ bool FWowUiTestPeer::Start(const FString& Fixture,uint64 MainGuid,bool CleanupOn
     for(TCHAR C:Token) if(!FChar::IsHexDigit(C)) return false;
     for(TCHAR C:Character) if(!FChar::IsAlpha(C)) return false;
     Path=Fixture; MasterGuid=MainGuid; Cleanup=CleanupOnly;
-    Client.Reset(NewObject<UWowConnectionManager>()); Client->Login(Account,Password,TEXT("127.0.0.1"),3724); Status(TEXT("connecting")); return true;
+    Client.Reset(NewObject<UWowConnectionManager>());
+    Client->PacketHandler.OnTeleportRequest.AddLambda([this](uint64 Guid,uint32 Order,uint32 Time,FVector Position,float Orientation)
+    {
+        if(!Client.IsValid() || Guid!=Client->PacketHandler.EntityManager.LocalPlayerGuid) return;
+        if(auto* P=Client->PacketHandler.EntityManager.GetLocalPlayer()) {P->Movement.Position=Position; P->Movement.Orientation=Orientation;}
+        Client->SendTeleportAck(Guid,Order,Time);
+    });
+    Client->Login(Account,Password,TEXT("127.0.0.1"),3724); Status(TEXT("connecting")); return true;
 }
 void FWowUiTestPeer::Status(const FString& Phase)
 {
@@ -114,6 +121,16 @@ void FWowUiTestPeer::Tick()
 bool FWowUiTestPeer::Command(const FString& Action,int32 Slot,uint32 Value)
 {
     if(!Ready()) return false;
+    if(Action==TEXT("loot_roll"))
+    {
+        if(Slot<0 || Slot>3 || !Value || !Client->PacketHandler.GroupInfo.FindMember(MasterGuid)) return false;
+        FWowLootRoll* Selected=nullptr;
+        for(auto& Pair:Client->PacketHandler.LootRolls) if(Pair.Value.ItemId==Value && !Pair.Value.Finished && Pair.Value.Choice<0 && Pair.Value.PendingChoice<0 && Pair.Value.MillisecondsLeft()>0)
+        {if(Selected) return false; Selected=&Pair.Value;}
+        if(!Selected || !(Selected->VoteMask&(1<<Slot))) return false;
+        TArray<uint8> Bytes; Bytes.Append(reinterpret_cast<const uint8*>(&Selected->Guid),8); Bytes.Append(reinterpret_cast<const uint8*>(&Selected->Slot),4); Bytes.Add(uint8(Slot));
+        Client->SendRawPacket(0x02A0,Bytes); Selected->PendingChoice=Slot; return true;
+    }
     if(Action.StartsWith(TEXT("group_")))
     {
         auto& H=Client->PacketHandler; const auto& G=H.GroupInfo;

@@ -297,6 +297,36 @@ struct FWowLootState
     uint8 Type = 0;
     uint32 Gold = 0;
     TArray<FWowLootItem> Items;
+    uint32 Revision=0,OpenSerial=0;
+    bool Open=false,HasMoneySlot=false;
+};
+
+struct FWowLootRoll
+{
+    uint32 Id=0,Map=0,Slot=0,ItemId=0,Count=0,RandomSuffix=0;
+    int32 RandomProperty=0;
+    uint64 Guid=0,Winner=0,SourceLootGuid=0;
+    uint8 VoteMask=0,WinnerRoll=0,WinnerChoice=0;
+    int32 Choice=-1,PendingChoice=-1;
+    double EndsAt=0;
+    bool Finished=false;
+    TMap<uint64,uint8> Votes;
+    float MillisecondsLeft() const {return Finished?0:float(FMath::Max(0.,(EndsAt-FPlatformTime::Seconds())*1000.));}
+};
+
+struct FWowLootRollEvent
+{
+    uint32 Sequence=0,RollId=0;
+    uint64 Player=0;
+    uint8 Kind=0,Number=0,Choice=0,Auto=0; // vote, winner, all passed
+};
+
+struct FWowLootNotification
+{
+    uint32 Sequence=0,Item=0,Count=0,RandomSuffix=0;
+    int32 RandomProperty=0;
+    uint64 Player=0;
+    bool Money=false,Received=false,Created=false,Sole=false;
 };
 
 struct FWowItemTemplate
@@ -307,7 +337,7 @@ struct FWowItemTemplate
     uint32 RequiredSkill=0,RequiredSkillRank=0,RequiredSpell=0,RequiredReputationFaction=0,RequiredReputationRank=0,Bonding=0;
     float DamageMin=0, DamageMax=0;
     TArray<TPair<uint32,int32>> Stats;
-    uint32 UseSpellId=0;
+    uint32 UseSpellId=0,RequiredDisenchantSkill=0;
     FString Name, Description;
 };
 

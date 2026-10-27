@@ -319,6 +319,53 @@ bool FHudGroupState::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudLootState,"WowUnreal.Hud.LootState",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudLootState::RunTest(const FString&)
+{
+    FHudFixture F; TStrongObjectPtr<UWowConnectionManager> C(NewObject<UWowConnectionManager>()); auto& H=C->PacketHandler;
+    F.Context.ConnectionManager=C.Get(); F.Context.EntityManager=&H.EntityManager; H.EntityManager.LocalPlayerGuid=1;
+    FWowItemTemplate T; T.Id=1206; T.Name=TEXT("Moss Agate"); T.Quality=2; T.RequiredDisenchantSkill=50; H.ItemTemplates.Add(T.Id,T);
+    H.Loot.Guid=99; H.Loot.Open=true; H.Loot.Gold=19; H.Loot.HasMoneySlot=true;
+    FWowLootItem A; A.Index=2; A.ItemId=1206; A.Count=3; A.RandomProperty=uint32(-9); A.RandomSuffix=33;
+    FWowLootItem B=A; B.Index=7; B.SlotType=1; H.Loot.Items={A,B};
+    TestTrue(TEXT("Original loot API preserves coin offset, real metadata and signed random-property links"),F.Lua.ExecuteString(TEXT(R"LUA(
+        format=string.format; COPPER_AMOUNT='%d Copper'; RETRIEVING_ITEM_INFO='Retrieving item information...'
+        local groups={GetChatWindowMessages(1)}; local found={}; for _,group in ipairs(groups) do found[group]=true end; assert(found.LOOT and found.MONEY)
+        assert(GetCVarDefault('lastTalkedToGM')==''); SetCVar('lastTalkedToGM','0'); assert(GetCVar('lastTalkedToGM')==''); SetCVar('lastTalkedToGM','')
+        assert(GetNumLootItems()==3 and LootSlotIsCoin(1) and LootSlotIsItem(2) and GetLootSlotType(1)==2)
+        local icon,name,count,quality,locked=GetLootSlotInfo(2); assert(name=='Moss Agate' and count==3 and quality==2 and not locked)
+        assert(select(5,GetLootSlotInfo(3)) and GetLootSlotInfo(4)==nil)
+        assert(GetLootSlotLink(2):find(':-9:33:0:0|h',1,true))
+        LootEvents={}; LootObserver=CreateFrame('Frame'); for _,event in ipairs({'LOOT_OPENED','LOOT_SLOT_CLEARED','LOOT_SLOT_CHANGED','LOOT_CLOSED','START_LOOT_ROLL','CANCEL_LOOT_ROLL'}) do LootObserver:RegisterEvent(event) end
+        LootObserver:SetScript('OnEvent',function(self,event,a,b) LootEvents[#LootEvents+1]={event,a,b} end)
+    )LUA")));
+    WowLuaApi::UpdateLootState(F.Lua.GetState()); H.Loot.Items[0].bLooted=true; H.Loot.Gold=0;
+    WowLuaApi::UpdateLootState(F.Lua.GetState()); WowLuaApi::UpdateLootState(F.Lua.GetState());
+    TestTrue(TEXT("Typed clear notifications preserve remaining slots and do not repeat on an unchanged tick"),F.Lua.ExecuteString(TEXT("assert(#LootEvents==3 and LootEvents[1][1]=='LOOT_OPENED' and LootEvents[1][2]==0 and LootEvents[2][2]==1 and LootEvents[3][2]==2); assert(GetNumLootItems()==3 and not LootSlotIsItem(2) and not LootSlotIsCoin(1) and LootSlotIsItem(3))")));
+    FWowLootRoll R; R.Id=1; R.Guid=0x4000000000000015ULL; R.ItemId=1206; R.Slot=7; R.Count=2; R.VoteMask=5; R.EndsAt=FPlatformTime::Seconds()+60; H.LootRolls.Add(1,R);
+    WowLuaApi::UpdateLootState(F.Lua.GetState());
+    TestTrue(TEXT("Roll API returns stock twelve-value signature and authoritative button eligibility"),F.Lua.ExecuteString(TEXT(R"LUA(
+        assert(select('#',GetLootRollItemInfo(1))==12)
+        local icon,name,count,quality,bop,need,greed,de,rn,rg,rd,skill=GetLootRollItemInfo(1)
+        assert(name=='Moss Agate' and count==2 and quality==2 and not bop and not need and greed and not de and type(rn)=='number' and rd==4 and skill==50)
+        assert(GetLootRollTimeLeft(1)>59000 and LootEvents[4][1]=='START_LOOT_ROLL' and LootEvents[4][2]==1 and type(LootEvents[4][3])=='number')
+    )LUA")));
+    H.LootRolls[1].Choice=2; WowLuaApi::UpdateLootState(F.Lua.GetState());
+    TestTrue(TEXT("Acknowledged choice cancels only its own stock frame"),F.Lua.ExecuteString(TEXT("assert(LootEvents[5][1]=='CANCEL_LOOT_ROLL' and LootEvents[5][2]==1)")));
+    TestTrue(TEXT("Stock chat notification observer loads"),F.Lua.ExecuteString(TEXT("LOOT_ITEM_SELF_MULTIPLE='You receive loot: %sx%d.'; YOU_LOOT_MONEY='You loot %s'; ReceiptObserver=CreateFrame('Frame'); ReceiptObserver:RegisterEvent('CHAT_MSG_LOOT'); ReceiptObserver:RegisterEvent('CHAT_MSG_MONEY'); Receipts={}; ReceiptObserver:SetScript('OnEvent',function(self,event,...) assert(select('#',...)==12 and type(select(4,...))=='string' and type(select(7,...))=='number'); Receipts[event]=(...) end)")));
+    FWowLootNotification Notice; Notice.Player=1; Notice.Item=1206; Notice.Count=3; H.RecordLootNotification(Notice);
+    Notice.Money=true; Notice.Count=19; Notice.Sole=true; H.RecordLootNotification(Notice); WowLuaApi::UpdateLootState(F.Lua.GetState());
+    TestTrue(TEXT("Item and currency messages have complete stock chat arguments and localized confirmed amounts"),F.Lua.ExecuteString(TEXT("assert(Receipts.CHAT_MSG_LOOT:find('Moss Agate',1,true) and Receipts.CHAT_MSG_LOOT:find('x3.',1,true) and Receipts.CHAT_MSG_MONEY=='You loot 19 Copper')")));
+    H.MasterLootGuid=99; H.MasterLootCandidates={2}; H.PlayerNameCache.Add(2,TEXT("Recipient"));
+    TestTrue(TEXT("Master candidate API takes one index and rejects out-of-range rows"),F.Lua.ExecuteString(TEXT("assert(GetMasterLootCandidate(1)=='Recipient' and GetMasterLootCandidate(0)==nil and GetMasterLootCandidate(2)==nil)")));
+    H.ResetLootState(); WowLuaApi::UpdateLootState(F.Lua.GetState());
+    TestTrue(TEXT("Closed loot exposes no stale rows or recipients"),F.Lua.ExecuteString(TEXT("assert(GetNumLootItems()==0 and GetMasterLootCandidate(1)==nil and LootEvents[#LootEvents][1]=='LOOT_CLOSED')")));
+    H.Loot.Open=true; H.Loot.Guid=99; H.Loot.Items={A,B}; H.Loot.OpenSerial=1; WowLuaApi::UpdateLootState(F.Lua.GetState());
+    H.Loot.OpenSerial=2; WowLuaApi::UpdateLootState(F.Lua.GetState());
+    TestTrue(TEXT("A fresh response for the same GUID reopens/rebuilds stock slots even without an intervening UI tick"),F.Lua.ExecuteString(TEXT("assert(LootEvents[#LootEvents][1]=='LOOT_OPENED' and LootEvents[#LootEvents-1][1]=='LOOT_OPENED' and GetNumLootItems()==2)")));
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudLiveResources, "WowUnreal.Hud.LiveResourcesAndStance",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FHudLiveResources::RunTest(const FString&)

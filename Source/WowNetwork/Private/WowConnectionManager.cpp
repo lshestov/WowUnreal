@@ -117,6 +117,7 @@ void UWowConnectionManager::SelectRealm(int32 I)
         if(Opcode==0x004C && Data.Num()>=5)
         {
             FPacketReader Reader(Data); const uint32 Reason=Reader.ReadU32(); const bool Instant=Reader.ReadU8()!=0;
+            UE_LOG(LogWowNet,Log,TEXT("Logout response: reason=%u instant=%u"),Reason,uint32(Instant));
             OnLogoutResponse.Broadcast(Reason,Instant); return;
         }
         if(Opcode==0x004D)
@@ -130,6 +131,7 @@ void UWowConnectionManager::SelectRealm(int32 I)
             PacketHandler.ResetGroupState(); PacketHandler.PetActionBar=FWowPetActionBarState(); PacketHandler.ResetChannels();
             PacketHandler.ResetMapState();
             PacketHandler.Merchant.Clear(); PacketHandler.CurrentBankerGuid=0; ResetMailState(); ResetTradeState();
+            PacketHandler.ResetLootState();
             RepairCursor=false; PacketHandler.GuildCanRepair=false; PacketHandler.GuildRepairRequested=false; PacketHandler.GuildRepairId=0; PacketHandler.GuildWithdrawMoney=0; PacketHandler.GuildRoster.Reset(); PacketHandler.GuildRankAccess.Reset(); PacketHandler.GuildInfoText.Empty(); PacketHandler.ItemRefunds.Empty(); PacketHandler.RequestedItemRefunds.Empty(); PacketHandler.TotalPlayedTime=0; PacketHandler.PlayedTimeReceived=0; PacketHandler.PlayedTimeRequested=false;
             PacketHandler.WeaponProficiency=PacketHandler.ArmorProficiency=0; PacketHandler.HasWeaponProficiency=PacketHandler.HasArmorProficiency=false;
             RequestCharacterList(); return;
@@ -925,10 +927,14 @@ void UWowConnectionManager::SendLoot(int64 CorpseGuid)
     TArray<uint8> Data;
     Data.SetNumUninitialized(8);
     uint64 Guid = static_cast<uint64>(CorpseGuid);
+    PacketHandler.PendingLootGuid=Guid; PacketHandler.MasterLootGuid=0;
+    PacketHandler.MasterLootCandidates.Reset(); ++PacketHandler.MasterLootRevision;
     FMemory::Memcpy(Data.GetData(), &Guid, 8);
 
     WorldSocket->SendPacket(WowOpcode::CMSG_LOOT, Data);
     UE_LOG(LogWowNet, Log, TEXT("Sent CMSG_LOOT for corpse %llu"), Guid);
+    const auto* Player=PacketHandler.EntityManager.GetLocalPlayer(); const auto* Corpse=PacketHandler.EntityManager.Find(Guid);
+    if(Player && Corpse) UE_LOG(LogWowNet,Verbose,TEXT("Loot request: player=(%.2f,%.2f,%.2f) corpse=(%.2f,%.2f,%.2f) distance=%.2f"),Player->Movement.Position.X,Player->Movement.Position.Y,Player->Movement.Position.Z,Corpse->Movement.Position.X,Corpse->Movement.Position.Y,Corpse->Movement.Position.Z,FVector::Distance(Player->Movement.Position,Corpse->Movement.Position));
 }
 
 void UWowConnectionManager::SendLootRelease(int64 CorpseGuid)

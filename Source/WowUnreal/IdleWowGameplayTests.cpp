@@ -224,17 +224,63 @@ bool FGameplayLootPackets::RunTest(const FString&)
     TestEqual(TEXT("Loot GUID is fixed-width, not packed"),Handler.Loot.Guid,Guid);
     TestEqual(TEXT("Non-contiguous loot slots retained"),Handler.Loot.Items.Num(),2);
     TestEqual(TEXT("Money parsed"),Handler.Loot.Gold,uint32(19));
+    const uint32 LootRevision=Handler.Loot.Revision;
+    for(int32 N=0;N<Loot.Data.Num();++N) {TArray<uint8> Cut(Loot.Data.GetData(),N); Handler.HandlePacket(WowOpcode::SMSG_LOOT_RESPONSE,Cut); TestEqual(TEXT("Every incomplete response preserves the previous complete window"),Handler.Loot.Revision,LootRevision);}
+    auto Extra=Loot.Data; Extra.Add(0); Handler.HandlePacket(WowOpcode::SMSG_LOOT_RESPONSE,Extra);
+    auto DuplicateSlots=Loot.Data; DuplicateSlots[36]=DuplicateSlots[14]; Handler.HandlePacket(WowOpcode::SMSG_LOOT_RESPONSE,DuplicateSlots);
+    TestEqual(TEXT("Trailing bytes and duplicate server slots reject the complete response"),Handler.Loot.Revision,LootRevision);
+    const uint32 FirstOpen=Handler.Loot.OpenSerial; Handler.HandlePacket(WowOpcode::SMSG_LOOT_RESPONSE,Loot.Data);
+    TestTrue(TEXT("Another valid response for the same corpse starts a new stable set of display slots"),Handler.Loot.OpenSerial>FirstOpen && Handler.Loot.Items.Num()==2);
     FWowLootItem Permission;
     Permission.SlotType=4; TestTrue(TEXT("Solo owner loot can be collected"),Permission.CanLoot());
     Permission.SlotType=1; TestFalse(TEXT("Ongoing group roll cannot be collected"),Permission.CanLoot());
     Handler.HandlePacket(0x0162,{2});
-    TestTrue(TEXT("Only acknowledged slot disappears"),Handler.Loot.Items.Num()==1 && Handler.Loot.Items[0].Index==7);
+    TestTrue(TEXT("Acknowledgement preserves all initial display rows and marks only the matching server slot"),Handler.Loot.Items.Num()==2 && Handler.Loot.Items[0].bLooted && !Handler.Loot.Items[1].bLooted && Handler.Loot.Items[1].Index==7);
     Handler.HandlePacket(0x0165,{});
     TestEqual(TEXT("Money acknowledgement clears currency"),Handler.Loot.Gold,uint32(0));
+    TestTrue(TEXT("The cleared money row retains its original place"),Handler.Loot.HasMoneySlot);
     FWire Release; Release.Add(Guid).Add(uint8(1));
     Handler.HandlePacket(WowOpcode::SMSG_LOOT_RELEASE_RESPONSE,Release.Data);
     TestEqual(TEXT("Close acknowledgement releases corpse"),Handler.Loot.Guid,uint64(0));
     TestEqual(TEXT("Close is distinct from looting money"),int32(WowOpcode::CMSG_LOOT_RELEASE),0x015F);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGameplayLootRollPackets,"WowUnreal.Gameplay.LootRollPackets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FGameplayLootRollPackets::RunTest(const FString&)
+{
+    FWowPacketHandler H; H.EntityManager.LocalPlayerGuid=1;
+    const uint64 Guid=0x4000000000000015ULL; FWire Start;
+    Start.Add(Guid).Add(uint32(0)).Add(uint32(7)).Add(uint32(1206)).Add(uint32(33)).Add(int32(-9)).Add(uint32(2)).Add(uint32(60000)).Add(uint8(7));
+    for(int32 N=0;N<Start.Data.Num();++N) {TArray<uint8> Cut(Start.Data.GetData(),N); H.HandlePacket(0x02A1,Cut); TestEqual(TEXT("Truncated starts cannot create a partial roll"),H.LootRolls.Num(),0);}
+    H.HandlePacket(0x02A1,Start.Data); auto* R=H.FindLootRoll(Guid,7);
+    if(!TestNotNull(TEXT("A complete start creates a typed roll"),R)) return false;
+    const uint32 Id=R->Id; TestTrue(TEXT("Server eligibility, random suffix and countdown are retained"),R->VoteMask==7 && R->RandomProperty==-9 && R->RandomSuffix==33 && R->Count==2 && R->MillisecondsLeft()>59000);
+    FWire Vote; Vote.Add(uint64(0)).Add(uint32(7)).Add(uint64(1)).Add(uint32(1206)).Add(uint32(33)).Add(int32(-9)).Add(uint8(0)).Add(uint8(0)).Add(uint8(0));
+    H.HandlePacket(0x02A2,Vote.Data);
+    TestTrue(TEXT("AzerothCore empty-GUID need selection is resolved from the unique drop identity"),H.LootRolls[Id].Choice==1 && H.LootRollEvents.Num()==1 && H.LootRollEvents[0].Choice==1);
+    FWire Won; Won.Add(Guid).Add(uint32(7)).Add(uint32(1206)).Add(uint32(33)).Add(int32(-9)).Add(uint64(1)).Add(uint8(42)).Add(uint8(1));
+    const uint32 Before=H.LootRollRevision;
+    for(int32 N=0;N<Won.Data.Num();++N) {TArray<uint8> Cut(Won.Data.GetData(),N); H.HandlePacket(0x029F,Cut); TestEqual(TEXT("Truncated result cannot close an active roll"),H.LootRollRevision,Before);}
+    H.HandlePacket(0x029F,Won.Data); H.HandlePacket(0x029F,Won.Data);
+    TestTrue(TEXT("Winner is authoritative and duplicate completion is ignored"),H.LootRolls[Id].Finished && H.LootRolls[Id].Winner==1 && H.LootRolls[Id].WinnerRoll==42 && H.LootRollEvents.Num()==2);
+    H.ResetLootState(); H.HandlePacket(0x02A1,Start.Data); FWire Passed;
+    TestTrue(TEXT("Session reset never reuses a public roll ID retained by an old UI context"),H.FindLootRoll(Guid,7)->Id>Id);
+    Passed.Add(Guid).Add(uint32(7)).Add(uint32(1206)).Add(int32(-9)).Add(uint32(33)); H.HandlePacket(0x029E,Passed.Data);
+    TestTrue(TEXT("All-passed packet has property before suffix, unlike the other roll packets"),H.FindLootRoll(Guid,7)->Finished && H.LootRollEvents.Last().Kind==2);
+    H.PendingLootGuid=99; H.PlayerNameCache.Add(1,TEXT("Alpha")); H.PlayerNameCache.Add(2,TEXT("Beta")); FWire Master;
+    Master.Add(uint8(2)).Add(uint64(1)).Add(uint64(2)); H.HandlePacket(0x02A4,Master.Data);
+    TestTrue(TEXT("Master list belongs to the pending corpse before its loot response"),H.MasterLootGuid==99 && H.MasterLootCandidates==TArray<uint64>{1,2});
+    const uint32 MasterRevision=H.MasterLootRevision; Master.Data.Add(0); H.HandlePacket(0x02A4,Master.Data);
+    FWire Duplicate; Duplicate.Add(uint8(2)).Add(uint64(1)).Add(uint64(1)); H.HandlePacket(0x02A4,Duplicate.Data);
+    TestEqual(TEXT("Trailing bytes and duplicate candidates cannot replace the list"),H.MasterLootRevision,MasterRevision);
+    FWire Receipt; Receipt.Add(uint64(1)).Add(uint32(0)).Add(uint32(0)).Add(uint32(1)).Add(uint8(255)).Add(MAX_uint32).Add(uint32(1206)).Add(uint32(33)).Add(int32(-9)).Add(uint32(2)).Add(uint32(5));
+    for(int32 N=0;N<Receipt.Data.Num();++N) {TArray<uint8> Cut(Receipt.Data.GetData(),N); H.HandlePacket(0x0166,Cut); TestEqual(TEXT("Incomplete item receipts cannot generate a loot message"),H.LootNotifications.Num(),0);}
+    H.HandlePacket(0x0166,Receipt.Data);
+    TestTrue(TEXT("Item receipt retains the awarded stack and signed property rather than total owned count"),H.LootNotifications.Num()==1 && H.LootNotifications[0].Count==2 && H.LootNotifications[0].RandomProperty==-9 && !H.LootNotifications[0].Received);
+    FWire Money; Money.Add(uint32(19)).Add(uint8(0)); H.HandlePacket(0x0163,Money.Data);
+    TestTrue(TEXT("Money notification preserves the actual group share"),H.LootNotifications.Num()==2 && H.LootNotifications[1].Money && H.LootNotifications[1].Count==19 && !H.LootNotifications[1].Sole);
+    H.ResetLootState(); TestTrue(TEXT("Logout removes loot, rolls, errors and candidate state together"),!H.Loot.Open && H.LootRolls.IsEmpty() && H.LootRollEvents.IsEmpty() && H.MasterLootCandidates.IsEmpty());
     return true;
 }
 
