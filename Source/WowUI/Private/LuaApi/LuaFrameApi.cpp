@@ -37,6 +37,7 @@ DEFINE_LOG_CATEGORY(LogWowLuaFrame);
 
 static UImage* GetTextureImage(lua_State* L, int idx = 1);
 static int LF_SetText(lua_State* L);
+static int LF_TooltipSetUnit(lua_State* L);
 static int LF_SetFormattedText(lua_State* L)
 {
 	const int32 Args=lua_gettop(L)-1;
@@ -104,7 +105,7 @@ static int LF_ModelUnit(lua_State* L)
     auto* C=WowLuaApi::GetContext(L); if(!C || !C->FrameManager) return 0;
     if(lua_isnoneornil(L,2)) { lua_settop(L,1); lua_getfield(L,1,"__modelUnit"); }
     const int64 H=GetFrameHandle(L,1);
-    if(const auto* Def=C->FrameManager->GetFrameDef(H); Def && Def->Type==EWowFrameType::GameTooltip) { C->FrameManager->TooltipSetUnit(H,UTF8_TO_TCHAR(luaL_checkstring(L,2))); return 0; }
+    if(const auto* Def=C->FrameManager->GetFrameDef(H); Def && Def->Type==EWowFrameType::GameTooltip) return LF_TooltipSetUnit(L);
     if(C->FrameManager->OnUnitModel)
     {
         const auto* Entity=WowLuaApi::ResolveUnitToken(L,2);
@@ -576,6 +577,11 @@ static int LF_Hide(lua_State* L)
 	if (Ctx && Ctx->FrameManager)
 	{
 		Ctx->FrameManager->SetFrameVisible(Handle, false);
+		if(const auto* Def=Ctx->FrameManager->GetFrameDef(Handle); Def && Def->Type==EWowFrameType::GameTooltip)
+		{
+			lua_pushnil(L); lua_setfield(L,1,"__tooltipOwner");
+			Ctx->FrameManager->GetTooltipState(Handle)->OwnerHandle=-1;
+		}
 	}
 	return 0;
 }
@@ -1992,27 +1998,23 @@ static int LF_SetAttribute(lua_State* L)
 static int LF_GetAttribute(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
-	// WoW GetAttribute supports 1-3 string args: GetAttribute(name) or GetAttribute(prefix, name, suffix)
-	// With multiple args, the attribute key is their concatenation.
-	FString AttrName;
-	int32 NumArgs = lua_gettop(L) - 1; // exclude self
-	for (int32 i = 2; i <= lua_gettop(L); i++)
-	{
-		const char* Part = lua_tostring(L, i);
-		if (Part)
-		{
-			AttrName += UTF8_TO_TCHAR(Part);
-		}
-	}
-	if (AttrName.IsEmpty())
-	{
-		lua_pushnil(L);
-		return 1;
-	}
-	FString Key = FString::Printf(TEXT("__attr_%s"), *AttrName);
-	FTCHARToUTF8 UTF8Key(*Key);
-	lua_getfield(L, 1, UTF8Key.Get());
-	return 1;
+    const auto Part=[&](int32 I)->FString {const auto* Value=lua_tostring(L,I); return Value?UTF8_TO_TCHAR(Value):TEXT("");};
+    TArray<FString> Keys;
+    if(lua_gettop(L)<=2) Keys.Add(Part(2));
+    else
+    {
+        const FString Prefix=Part(2),Name=Part(3),Suffix=Part(4);
+        // Secure unit buttons use *type1 and a plain unit attribute. Looking
+        // up only the concatenation silently disables their normal clicks.
+        Keys={Prefix+Name+Suffix,Prefix+Name+TEXT("*"),TEXT("*")+Name+Suffix,TEXT("*")+Name+TEXT("*"),Name};
+    }
+    for(const auto& Key:Keys) if(!Key.IsEmpty())
+    {
+        lua_getfield(L,1,TCHAR_TO_UTF8(*(TEXT("__attr_")+Key)));
+        if(!lua_isnil(L,-1)) return 1;
+        lua_pop(L,1);
+    }
+    lua_pushnil(L); return 1;
 }
 
 // frame:HookScript(scriptType, handler)
@@ -3073,13 +3075,15 @@ static int LF_TooltipGetUnit(lua_State* L)
 	const FTooltipState* State = Ctx->FrameManager->GetTooltipState(TooltipHandle);
 	if (State && !State->UnitToken.IsEmpty())
 	{
+		lua_getglobal(L,"UnitName"); lua_pushstring(L,TCHAR_TO_UTF8(*State->UnitToken)); lua_call(L,1,1);
 		lua_pushstring(L, TCHAR_TO_UTF8(*State->UnitToken));
 	}
 	else
 	{
 		lua_pushnil(L);
+		lua_pushnil(L);
 	}
-	return 1;
+	return 2;
 }
 
 // tooltip:SetItem(itemLink) -- sets item context for tooltip
@@ -3108,8 +3112,31 @@ static int LF_TooltipSetUnit(lua_State* L)
 
 	int64 TooltipHandle = GetFrameHandle(L, 1);
 	const char* UnitToken = luaL_checkstring(L, 2);
+	const auto* Entity=WowLuaApi::ResolveUnitToken(L,2);
+	if(!Entity || !Entity->IsUnit()) {Ctx->FrameManager->TooltipClearLines(TooltipHandle); LF_Hide(L); lua_pushboolean(L,false); return 1;}
 	Ctx->FrameManager->TooltipSetUnit(TooltipHandle, UTF8_TO_TCHAR(UnitToken));
-	return 0;
+	const auto Read=[&](const char* Function)->FString
+	{
+		lua_getglobal(L,Function); lua_pushvalue(L,2); lua_call(L,1,1);
+		const FString Value=lua_isstring(L,-1)?UTF8_TO_TCHAR(lua_tostring(L,-1)):TEXT(""); lua_pop(L,1); return Value;
+	};
+	const FString Name=Read("UnitName");
+	Ctx->FrameManager->TooltipAddLine(TooltipHandle,Name,1,1,1,false);
+	if(Entity->IsPlayer())
+	{
+		const FString Guild=Read("GetGuildInfo");
+		if(!Guild.IsEmpty()) Ctx->FrameManager->TooltipAddLine(TooltipHandle,TEXT("<")+Guild+TEXT(">"),0,1,0,false);
+	}
+	lua_getglobal(L,"LEVEL"); const FString LevelLabel=lua_isstring(L,-1)?UTF8_TO_TCHAR(lua_tostring(L,-1)):TEXT("Level"); lua_pop(L,1);
+	FString Details=LevelLabel+TEXT(" ")+FString::FromInt(Entity->GetLevel());
+	const FString Race=Entity->IsPlayer()?Read("UnitRace"):TEXT("");
+	const FString Class=Read(Entity->IsPlayer()?"UnitClass":"UnitCreatureType");
+	if(!Race.IsEmpty()) Details+=TEXT(" ")+Race;
+	if(!Class.IsEmpty()) Details+=TEXT(" ")+Class;
+	Ctx->FrameManager->TooltipAddLine(TooltipHandle,Details,1,1,1,false);
+	Ctx->FrameManager->SetFrameVisible(TooltipHandle,true);
+	if(Ctx->EventSystem) Ctx->EventSystem->RunFrameScript(TooltipHandle,TEXT("OnTooltipSetUnit"));
+	lua_pushboolean(L,true); return 1;
 }
 
 // ── Metatable Setup ──────────────────────────────────────────────────────────────
@@ -3523,7 +3550,7 @@ static const luaL_Reg FrameMethods[] =
 	{"SetItem", LF_TooltipSetItem},
 	{"GetAnchorType", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); const auto* S=C && C->FrameManager?C->FrameManager->GetTooltipState(GetFrameHandle(L,1)):nullptr; lua_pushstring(L,S?TCHAR_TO_UTF8(*S->AnchorType):"ANCHOR_NONE"); return 1; }},
 	{"SetAnchorType", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->TooltipSetAnchorType(GetFrameHandle(L,1),UTF8_TO_TCHAR(luaL_checkstring(L,2)),luaL_optnumber(L,3,0),luaL_optnumber(L,4,0)); return 0; }},
-	{"FadeOut", [](lua_State* L) -> int { return 0; }},
+	{"FadeOut", LF_Hide},
 
 	// Cooldown frame
 	{"SetReverse", [](lua_State* L) -> int { return 0; }},

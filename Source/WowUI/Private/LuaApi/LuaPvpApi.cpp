@@ -180,7 +180,12 @@ void WowLuaApi::UpdatePvpState(lua_State* L)
     const auto Event=[&](const TCHAR* Name) {C->EventSystem->FireEvent(Name);};
     const auto* LocalPlayer=Player(C); const uint32 Level=LocalPlayer?uint32(LocalPlayer->GetLevel()):0;
     if(Level!=V.Level) {V.Level=Level; Event(TEXT("PVPQUEUE_ANYWHERE_UPDATE_AVAILABLE"));}
-    if(V.Revision!=P.Revision) {V.Revision=P.Revision; Event(TEXT("UPDATE_BATTLEFIELD_STATUS"));}
+    if(V.Revision!=P.Revision)
+    {
+        V.Revision=P.Revision;
+        // The stock invitation popup only opens for the supplied queue index.
+        for(int32 I=1;I<=3;++I) C->EventSystem->FireEventTyped(TEXT("UPDATE_BATTLEFIELD_STATUS"),[I](lua_State* S){lua_pushinteger(S,I); return 1;});
+    }
     if(V.List!=P.ListRevision) {V.List=P.ListRevision; if(!V.Selected || !P.List.Source) {V.Selected=P.List.Type; V.Instance=0;} if(P.List.Type==V.Selected) Event(P.List.Source?TEXT("PVPQUEUE_ANYWHERE_SHOW"):TEXT("BATTLEFIELDS_SHOW"));}
     for(const auto& E:P.WorldEvents) if(E.Sequence>V.WorldEvent)
     {

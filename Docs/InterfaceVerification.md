@@ -32,6 +32,15 @@ the temporary account, removes its credential file, and compares hashes of all
 pre-existing characters and their inventory records. Failure leaves a recovery
 fixture instead of deleting unrelated data or concealing a state difference.
 
+Multiplayer probes accept indexed coordinator-owned peers. Every additional
+peer has a fresh private fixture below the primary UserDir, its own registration
+proof and an explicit cleanup guard. Every connection is stopped and deleted
+before success; the outer coordinator closes all account guards. Arena damage
+and completion require exactly four distinct owned players, active two-player
+arena queues, the same map and two opposing team members. They cannot target
+an existing character. Pointer movement uses the game's UI callbacks, and
+captures continue to use Unreal's screenshot API.
+
 The first lifecycle check successfully creates and prepares the character,
 autologs into the rendered world, captures its original HUD with Unreal's
 screenshot API, and deletes the character/account. All pre-existing character

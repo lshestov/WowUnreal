@@ -129,10 +129,10 @@ Full WoW UI compatibility is **not complete**. In particular:
 
 - Specialized legacy frame/region methods and broader addon compatibility. Visible panels and
   readable category lists do not establish complete visual parity.
-- Advanced macro commands such as cast sequences, complete conditional syntax,
-  additional combat event families. See
+- Uncovered macro condition variants and additional combat event families.
+  Cast sequences and acknowledged random actions are implemented. See
   [macro support](Macros.md) and [combat-log support](CombatLog.md).
-- Native complete-match PvP verification, LFG and achievement panels/protocol.
+- LFG and achievement panels/protocol.
   Unit relationships and selection colours are implemented separately; see
   [faction/reputation reactions](UnitReactions.md).
 - Legacy options without an engine-side implementation; persisting a CVar

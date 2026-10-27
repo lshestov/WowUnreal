@@ -39,6 +39,24 @@ Wintergrasp queue and entry invitations retain the actual battle ID, zone and
 deadline. Queue responses and exits publish typed arguments to the original
 popups. The wait timer reads the server world-state clock.
 
+Queue changes send numeric one-based UPDATE_BATTLEFIELD_STATUS arguments,
+which the stock confirmation popup requires. IsInInstance/GetInstanceInfo read
+the actual Map.dbc type, difficulty and active arena size, so the original
+Blizzard_ArenaUI can show its frames. Absent unit GUIDs return nil; unused arena
+slots remain hidden. Arena-frame and cast-bar options default to enabled and
+honor the named CVAR_UPDATE event supplied by the original settings controls.
+
+Secure button attribute lookups include wildcard and unmodified fallbacks.
+Their original Lua handlers own physical clicks; native action dispatch is a
+fallback for buttons without an OnClick script. This avoids sending an action
+twice. The world controller follows selections made by Lua unit buttons without
+repeating the network request or target-change event. Unit selection capsules
+remain hittable by the pointer while permitting overlapping player spawn points.
+
+Unit tooltips show real identity, guild when available, level, race and class.
+GetUnit returns name and token; SetUnit shows a valid unit and reports success.
+Changing owners clears obsolete anchors, and FadeOut dismisses the tooltip.
+
 ## Verification scope
 
 Native disposable-account routes verify seven inspected images over 40 steps:
@@ -54,6 +72,16 @@ and remain unchanged.
 Packet tests reject every truncated queue/scoreboard prefix, trailing bytes,
 duplicate/oversized entries and late session state. UI tests cover real honor
 tuples, winner/faction semantics, anonymous parentKey descendants, independent
-click/wheel routing and changing arena health. Complete rendered matches,
-opponent visibility transitions and final scoreboards still need a native
-multiplayer route; opening the windows alone does not verify those cases.
+click/wheel routing and changing arena health.
+
+A four-account native route exercises a real two-versus-two skirmish: normal
+action-button casting (one network request), queue confirmation and physical
+entry, destination collision, exactly two visible opponent frames, physical
+target selection, real server damage and the matching health bar, stock frame
+options, a four-player final scoreboard, the original Leave Arena button and
+return to the world. Completion uses GM damage/kills only after verifying all
+four active participants belong to that disposable fixture. Accounts and
+characters are deleted and pre-existing character/inventory hashes preserved.
+The extended route also checks the unit tooltip's identity and width and that
+it closes when the pointer leaves. World art and gameobject animation on each
+arena are separate from this UI/protocol verification.

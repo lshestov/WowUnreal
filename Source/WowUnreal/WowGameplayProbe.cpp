@@ -72,7 +72,8 @@ struct FWowGameplayProbe
     TMap<FString,TArray<double>> Profile;
     TSharedPtr<FJsonObject> Inspections=MakeShared<FJsonObject>();
     TSharedPtr<FWowProbeInputGuard> InputGuard;
-    TUniquePtr<FWowUiTestPeer> Peer;
+    TUniquePtr<FWowUiTestPeer> Peers[3];
+    FWowUiTestPeer* Peer=nullptr;
     TSharedPtr<FJsonObject> FinalReport;
     int32 PeerExitCode=-1;
 
@@ -123,9 +124,11 @@ struct FWowGameplayProbe
         FString Text; FJsonSerializer::Serialize(Report,TJsonWriterFactory<>::Create(&Text));
         if (!Output.IsEmpty()) FFileHelper::SaveStringToFile(Text,*(Output/TEXT("probe.json")));
         UE_LOG(LogTemp,Log,TEXT("GameplayProbe: %s step=%d reason=%s"),Passed?TEXT("PASS"):TEXT("FAIL"),Index,*Failure);
-        if(Peer)
+        bool HasPeers=false; for(const auto& TestPeer:Peers) HasPeers|=bool(TestPeer);
+        if(HasPeers)
         {
-            FinalReport=Report; PeerExitCode=Passed?0:3; Peer->Stop();
+            FinalReport=Report; PeerExitCode=Passed?0:3;
+            for(const auto& TestPeer:Peers) if(TestPeer) TestPeer->Stop();
             if(!Passed && !Output.IsEmpty()) FScreenshotRequest::RequestScreenshot(Output/TEXT("failure.png"),true,false);
             FailureExitAt=FPlatformTime::Seconds()+(Passed?0:2); return;
         }
@@ -188,14 +191,20 @@ struct FWowGameplayProbe
 
     void Tick(AWowGameplayController& C)
     {
-        if(Peer) Peer->Tick();
+        for(const auto& TestPeer:Peers) if(TestPeer) TestPeer->Tick();
         if (bFinished)
         {
-            if(Peer && PeerExitCode>=0)
+            if(PeerExitCode>=0)
             {
-                if(!Peer->Complete() || FPlatformTime::Seconds()<FailureExitAt) return;
-                FinalReport->SetBoolField(TEXT("peerCleanup"),Peer->Error().IsEmpty());
-                if(!Peer->Error().IsEmpty()) {FinalReport->SetBoolField(TEXT("passed"),false); FinalReport->SetStringField(TEXT("failure"),Peer->Error()); PeerExitCode=3;}
+                if(FPlatformTime::Seconds()<FailureExitAt) return;
+                FString PeerFailure;
+                for(const auto& TestPeer:Peers) if(TestPeer)
+                {
+                    if(!TestPeer->Complete()) return;
+                    if(!TestPeer->Error().IsEmpty()) PeerFailure=TestPeer->Error();
+                }
+                FinalReport->SetBoolField(TEXT("peerCleanup"),PeerFailure.IsEmpty());
+                if(!PeerFailure.IsEmpty()) {FinalReport->SetBoolField(TEXT("passed"),false); FinalReport->SetStringField(TEXT("failure"),PeerFailure); PeerExitCode=3;}
                 FString Text; FJsonSerializer::Serialize(FinalReport.ToSharedRef(),TJsonWriterFactory<>::Create(&Text)); FFileHelper::SaveStringToFile(Text,*(Output/TEXT("probe.json")));
                 FPlatformMisc::RequestExitWithStatus(false,uint8(PeerExitCode)); return;
             }
@@ -203,7 +212,7 @@ struct FWowGameplayProbe
             return;
         }
         const double Now=FPlatformTime::Seconds();
-        if(Peer && !Peer->Error().IsEmpty()) Failure=Peer->Error();
+        for(const auto& TestPeer:Peers) if(TestPeer && !TestPeer->Error().IsEmpty()) Failure=TestPeer->Error();
         if (!Failure.IsEmpty()) { Finish(C,false); return; }
         if (Now-Started>600) { Failure=TEXT("Overall timeout"); Finish(C,false); return; }
         auto* Connection=C.ConnectionManager.Get();
@@ -217,6 +226,9 @@ struct FWowGameplayProbe
         if (bJumpRequested) if (const auto* Character=Cast<ACharacter>(C.GetPawn()); Character && Character->GetCharacterMovement()->IsFalling()) bJumpObserved=true;
         if (Index>=Steps.Num()) { Finish(C,true); return; }
         const auto Step=Steps[Index]->AsObject();
+        double PeerIndex=0; Step->TryGetNumberField(TEXT("peer"),PeerIndex);
+        if(PeerIndex<0 || PeerIndex>=UE_ARRAY_COUNT(Peers) || FMath::FloorToDouble(PeerIndex)!=PeerIndex) {Failure=TEXT("Invalid QA peer index"); Finish(C,false); return;}
+        Peer=Peers[int32(PeerIndex)].Get();
         const FString Op=Step->GetStringField(TEXT("op"));
         double Timeout=60; Step->TryGetNumberField(TEXT("timeout"),Timeout);
         if (StepStarted==0) { StepStarted=Now; UE_LOG(LogTemp,Log,TEXT("GameplayProbe: step %d %s"),Index,*Op); }
@@ -227,15 +239,18 @@ struct FWowGameplayProbe
         {
             if(!Peer)
             {
-                Peer=MakeUnique<FWowUiTestPeer>();
-                if(!Peer->Start(Spec->GetStringField(TEXT("peerFixture")),Handler.EntityManager.LocalPlayerGuid,Op==TEXT("peer_cleanup"))) {Failure=TEXT("Invalid coordinator-owned QA peer fixture"); Finish(C,false); return;}
+                FString Fixture;
+                if(PeerIndex==0) Spec->TryGetStringField(TEXT("peerFixture"),Fixture);
+                else {const TArray<TSharedPtr<FJsonValue>>* Extra=nullptr; if(Spec->TryGetArrayField(TEXT("extraPeerFixtures"),Extra) && Extra->IsValidIndex(int32(PeerIndex)-1)) Fixture=(*Extra)[int32(PeerIndex)-1]->AsString();}
+                Peers[int32(PeerIndex)]=MakeUnique<FWowUiTestPeer>(); Peer=Peers[int32(PeerIndex)].Get();
+                if(!Peer->Start(Fixture,Handler.EntityManager.LocalPlayerGuid,Op==TEXT("peer_cleanup"))) {Failure=TEXT("Invalid coordinator-owned QA peer fixture"); Finish(C,false); return;}
             }
             if(Op==TEXT("peer_cleanup")) Peer->Stop();
             Done=Op==TEXT("peer_cleanup")?Peer->Complete():Peer->Ready();
             if(Done && Op==TEXT("peer_start"))
             {
                 Connection->SendNameQuery(int64(Peer->Guid()));
-                C.UIManager->GetLuaVM()->ExecuteString(FString::Printf(TEXT("QAUiPeerGuid=%llu; QAUiPeerName='%s'"),Peer->Guid(),*Peer->Get()->GetCharacterName()));
+                C.UIManager->GetLuaVM()->ExecuteString(FString::Printf(TEXT("QAUiPeerGuid=%llu; QAUiPeerName='%s'; QAUiPeerGuids=QAUiPeerGuids or {}; QAUiPeerNames=QAUiPeerNames or {}; QAUiPeerGuids[%d]=QAUiPeerGuid; QAUiPeerNames[%d]=QAUiPeerName"),Peer->Guid(),*Peer->Get()->GetCharacterName(),int32(PeerIndex)+1,int32(PeerIndex)+1));
             }
         }
         else if(Op==TEXT("peer_target")) {if(Peer && Peer->Ready() && Handler.EntityManager.Find(Peer->Guid())) {C.SetTarget(Peer->Guid()); Done=true;}}
@@ -253,7 +268,38 @@ struct FWowGameplayProbe
             else if(Field==TEXT("item_count")) {Value=0; const uint32 Entry=Step->GetIntegerField(TEXT("entry")); for(const auto* Item:N->PacketHandler.EntityManager.GetInventoryItems()) if(Item->Entry==Entry) Value+=Item->GetStackCount();}
             if(Value!=int64(Step->GetNumberField(TEXT("value")))) {Failure=TEXT("QA peer assertion differs from server state"); Finish(C,false); return;} Done=true;
         }
+        else if(Op==TEXT("arena_finish_owned") || Op==TEXT("arena_damage_owned"))
+        {
+            const auto ActiveQueue=[](const FWowPacketHandler& H)->const FWowPvpState::FQueue* {for(const auto& Q:H.Pvp.Queues) if(Q.Status==3 && Q.Arena==2) return &Q; return nullptr;};
+            const auto* MainQueue=ActiveQueue(Handler);
+            TArray<FWowUiTestPeer*> Opponents;
+            TSet<uint64> OwnedGuids={Handler.EntityManager.LocalPlayerGuid};
+            bool Valid=MainQueue!=nullptr;
+            for(const auto& TestPeer:Peers)
+            {
+                const auto* Queue=TestPeer && TestPeer->Ready()?ActiveQueue(TestPeer->Get()->PacketHandler):nullptr;
+                Valid&=Queue && TestPeer->Get()->PacketHandler.CurrentMapId==Handler.CurrentMapId;
+                if(TestPeer) OwnedGuids.Add(TestPeer->Guid());
+                if(Queue && MainQueue && Queue->Team!=MainQueue->Team) Opponents.Add(TestPeer.Get());
+            }
+            if(!Valid || OwnedGuids.Num()!=4 || Opponents.Num()!=2) {Failure=TEXT("Arena finish requires exactly four owned QA players on the same map"); Finish(C,false); return;}
+            // A real server match result with all four score rows. The guard
+            // above excludes every non-fixture character before either kill.
+            if(Op==TEXT("arena_damage_owned"))
+            {
+                if(!Opponents.ContainsByPredicate([&](const auto* Opponent){return Opponent->Guid()==C.TargetGuid;})) {Failure=TEXT("Damage target is not an owned arena opponent"); Finish(C,false); return;}
+                Connection->SendChatMessage(TEXT(".damage 20"));
+            }
+            else for(auto* Opponent:Opponents) {C.SetTarget(Opponent->Guid()); Connection->SendChatMessage(TEXT(".die"));}
+            Done=true;
+        }
         else if (Op==TEXT("wait")) Done=Now-StepStarted>=Step->GetNumberField(TEXT("seconds"));
+        else if(Op==TEXT("move_pointer"))
+        {
+            int32 Width=0,Height=0; C.GetViewportSize(Width,Height);
+            const FVector2D Point(FMath::Clamp(Step->GetNumberField(TEXT("x")),0.,1.)*Width,FMath::Clamp(Step->GetNumberField(TEXT("y")),0.,1.)*Height);
+            C.GameplayProbePointer=Point; C.UIManager->GetFrameManager()->UpdateMouseHover(Point.X,Point.Y); Done=true;
+        }
         else if(Op==TEXT("wait_character_select")) Done=Connection->GetState()==EWowSessionState::WorldHaveCharList;
         else if(Op==TEXT("enter_character"))
         {
@@ -447,6 +493,12 @@ struct FWowGameplayProbe
         }
         else if (Op==TEXT("bags")) { C.UIManager->ToggleBagWindow(); C.UIManager->ToggleCharacterPanel(); Done=true; }
         else if (Op==TEXT("lua")) { Done=C.UIManager->GetLuaVM()->ExecuteString(Step->GetStringField(TEXT("code")),TEXT("=GameplayProbe")); if (!Done) { Failure=TEXT("Lua assertion failed"); Finish(C,false); return; } }
+        else if(Op==TEXT("lua_wait"))
+        {
+            auto* VM=C.UIManager->GetLuaVM();
+            if(!VM->ExecuteString(TEXT("QAProbeCondition=tostring(not not (")+Step->GetStringField(TEXT("condition"))+TEXT("))"),TEXT("=GameplayProbeCondition"))) {Failure=TEXT("Lua wait condition failed"); Finish(C,false); return;}
+            Done=VM->GetGlobalString(TEXT("QAProbeCondition"))==TEXT("true");
+        }
         else if(Op==TEXT("drop_action_cursor")) { Done=Connection->DropActionCursor(); if(!Done) { Failure=TEXT("No action is held by the cursor"); Finish(C,false); return; } }
         else if(Op==TEXT("request_delete_cursor")) { Done=C.RequestCursorItemDeletion(); if(!Done) { Failure=TEXT("No valid item is held by the cursor"); Finish(C,false); return; } }
         else if(Op==TEXT("click_link") || Op==TEXT("hover_link"))
@@ -534,7 +586,7 @@ struct FWowGameplayProbe
             const auto Rect=Handle>=0?Frames->GetLayoutRect(Handle):Frames->GetRegionRect(Name);
             auto Row=MakeShared<FJsonObject>(); Row->SetNumberField(TEXT("x"),Rect.X); Row->SetNumberField(TEXT("y"),Rect.Y); Row->SetNumberField(TEXT("width"),Rect.Z); Row->SetNumberField(TEXT("height"),Rect.W);
             Row->SetStringField(TEXT("hit"),Frames->GetFrameName(Frames->HitTestFrames((Rect.X+Rect.Z*.5f)*Frames->GetScreenScale(),(Rect.Y+Rect.W*.5f)*Frames->GetScreenScale())));
-            if(const auto* Def=Frames->GetFrameDef(Handle)) { Row->SetNumberField(TEXT("level"),Def->FrameLevel); Row->SetNumberField(TEXT("strata"),int32(Def->Strata)); }
+            if(const auto* Def=Frames->GetFrameDef(Handle)) { Row->SetNumberField(TEXT("level"),Def->FrameLevel); Row->SetNumberField(TEXT("strata"),int32(Def->Strata)); Row->SetBoolField(TEXT("hidden"),Def->bHidden); Row->SetBoolField(TEXT("hiddenSpecified"),Def->bHiddenSpecified); Row->SetBoolField(TEXT("drawn"),Frames->IsFrameDrawn(Handle)); }
             auto* Text=Handle>=0?Frames->GetPrimaryTextWidget(Handle):Frames->GetNamedFontString(Name);
             if(Text)
             {

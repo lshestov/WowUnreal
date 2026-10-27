@@ -94,7 +94,8 @@ int SetCvar(lua_State* L)
     if(Changed)
     {
         ApplyNative(L,Name,Value);
-        if(auto* C=WowLuaApi::GetContext(L); C && C->EventSystem) C->EventSystem->FireEvent(TEXT("CVAR_UPDATE"),{Name.ToUpper(),Value});
+        const FString Event=lua_isstring(L,3)?UTF8_TO_TCHAR(lua_tostring(L,3)):Name.ToUpper();
+        if(auto* C=WowLuaApi::GetContext(L); C && C->EventSystem) C->EventSystem->FireEvent(TEXT("CVAR_UPDATE"),{Event,Value});
     }
     return 0;
 }

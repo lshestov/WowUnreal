@@ -1068,6 +1068,9 @@ void AWowGameplayController::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 	TickGameplayProbe();
+	// Lua unit buttons and /target update the shared network selection. Keep
+	// world interaction/highlights in sync without sending or publishing twice.
+	if(ConnectionManager && TargetGuid!=uint64(ConnectionManager->GetTargetGuid())) SetTarget(uint64(ConnectionManager->GetTargetGuid()),false);
 	if(UIManager) UIManager->ProcessPendingReload();
 	if(ConnectionManager && ConnectionManager->GetState()!=EWowSessionState::WorldInGame) return;
     if(ConnectionManager) ConnectionManager->RefreshItemCursor();
@@ -1816,7 +1819,9 @@ void AWowGameplayController::SpawnEntityModel(const FWowEntity& Entity)
 			TargetCapsule->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 			TargetCapsule->SetCollisionObjectType(ECC_Pawn);
 			TargetCapsule->SetCollisionResponseToAllChannels(ECR_Ignore);
-			TargetCapsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+			// Unit hitboxes support selection. WoW characters can overlap, which
+			// is essential at shared party/arena spawn points.
+			TargetCapsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
 			TargetCapsule->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 			TargetCapsule->ShapeColor = FColor::Green;
 			TargetCapsule->SetHiddenInGame(true);
@@ -3171,14 +3176,14 @@ void AWowGameplayController::UpdateTargetFrame()
 	TargetFrameText->SetColorAndOpacity(TargetColor);
 }
 
-void AWowGameplayController::SetTarget(uint64 NewTargetGuid)
+void AWowGameplayController::SetTarget(uint64 NewTargetGuid, bool bUpdateConnection)
 {
 	uint64 OldTargetGuid = TargetGuid;
 	TargetGuid = NewTargetGuid;
-	if (ConnectionManager) ConnectionManager->SendSetSelection(static_cast<int64>(TargetGuid));
+	if (ConnectionManager && bUpdateConnection) ConnectionManager->SendSetSelection(static_cast<int64>(TargetGuid));
 
 	// Fire target change event
-	if (OldTargetGuid != NewTargetGuid)
+	if (OldTargetGuid != NewTargetGuid && bUpdateConnection)
 	{
 		FireUIEvent(TEXT("PLAYER_TARGET_CHANGED"));
 	}

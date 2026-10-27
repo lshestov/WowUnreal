@@ -337,6 +337,7 @@ bool FHudPvpState::RunTest(const FString&)
     const FTCHARToUTF8 Utf8(*Xml); TArray<uint8> Bytes; Bytes.Append(reinterpret_cast<const uint8*>(Utf8.Get()),Utf8.Length()); const auto Definitions=FWowFrameXmlParser::ParseXml(Bytes,TEXT("PvpRow"));
     if(!TestEqual(TEXT("Original anonymous status child parses"),Definitions.Num(),1)) return false;
     F.Frames.CreateFrame(Definitions[0].FrameDef); TestTrue(TEXT("Anonymous parentKey frames and their nested texture exist before the row OnLoad"),F.Lua.ExecuteString(TEXT("assert(PvpParentKeyReady and PvpRow.status.texture:GetParent()==PvpRow.status)")));
+    TestTrue(TEXT("Secure unit buttons resolve wildcard action attributes and plain unit fallbacks"),F.Lua.ExecuteString(TEXT("PvpRow:SetAttribute('*type1','target'); PvpRow:SetAttribute('unit','arena1'); assert(PvpRow:GetAttribute('','type','1')=='target' and PvpRow:GetAttribute('','unit','1')=='arena1'); PvpRow:SetAttribute('shift-type1','focus'); assert(PvpRow:GetAttribute('shift-','type','1')=='focus'); PvpRow:SetAttribute('shift-type1',false); assert(PvpRow:GetAttribute('shift-','type','1')==false and PvpRow:GetAttribute('missing')==nil)")));
     TestTrue(TEXT("Create an original-style wheel-only overlay above a list button"),F.Lua.ExecuteString(TEXT("PvpClickable=CreateFrame('Button','PvpClickable',UIParent); PvpClickable:SetSize(200,60); PvpClickable:SetPoint('CENTER'); PvpClickable:SetFrameLevel(10); PvpWheelOverlay=CreateFrame('ScrollFrame','PvpWheelOverlay',UIParent); PvpWheelOverlay:SetSize(200,60); PvpWheelOverlay:SetPoint('CENTER'); PvpWheelOverlay:SetFrameLevel(11); PvpWheelOverlay:EnableMouseWheel(true); PvpWheelOverlay:SetScript('OnMouseWheel',function(self,delta) PvpWheelDelta=delta end)")));
     F.Frames.RefreshLayout(); const auto Rect=F.Frames.GetLayoutRect(F.Frames.FindFrame(TEXT("PvpClickable"))); const float X=(Rect.X+20)*F.Frames.GetScreenScale(),Y=(Rect.Y+20)*F.Frames.GetScreenScale();
     TestEqual(TEXT("Wheel-only overlays do not steal clicks from list buttons"),F.Frames.HitTestFrames(X,Y),F.Frames.FindFrame(TEXT("PvpClickable")));
@@ -354,6 +355,10 @@ bool FHudPvpState::RunTest(const FString&)
         assert(GetBattlefieldEstimatedWaitTime(1)==40000 and GetBattlefieldTimeWaited(1)>=1200)
         assert(GetBattlefieldWinner()==nil and GetWorldPVPQueueStatus(1)=='none')
     )LUA")));
+    TestTrue(TEXT("Watch the stock queue-index event contract"),F.Lua.ExecuteString(TEXT("PvpQueueEvents={}; PvpQueueWatch=CreateFrame('Frame'); PvpQueueWatch:RegisterEvent('UPDATE_BATTLEFIELD_STATUS'); PvpQueueWatch:SetScript('OnEvent',function(self,event,index) assert(type(index)=='number' and index>=1 and index<=3); PvpQueueEvents[index]=true end)")));
+    WowLuaApi::UpdatePvpState(F.Lua.GetState());
+    TestTrue(TEXT("All queue status notifications carry a numeric one-based index for invitation popups"),F.Lua.ExecuteString(TEXT("assert(PvpQueueEvents[1] and PvpQueueEvents[2] and PvpQueueEvents[3]); PvpQueueWatch:UnregisterAllEvents()")));
+    TestTrue(TEXT("Arena frame defaults and stock named CVar notifications are functional"),F.Lua.ExecuteString(TEXT("assert(GetCVarDefault('showArenaEnemyFrames')=='1' and GetCVarDefault('showArenaEnemyCastbar')=='1'); ArenaCvarWatch=CreateFrame('Frame'); ArenaCvarWatch:RegisterEvent('CVAR_UPDATE'); ArenaCvarWatch:SetScript('OnEvent',function(self,event,name,value) ArenaCvarEvent=name; ArenaCvarValue=value end); SetCVar('showArenaEnemyFrames',0,'SHOW_ARENA_ENEMY_FRAMES_TEXT'); assert(ArenaCvarEvent=='SHOW_ARENA_ENEMY_FRAMES_TEXT' and ArenaCvarValue=='0'); SetCVar('showArenaEnemyFrames',1,'SHOW_ARENA_ENEMY_FRAMES_TEXT'); assert(ArenaCvarValue=='1'); ArenaCvarWatch:UnregisterAllEvents()")));
     H.Pvp.Winner=0; H.Pvp.ScoreArena=true; H.Pvp.Scores.Add({42,3,0,0,0,456,789,1,{}}); H.PlayerNameCache.Add(42,TEXT("Enemy")); H.PlayerIdentities.Add(42,{2,0,1,TEXT("")});
     TestTrue(TEXT("Winner zero remains a winner, arena faction filtering preserves actual score rows"),F.Lua.ExecuteString(TEXT(R"LUA(
         LOCALIZED_CLASS_NAMES_MALE={WARRIOR='Warrior'}
@@ -365,6 +370,9 @@ bool FHudPvpState::RunTest(const FString&)
         SetBattlefieldScoreFaction(nil); assert(GetNumBattlefieldScores()==1)
     )LUA")));
     F.Context.ArenaOpponents={42}; auto& Enemy=H.EntityManager.PromoteToTyped(42,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER); Enemy.SetField(UnitField::BYTES_0,2|(1u<<8)|(1u<<24)); Enemy.SetField(UnitField::HEALTH,123); Enemy.SetField(UnitField::MAXHEALTH,456);
+    TestTrue(TEXT("Absent arena slots and pets have nil GUIDs instead of a truthy zero string"),F.Lua.ExecuteString(TEXT("assert(UnitGUID('arena1')=='0x000000000000002A' and UnitGUID('arena2')==nil and UnitGUID('arenapet1')==nil)")));
+    Enemy.SetField(UnitField::LEVEL,80);
+    TestTrue(TEXT("Unit tooltips expose real names/tokens and replace old owner anchors"),F.Lua.ExecuteString(TEXT("ArenaTooltip=CreateFrame('GameTooltip','ArenaTooltip',UIParent); ArenaTooltip:SetOwner(PvpRow,'ANCHOR_RIGHT'); ArenaTooltip:SetOwner(UIParent,'ANCHOR_NONE'); ArenaTooltip:SetPoint('BOTTOMRIGHT',UIParent,'BOTTOMRIGHT',-13,13); assert(ArenaTooltip:SetUnit('arena1') and ArenaTooltip:IsVisible()); local name,unit=ArenaTooltip:GetUnit(); assert(name=='Enemy' and unit=='arena1' and ArenaTooltip:NumLines()>=2 and ArenaTooltip:GetWidth()<400); assert(ArenaTooltipTextLeft1:GetText()=='Enemy'); ArenaTooltip:FadeOut(); assert(not ArenaTooltip:IsVisible() and not ArenaTooltip:IsOwned(UIParent) and ArenaTooltip:GetOwner()==nil); ArenaTooltip:SetOwner(UIParent,'ANCHOR_NONE'); assert(not ArenaTooltip:SetUnit('arena5') and not ArenaTooltip:IsVisible() and ArenaTooltip:GetUnit()==nil and not ArenaTooltip:IsOwned(UIParent))")));
     TestTrue(TEXT("Arena tokens resolve real opponent health and identity"),F.Lua.ExecuteString(TEXT("assert(GetNumArenaOpponents()==1 and UnitName('arena1')=='Enemy' and UnitHealth('arena1')==123); ArenaHealthWatch=CreateFrame('Frame'); ArenaHealthWatch:RegisterEvent('UNIT_HEALTH'); ArenaHealthWatch:RegisterEvent('UNIT_RAGE'); ArenaHealthWatch:SetScript('OnEvent',function(self,event,unit) if unit=='arena1' then ArenaHealth=UnitHealth(unit) end end)")));
     WowLuaApi::UpdateGroupState(F.Lua.GetState()); TestTrue(TEXT("Arena frames receive initial unit health events"),F.Lua.ExecuteString(TEXT("assert(ArenaHealth==123)")));
     Enemy.SetField(UnitField::HEALTH,99); WowLuaApi::UpdateGroupState(F.Lua.GetState()); TestTrue(TEXT("Subsequent opponent damage updates the live arena frame"),F.Lua.ExecuteString(TEXT("assert(ArenaHealth==99)")));
@@ -681,6 +689,10 @@ bool FGameplaySecureAction::RunTest(const FString&)
     F.Frames.OnSecureActionDispatch.BindLambda([&Slot](int32 Value){Slot=Value;});
     F.Frames.DispatchClick(F.Frames.FindFrame(TEXT("BonusActionButton1")),TEXT("LeftButton"),false);
     TestEqual(TEXT("Mouse action uses current page, not a fixed battle slot"),Slot,84);
+    Slot=INDEX_NONE;
+    TestTrue(TEXT("A stock-style Lua click handler owns its dispatch"),F.Lua.ExecuteString(TEXT("SecureLuaClicks=0; PageButton:SetScript('OnClick',function() SecureLuaClicks=SecureLuaClicks+1 end)")));
+    F.Frames.DispatchClick(F.Frames.FindFrame(TEXT("BonusActionButton1")),TEXT("LeftButton"),false);
+    TestTrue(TEXT("One physical click invokes Lua once without an additional native action"),Slot==INDEX_NONE && F.Lua.ExecuteString(TEXT("assert(SecureLuaClicks==1)")));
     return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudLifecycle,"WowUnreal.Hud.VisibilityAndInitialization",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)

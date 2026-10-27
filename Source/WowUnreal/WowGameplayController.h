@@ -245,7 +245,7 @@ public:
     void UpdateTargetFrame();
 
     /** Set target and update UI highlighting */
-    void SetTarget(uint64 NewTargetGuid);
+    void SetTarget(uint64 NewTargetGuid, bool bUpdateConnection=true);
 
     /** Handle keyboard input for action bar slots */
     void HandleActionBarInput();

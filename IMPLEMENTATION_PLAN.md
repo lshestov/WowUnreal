@@ -516,13 +516,16 @@ build, automation, native autologin and rendered screenshot verification):
     and 45-step physical tabard routes with 13 validated, inspected captures.
     Disposable accounts/guilds removed, existing characters unchanged.
     See Docs/GuildInspectTabard.md.
-  - [ ] Complete PvP/battleground panels and queue/status/scoreboard protocol.
+  - [?] Complete PvP/battleground panels and queue/status/scoreboard protocol.
     - [x] Original browser/honor tabs, NPC arena queue, team roster controls,
       typed queue/score/world-PvP packets and live arena unit events. Verified
       Windows build, focused protocol/UI checks, 40-step BG queue and 47-step
       arena-team routes with 12 validated, inspected captures. See Docs/Pvp.md.
-    - [ ] Verify rendered multiplayer matches, invitation entry and final scores.
-      - [?] Load the new server map and collision on far transfers; preserve
+    - [?] Verify rendered multiplayer matches, invitation entry and final scores.
+      Verified native 107-step four-account skirmish with nine inspected
+      captures: physical action/entry/unit/leave buttons, live health bars,
+      compact tooltips, frame options, final scores and return to the world.
+      - [x] Load the new server map and collision on far transfers; preserve
         quests/inventory, clear old visible objects and acknowledge world entry.
   - [ ] Complete dungeon-finder browsing, role/queue/proposal state and controls.
   - [ ] Complete achievements, criteria, tracking and comparison state.

@@ -475,10 +475,28 @@ uint32 WowLuaApi::CombatLogFlags(FWowLuaContext* C,uint64 Guid)
 // ─── Instance / Group ───────────────────────────────────────────────────────────
 static int L_IsInInstance(lua_State* L)
 {
-    // Return false, "none" for now (not in instance, no instance type)
-    lua_pushboolean(L, false);
-    lua_pushstring(L, "none");
+    const auto* C=WowLuaApi::GetContext(L);
+    const auto* Map=C && C->ConnectionManager?FDbcStore::Get().Maps().GetById(C->ConnectionManager->PacketHandler.CurrentMapId):nullptr;
+    const char* Types[]={"none","party","raid","pvp","arena"};
+    const uint32 Type=Map && Map->MapType<UE_ARRAY_COUNT(Types)?Map->MapType:0;
+    lua_pushboolean(L,Type!=0); lua_pushstring(L,Types[Type]);
     return 2;
+}
+static int L_GetInstanceInfo(lua_State* L)
+{
+    const auto* C=WowLuaApi::GetContext(L); const auto* H=C && C->ConnectionManager?&C->ConnectionManager->PacketHandler:nullptr;
+    const auto* Map=H?FDbcStore::Get().Maps().GetById(H->CurrentMapId):nullptr;
+    const char* Types[]={"none","party","raid","pvp","arena"};
+    const uint32 Type=Map && Map->MapType<UE_ARRAY_COUNT(Types)?Map->MapType:0;
+    if(Type) lua_pushstring(L,TCHAR_TO_UTF8(*Map->Name)); else lua_pushnil(L);
+    lua_pushstring(L,Types[Type]);
+    const uint32 Difficulty=H?(Type==2?H->RaidDifficulty:Type==1?H->DungeonDifficulty:0)+1:1;
+    lua_pushinteger(L,Difficulty);
+    if(Type==1 || Type==2) {const FString Key=Type==2?FString::Printf(TEXT("RAID_DIFFICULTY%d"),Difficulty):FString::Printf(TEXT("DUNGEON_DIFFICULTY%d"),Difficulty); lua_getglobal(L,TCHAR_TO_UTF8(*Key));}
+    else lua_pushstring(L,"");
+    uint32 Max=Type?Map->MaxPlayers:0;
+    if(Type==4 && H) for(const auto& Q:H->Pvp.Queues) if(Q.Status==3 && Q.Arena) Max=Q.Arena*2;
+    lua_pushinteger(L,Max); lua_pushinteger(L,Type?Difficulty:0); lua_pushboolean(L,false); return 7;
 }
 
 static int L_GetNumPartyMembers(lua_State* L)
@@ -994,16 +1012,16 @@ static int L_UnitExists(lua_State* L)
 
 static int L_UnitGUID(lua_State* L)
 {
-    FWowEntity* Entity = ResolveUnit(L);
-    if (Entity)
+    const uint64 Guid=ResolveUnitGuid(L);
+    if (Guid)
     {
         char buf[32];
-        snprintf(buf, sizeof(buf), "0x%016llX", static_cast<unsigned long long>(Entity->Guid));
+        snprintf(buf, sizeof(buf), "0x%016llX", static_cast<unsigned long long>(Guid));
         lua_pushstring(L, buf);
     }
     else
     {
-        lua_pushstring(L, "0x0000000000000000");
+        lua_pushnil(L);
     }
     return 1;
 }
@@ -3435,6 +3453,8 @@ static FString GetDefaultCVarValue(const FString& Name)
 {
     static const TMap<FString, FString> ExplicitDefaults = {
         { TEXT("questpoi"), TEXT("1") },
+        { TEXT("showarenaenemyframes"), TEXT("1") },
+        { TEXT("showarenaenemycastbar"), TEXT("1") },
         { TEXT("minimaptrackedinfo"), TEXT("") },
         { TEXT("minimapzoom"), TEXT("0") },
         { TEXT("minimapinsidezoom"), TEXT("0") },
@@ -6375,16 +6395,7 @@ lua_pushboolean(L2, PLATFORM_MAC);
         lua_pushboolean(L2, false);
         return 1;
     });
-    lua_register(L, "GetInstanceInfo", [](lua_State* L2) -> int {
-        lua_pushnil(L2);             // name
-        lua_pushstring(L2, "none");  // instanceType
-        lua_pushnumber(L2, 1);       // difficulty
-        lua_pushstring(L2, "");      // difficultyName
-        lua_pushnumber(L2, 0);       // maxPlayers
-        lua_pushnumber(L2, 0);       // playerDifficulty
-        lua_pushboolean(L2, false);  // isDynamicInstance
-        return 7;
-    });
+    lua_register(L, "GetInstanceInfo", L_GetInstanceInfo);
     lua_register(L, "GetSummonFriendCooldown", [](lua_State* L2) -> int {
         lua_pushnumber(L2, 0);
         lua_pushnumber(L2, 0);

@@ -2421,12 +2421,10 @@ void FWowFrameManager::DispatchClick(int64 Handle, const FString& Button, bool b
 	if(Entry && Entry->Def.Type==EWowFrameType::CheckButton && Button==TEXT("LeftButton")) SetChecked(Handle,!GetChecked(Handle));
     const FString PreviousButton=CurrentMouseButton; CurrentMouseButton=Button;
 
-	// Native secure action dispatch — emulates WoW's C++ SecureActionButton behavior.
-	// The FrameXML OnLoad for SecureActionButtonTemplate sets type="action" via Lua,
-	// but this often fails in our environment. So we also detect action buttons by
-	// name pattern (ActionButton1-12, MultiBarBottomLeftButton1-12, etc.) and by
-	// checking the Lua attribute as a fallback.
-	if (Entry && (Entry->Def.Type == EWowFrameType::Button || Entry->Def.Type == EWowFrameType::CheckButton))
+	// Stock secure handlers now resolve wildcard attributes and execute their
+	// action in Lua. Keep native dispatch only for buttons without an OnClick;
+	// otherwise a single physical press would send the action twice.
+	if (Entry && !EventSystem->HasFrameScript(Handle,TEXT("OnClick")) && (Entry->Def.Type == EWowFrameType::Button || Entry->Def.Type == EWowFrameType::CheckButton))
 	{
 		int32 ActionSlot = -1;
 
@@ -2666,6 +2664,7 @@ void FWowFrameManager::TooltipSetOwner(int64 TooltipHandle, int64 OwnerHandle, c
     State->AnchorOffset=FVector2D::ZeroVector; State->MinimumWidth=0;
     // Native SetOwner clears content even when owner and anchor are unchanged.
     TooltipClearLines(TooltipHandle);
+    if(AnchorType!=TEXT("ANCHOR_PRESERVE")) SetFrameAnchors(TooltipHandle,{});
     if(AnchorType==TEXT("ANCHOR_NONE") || AnchorType==TEXT("ANCHOR_PRESERVE")) return;
 
 	// Position the tooltip relative to owner frame if valid
@@ -3004,9 +3003,7 @@ void FWowFrameManager::TooltipSetUnit(int64 TooltipHandle, const FString& UnitTo
 	State->ItemLink.Empty(); // Clear other contexts
 	State->SpellId = 0;
 
-	// TODO: Lookup unit data and populate tooltip
-	// For now, just add a placeholder line
-	TooltipAddLine(TooltipHandle, FString::Printf(TEXT("Unit: %s"), *UnitToken), 1.0f, 1.0f, 1.0f, false);
+	// The Lua unit API supplies localized identity and level/class lines.
 }
 
 FTooltipState* FWowFrameManager::GetTooltipState(int64 TooltipHandle)

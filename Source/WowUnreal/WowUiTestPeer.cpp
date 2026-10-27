@@ -30,6 +30,11 @@ bool FWowUiTestPeer::Start(const FString& Fixture,uint64 MainGuid,bool CleanupOn
         if(auto* P=Client->PacketHandler.EntityManager.GetLocalPlayer()) {P->Movement.Position=Position; P->Movement.Orientation=Orientation;}
         Client->SendTeleportAck(Guid,Order,Time);
     });
+    Client->PacketHandler.OnMapTransfer.AddLambda([this](uint32,float,float,float,float)
+    {
+        // NEW_WORLD has already updated the peer's authoritative map/position.
+        if(Client.IsValid()) Client->SendRawPacket(WowOpcode::MSG_MOVE_WORLDPORT_ACK,{});
+    });
     Client->Login(Account,Password,TEXT("127.0.0.1"),3724); Status(TEXT("connecting")); return true;
 }
 void FWowUiTestPeer::Status(const FString& Phase)
@@ -121,6 +126,30 @@ void FWowUiTestPeer::Tick()
 bool FWowUiTestPeer::Command(const FString& Action,int32 Slot,uint32 Value)
 {
     if(!Ready()) return false;
+    if(Action==TEXT("arena_queue"))
+    {
+        if(Slot<0 || Slot>2 || Value!=19911) return false;
+        const auto& H=Client->PacketHandler;
+        const auto* P=H.EntityManager.GetLocalPlayer(); uint64 Vendor=0;
+        for(const auto& Pair:H.EntityManager.GetAll()) if(Pair.Value->IsUnit() && Pair.Value->Entry==Value && P
+            && FVector::DistSquared(P->Movement.Position,Pair.Value->Movement.Position)<400) {Vendor=Pair.Key; break;}
+        if(!Vendor) return false;
+        TArray<uint8> Bytes; Bytes.Append(reinterpret_cast<const uint8*>(&Vendor),8); Bytes.Add(uint8(Slot)); Bytes.Add(0); Bytes.Add(0);
+        Client->SendRawPacket(0x358,Bytes); return true;
+    }
+    if(Action==TEXT("arena_enter") || Action==TEXT("arena_leave"))
+    {
+        const auto& H=Client->PacketHandler;
+        for(const auto& Q:H.Pvp.Queues) if(Q.Status && Q.Arena)
+        {
+            if(Action==TEXT("arena_enter") && Q.Status!=2) return Q.Status==3;
+            TArray<uint8> Bytes; Bytes.Add(Q.Arena); Bytes.Add(0); Bytes.Append(reinterpret_cast<const uint8*>(&Q.Type),4);
+            const uint16 Marker=0x1F90; Bytes.Append(reinterpret_cast<const uint8*>(&Marker),2);
+            if(Action==TEXT("arena_enter") || Q.Status!=3) Bytes.Add(Action==TEXT("arena_enter")?1:0);
+            Client->SendRawPacket(Q.Status==3 && Action==TEXT("arena_leave")?0x2E1:0x2D5,Bytes); return true;
+        }
+        return Action==TEXT("arena_leave");
+    }
     if(Action==TEXT("arena_accept"))
     {
         auto& H=Client->PacketHandler; const FString MasterName=H.PlayerNameCache.FindRef(MasterGuid);
