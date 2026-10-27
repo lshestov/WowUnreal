@@ -566,6 +566,26 @@ int32 AWowWorldManager::LoadTilesAroundPosition(const FVector& UEPosition, int32
     return Queued;
 }
 
+bool AWowWorldManager::SelectMap(uint32 MapId)
+{
+    const auto* Map=FDbcStore::Get().Maps().GetById(MapId);
+    if(!Map || Map->InternalName.IsEmpty()) return false;
+    if(MapName.Equals(Map->InternalName,ESearchCase::IgnoreCase)) return true;
+    bStreamingSuspended=true; bStreamingEnabled=false; ++MapGeneration;
+    // Old MPQ reads can finish in the background; their generation prevents
+    // them from being finalized into this map without blocking the game thread.
+    PendingTileKeys.Reset(); InitialTileKeys.Reset(); InitialTilesQueued=InitialTilesLoaded=0;
+    for(auto& Pair:LoadedTiles) if(IsValid(Pair.Value)) Pair.Value->Destroy(); LoadedTiles.Reset();
+    for(auto& Pair:WdlTiles) if(IsValid(Pair.Value)) Pair.Value->Destroy(); WdlTiles.Reset();
+    for(auto& Pair:Lod1Tiles) if(IsValid(Pair.Value)) Pair.Value->Destroy(); Lod1Tiles.Reset();
+    SpawnedWmoIds.Reset(); SpawnedDoodadIds.Reset(); ActiveDoodadCount=ActiveWmoGroupCount=0;
+    WdtData.Reset(); WdlData.Reset(); CurrentAudioAreaId=0;
+    StreamingFocusActor.Reset(); StreamingLoadPosition.Reset(); LastCameraTile=FIntPoint(-9999,-9999);
+    MapName=Map->InternalName;
+    UE_LOG(LogWowWorld,Log,TEXT("Selected server map %u: %s"),MapId,*MapName);
+    return true;
+}
+
 void AWowWorldManager::EnableTerrainStreaming()
 {
     if (bStreamingEnabled) return; // Already enabled
@@ -809,6 +829,7 @@ void AWowWorldManager::LoadTileAsync(int32 TX, int32 TY)
     FPendingTileLoad Pending;
     Pending.TX = TX;
     Pending.TY = TY;
+    Pending.Generation=MapGeneration;
     Pending.Future = Async(EAsyncExecution::ThreadPool, [Mpq, Map, TX, TY, bBigAlpha]() -> TSharedPtr<FAdtData>
     {
         FString AdtPath = FString::Printf(TEXT("World\\Maps\\%s\\%s_%d_%d.adt"), *Map, *Map, TX, TY);
@@ -864,33 +885,23 @@ void AWowWorldManager::FinalizeTileLoad(int32 TX, int32 TY, TSharedPtr<FAdtData>
 
 void AWowWorldManager::ProcessPendingLoads()
 {
-    // During initial load (loading screen), finalize all ready tiles at once.
-    // After initial load, limit to 1 per tick to avoid frame hitches.
-    const bool bBulkLoad = (InitialTilesQueued > 0 && InitialTilesLoaded < InitialTilesQueued);
-    const int32 MaxPerTick = bBulkLoad ? 4 : 1;
-
     int32 Finalized = 0;
     for (int32 i = PendingLoads.Num() - 1; i >= 0; --i)
     {
         FPendingTileLoad& Pending = PendingLoads[i];
         if (Pending.Future.IsReady())
         {
+            if(Pending.Generation!=MapGeneration) {Pending.Future.Get(); PendingLoads.RemoveAt(i); continue;}
+            if(Finalized>=1) continue;
             TSharedPtr<FAdtData> Result = Pending.Future.Get();
             int64 Key = TileKey(Pending.TX, Pending.TY);
             PendingTileKeys.Remove(Key);
 
-            if (Result && Finalized < MaxPerTick)
+            if (Result)
             {
                 FinalizeTileLoad(Pending.TX, Pending.TY, Result);
                 ++Finalized;
             }
-            else if (Result)
-            {
-                // Re-queue: data is ready but we hit the per-tick limit.
-                // Leave it in the array for next tick.
-                continue;
-            }
-
             PendingLoads.RemoveAt(i);
         }
     }
@@ -1686,6 +1697,7 @@ void AWowWorldManager::UpdateObjectStreaming()
 
 void AWowWorldManager::SetupRuntimeVirtualTexture()
 {
+    if(TerrainRVT && RVTVolumeComponent) return;
     // Create the Runtime Virtual Texture object
     // Uses defaults: BaseColor_Normal_Specular, TileCount=8 (256), TileSize=2 (256px)
     TerrainRVT = NewObject<URuntimeVirtualTexture>(this, TEXT("TerrainRVT"));

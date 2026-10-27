@@ -236,7 +236,7 @@ void AWowLoginController::OnStateChanged(EWowSessionState NewState)
             CinematicManager = nullptr;
         }
         ClearCurrentScreen();
-        ShowLoadingScreen(0);
+        ShowLoadingScreen(ConnectionManager->PacketHandler.CurrentMapId);
         InitializeWorldSystems();
         break;
     default:
@@ -367,6 +367,8 @@ void AWowLoginController::InitializeWorldSystems()
     // 1. Enable terrain streaming on the WorldManager (loads WDT/WDL)
     if (WorldManager)
     {
+        if(!ConnectionManager || !WorldManager->SelectMap(ConnectionManager->PacketHandler.CurrentMapId))
+        {StopAutoLogin(TEXT("The server selected an unknown map.")); return;}
         WorldManager->EnableTerrainStreaming();
     }
 

@@ -18,6 +18,7 @@ struct FPendingTileLoad
 {
     int32 TX = 0;
     int32 TY = 0;
+    uint32 Generation=0;
     TFuture<TSharedPtr<FAdtData>> Future;
 };
 
@@ -36,6 +37,8 @@ public:
 
     /** Load WDT/WDL and enable terrain streaming. Call after deferred startup (e.g. login scene). */
     void EnableTerrainStreaming();
+    /** Select the server's Map.dbc row before scheduling the initial terrain. */
+    bool SelectMap(uint32 MapId);
     void SuspendStreaming() { bStreamingSuspended=true; }
     void LoadStreamingAt(const FVector& Position) { StreamingLoadPosition=Position; bStreamingSuspended=false; LastCameraTile=FIntPoint(-1,-1); }
     void FollowStreamingActor(AActor* Actor) { StreamingFocusActor=Actor; StreamingLoadPosition.Reset(); bStreamingSuspended=false; LastCameraTile=FIntPoint(-1,-1); }
@@ -198,6 +201,7 @@ private:
 
     /** Tiles currently being loaded on background threads */
     TArray<FPendingTileLoad> PendingLoads;
+    uint32 MapGeneration=0;
 
     /** Track tile keys that are in-flight to avoid duplicate requests */
     TSet<int64> PendingTileKeys;

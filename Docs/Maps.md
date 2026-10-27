@@ -97,3 +97,24 @@ warning tests), focused final quest-summary checks, and two native runs totallin
 41 steps and nine non-black inspected captures. The native navigation run also
 asserts opening below one second, a map update rate above 20 FPS during
 navigation, an actual floor-button click and successful ReloadUI.
+
+## Server-selected world entry
+
+Initial terrain now uses the authoritative Map.dbc ID from LOGIN_VERIFY_WORLD,
+including the matching loading screen. Previously, a Kalimdor character could
+receive the default Azeroth tiles at the same coordinates. With no usable floor,
+the pawn remained in the ground-loading hold and its visual movement was never
+sent to the server; nearby corpse interaction consequently returned a release.
+
+Selecting another map resets terrain, distant meshes, WDT/WDL, object IDs and
+initial-load accounting. Background MPQ reads retain their original generation;
+obsolete results are discarded without waiting on the game thread or clearing
+pending keys belonging to the new map. Finalization builds at most one terrain
+tile per tick, including initial loading. The existing terrain virtual texture
+is reused when switching maps.
+
+The server-map test checks Kalimdor/Azeroth selection, unchanged-map reuse and
+rejection of unknown IDs. Four final focused map/loot checks pass without
+warnings. Native disposable-character verification loads Kalimdor, finds the
+ground, sends movement and obtains an actual group-roll reward. The rendered
+world, corpse window and roll tooltip captures are nonempty and inspected.

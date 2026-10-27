@@ -494,6 +494,10 @@ build, automation, native autologin and rendered screenshot verification):
     typed ready checks and acknowledged controls. Original template parenting,
     name-label draw order, XML initializers and bounded Lua collection. Windows build, 124-test
     regression and a final 55-step/six-image native route; see Docs/Groups.md.
+  - [?] Select terrain from the server's Map.dbc ID before world entry, discard
+    stale map reads and finalize at most one terrain tile per tick. Verified
+    Kalimdor login, grounded movement and a server-confirmed loot-roll win;
+    four focused checks pass without warnings. See Docs/Maps.md.
   - [ ] Complete loot slots, roll windows and master-looter selection.
   - [ ] Complete guild/inspect/tabard panels and their server-backed state.
   - [ ] Complete PvP/battleground panels and queue/status/scoreboard protocol.
