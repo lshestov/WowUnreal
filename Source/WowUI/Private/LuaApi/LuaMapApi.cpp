@@ -3,6 +3,7 @@
 #include "WowEventSystem.h"
 #include "Formats/Dbc/DbcStore.h"
 #include "WowMapUi.h"
+#include "WowMinimapUi.h"
 
 uint32 WowLuaApi::ResolveAreaId(const FWowLuaContext* C)
 {
@@ -29,12 +30,24 @@ const FAreaTableDbcEntry* Zone(const FAreaTableDbcEntry* A)
 }
 void Register(lua_State* L,const char* Name,lua_CFunction Function) {lua_pushcfunction(L,Function); lua_setglobal(L,Name);}
 int ZoneText(lua_State* L) {const auto* A=Zone(Area(L)); lua_pushstring(L,A?TCHAR_TO_UTF8(*A->Name):""); return 1;}
+TPair<FString,FString> Names(lua_State* L)
+{
+    const auto* A=Area(L); const auto* Z=Zone(A); TPair<FString,FString> Result(Z?Z->Name:FString(),A && Z && A->ID!=Z->ID?A->Name:FString());
+    if(auto* C=WowLuaApi::GetContext(L))
+    {
+        const auto& W=WowMinimapUi::View(C).Location;
+        if(!W.ZoneName.IsEmpty() && W.ZoneName!=Result.Value) {Result.Key=W.ZoneName; Result.Value.Empty();}
+        if(!W.SubzoneName.IsEmpty()) Result.Value=W.SubzoneName;
+    }
+    return Result;
+}
 }
 void WowLuaApi::RegisterMapApi(lua_State* L)
 {
-    Register(L,"GetZoneText",ZoneText); Register(L,"GetRealZoneText",ZoneText);
-    Register(L,"GetSubZoneText",[](lua_State* S)->int {const auto* A=Area(S); const auto* Z=Zone(A); lua_pushstring(S,A && Z && A->ID!=Z->ID?TCHAR_TO_UTF8(*A->Name):""); return 1;});
-    Register(L,"GetMinimapZoneText",[](lua_State* S)->int {const auto* A=Area(S); lua_pushstring(S,A?TCHAR_TO_UTF8(*A->Name):""); return 1;});
+    Register(L,"GetRealZoneText",ZoneText);
+    Register(L,"GetZoneText",[](lua_State* S)->int {const auto N=Names(S); lua_pushstring(S,TCHAR_TO_UTF8(*N.Key)); return 1;});
+    Register(L,"GetSubZoneText",[](lua_State* S)->int {const auto N=Names(S); lua_pushstring(S,TCHAR_TO_UTF8(*N.Value)); return 1;});
+    Register(L,"GetMinimapZoneText",[](lua_State* S)->int {const auto N=Names(S); lua_pushstring(S,TCHAR_TO_UTF8(*(N.Value.IsEmpty()?N.Key:N.Value))); return 1;});
     Register(L,"GetZonePVPInfo",[](lua_State* S)->int {
         const auto* A=Area(S); const auto* Z=Zone(A); if(!A || !Z) return 0;
         const char* Type=A->Flags&0x800?"sanctuary":A->Flags&0x80?"arena":A->Flags&0x1000000?"combat":nullptr;
@@ -76,8 +89,10 @@ void WowLuaApi::UpdateMapState(lua_State* L)
     if(MapChanged) C->EventSystem->FireEvent(TEXT("WORLD_MAP_UPDATE"));
     if(QuestChanged) C->EventSystem->FireEvent(TEXT("QUEST_POI_UPDATE"));
     const auto* A=Area(L); const auto* Z=Zone(A); if(!A || !Z) return;
-    const bool AreaChanged=C->LastAreaId!=A->ID,ZoneChanged=C->LastZoneId!=Z->ID;
+    const uint32 WmoHash=WowMinimapUi::View(C).WmoHash;
+    const bool AreaChanged=C->LastAreaId!=A->ID || C->LastWmoHash!=WmoHash,ZoneChanged=C->LastZoneId!=Z->ID;
     C->LastAreaId=A->ID; C->LastZoneId=Z->ID;
+    C->LastWmoHash=WmoHash;
     if(ZoneChanged)
     {
         TArray<uint8> Data; Data.Append(reinterpret_cast<const uint8*>(&Z->ID),4); C->ConnectionManager->SendRawPacket(0x1F4,Data);

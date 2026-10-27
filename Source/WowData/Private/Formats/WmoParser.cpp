@@ -173,7 +173,7 @@ FWmoRootData FWmoParser::ParseRoot(const TArray<uint8>& Data)
             /*nDoodads*/               ReadU32(Base, Off, DataSize);
             /*nSets*/                  ReadU32(Base, Off, DataSize);
             const uint32 AmbientBGRA = ReadU32(Base, Off, DataSize);
-            /*wmoID*/                  ReadU32(Base, Off, DataSize);
+            Result.RootId            = ReadU32(Base, Off, DataSize);
 
             // Bounding box: min (3 floats), max (3 floats)
             const float MinX = ReadFloat(Base, Off, DataSize);
@@ -255,6 +255,21 @@ FWmoRootData FWmoParser::ParseRoot(const TArray<uint8>& Data)
 
                 Result.Materials.Add(MoveTemp(Mat));
             }
+        }
+        else if (ChunkMagic == MakeFourCC('V','P','O','M'))
+        {
+            uint32 Off=ChunkStart;
+            for(uint32 I=0;I<ChunkSize/12;++I) {const float X=ReadFloat(Base,Off,DataSize),Y=ReadFloat(Base,Off,DataSize),Z=ReadFloat(Base,Off,DataSize); Result.PortalVertices.Add(FVector(X,Y,Z));}
+        }
+        else if (ChunkMagic == MakeFourCC('T','P','O','M'))
+        {
+            uint32 Off=ChunkStart;
+            for(uint32 I=0;I<ChunkSize/20;++I) {FWmoRootData::FPortal P; P.Start=ReadU16(Base,Off,DataSize); P.Count=ReadU16(Base,Off,DataSize); Off+=16; Result.Portals.Add(P);}
+        }
+        else if (ChunkMagic == MakeFourCC('R','P','O','M'))
+        {
+            uint32 Off=ChunkStart;
+            for(uint32 I=0;I<ChunkSize/8;++I) {FWmoRootData::FPortalRef P; P.Portal=ReadU16(Base,Off,DataSize); P.Group=ReadU16(Base,Off,DataSize); P.Side=int16(ReadU16(Base,Off,DataSize)); Off+=2; Result.PortalRefs.Add(P);}
         }
         else if (ChunkMagic == WMO_MODN)
         {
@@ -339,8 +354,8 @@ FWmoGroupData FWmoParser::ParseGroup(const TArray<uint8>& Data)
             const float MaxZ = ReadFloat(Base, Off, DataSize);
             Result.BoundingBox = FBox(FVector(MinX, MinY, MinZ), FVector(MaxX, MaxY, MaxZ));
 
-            /*portalStart*/       ReadU16(Base, Off, DataSize);
-            /*portalCount*/       ReadU16(Base, Off, DataSize);
+            Result.PortalStart  = ReadU16(Base, Off, DataSize);
+            Result.PortalCount  = ReadU16(Base, Off, DataSize);
             /*transBatchCount*/   ReadU16(Base, Off, DataSize);
             /*intBatchCount*/     ReadU16(Base, Off, DataSize);
             /*extBatchCount*/     ReadU16(Base, Off, DataSize);
@@ -348,7 +363,7 @@ FWmoGroupData FWmoParser::ParseGroup(const TArray<uint8>& Data)
             // fogs[4]
             Off += 4;
             /*groupLiquid*/       ReadU32(Base, Off, DataSize);
-            /*groupID*/           ReadU32(Base, Off, DataSize);
+            Result.GroupId      = ReadU32(Base, Off, DataSize);
             /*unk1*/              ReadU32(Base, Off, DataSize);
             /*unk2*/              ReadU32(Base, Off, DataSize);
 

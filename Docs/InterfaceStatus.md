@@ -95,7 +95,7 @@ The Windows Editor and packaged Development client are built from the same
 source tree. `WowUnreal.Hud`, `WowUnreal.UI`, `WowUnreal.Gameplay` and the related
 player, collision, equipment, lighting, rendering, traversal and performance
 suites cover both isolated controls and live protocol state. The interface
-regression set contains 113 tests. Existing optional character texture-layout
+regression set contains 115 tests. Existing optional character texture-layout
 DBC and test-fixture size warnings remain.
 
 Native gameplay probes exercise live server state and rendered UI at 1280x720
@@ -115,9 +115,9 @@ Full WoW UI compatibility is **not complete**. In particular:
   additional combat event families. See
   [macro support](Macros.md) and [combat-log support](CombatLog.md).
 - Complete PvP/battleground, LFG and achievement panels and protocol support.
-- WMO indoor minimap tiles and automatic interior area/floor resolution. The
-  original world-map POIs and outdoor minimap tracking are described in
-  [maps](Maps.md) and [minimap tracking](Minimap.md).
+- Remote party-member map/minimap updates, alongside the broader group-window
+  work. Original map POIs, tracking and WMO room/floor handling are described in
+  [maps](Maps.md), [minimap tracking](Minimap.md) and [indoor maps](IndoorMinimap.md).
 - Legacy options without an engine-side implementation; persisting a CVar
   does not imply that its associated rendering or gameplay feature exists.
 - MP3 music decoding. WAV playback and finite UI-sound lifetime are supported.

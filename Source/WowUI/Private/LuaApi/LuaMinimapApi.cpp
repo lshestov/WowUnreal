@@ -77,9 +77,11 @@ void WowLuaApi::RegisterMinimapApi(lua_State* L)
     });
     Reg("GetTrackingTexture",[](lua_State* S)->int {auto* C=GetContext(S); const uint32 Active=C && View(C).CommonKey.IsEmpty()?TrackingSpell(C):0; for(const auto& T:Tracking(C)) if(C && ((!T.Spell && T.Key==View(C).CommonKey) || (T.Spell && T.Spell==Active))) {String(S,Icon(C,T)); return 1;} lua_pushstring(S,"Interface\\Minimap\\Tracking\\None"); return 1;});
     Reg("SetTracking",SetTracking);
+    Reg("IsIndoors",[](lua_State* S)->int {auto* C=GetContext(S); lua_pushboolean(S,C && View(C).Location.Indoors); return 1;});
+    Reg("IsOutdoors",[](lua_State* S)->int {auto* C=GetContext(S); lua_pushboolean(S,!C || !View(C).Location.Indoors); return 1;});
     luaL_getmetatable(L,FRAME_METATABLE);
     const auto Method=[&](const char* Name,lua_CFunction F){lua_pushcfunction(L,F); lua_setfield(L,-2,Name);};
-    Method("SetZoom",[](lua_State* S)->int {auto* C=GetContext(S); if(C && C->FrameManager) {const int32 Z=FMath::Clamp(int32(luaL_checkinteger(S,2)),0,5); if(Z!=C->FrameManager->MinimapZoom) {C->FrameManager->MinimapZoom=Z; Cvar(S,"minimapZoom",FString::FromInt(Z)); if(C->EventSystem) C->EventSystem->FireEvent(TEXT("MINIMAP_UPDATE_ZOOM"));}} return 0;});
+    Method("SetZoom",[](lua_State* S)->int {auto* C=GetContext(S); if(C && C->FrameManager) {const int32 Z=FMath::Clamp(int32(luaL_checkinteger(S,2)),0,5); if(Z!=C->FrameManager->MinimapZoom) {C->FrameManager->MinimapZoom=Z; Cvar(S,View(C).Location.Minimap?"minimapInsideZoom":"minimapZoom",FString::FromInt(Z)); if(C->EventSystem) C->EventSystem->FireEvent(TEXT("MINIMAP_UPDATE_ZOOM"));}} return 0;});
     Method("SetBlipTexture",[](lua_State* S)->int {if(auto* C=GetContext(S)) View(C).BlipTexture=UTF8_TO_TCHAR(luaL_checkstring(S,2)); return 0;});
     Method("SetPlayerTexture",[](lua_State* S)->int {if(auto* C=GetContext(S)) View(C).PlayerTexture=UTF8_TO_TCHAR(luaL_checkstring(S,2)); return 0;});
     Method("SetStaticArrowTexture",[](lua_State* S)->int {if(auto* C=GetContext(S)) View(C).StaticArrowTexture=UTF8_TO_TCHAR(luaL_checkstring(S,2)); return 0;});
@@ -106,12 +108,20 @@ void WowLuaApi::UpdateMinimapState(lua_State* L)
     auto* C=GetContext(L); if(!C || !C->EntityManager || !C->ConnectionManager || !C->EventSystem) return;
     const auto* P=C->EntityManager->GetLocalPlayer(); if(!P) return; auto& H=C->ConnectionManager->PacketHandler; auto& V=View(C);
     const uint32 Spell=TrackingSpell(C); const bool Initial=V.TrackingHash==MAX_uint32;
+    const auto Where=Location(C); const bool ZoomChanged=Where.Minimap!=V.Location.Minimap;
+    const bool InsideChanged=Where.Indoors!=V.Location.Indoors,FloorChanged=Where.FloorId!=V.Location.FloorId;
+    const uint32 WmoHash=Where.Component.IsValid()?HashCombineFast(GetTypeHash(Where.Component.Get()),Where.Group+1):0;
+    if(WmoHash!=V.WmoHash) {const auto* Meta=Where.Component.Get(); UE_LOG(LogWowLuaFrame,Log,TEXT("WMO location: root=%u nameset=%u group=%d area=%u floor=%u indoors=%d minimap=%d"),Meta?Meta->RootId:0,Meta?Meta->NameSet:0,Where.Group,Where.AreaId,Where.FloorId,Where.Indoors,Where.Minimap);}
+    V.Location=Where; V.WmoHash=WmoHash;
+    V.PortalDepth=FMath::Clamp(FCString::Atoi(*Cvar(L,"minimapPortalMax")),0,99);
+    if(InsideChanged) C->EventSystem->FireEvent(Where.Indoors?TEXT("ZONE_CHANGED_INDOORS"):TEXT("ZONE_CHANGED_OUTDOORS"));
+    if(FloorChanged) C->EventSystem->FireEvent(TEXT("WORLD_MAP_UPDATE"));
     V.CommonKey=Cvar(L,"minimapTrackedInfo"); V.Rotates=Cvar(L,"rotateMinimap")==TEXT("1");
     if(Spell!=V.TrackingSpell && Spell) {V.CommonKey.Empty(); Cvar(L,"minimapTrackedInfo",V.CommonKey);}
     V.TrackingSpell=Spell;
     uint32 Hash=HashCombineFast(Spell,GetTypeHash(V.CommonKey)); for(const auto& T:Tracking(C)) Hash=HashCombineFast(Hash,T.Spell?T.Spell:GetTypeHash(T.Key));
     if(Hash!=V.TrackingHash) {V.TrackingHash=Hash; Changed(C);}
-    if(Initial && C->FrameManager) {C->FrameManager->MinimapZoom=FMath::Clamp(FCString::Atoi(*Cvar(L,"minimapZoom")),0,5); C->EventSystem->FireEvent(TEXT("MINIMAP_UPDATE_ZOOM"));}
+    if((Initial || ZoomChanged) && C->FrameManager) {C->FrameManager->MinimapZoom=FMath::Clamp(FCString::Atoi(*Cvar(L,Where.Minimap?"minimapInsideZoom":"minimapZoom")),0,5); C->EventSystem->FireEvent(TEXT("MINIMAP_UPDATE_ZOOM"));}
     uint32 QuestHash=HashCombineFast(H.CurrentMapId,P->GetLevel());
     TArray<uint64> Givers; for(const auto& Pair:C->EntityManager->GetAll()) if((Pair.Value->IsUnit() && Pair.Value->GetField(UnitField::NPC_FLAGS)&2) || Pair.Value->IsGameObject()) Givers.Add(Pair.Key);
     Givers.Sort(); for(uint64 Guid:Givers) QuestHash=HashCombineFast(QuestHash,GetTypeHash(Guid));

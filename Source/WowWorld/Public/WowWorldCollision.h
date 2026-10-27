@@ -13,7 +13,7 @@ public:
     static UProceduralMeshComponent* Create(USceneComponent* Parent, FName Name,
         const TArray<FVector>& Vertices, const TArray<int32>& Indices);
     static void DestroyChildren(USceneComponent* Parent);
-    static void AddWmo(USceneComponent* Parent, FName Name, const FWmoGroupData& Group);
+    static UProceduralMeshComponent* AddWmo(USceneComponent* Parent, FName Name, const FWmoGroupData& Group);
     static void AppendM2(const FM2Data& Model, const FTransform& Transform,
         TArray<FVector>& Vertices, TArray<int32>& Indices);
     static bool FindFloor(UWorld* World, const FVector& Feet, const AActor* Ignore,

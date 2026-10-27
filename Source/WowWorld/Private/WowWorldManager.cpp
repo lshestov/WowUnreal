@@ -1,4 +1,5 @@
 #include "WowWorldManager.h"
+#include "WowWmoArea.h"
 #include "WowWorldCollision.h"
 #include "WowRuntimeMeshMaterials.h"
 #include "WowTerrainTile.h"
@@ -1468,6 +1469,8 @@ void AWowWorldManager::SpawnLod1Tile(int32 TX, int32 TY)
 
 uint32 AWowWorldManager::GetAreaAt(const FVector& Position) const
 {
+    for(const auto& Map:FDbcStore::Get().Maps().GetAll()) if(Map.InternalName.Equals(MapName,ESearchCase::IgnoreCase))
+    {const auto Location=UWowWmoAreaComponent::Locate(GetWorld(),Position,Map.ID); if(Location.AreaId) return Location.AreaId; break;}
     const auto Tile=FWowCoordinate::WorldToTile(Position),Chunk=FWowCoordinate::WorldToChunk(Position);
     const auto* Found=LoadedTiles.Find(TileKey(Tile.X,Tile.Y));
     if(!Found || !IsValid(*Found)) return 0;

@@ -4,6 +4,11 @@
 #include "GameFramework/Actor.h"
 #include "Components/SceneComponent.h"
 #include "WowWorldCollision.h"
+#include "WowWmoArea.h"
+#include "Coord/WowCoordinate.h"
+#include "Formats/Dbc/DbcStore.h"
+#include "Formats/BlpParser.h"
+#include "ProceduralMeshComponent.h"
 #include "Formats/WmoTypes.h"
 #include "Formats/WmoParser.h"
 #include "Formats/M2Types.h"
@@ -171,6 +176,52 @@ bool FIdleWowArchitectureCollision::RunTest(const FString& Parameters)
         TestTrue(TEXT("Actual abbey wall blocks a capsule"),World->SweepSingleByObjectType(Hit,
             WallPoint.GetValue()+WallNormal.GetValue()*100,WallPoint.GetValue()-WallNormal.GetValue()*100,FQuat::Identity,Objects,FCollisionShape::MakeCapsule(10,20),Query));
         DestroyCollisionWorld(World);return true;
+    }));
+    return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIdleWowWmoAreas,"WowUnreal.Collision.WmoRoomsAndMinimap",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FIdleWowWmoAreas::RunTest(const FString&)
+{
+    FString Path; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false; FMpqManager Mpq; if(!Mpq.Initialize(Path)) return false;
+    auto& Dbc=FDbcStore::Get(); if(!Dbc.IsLoaded()) Dbc.LoadAll(Mpq); if(!Dbc.IsDeferredLoaded()) Dbc.LoadDeferred(Mpq);
+    TArray<uint8> Raw; const FString Base=TEXT("World\\Wmo\\Azeroth\\Buildings\\NSabbey\\NSabbey"); if(!Mpq.ReadFile(Base+TEXT(".wmo"),Raw)) return false;
+    const auto RootData=FWmoParser::ParseRoot(Raw); TestTrue(TEXT("Actual root identity and portal graph are retained"),RootData.RootId==59 && RootData.NumGroups==14 && RootData.Portals.Num()>0 && RootData.PortalVertices.Num()>0 && RootData.PortalRefs.Num()>0);
+    auto* World=CollisionWorld(); auto* Root=CollisionRoot(World); auto* Actor=Root->GetOwner();
+    Actor->SetActorLocation(FWowCoordinate::WowToUE(-8897,-178.296875,80.0673218)); Actor->SetActorRotation(FWowCoordinate::WowRotationToUE(0,-201.5,0));
+    auto* Meta=NewObject<UWowWmoAreaComponent>(Actor); Actor->AddInstanceComponent(Meta); Meta->RegisterComponent();
+    Meta->RootId=RootData.RootId; Meta->NameSet=1; Meta->Bounds=RootData.BoundingBox; Meta->PortalVertices=RootData.PortalVertices; Meta->Portals=RootData.Portals; Meta->PortalRefs=RootData.PortalRefs; Meta->Groups.SetNum(RootData.NumGroups);
+    FVector Point=FVector::ZeroVector; double FloorZ=MAX_dbl;
+    for(uint32 I=0;I<RootData.NumGroups;++I)
+    {
+        if(!Mpq.ReadFile(Base+FString::Printf(TEXT("_%03u.wmo"),I),Raw)) continue; const auto G=FWmoParser::ParseGroup(Raw);
+        auto& R=Meta->Groups[I]; R.Id=G.GroupId; R.Flags=G.Flags; R.Bounds=G.BoundingBox; R.PortalStart=G.PortalStart; R.PortalCount=G.PortalCount;
+        if(I) continue;
+        TestTrue(TEXT("Main hall identity and portal range are actual MOGP fields"),G.GroupId==1934 && G.PortalCount>0 && int32(G.PortalStart)+G.PortalCount<=RootData.PortalRefs.Num());
+        R.Collision=FWowWorldCollision::AddWmo(Root,TEXT("WmoCollision_0"),G);
+        for(int32 T=0;T+2<G.Indices.Num();T+=3)
+        {
+            if(!G.HasCollision(T/3)) continue; const auto A=G.Vertices[G.Indices[T]],B=G.Vertices[G.Indices[T+1]],C=G.Vertices[G.Indices[T+2]],Cross=FVector::CrossProduct(B-A,C-A),Mid=(A+B+C)/3;
+            const double Perimeter=(B-A).Size()+(C-A).Size()+(C-B).Size();
+            if(Cross.GetSafeNormal().Z>.99 && Cross.Size()/FMath::Max(.001,Perimeter)>.5 && Mid.Z<FloorZ) {Point=Mid; FloorZ=Mid.Z;}
+        }
+    }
+    if(!TestTrue(TEXT("A broad real main-hall floor was found"),FloorZ<MAX_dbl)) {DestroyCollisionWorld(World); return false;}
+    const FVector Position=Meta->ToWorld(Point)+FVector(0,0,88); const auto Room=Meta->Location(0,Position,0);
+    TestTrue(TEXT("Raw model transforms round-trip through placed UE coordinates"),Meta->ToLocal(Meta->ToWorld(Point)).Equals(Point,.001));
+    TestTrue(TEXT("Placement name set resolves the actual Northshire room and area"),Room.AreaId==24 && Room.Indoors && Room.Minimap && Room.ZoneName==TEXT("Northshire Abbey") && Room.SubzoneName==TEXT("Main Hall"));
+    TestTrue(TEXT("Exterior groups do not activate an indoor minimap"),!Meta->Location(4,Position,0).Minimap);
+    const auto CurrentOnly=Meta->MapQuads(Room,150,0),Connected=Meta->MapQuads(Room,150,99); TSet<int32> Rooms; for(const auto& Q:Connected) {Rooms.Add(Q.Group); TestFalse(TEXT("Portal traversal cannot draw exterior groups through an interior door"),Meta->Groups[Q.Group].Flags&8);}
+    TestTrue(TEXT("Portal limit and graph traversal preserve current-room priority"),CurrentOnly.Num()==1 && CurrentOnly[0].Group==0 && Rooms.Num()>1 && Connected.Last().Group==0);
+    TArray<uint8> ArtBytes; Mpq.ReadFile(TEXT("Textures\\Minimap\\8d5e281bd5678bdfb6e6e18717d4b3ab.blp"),ArtBytes); const auto Art=FBlpParser::Parse(ArtBytes);
+    TestTrue(TEXT("Generated half-yard quads match the real 128px room tile and two-texel border"),Art.bIsValid && Art.Width==128 && CurrentOnly.Num()==1 && FMath::IsNearlyEqual(CurrentOnly[0].Bounds.GetSize().X,Art.Width*.5+2));
+    const double Started=FPlatformTime::Seconds();
+    ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this,World,Meta,Position,Started]()
+    {
+        const auto Located=UWowWmoAreaComponent::Locate(World,Position,0);
+        if(!Located.Component.IsValid() && FPlatformTime::Seconds()-Started<8) return false;
+        TestTrue(TEXT("Asynchronously cooked collision resolves the owning room and area"),Located.Component.Get()==Meta && Located.Group==0 && Located.AreaId==24 && Located.Indoors);
+        TestFalse(TEXT("Nearby outdoor terrain cannot be classified by a building's broad box"),UWowWmoAreaComponent::Locate(World,Position+FVector(30000,0,0),0).Component.IsValid());
+        DestroyCollisionWorld(World); return true;
     }));
     return true;
 }

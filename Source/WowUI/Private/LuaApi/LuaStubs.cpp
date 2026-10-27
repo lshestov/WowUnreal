@@ -3520,6 +3520,7 @@ static FString GetDefaultCVarValue(const FString& Name)
         { TEXT("minimapzoom"), TEXT("0") },
         { TEXT("minimapinsidezoom"), TEXT("0") },
         { TEXT("rotateminimap"), TEXT("0") },
+        { TEXT("minimapportalmax"), TEXT("99") },
         { TEXT("miniworldmap"), TEXT("0") },
         { TEXT("advancedworldmap"), TEXT("0") },
         { TEXT("worldmapopacity"), TEXT("0") },

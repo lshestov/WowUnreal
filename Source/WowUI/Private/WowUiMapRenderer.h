@@ -8,6 +8,7 @@ class UTexture2D;
 class UTextureRenderTarget2D;
 class UMaterialInstanceDynamic;
 class UWorld;
+class UCanvas;
 
 /** Original MPQ map art, streamed one texture per tick with a bounded tile cache. */
 class FWowUiMapRenderer
@@ -30,5 +31,6 @@ private:
     bool bLoadedIndex=false;
     UTexture2D* Texture(const FString& Path);
     void DrawQuestBlobs(UWorld* World);
+    void DrawIndoor(UCanvas* Canvas,const FVector& Position,float Radius,float Facing);
     FVector Position() const;
 };

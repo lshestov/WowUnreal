@@ -634,6 +634,24 @@ bool FHudAreaZones::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudInteriorAreas,"WowUnreal.Hud.InteriorAreas",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudInteriorAreas::RunTest(const FString&)
+{
+    FString Path; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false; FMpqManager Mpq; if(!Mpq.Initialize(Path)) return false;
+    auto& Dbc=FDbcStore::Get(); if(!Dbc.IsLoaded()) Dbc.LoadAll(Mpq); if(!Dbc.IsDeferredLoaded()) Dbc.LoadDeferred(Mpq);
+    FHudFixture F; TStrongObjectPtr<UWowConnectionManager> C(NewObject<UWowConnectionManager>()); auto& H=C->PacketHandler;
+    H.EntityManager.LocalPlayerGuid=1; H.EntityManager.PromoteToTyped(1,WowTypeMask::PLAYER|WowTypeMask::UNIT); F.Context.ConnectionManager=C.Get(); F.Context.EntityManager=&H.EntityManager; F.Context.ResolveArea=[]{return 9u;};
+    auto& W=WowMinimapUi::View(&F.Context).Location; W.ZoneName=TEXT("Northshire Abbey"); W.SubzoneName=TEXT("Main Hall"); W.Indoors=W.Minimap=true;
+    TestTrue(TEXT("Original WMO names override display text while the real channel zone stays Elwynn"),F.Lua.ExecuteString(TEXT("assert(GetRealZoneText()=='Elwynn Forest' and GetZoneText()=='Northshire Abbey' and GetSubZoneText()=='Main Hall' and GetMinimapZoneText()=='Main Hall' and IsIndoors() and not IsOutdoors())")));
+    F.Context.ResolveArea=[]{return 24u;}; TestTrue(TEXT("A root name already equal to the terrain subzone does not replace its parent zone"),F.Lua.ExecuteString(TEXT("assert(GetZoneText()=='Elwynn Forest' and GetSubZoneText()=='Main Hall')")));
+    W=FWowWmoLocation(); F.Context.ResolveArea=[]{return 9u;}; TestTrue(TEXT("Leaving the building restores terrain text and outdoor state"),F.Lua.ExecuteString(TEXT("assert(GetZoneText()=='Elwynn Forest' and GetSubZoneText()=='Northshire Valley' and GetMinimapZoneText()=='Northshire Valley' and IsOutdoors() and not IsIndoors())")));
+    H.CurrentMapId=571; F.Context.ResolveArea=[]{return 4395u;};
+    const auto* Floor=Dbc.MapUi().Floors().FindByPredicate([](const auto& A){return A.MapId==571 && A.Index==2;}); if(!TestNotNull(TEXT("Actual Dalaran underground floor definition exists"),Floor)) return false;
+    W.FloorId=Floor->Id; H.EntityManager.GetLocalPlayer()->Movement.Position=FVector((Floor->MinY+Floor->MaxY)/2,(Floor->MinX+Floor->MaxX)/2,600);
+    TestTrue(TEXT("Current-zone map automatically follows the resolved WMO dungeon floor and player projection"),F.Lua.ExecuteString(TEXT("SetMapToCurrentZone(); assert(GetMapInfo()=='Dalaran' and GetCurrentMapDungeonLevel()==2); local x,y=GetPlayerMapPosition('player'); assert(math.abs(x-.5)<.001 and math.abs(y-.5)<.001)")));
+    W.FloorId=0; return TestTrue(TEXT("Returning outside restores Dalaran's terrain floor"),F.Lua.ExecuteString(TEXT("SetMapToCurrentZone(); assert(GetCurrentMapDungeonLevel()==1)")));
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudFrameReparent,"WowUnreal.Hud.FrameReparentVisibility",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FHudFrameReparent::RunTest(const FString&)
 {

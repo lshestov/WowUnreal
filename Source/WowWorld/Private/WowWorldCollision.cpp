@@ -40,7 +40,7 @@ void FWowWorldCollision::DestroyChildren(USceneComponent* Parent)
         if (Child && Child->ComponentHasTag(TEXT("WowGroundSurface"))) Child->DestroyComponent();
 }
 
-void FWowWorldCollision::AddWmo(USceneComponent* Parent, FName Name, const FWmoGroupData& Group)
+UProceduralMeshComponent* FWowWorldCollision::AddWmo(USceneComponent* Parent, FName Name, const FWmoGroupData& Group)
 {
     TArray<FVector> Vertices;
     for (const FVector& V : Group.Vertices) Vertices.Add(FVector(V.Y, V.X, V.Z) * FWowCoordinate::SCALE);
@@ -53,7 +53,7 @@ void FWowWorldCollision::AddWmo(USceneComponent* Parent, FName Name, const FWmoG
         // already converts the handedness; reversing again inverts sweep normals.
         Indices.Append({Group.Indices[I], Group.Indices[I + 1], Group.Indices[I + 2]});
     }
-    Create(Parent, Name, Vertices, Indices);
+    return Create(Parent, Name, Vertices, Indices);
 }
 
 void FWowWorldCollision::AppendM2(const FM2Data& Model, const FTransform& Transform,

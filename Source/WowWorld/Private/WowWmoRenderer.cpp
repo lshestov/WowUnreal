@@ -1,4 +1,6 @@
 #include "WowWmoRenderer.h"
+#include "WowWmoArea.h"
+#include "ProceduralMeshComponent.h"
 #include "WowWorldCollision.h"
 #include "Components/PointLightComponent.h"
 #include "PhysicsEngine/BodySetup.h"
@@ -85,6 +87,12 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
     WmoActor->SetActorScale3D(FVector(ScaleVal));
     RootComp->SetMobility(EComponentMobility::Static);
 
+    auto* Area=NewObject<UWowWmoAreaComponent>(WmoActor);
+    WmoActor->AddInstanceComponent(Area); Area->RegisterComponent();
+    Area->Path=WmoPath; Area->RootId=RootData.RootId; Area->NameSet=Placement.NameSet; Area->Bounds=RootData.BoundingBox;
+    Area->PortalVertices=MoveTemp(RootData.PortalVertices); Area->Portals=MoveTemp(RootData.Portals); Area->PortalRefs=MoveTemp(RootData.PortalRefs);
+    Area->Groups.SetNum(RootData.NumGroups);
+
     int32 GroupsLoaded = 0, InteriorFills=0;
 
     // Load each group as UStaticMesh with Nanite support
@@ -105,7 +113,9 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
             continue;
         }
 
-        FWowWorldCollision::AddWmo(RootComp, *FString::Printf(TEXT("WmoCollision_%u"), GroupIdx), GroupData);
+        auto& Room=Area->Groups[GroupIdx]; Room.Id=GroupData.GroupId; Room.Flags=GroupData.Flags; Room.Bounds=GroupData.BoundingBox;
+        Room.PortalStart=GroupData.PortalStart; Room.PortalCount=GroupData.PortalCount;
+        Room.Collision=FWowWorldCollision::AddWmo(RootComp, *FString::Printf(TEXT("WmoCollision_%u"), GroupIdx), GroupData);
         if (InteriorFills<4 && AddInteriorFill(RootComp,GroupData)) ++InteriorFills;
 
         // Create UStaticMesh with Nanite for this group

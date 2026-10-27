@@ -1,4 +1,5 @@
 #include "WowMapUi.h"
+#include "WowMinimapUi.h"
 #include "LuaApi/LuaApiRegistry.h"
 #include "WowConnectionManager.h"
 #include "WowEventSystem.h"
@@ -55,9 +56,14 @@ WowMapUi::FSelection WowMapUi::Selection(FWowLuaContext* C)
     for(int32 I=0;I<All.Num();++I) if(All[I]->MapId==S.Area->DisplayMap()) {S.Continent=I+1; break;}
     const auto List=Zones(S.Continent); for(int32 I=0;I<List.Num();++I) if(List[I]->Id==S.Area->Id) {S.Zone=I+1; break;}
     if(const auto* Floor=C->SelectedRows.Find(TEXT("mapFloor"))) S.Floor=Data().Floor(*Floor);
-    else if(S.Area->DefaultFloor>0) S.Floor=Data().Floor(S.Area->DefaultFloor);
-    else if(S.Area->AreaId && S.Area->DefaultFloor!=-1 && (!S.Area->HasBounds() || !Data().Continent(S.Area->MapId)))
-        S.Floor=Data().Floors().FindByPredicate([&](const auto& F){return F.MapId==S.Area->MapId && F.Index==1;});
+    else
+    {
+        const auto* Actual=!C->SelectedRows.Contains(TEXT("mapArea"))?Data().Floor(CurrentFloor(C)):nullptr;
+        if(Actual && S.Area->AreaId && Actual->MapId==S.Area->MapId) S.Floor=Actual;
+        else if(S.Area->DefaultFloor>0) S.Floor=Data().Floor(S.Area->DefaultFloor);
+        else if(S.Area->AreaId && S.Area->DefaultFloor!=-1 && (!S.Area->HasBounds() || !Data().Continent(S.Area->MapId)))
+            S.Floor=Data().Floors().FindByPredicate([&](const auto& F){return F.MapId==S.Area->MapId && F.Index==1;});
+    }
     return S;
 }
 void WowMapUi::Select(FWowLuaContext* C,int32 AreaId,int32 FloorId)
@@ -79,6 +85,7 @@ bool WowMapUi::SelectZoom(FWowLuaContext* C,int32 Continent,int32 Zone)
 uint32 WowMapUi::CurrentFloor(FWowLuaContext* C)
 {
     if(C && C->ResolveDungeonFloor) if(const uint32 Floor=C->ResolveDungeonFloor()) return Floor;
+    if(C && WowMinimapUi::View(C).Location.FloorId) return WowMinimapUi::View(C).Location.FloorId;
     const auto* Area=Current(C); return Area && Area->DefaultFloor>0?uint32(Area->DefaultFloor):0;
 }
 FVector2D WowMapUi::Project(FWowLuaContext* C,uint32 MapId,const FVector& Position,uint32 ActualFloor,bool Unclamped)

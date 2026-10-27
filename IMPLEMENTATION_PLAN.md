@@ -431,7 +431,7 @@ build, automation, native autologin and rendered screenshot verification):
     build, 106-test regression (two existing warnings), focused request/reset
     checks and a native 35-step/five-image round trip with exact fixture cleanup.
     See Docs/Macros.md.
-- [ ] 6. Maps: points of interest, tracking, interior minimaps and original map bootstrap.
+- [?] 6. Maps: points of interest, tracking, interior minimaps and original map bootstrap.
   - [x] Resolve actual zone/subzone from streamed terrain areas and join/replace
     built-in zone channels using their real DBC definitions and server replies.
     Centre-offset chunk coordinates, player-position resolver retained on reload,
@@ -458,7 +458,7 @@ build, automation, native autologin and rendered screenshot verification):
     with nine inspected captures, sub-second opening, an actual floor-button
     click, objective toggles and ReloadUI. Temporary quest and original
     position/UI were restored exactly. See Docs/Maps.md.
-  - [?] Original minimap tracking: class-filtered learned spells and common
+  - [x] Original minimap tracking: class-filtered learned spells and common
     services, real server quest dots, resource locks, mailboxes, loaded group
     members and pets, dot tooltips, original ObjectIcons UVs, stock zoom radii,
     rotating tiles/compass/player arrow, world-coordinate local/group pings,
@@ -467,7 +467,16 @@ build, automation, native autologin and rendered screenshot verification):
     regression tests (two existing warning tests), focused tooltip/API checks
     and a final 31-step/six-image native menu/selection/zoom/ping/rotation/reload
     route; all images validated and inspected. See Docs/Minimap.md.
-  - [ ] WMO interior minimap tiles, areas and floor resolution.
+  - [?] WMO interior maps: actual root/name-set/group identities and room portal
+    graph, collision-owned location, WMO area/room names, geographical zone
+    retention, DungeonMapChunk floor resolution and current-zone auto selection.
+    Original half-yard tiles and borders, portal eligibility/depth and room
+    ordering; separate indoor/outdoor zoom and reload state. Verified Windows
+    package, 115 regression tests (three warning tests, the same optional-DBC
+    and fixture-size warnings), final focused checks and a 26-step/four-image
+    native main-hall/upper-room/reload/outdoor round trip. The guarded route
+    restores original position/UI and verifies unchanged health, inventory,
+    money, level, XP and exploration. See Docs/IndoorMinimap.md.
 - [ ] 7. Group/special windows: party/loot, PvP, dungeon finder and achievements.
   - [ ] Restore NPC portrait captures and friendly NPC unit-frame reactions.
 

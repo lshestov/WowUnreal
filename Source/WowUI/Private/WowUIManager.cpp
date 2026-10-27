@@ -461,8 +461,8 @@ void UWowUIManager::TickWorldImages(UWorld* World)
     if(bUILoaded && LuaVM && Now>=NextItemComparisonUpdate)
     {
         NextItemComparisonUpdate=Now+.2; LuaVM->BeginCallback();
-        WowLuaApi::UpdateMapState(LuaVM->GetState());
         WowLuaApi::UpdateMinimapState(LuaVM->GetState());
+        WowLuaApi::UpdateMapState(LuaVM->GetState());
         WowLuaApi::UpdateItemComparisons(LuaVM->GetState());
         WowLuaApi::UpdateMerchant(LuaVM->GetState());
         WowLuaApi::UpdateBank(LuaVM->GetState());

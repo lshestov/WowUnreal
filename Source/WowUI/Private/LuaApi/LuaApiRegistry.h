@@ -36,6 +36,7 @@ struct FWowLuaContext
     TFunction<uint32()> ResolveDungeonFloor;
     TFunction<uint32()> ResolveArea;
     uint32 LastAreaId=0,LastZoneId=0;
+    uint32 LastWmoHash=0;
     TFunction<AActor*(uint64)> ResolveActor;
     TFunction<void()> ReloadUI;
     TMap<FName,int32> SelectedRows;

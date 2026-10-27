@@ -40,5 +40,6 @@ selection, aura acknowledgement, radii, markers, rotation and local ping.
 `WowUnreal.Hud.MinimapPackets` checks every truncated packet prefix, atomic
 replacement, empty/negative query responses and foreign ping rejection.
 
-Interior WMO tile/area/floor resolution and remote group member positions are
-separate tasks; outdoor tracking tests do not establish those features.
+WMO tiles, room/area/floor resolution and separate indoor zoom are described in
+[indoor minimaps](IndoorMinimap.md). Remote group member positions remain part
+of the group-interface task; loaded-member dots do not establish that feature.

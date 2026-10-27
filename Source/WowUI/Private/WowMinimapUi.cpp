@@ -58,6 +58,13 @@ FVector WowMinimapUi::Position(FWowLuaContext* C,uint64 Guid)
     if(C && C->ResolveActor) if(auto* A=C->ResolveActor(Guid)) {FVector P=A->GetActorLocation(); if(const auto* Pawn=Cast<ACharacter>(A)) P.Z-=Pawn->GetCapsuleComponent()->GetScaledCapsuleHalfHeight(); return FWowCoordinate::UEToWow(P);}
     const auto* E=C && C->EntityManager?C->EntityManager->Find(Guid):nullptr; return E?E->Movement.Position:FVector::ZeroVector;
 }
+FWowWmoLocation WowMinimapUi::Location(FWowLuaContext* C)
+{
+    if(C && C->ResolveActor && C->EntityManager && C->ConnectionManager) if(auto* A=C->ResolveActor(C->EntityManager->LocalPlayerGuid))
+        return UWowWmoAreaComponent::Locate(A->GetWorld(),A->GetActorLocation(),C->ConnectionManager->PacketHandler.CurrentMapId);
+    return FWowWmoLocation();
+}
+float WowMinimapUi::Radius(FWowLuaContext* C) {return Radius(C,C && View(C).Location.Minimap);}
 float WowMinimapUi::Radius(FWowLuaContext* C,bool Indoors)
 {
     const int32 Zoom=C && C->FrameManager?FMath::Clamp(C->FrameManager->MinimapZoom,0,5):0;
@@ -78,6 +85,12 @@ TArray<WowMinimapUi::FBlip> WowMinimapUi::Blips(FWowLuaContext* C)
     {
         const auto& E=*Pair.Value; if(E.Guid==Player->Guid || (!E.IsUnit() && E.GetEntityKind()!=EWowEntityKind::GameObject)) continue;
         const auto Pos=Position(C,E.Guid); if(FVector::DistSquared2D(Pos,Center)>R*R) continue;
+        if(const auto& Where=View(C).Location; Where.Minimap && Where.Component.IsValid() && !H.GroupInfo.FindMember(E.Guid))
+        {
+            const auto* Meta=Where.Component.Get(); const auto Local=Meta->ToLocal(FWowCoordinate::WowToUE(Pos)); bool SameInterior=false;
+            for(const auto& G:Meta->Groups) if(!(G.Flags&8) && G.Bounds.IsValid && G.Bounds.ExpandBy(.25).IsInsideOrOn(Local)) {SameInterior=true; break;}
+            if(!SameInterior) continue;
+        }
         int32 Icon=-1; FString Name;
         if(E.GetEntityKind()==EWowEntityKind::GameObject)
         {

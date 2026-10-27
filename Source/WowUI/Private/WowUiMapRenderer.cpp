@@ -102,7 +102,8 @@ void FWowUiMapRenderer::Tick(UWorld* World)
             const float TileSize=256.f*(1600.f/3)/(2*Radius);
             const float Angle=Mini.Rotates?Facing:0;
             const auto Rotate=[&](FVector2D P){P-=FVector2D(128); return FVector2D(128)+FVector2D(P.X*FMath::Cos(Angle)-P.Y*FMath::Sin(Angle),P.X*FMath::Sin(Angle)+P.Y*FMath::Cos(Angle));};
-            for(int32 DY=-1; DY<=1; ++DY) for(int32 DX=-1; DX<=1; ++DX)
+            if(Mini.Location.Minimap && Mini.Location.Component.IsValid()) DrawIndoor(Canvas,Pos,Radius,Facing);
+            else for(int32 DY=-1; DY<=1; ++DY) for(int32 DX=-1; DX<=1; ++DX)
             {
                 const int32 TX=FMath::FloorToInt(X)+DX,TY=FMath::FloorToInt(Y)+DY;
                 const FString Key=FString::Printf(TEXT("%s\\map%d_%d.blp"),*Map->InternalName,TX,TY).ToLower();
@@ -123,7 +124,7 @@ void FWowUiMapRenderer::Tick(UWorld* World)
                 // 8x4 table in build 12340 belongs to the vehicle atlas.
                 Canvas->K2_DrawTexture(Icons,FVector2D(128)+P*256-FVector2D(8),FVector2D(16),FVector2D((B.Icon&7)/8.,(B.Icon>>3)/2.),FVector2D(1./8,1./2),FLinearColor::White);
                 const FVector2D Screen(Rect.X+Rect.Z*(.5+P.X),Rect.Y+Rect.W*(.5+P.Y));
-                if(Frames.IsMouseOverFrame(Handle) && FVector2D::DistSquared(Screen,Pointer)<=FMath::Square(Rect.Z/256*10)) Hover=&B.Name;
+                if(Frames.HitTestFrames(Pointer.X*Frames.GetScreenScale(),Pointer.Y*Frames.GetScreenScale())==Handle && FVector2D::DistSquared(Screen,Pointer)<=FMath::Square(Rect.Z/256*10)) Hover=&B.Name;
             }
             const int64 Tooltip=Frames.FindFrame(TEXT("GameTooltip"));
             if(Hover && Tooltip>=0) {Frames.TooltipSetOwner(Tooltip,Handle,TEXT("ANCHOR_CURSOR")); Frames.TooltipSetText(Tooltip,*Hover); Frames.SetFrameVisible(Tooltip,true); Mini.OwnsTooltip=true;}
@@ -136,6 +137,23 @@ void FWowUiMapRenderer::Tick(UWorld* World)
         UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(World,Draw);
     }
     DrawQuestBlobs(World);
+}
+void FWowUiMapRenderer::DrawIndoor(UCanvas* Canvas,const FVector& Pos,float Radius,float Facing)
+{
+    auto& V=WowMinimapUi::View(&Context); const auto* Meta=V.Location.Component.Get(); if(!Meta) return;
+    FString Base=Meta->Path.ToLower(); Base.ReplaceInline(TEXT("/"),TEXT("\\")); Base.RemoveFromStart(TEXT("world\\")); Base.RemoveFromEnd(TEXT(".wmo"));
+    for(const auto& Q:Meta->MapQuads(V.Location,Radius,V.PortalDepth))
+    {
+        FVector2D Points[4]; const FVector P[]={FVector(Q.Bounds.Min.X,Q.Bounds.Max.Y,V.Location.LocalPosition.Z),FVector(Q.Bounds.Max.X,Q.Bounds.Max.Y,V.Location.LocalPosition.Z),FVector(Q.Bounds.Min.X,Q.Bounds.Min.Y,V.Location.LocalPosition.Z),FVector(Q.Bounds.Max.X,Q.Bounds.Min.Y,V.Location.LocalPosition.Z)};
+        FVector2D Min(MAX_dbl),Max(-MAX_dbl);
+        for(int32 I=0;I<4;++I) {Points[I]=FVector2D(128)+WowMinimapUi::Offset(&Context,Pos,FWowCoordinate::UEToWow(Meta->ToWorld(P[I])),Radius,Facing)*256; Min.X=FMath::Min(Min.X,Points[I].X); Min.Y=FMath::Min(Min.Y,Points[I].Y); Max.X=FMath::Max(Max.X,Points[I].X); Max.Y=FMath::Max(Max.Y,Points[I].Y);}
+        if(Min.X>256 || Min.Y>256 || Max.X<0 || Max.Y<0) continue;
+        const FString Key=FString::Printf(TEXT("%s_%03d_%02d_%02d.blp"),*Base,Q.Group,Q.X,Q.Y);
+        const auto* Hash=TileNames.Find(Key); if(!Hash) continue; auto* Art=Texture(TEXT("Textures\\Minimap\\")+*Hash); if(!Art) continue;
+        const FVector2D Half(.5/Art->GetSizeX(),.5/Art->GetSizeY()); const FVector2D UV[]={Half,FVector2D(1-Half.X,Half.Y),FVector2D(Half.X,1-Half.Y),FVector2D(1)-Half}; TArray<FCanvasUVTri> Triangles;
+        for(const auto Indices:{FIntVector(0,1,2),FIntVector(2,1,3)}) {FCanvasUVTri T; T.V0_Pos=Points[Indices.X]; T.V1_Pos=Points[Indices.Y]; T.V2_Pos=Points[Indices.Z]; T.V0_UV=UV[Indices.X]; T.V1_UV=UV[Indices.Y]; T.V2_UV=UV[Indices.Z]; T.V0_Color=T.V1_Color=T.V2_Color=FLinearColor::White; Triangles.Add(T);}
+        Canvas->K2_DrawTriangle(Art,Triangles);
+    }
 }
 void FWowUiMapRenderer::DrawQuestBlobs(UWorld* World)
 {
