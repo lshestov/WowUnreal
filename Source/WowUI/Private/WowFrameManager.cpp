@@ -1,6 +1,6 @@
+#include "WowFrameManager.h"
 #include "WowTextBlock.h"
 #include "WowBackdropWidget.h"
-#include "WowFrameManager.h"
 #include "WowEventSystem.h"
 #include "WowFontManager.h"
 #include "Components/CanvasPanel.h"
@@ -242,7 +242,7 @@ void FWowFrameManager::SetFrameVisible(int64 Handle, bool bVisible)
 {
 	if(!bVisible && FSlateApplication::IsInitialized())
 	{
-		for(const auto& Edit:EditBoxWidgets) if(Edit.Value.IsValid() && Edit.Value->HasKeyboardFocus())
+		for(const auto& Edit:EditBoxWidgets) if(Edit.Value.IsValid() && HasEditFocus(Edit.Key))
 		{
 			for(int64 Parent=Edit.Key; Parent>=0; Parent=GetParentHandle(Parent)) if(Parent==Handle) { FSlateApplication::Get().SetAllUserFocusToGameViewport(); break; }
 		}
@@ -2227,6 +2227,7 @@ bool FWowFrameManager::IsMouseOverFrame(int64 Handle, float TopOffset, float Bot
 
 void FWowFrameManager::TickWidgetEvents()
 {
+    SyncEditFocus();
     TickMessages(FPlatformTime::Seconds());
     if(EventSystem && FPlatformTime::Seconds()>=NextScrollRangeCheck)
     {
@@ -2318,7 +2319,7 @@ bool FWowFrameManager::DispatchEditBoxEnterPressed()
 	for (const auto& Pair : EditBoxWidgets)
 	{
 		if (!Pair.Value.IsValid()) continue;
-		if (IsFrameHierarchyShown(Pair.Key) && Pair.Value->HasKeyboardFocus())
+		if (IsFrameHierarchyShown(Pair.Key) && HasEditFocus(Pair.Key))
 		{
 			if (EventSystem)
 			{
@@ -2339,7 +2340,7 @@ bool FWowFrameManager::DispatchEditBoxEscapePressed()
 	for (const auto& Pair : EditBoxWidgets)
 	{
 		if (!Pair.Value.IsValid()) continue;
-		if (IsFrameHierarchyShown(Pair.Key) && Pair.Value->HasKeyboardFocus())
+		if (IsFrameHierarchyShown(Pair.Key) && HasEditFocus(Pair.Key))
 		{
 			if (EventSystem)
 			{
@@ -2394,8 +2395,7 @@ void FWowFrameManager::DispatchMouseDown(int64 Handle, const FString& Button)
     {HyperlinkPressedFrame=Handle; HyperlinkPressedData=LinkData; HyperlinkPressedButton=Button; return;}
     if(Button==TEXT("LeftButton"))
     {
-        if(auto* Edit=GetEditBoxWidget(Handle); Edit && Edit->GetIsEnabled()) Edit->SetKeyboardFocus();
-        if(auto* Edit=GetMultiLineEditBoxWidget(Handle); Edit && Edit->GetIsEnabled()) Edit->SetKeyboardFocus();
+        SetEditFocus(Handle,true);
     }
     if(auto* Slider=GetSliderWidget(Handle); Slider && Button==TEXT("LeftButton")) { if(!Slider->GetIsEnabled()) return; DraggingSlider=Handle; UpdateSliderPointer(); }
     if(auto* Widget=GetButtonWidget(Handle))

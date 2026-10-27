@@ -21,6 +21,7 @@ bool Reward(FPacketReader& R,FWowLfgState::FReward& Out)
 }
 void FWowPacketHandler::RegisterLfgHandlers()
 {
+    Handlers.Add(0x360,&FWowPacketHandler::HandleLfrList); Handlers.Add(0x369,&FWowPacketHandler::HandleLfrSearchActive);
     Handlers.Add(0x36F,&FWowPacketHandler::HandleLfgPlayerInfo); Handlers.Add(0x372,&FWowPacketHandler::HandleLfgPartyInfo);
     Handlers.Add(0x367,&FWowPacketHandler::HandleLfgPlayerUpdate); Handlers.Add(0x368,&FWowPacketHandler::HandleLfgPartyUpdate);
     Handlers.Add(0x364,&FWowPacketHandler::HandleLfgJoinResult); Handlers.Add(0x365,&FWowPacketHandler::HandleLfgQueue); Handlers.Add(0x398,&FWowPacketHandler::HandleLfgDisabled);
@@ -30,6 +31,7 @@ void FWowPacketHandler::RegisterLfgHandlers()
 void FWowPacketHandler::ResetLfgState()
 {
     FWowLfgState Fresh; Fresh.Revision=Lfg.Revision+1; Fresh.InfoRevision=Lfg.InfoRevision+1; Fresh.QueueRevision=Lfg.QueueRevision+1; Fresh.ResultRevision=Lfg.ResultRevision+1;
+    Fresh.Raid.Revision=Lfg.Raid.Revision+1;
     Fresh.RoleRevision=Lfg.RoleRevision+1; Fresh.ChosenRevision=Lfg.ChosenRevision+1; Fresh.ProposalRevision=Lfg.ProposalRevision+1; Fresh.BootRevision=Lfg.BootRevision+1; Fresh.ContinueRevision=Lfg.ContinueRevision+1; Fresh.TeleportRevision=Lfg.TeleportRevision+1; Fresh.RewardRevision=Lfg.RewardRevision+1; Lfg=MoveTemp(Fresh);
 }
 void FWowPacketHandler::HandleLfgPlayerInfo(FPacketReader& R)

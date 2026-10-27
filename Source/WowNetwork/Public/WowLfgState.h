@@ -23,4 +23,15 @@ struct FWowLfgState
     uint32 ContinueDungeon=0,TeleportError=0,RewardRandom=0,RewardSpecific=0;
     FReward FinalReward;
     uint32 RoleRevision=0,ChosenRevision=0,ProposalRevision=0,BootRevision=0,ContinueRevision=0,TeleportRevision=0,RewardRevision=0;
+    struct FRaidGroup {uint64 Guid=0,Instance=0; FString Comment; uint8 Tanks=0,Healers=0,Damage=0; uint32 Encounters=0;};
+    struct FRaidPlayer
+    {
+        uint64 Guid=0,Group=0,Instance=0; uint8 Level=0,Class=0,Race=0,Roles=0,Status=0;
+        uint32 Area=0,Encounters=0; float ItemLevel=0; bool Leader=false,Online=false; FString Comment;
+    };
+    struct FRaidBrowser
+    {
+        uint32 SearchDungeon=0,Revision=1; bool Ready=false,Listed=false;
+        TMap<uint64,FRaidGroup> Groups; TMap<uint64,FRaidPlayer> Players;
+    } Raid;
 };

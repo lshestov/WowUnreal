@@ -2410,4 +2410,22 @@ bool FHudScrollContent::RunTest(const FString&)
     TestTrue(TEXT("Capturing a key updates its real binding"),F.Lua.ExecuteString(TEXT("assert(GetBindingAction('F8')=='TOGGLESPELLBOOK'); LoadBindings(2); assert(GetBindingAction('F8')=='')")));
     return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudEditFocus,"WowUnreal.Hud.EditBoxFocusEvents",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudEditFocus::RunTest(const FString&)
+{
+    FHudFixture F;
+    TestTrue(TEXT("Observe the original edit-focus callbacks"),F.Lua.ExecuteString(TEXT(R"LUA(
+        FocusEvents={}; FocusA=CreateFrame('EditBox','FocusA',UIParent); FocusB=CreateFrame('EditBox','FocusB',UIParent)
+        for _,f in ipairs({FocusA,FocusB}) do
+            f:SetScript('OnEditFocusGained',function(self) table.insert(FocusEvents,self:GetName()..'+') end)
+            f:SetScript('OnEditFocusLost',function(self) table.insert(FocusEvents,self:GetName()..'-') end)
+        end
+    )LUA")));
+    const int64 A=F.Frames.FindFrame(TEXT("FocusA")),B=F.Frames.FindFrame(TEXT("FocusB"));
+    F.Frames.NotifyEditFocus(A); F.Frames.NotifyEditFocus(A); F.Frames.NotifyEditFocus(B); F.Frames.NotifyEditFocus(-1);
+    TestTrue(TEXT("Focus changes emit loss before gain and never duplicate unchanged focus"),F.Lua.ExecuteString(TEXT("assert(table.concat(FocusEvents,',')=='FocusA+,FocusA-,FocusB+,FocusB-')")));
+    F.Frames.NotifyEditFocus(999999);
+    TestTrue(TEXT("Unknown controls cannot invent a focus event"),F.Lua.ExecuteString(TEXT("assert(#FocusEvents==4)")));
+    return true;
+}
 #endif

@@ -152,7 +152,15 @@ void WowLuaApi::RegisterLfgApi(lua_State* L)
     Reg(L,"SetLFGRoles",[](lua_State* S)->int {auto* C=GetContext(S); if(!C) return 0; uint8 Roles=0; for(int I=1;I<=4;++I) if(Bool(S,I)) Roles|=1<<(I-1); Roles&=Available(C)|1; if(View(C).Roles!=Roles) {View(C).Roles=Roles; if(C->EventSystem) C->EventSystem->FireEvent(TEXT("LFG_ROLE_UPDATE"));} return 0;});
     Reg(L,"SetLFGComment",[](lua_State* S)->int {auto* C=GetContext(S); if(!C) return 0; FString Text=UTF8_TO_TCHAR(luaL_checkstring(S,1)); while(FTCHARToUTF8(*Text).Length()>255) Text.LeftChopInline(1); if(View(C).Comment!=Text) {View(C).Comment=Text; Send(C,0x366,FWire().Text(Text));} return 0;});
     Reg(L,"GetLFGInfoServer",[](lua_State* S)->int {auto* C=GetContext(S); const auto* H=Handler(C); const auto* Selected=Selection(C); Flag(S,H && !H->GroupInfo.IsEmpty()); Flag(S,Selected && Selected->Joined); Flag(S,Selected && Selected->Queued); Flag(S,false); Flag(S,false); String(S,Selected?Selected->Comment:C?View(C).Comment:FString()); lua_pushinteger(S,Selected?Selected->Dungeons.Num():0); return 7;});
-    Reg(L,"JoinLFG",[](lua_State* S)->int {auto* C=GetContext(S); auto* H=Handler(C); if(!H || H->Lfg.Disabled || View(C).Selected.IsEmpty() || !(View(C).Roles&14)) return 0; TArray<uint32> Ids=View(C).Selected.Array(); Ids.Sort(); FWire W; W.Add(uint32(View(C).Roles)).Add(uint8(0)).Add(uint8(0)).Add(uint8(Ids.Num())); for(uint32 Id:Ids) {const auto* D=Data().Dungeon(Id); if(!D || AnyLock(C,Id)) return 0; W.Add(D->Entry());} W.Add(uint8(3)).Add(uint8(0)).Add(uint8(0)).Add(uint8(0)).Text(View(C).Comment); Send(C,0x35C,W); return 0;});
+    Reg(L,"JoinLFG",[](lua_State* S)->int {
+        auto* C=GetContext(S); auto* H=Handler(C); if(!H || H->Lfg.Disabled || View(C).Selected.IsEmpty()) return 0;
+        TArray<uint32> Ids=View(C).Selected.Array(); Ids.Sort(); bool GroupRaid=!H->GroupInfo.IsEmpty();
+        for(uint32 Id:Ids) {const auto* D=Data().Dungeon(Id); if(!D || (AnyLock(C,Id) && (D->Type!=2 || H->GroupInfo.IsEmpty()))) return 0; GroupRaid&=D->Type==2;}
+        if(!GroupRaid && !(View(C).Roles&14)) return 0;
+        FWire W; W.Add(uint32(GroupRaid?1:View(C).Roles)).Add(uint8(0)).Add(uint8(0)).Add(uint8(Ids.Num()));
+        for(uint32 Id:Ids) W.Add(Data().Dungeon(Id)->Entry());
+        W.Add(uint8(3)).Add(uint8(0)).Add(uint8(0)).Add(uint8(0)).Text(View(C).Comment); Send(C,0x35C,W); return 0;
+    });
     Reg(L,"LeaveLFG",[](lua_State* S)->int {Send(GetContext(S),0x35D); return 0;});
     Reg(L,"GetLFGRoleUpdate",[](lua_State* S)->int {const auto* H=Handler(GetContext(S)); Flag(S,H && H->Lfg.RoleCheck.State==2); lua_pushinteger(S,H?H->Lfg.RoleCheck.Dungeons.Num():0); lua_pushinteger(S,H?H->Lfg.RoleCheck.Members.Num():0); return 3;});
     Reg(L,"GetLFGRoleUpdateSlot",[](lua_State* S)->int {const auto* H=Handler(GetContext(S)); const int I=luaL_checkinteger(S,1)-1; const auto* D=H && H->Lfg.RoleCheck.Dungeons.IsValidIndex(I)?Data().Dungeon(H->Lfg.RoleCheck.Dungeons[I]):nullptr; if(!D) return 0; lua_pushinteger(S,D->Type); lua_pushinteger(S,D->Id); return 2;});
@@ -200,6 +208,7 @@ int WowLuaApi::SetLfgRewardTooltip(lua_State* L)
 }
 void WowLuaApi::UpdateLfgState(lua_State* L)
 {
+    UpdateRaidBrowserState(L);
     auto* C=GetContext(L); auto* H=Handler(C); if(!H || !C->EventSystem) return; auto& V=View(C); const double Now=FPlatformTime::Seconds();
     const auto Event=[&](const TCHAR* Name){C->EventSystem->FireEvent(Name);}; const auto* P=Player(C); const uint32 Level=P?P->GetLevel():0;
     if(C->ConnectionManager->GetState()==EWowSessionState::WorldInGame && Level && (Now>=V.InfoAt || V.Level!=Level || V.Group!=H->GroupRevision)) {V.InfoAt=Now+60; V.Level=Level; V.Group=H->GroupRevision; Send(C,0x36E); if(!H->GroupInfo.IsEmpty()) Send(C,0x371); Event(TEXT("LFG_ROLE_UPDATE"));}

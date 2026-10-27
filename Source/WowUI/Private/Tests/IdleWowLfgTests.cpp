@@ -102,6 +102,25 @@ bool FLfgUiTest::RunTest(const FString&)
     H.GroupInfo.RawGroupType=WowGroupType::LFG|WowGroupType::LFG_RESTRICTED; H.GroupInfo.LfgDungeon=6; H.CurrentMapId=36;
     TestTrue(TEXT("Restrictions and dungeon presence follow the real LFG group and selected map"),Lua.ExecuteString(TEXT("assert(HasLFGRestrictions() and IsInLFGDungeon())")));
     TestTrue(TEXT("Original static-popup boot-vote API is registered"),Lua.ExecuteString(TEXT("assert(type(SetLFGBootVote)=='function' and SetLFGBootVote==VoteInBootProposal)")));
+    H.Lfg.Raid.SearchDungeon=42; H.Lfg.Raid.Ready=true;
+    FWowLfgState::FRaidGroup RaidGroup; RaidGroup.Guid=900; RaidGroup.Comment=TEXT("Owned group"); RaidGroup.Encounters=3; H.Lfg.Raid.Groups.Add(900,RaidGroup);
+    FWowLfgState::FRaidPlayer Leader; Leader.Guid=11; Leader.Group=900; Leader.Leader=true; Leader.Level=80; Leader.Class=1; Leader.Roles=1; H.Lfg.Raid.Players.Add(11,Leader);
+    auto Member=Leader; Member.Guid=22; Member.Leader=false; Member.Class=5; Member.Roles=0; H.Lfg.Raid.Players.Add(22,Member);
+    auto Solo=Leader; Solo.Guid=33; Solo.Group=0; Solo.Leader=false; Solo.Class=8; Solo.Roles=8; H.Lfg.Raid.Players.Add(33,Solo);
+    H.PlayerNameCache.Add(11,TEXT("Alpha")); H.PlayerNameCache.Add(22,TEXT("Beta")); H.PlayerNameCache.Add(33,TEXT("Zeta"));
+    FWowFriendInfo Friend; Friend.Guid=22; Friend.Name=TEXT("Beta"); H.FriendsList.Add(Friend);
+    TestTrue(TEXT("Original raid-browser tuples contain real group, solo, friend and encounter state"),Lua.ExecuteString(TEXT(R"LUA(
+        local count,total=SearchLFGGetNumResults(); assert(count==2 and total==2 and SearchLFGGetJoinedID()==42)
+        local name,level,area,class,comment,members,status,token,bosses,done,lead,tank,heal,dps=SearchLFGGetResults(1)
+        assert(name=='Alpha' and level==80 and comment=='Owned group' and members==2 and token=='WARRIOR' and bosses>0 and done==2 and lead and not tank and not heal and not dps)
+        local name,level,relation=SearchLFGGetPartyResults(1,2); assert(name=='Beta' and level==80 and relation=='friend')
+        assert(SearchLFGGetResults(3)==nil and SearchLFGGetPartyResults(2,1)==nil)
+        assert(SearchLFGGetEncounterResults(1,1)~=nil)
+        SearchLFGSort('name'); assert(SearchLFGGetResults(1)=='Zeta' and select(14,SearchLFGGetResults(1)))
+        SearchLFGSort('name'); assert(SearchLFGGetResults(1)=='Alpha')
+        LfrTip=CreateFrame('GameTooltip','LfrTip'); LfrTip:AddLine('Tank'); LfrTip:AddTexture('Interface\\LFGFrame\\LFGRole',0,.25,0,1)
+        LfrTip:AddDoubleLine('Owned group','2'); LfrTip:AddTexture(''); assert(LfrTip:NumLines()==2)
+    )LUA")));
     WowLuaApi::ClearContext(Lua.GetState()); Lua.Shutdown(); return true;
 }
 #endif

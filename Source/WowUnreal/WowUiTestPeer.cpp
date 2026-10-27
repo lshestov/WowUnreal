@@ -130,7 +130,7 @@ bool FWowUiTestPeer::Command(const FString& Action,int32 Slot,uint32 Value)
     if(Action.StartsWith(TEXT("lfg_")))
     {
         const auto& H=Client->PacketHandler; const auto* P=H.EntityManager.GetLocalPlayer();
-        const bool Solo=H.GroupInfo.IsEmpty() && (Action==TEXT("lfg_join") || Action==TEXT("lfg_proposal"));
+        const bool Solo=H.GroupInfo.IsEmpty() && (Action==TEXT("lfg_join") || Action==TEXT("lfg_proposal") || Action==TEXT("lfg_leave") || Action==TEXT("lfg_comment"));
         if(!P || (!Solo && !H.GroupInfo.FindMember(MasterGuid))) return false;
         const uint8 Class=P->GetClassId(); const uint32 Available=9u|((Class==1 || Class==2 || Class==6 || Class==11)?2u:0u)|((Class==2 || Class==5 || Class==7 || Class==11)?4u:0u);
         const auto Packet=[&](uint32 Op,const TArray<uint8>& Bytes){Client->SendRawPacket(Op,Bytes); return true;};
@@ -154,6 +154,7 @@ bool FWowUiTestPeer::Command(const FString& Action,int32 Slot,uint32 Value)
         if(Action==TEXT("lfg_vote")) {if(!H.Lfg.Boot.Progress || Slot<0 || Slot>1) return false; if(H.Lfg.Boot.Voted) return true; Bytes.Add(uint8(Slot)); return Packet(0x36C,Bytes);}
         if(Action==TEXT("lfg_boot")) {if(!H.GroupInfo.IsLfgGroup() || !Value || uint64(Value)==CharacterGuid || !H.GroupInfo.FindMember(Value)) return false; Append(Bytes,uint64(Value)); const char* Reason="Owned QA vote verification"; Bytes.Append(reinterpret_cast<const uint8*>(Reason),FCStringAnsi::Strlen(Reason)+1); return Packet(0x76,Bytes);}
         if(Action==TEXT("lfg_leave")) return Packet(0x35D,Bytes);
+        if(Action==TEXT("lfg_comment")) {const char* Comment="Owned QA raid listing"; Bytes.Append(reinterpret_cast<const uint8*>(Comment),FCStringAnsi::Strlen(Comment)+1); return Packet(0x366,Bytes);}
         return false;
     }
     if(Action==TEXT("arena_queue"))

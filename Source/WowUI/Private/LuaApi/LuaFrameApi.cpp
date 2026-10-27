@@ -2501,52 +2501,17 @@ static int LF_SetAutoFocus(lua_State* L)
 
 static int LF_ClearFocus(lua_State* L)
 {
-	if(auto* Edit=GetMultiLineEditor(L); Edit && Edit->HasEditFocus()) { if(FSlateApplication::IsInitialized()) FSlateApplication::Get().SetAllUserFocusToGameViewport(); return 0; }
-	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-	if (Ctx && Ctx->FrameManager)
-	{
-		if (UEditableTextBox* EditBox = GetEditBoxWidgetForTable(L))
-		{
-			// Clear focus from the edit box
-			if(FSlateApplication::IsInitialized()) FSlateApplication::Get().SetAllUserFocusToGameViewport();
-		}
-	}
-
-	return 0;
+    auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->SetEditFocus(GetFrameHandle(L,1),false); return 0;
 }
 
 static int LF_SetFocus(lua_State* L)
 {
-	if(auto* Edit=GetMultiLineEditor(L)) { Edit->SetKeyboardFocus(); return 0; }
-	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-	if (Ctx && Ctx->FrameManager)
-	{
-		if (UEditableTextBox* EditBox = GetEditBoxWidgetForTable(L))
-		{
-			// Set focus to the edit box
-			EditBox->SetKeyboardFocus();
-		}
-	}
-
-	return 0;
+    auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->SetEditFocus(GetFrameHandle(L,1),true); return 0;
 }
 
 static int LF_HasFocus(lua_State* L)
 {
-	if(auto* Edit=GetMultiLineEditor(L)) { lua_pushboolean(L,Edit->HasEditFocus()); return 1; }
-	bool HasFocus = false;
-
-	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-	if (Ctx && Ctx->FrameManager)
-	{
-		if (UEditableTextBox* EditBox = GetEditBoxWidgetForTable(L))
-		{
-			HasFocus = EditBox->HasKeyboardFocus();
-		}
-	}
-
-	lua_pushboolean(L, HasFocus);
-	return 1;
+    auto* C=WowLuaApi::GetContext(L); lua_pushboolean(L,C && C->FrameManager && C->FrameManager->HasEditFocus(GetFrameHandle(L,1))); return 1;
 }
 static int LF_HighlightText(lua_State* L) { return 0; }
 static int LF_SetCursorPosition(lua_State* L)
@@ -2944,6 +2909,19 @@ static int LF_TooltipAddLine(lua_State* L)
 	return 0;
 }
 
+static int LF_TooltipAddTexture(lua_State* L)
+{
+    auto* C=WowLuaApi::GetContext(L); if(!C || !C->FrameManager) return 0;
+    const int64 Handle=GetFrameHandle(L,1); auto* State=C->FrameManager->GetTooltipState(Handle);
+    if(!State || State->LineOrder.IsEmpty()) return 0;
+    const FString Path=UTF8_TO_TCHAR(luaL_optstring(L,2,""));
+    const auto Coord=[&](int I,double Default){const double Value=lua_isnumber(L,I)?lua_tonumber(L,I):Default; return FMath::IsFinite(Value)?FMath::Clamp(Value,0.,1.):Default;};
+    const FString Icon=Path.IsEmpty()?TEXT("   "):FString::Printf(TEXT("|T%s:16:16:0:0:1:1:%g:%g:%g:%g|t "),*Path,Coord(3,0),Coord(4,1),Coord(5,0),Coord(6,1));
+    const int32 Last=State->LineOrder.Last();
+    if(Last>=0 && State->Lines.IsValidIndex(Last)) State->Lines[Last].Text=Icon+State->Lines[Last].Text;
+    else if(Last<0 && State->DoubleLines.IsValidIndex(~Last)) State->DoubleLines[~Last].LeftText=Icon+State->DoubleLines[~Last].LeftText;
+    C->FrameManager->TooltipUpdateDisplay(Handle); return 0;
+}
 // tooltip:AddDoubleLine(leftText, rightText, lr, lg, lb, rr, rg, rb)
 static int LF_TooltipAddDoubleLine(lua_State* L)
 {
@@ -3555,6 +3533,7 @@ static const luaL_Reg FrameMethods[] =
 	{"SetHyperlink", WowLuaApi::SetHyperlinkTooltip},
 	{"SetHyperlinkCompareItem", WowLuaApi::SetHyperlinkCompareItem},
 	{"AddLine", LF_TooltipAddLine},
+    {"AddTexture", LF_TooltipAddTexture},
 	{"AddDoubleLine", LF_TooltipAddDoubleLine},
 	{"ClearLines", LF_TooltipClearLines},
 	{"NumLines", LF_TooltipNumLines},

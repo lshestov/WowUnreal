@@ -527,19 +527,19 @@ build, automation, native autologin and rendered screenshot verification):
       compact tooltips, frame options, final scores and return to the world.
       - [x] Load the new server map and collision on far transfers; preserve
         quests/inventory, clear old visible objects and acknowledge world entry.
-  - [ ] Complete dungeon-finder browsing, role/queue/proposal state and controls.
+  - [?] Complete dungeon-finder browsing, role/queue/proposal state and controls.
     - [x] Load original dungeon/group definitions and authoritative locks/rewards;
       restore the original browser, roles and queue controls.
       Verified Windows build, packet/catalog automation and a native 40-step
       queue/cancel route with six validated and inspected captures. See
       Docs/DungeonFinder.md.
-    - [?] Complete role checks, five-player proposals, teleport and group controls;
+    - [x] Complete role checks, five-player proposals, teleport and group controls;
       verify native disposable multiplayer routes and rendered screenshots.
       - [x] Premade role checks, accepted/declined proposals, original ready
         status and minimap teleport controls. Verified six focused checks and
         a 127-step five-account route with nine inspected captures and three
         explicit Unreal garbage collections between map transfers.
-      - [?] Verify separate-player matchmaking, vote kicks, backfill and random
+      - [x] Verify separate-player matchmaking, vote kicks, backfill and random
         completion rewards through rendered multiplayer routes.
         Verified eight focused checks and a 135-step five-account route with
         twelve inspected captures: separate queues, both vote outcomes, reason
@@ -548,7 +548,11 @@ build, automation, native autologin and rendered screenshot verification):
         is ready (required by Stockades/Ragefire Chasm dungeon transfers).
         Verified build, five focused checks and a native 30-step route through
         Stockades/Ragefire/world with three inspected, nonempty captures.
-    - [ ] Complete original raid-browser listings, search results and controls.
+    - [?] Complete original raid-browser listings, search results and controls.
+      Verified five focused checks and an 80-step two-account rendered route
+      with eight inspected captures: original dropdown/choices, live solo/group
+      listings, comment updates, role/group tooltips, sorting, refresh, invite,
+      listing/unlisting and focus-driven comment submission.
     - [x] Fix stock character-frame bootstrap identity and timed notification
       fading discovered during the dungeon-finder routes.
       Verified six focused checks and a 21-step native route with four

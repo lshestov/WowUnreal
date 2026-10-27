@@ -283,6 +283,10 @@ public:
 	/** Poll EditBox/Slider widgets for changes and dispatch Lua events.
 	 *  Call once per frame from Tick. */
 	void TickWidgetEvents();
+    bool HasEditFocus(int64 Handle) const;
+    void SetEditFocus(int64 Handle,bool Focus);
+    void SyncEditFocus();
+    void NotifyEditFocus(int64 Handle);
 
 	/** Dispatch OnEnterPressed to the currently focused EditBox (if any).
 	 *  Returns true if an EditBox was focused and received the event. */
@@ -338,6 +342,8 @@ private:
 
 	/** Handle of the frame currently under the mouse cursor (-1 if none) */
 	int64 HoverFrameHandle = -1;
+    int64 FocusedEditHandle=-1;
+    uint32 EditFocusRevision=0;
     int64 HyperlinkHoverFrame=-1,HyperlinkPressedFrame=-1;
     FString HyperlinkHoverData,HyperlinkHoverText,HyperlinkPressedData,HyperlinkPressedButton;
 	FVector2D LastPointerPosition=FVector2D::ZeroVector;

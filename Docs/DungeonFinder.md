@@ -76,8 +76,42 @@ The current server clears a player's selected random dungeon when a replacement
 queue is cancelled (LFGMgr::LeaveLfg sets player state to NONE). This can prevent
 its later random-completion reward. The client sends the original cancellation
 packet; the successful reward route fills the replacement instead. This is a
-server behavior, not a client-side reward substitute. Raid-browser listings and
-achievement presentation remain separate pending tasks.
+server behavior, not a client-side reward substitute. Achievement presentation
+remains a separate pending task.
+
+## Original raid browser
+
+SearchLFGJoin sends a single typed dungeon entry, as required by the build 12340
+handler. Full and differential server lists commit atomically after validating
+row counts, strings, optional fields and character-stat payloads. Late results
+for a different selected raid are ignored. Session reset clears subscriptions,
+listing activity and cached rows. Names resolve through actual player queries,
+throttled to sixteen requests per UI update.
+
+The original choice and browse tabs show individual roles and group leaders,
+comments, classes, levels, party membership and encounter masks. Name/level/class/
+role/group sorts, refresh, listing/unlisting, dropdown selection, invitations
+and tooltip contracts use the same authoritative snapshot. Group listings follow
+the original leader-only role and locked-instance rules; solo listings retain
+class role and availability checks. Tooltip AddTexture renders role icons and
+preserves the ordering of single/double text rows.
+
+Focused automation covers complete/differential lists, truncation and trailing
+bytes, oversized counts, stale subscriptions, deletion and session reset, plus
+the original Lua tuples, sorting, group/friend/encounter state and tooltip icons.
+Edit fields dispatch their original focus-gained/lost handlers immediately and
+when Slate changes focus. Single-line focus includes Slate's inner editor;
+clearing a different field does not steal focus. An ordered, reentrant-safe
+bridge avoids duplicate transitions and lets the stock comment placeholder and
+submission handlers work without FrameXML patches.
+
+Verified: five focused checks and an 80-step rendered two-account route through
+the original dropdown, actual solo/group listings, comment updates, role/group
+tooltips, sorting, refresh, invitation and unlisting. Eight captures were
+validated and inspected. Both accounts are disposable and removed after the
+route; existing characters and inventories remain unchanged.
+The complete regression passes 144 checks (140 clean, four previously recorded
+optional-data/fixture warning cases), including the shared input/tooltip paths.
 
 ## Dungeon map prerequisite
 

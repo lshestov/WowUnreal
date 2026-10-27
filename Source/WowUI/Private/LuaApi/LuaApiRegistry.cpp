@@ -43,6 +43,7 @@ void WowLuaApi::RegisterAll(lua_State* L)
     RegisterTabardApi(L);
     RegisterPvpApi(L);
     RegisterLfgApi(L);
+    RegisterRaidBrowserApi(L);
     RegisterMapApi(L);
     RegisterWorldMapApi(L);
     RegisterReputationApi(L);

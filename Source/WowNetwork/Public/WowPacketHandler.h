@@ -476,6 +476,8 @@ private:
     void HandleLfgContinue(FPacketReader& R);
     void HandleLfgTeleport(FPacketReader& R);
     void HandleLfgReward(FPacketReader& R);
+    void HandleLfrList(FPacketReader& R);
+    void HandleLfrSearchActive(FPacketReader& R);
     void RegisterPvpHandlers();
     void HandleBattlefieldStatus(FPacketReader& R);
     void HandleBattlefieldList(FPacketReader& R);
