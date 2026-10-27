@@ -38,7 +38,7 @@ public:
     void FireEventBoolean(const FString& EventName,bool Value);
     void FireEventStringNumber(const FString& EventName,const FString& Text,double Number);
 	void FireChatMessage(uint8 Type, uint32 Language, uint64 SenderGuid,
-		const FString& SenderName, const FString& Message, const FString& Channel);
+		const FString& SenderName, const FString& Message, const FString& Channel, uint32 Achievement=0);
 
 	/** Compile a script handler for a frame and store the Lua function reference */
 	void SetFrameScript(int64 Handle, const FString& ScriptName, const FString& Code);

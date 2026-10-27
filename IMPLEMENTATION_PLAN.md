@@ -111,7 +111,7 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 - [x] Button texture regions and micro menu: render XML/Lua normal, pushed, disabled and highlight states; preserve region identity, dimensions/UVs and explicit visibility; resolve mouse-over geometry after child reanchoring. Verified by 45 targeted tests and 40 rendered native steps.
 - [x] Basic macro panel and action execution: account/character storage, immediate byte-safe persistence, stable action identities, multiline editor/caret/scroll, icon selection and original slash-command dispatch. Native tests verify creation, typing, drag/drop, execution and ReloadUI persistence. See [macro support](Docs/Macros.md) for remaining advanced syntax.
 - [x] Live combat-log foundation: typed melee/spell/heal/environment/death events, bounded session history, filters and terminating cursors; original combat-log tab, quick-filter buttons and ReloadUI history are verified with real server healing. See [combat-log support](Docs/CombatLog.md) for remaining event families.
-- [ ] Remaining full FrameXML feature parity: advanced macros and combat events, PvP/battleground and LFG queues, achievements, world-map POIs/indoor minimaps, and unsupported legacy configuration controls. Their current stubs must not be described as complete WoW client functionality. See [interface status](Docs/InterfaceStatus.md) for verified scope and limitations.
+- [ ] Remaining full FrameXML feature parity: specialized frame/region methods, uncovered macro conditions and combat events, broader addon compatibility, and unsupported legacy configuration controls. The seven requested interface stages below have their own verified scope. See [interface status](Docs/InterfaceStatus.md) for limitations.
 - [x] Profile native UI/game/render/GPU frame times, reduce recurring OnUpdate GC slices from 1024 to 64 while preserving pressure checks and the 128 MiB sandbox, and move routine frame/model/animation traces to Verbose. Verified with 25 regression tests and the same 22-step native route: median UI time improves from about 3.1 ms to 0.7–0.8 ms, frame p95 from about 15 ms to 4.3 ms, with stable 56.6 MiB Lua memory. A transient-allocation test checks callback delivery and bounded heap use independently of timing.
 - [x] Lua 5.1 VM (sandboxed, memory limited 128MB, instruction limited)
 - [x] FrameXML parser (19 frame types, anchors, strata, templates)
@@ -477,7 +477,7 @@ build, automation, native autologin and rendered screenshot verification):
     native main-hall/upper-room/reload/outdoor round trip. The guarded route
     restores original position/UI and verifies unchanged health, inventory,
     money, level, XP and exploration. See Docs/IndoorMinimap.md.
-- [ ] 7. Group/special windows: party/loot, PvP, dungeon finder and achievements.
+- [?] 7. Group/special windows: party/loot, PvP, dungeon finder and achievements.
   - [x] Restore NPC/player portrait captures with authored M2 cameras and the
     runtime head-socket cache. Verified Windows build, 117 regression tests
     (three existing warning tests), corrected fixture and final two-test check,
@@ -527,7 +527,7 @@ build, automation, native autologin and rendered screenshot verification):
       compact tooltips, frame options, final scores and return to the world.
       - [x] Load the new server map and collision on far transfers; preserve
         quests/inventory, clear old visible objects and acknowledge world entry.
-  - [?] Complete dungeon-finder browsing, role/queue/proposal state and controls.
+  - [x] Complete dungeon-finder browsing, role/queue/proposal state and controls.
     - [x] Load original dungeon/group definitions and authoritative locks/rewards;
       restore the original browser, roles and queue controls.
       Verified Windows build, packet/catalog automation and a native 40-step
@@ -548,7 +548,7 @@ build, automation, native autologin and rendered screenshot verification):
         is ready (required by Stockades/Ragefire Chasm dungeon transfers).
         Verified build, five focused checks and a native 30-step route through
         Stockades/Ragefire/world with three inspected, nonempty captures.
-    - [?] Complete original raid-browser listings, search results and controls.
+    - [x] Complete original raid-browser listings, search results and controls.
       Verified five focused checks and an 80-step two-account rendered route
       with eight inspected captures: original dropdown/choices, live solo/group
       listings, comment updates, role/group tooltips, sorting, refresh, invite,
@@ -557,7 +557,15 @@ build, automation, native autologin and rendered screenshot verification):
       fading discovered during the dungeon-finder routes.
       Verified six focused checks and a 21-step native route with four
       inspected captures. See Docs/MessageFrames.md.
-  - [ ] Complete achievements, criteria, tracking and comparison state.
+  - [?] Complete achievements, criteria, tracking and comparison state.
+    Original catalog/categories/ranks, authoritative snapshots and criteria,
+    statistics, points/dates/icons, numeric earned notifications and chat links,
+    per-character tracking/restoration and isolated player comparisons.
+    Verified Windows build and 146 regression checks (142 clean, four previously
+    recorded warning cases), native 84/89-step routes at 1280x720/1920x1080,
+    and 23 validated, inspected captures. Tracking survives ReloadUI; server
+    completion removes it and actual chat links open the original tooltip.
+    See Docs/Achievements.md.
 
 - [x] Stock options category placement and text: numeric-offset SetPoint overloads, runtime $parent references, constrained description wrapping, and XML markup rendered without asset paths while Lua keeps original strings. Verified 64 automation tests and native category clicks, character/spellbook windows and rendered screenshots.
 - [x] Stock FrameXML visibility: preserve hidden branches during parent Show/layout, respect explicit hidden=false, remove frame-name and Flash overrides. Verified 63 automation tests, native action-bar options/window clicks and rendered screenshots at 1280x720 and 1920x1080.

@@ -366,7 +366,7 @@ private:
     void OnAttackerStateUpdate(uint64 AttackerGuid, uint64 VictimGuid, uint32 HitInfo, uint32 Damage);
     void OnServerAttackStart(uint64 AttackerGuid, uint64 VictimGuid);
     void OnServerAttackStop(uint64 AttackerGuid, uint64 VictimGuid);
-    void OnChatMessage(uint8 Type, uint32 Language, uint64 SenderGuid, const FString& SenderName, const FString& Message, const FString& Channel);
+    void OnChatMessage(uint8 Type, uint32 Language, uint64 SenderGuid, const FString& SenderName, const FString& Message, const FString& Channel, uint32 Achievement);
     void OnEmote(uint64 EntityGuid, uint32 EmoteId);
     void OnInitialSpells(const TArray<uint32>& SpellIds);
     void OnActionButtonsUpdated();

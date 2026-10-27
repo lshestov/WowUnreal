@@ -6,6 +6,7 @@
 #include "WowCombatLog.h"
 #include "WowPvpState.h"
 #include "WowLfgState.h"
+#include "WowAchievementState.h"
 
 DECLARE_DELEGATE_OneParam(FOnWowCombatLog,const FWowCombatEntry&);
 DECLARE_DELEGATE_RetVal_OneParam(uint32,FOnWowCombatFlags,uint64);
@@ -13,7 +14,7 @@ DECLARE_DELEGATE_FourParams(FOnWowCastResult,uint64,uint32,uint8,bool);
 DECLARE_DELEGATE_ThreeParams(FOnWowCastState,uint64,uint32,uint8);
 
 DECLARE_MULTICAST_DELEGATE_FiveParams(FOnLoginVerifyWorld, uint32 /*MapId*/, float /*X*/, float /*Y*/, float /*Z*/, float /*Orientation*/);
-DECLARE_MULTICAST_DELEGATE_SixParams(FOnChatMessage, uint8 /*Type*/, uint32 /*Language*/, uint64 /*SenderGuid*/, const FString& /*SenderName*/, const FString& /*Message*/, const FString& /*Channel*/);
+DECLARE_MULTICAST_DELEGATE_SevenParams(FOnChatMessage, uint8 /*Type*/, uint32 /*Language*/, uint64 /*SenderGuid*/, const FString& /*SenderName*/, const FString& /*Message*/, const FString& /*Channel*/, uint32 /*Achievement*/);
 DECLARE_MULTICAST_DELEGATE_FourParams(FOnSpellStart, uint64 /*CasterGuid*/, uint32 /*SpellId*/, uint32 /*CastFlags*/, int32 /*CastTime*/);
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnSpellGo, uint64 /*CasterGuid*/, uint32 /*SpellId*/, uint32 /*CastFlags*/);
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnSpellFailure, uint64 /*CasterGuid*/, uint32 /*SpellId*/, uint8 /*FailureReason*/);
@@ -235,6 +236,8 @@ public:
     FWowPvpState Pvp;
     FWowLfgState Lfg;
     void ResetLfgState();
+    FWowAchievementState Achievements;
+    void ResetAchievementState();
     void ResetPvpState();
     void ResetInspectState(uint64 Guid=0);
     TArray<FWowGlyphChange> LastGlyphChanges;
@@ -478,6 +481,13 @@ private:
     void HandleLfgReward(FPacketReader& R);
     void HandleLfrList(FPacketReader& R);
     void HandleLfrSearchActive(FPacketReader& R);
+    void RegisterAchievementHandlers();
+    void HandleAllAchievements(FPacketReader& R);
+    void HandleInspectAchievements(FPacketReader& R);
+    void HandleAchievementEarned(FPacketReader& R);
+    void HandleAchievementCriteria(FPacketReader& R);
+    void HandleAchievementDeleted(FPacketReader& R);
+    void HandleCriteriaDeleted(FPacketReader& R);
     void RegisterPvpHandlers();
     void HandleBattlefieldStatus(FPacketReader& R);
     void HandleBattlefieldList(FPacketReader& R);

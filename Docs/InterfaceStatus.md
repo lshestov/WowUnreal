@@ -36,6 +36,14 @@ compatibility work.
 - Original party frames, raid roster, remote members/pets, focus, subgroup and
   leadership controls, server-confirmed loot settings and ready checks. Remote
   group positions also appear on the map/minimap; see [groups](Groups.md).
+- Original dungeon and raid browsers, roles, server locks/rewards, separate
+  queues and premade role checks, five-player proposals, dungeon transfers,
+  both vote-kick outcomes, replacement matchmaking and random completion
+  rewards. Raid search includes actual player/group listings, comments, roles,
+  invitation and unlisting. See [dungeon finder](DungeonFinder.md).
+- Achievement categories, ranks, criteria, dates, points, statistics, links,
+  earned notifications, per-character tracking and separate inspected-player
+  comparison state. See [achievements](Achievements.md).
 - Original loot window, money/item rows, bind prompts, Need/Greed/Disenchant
   eligibility and countdowns, confirmed results and master-recipient selection.
   Saved auto-loot/Shift behaviour and actual item/money chat notifications;
@@ -113,7 +121,7 @@ The Windows Editor and packaged Development client are built from the same
 source tree. `WowUnreal.Hud`, `WowUnreal.UI`, `WowUnreal.Gameplay` and the related
 player, collision, equipment, lighting, rendering, traversal and performance
 suites cover both isolated controls and live protocol state. The interface
-regression set, including runtime animation, contains 137 tests. Existing optional character texture-layout
+regression set, including runtime animation and world parsers, contains 146 tests. Existing optional character texture-layout
 DBC and test-fixture size warnings remain.
 
 Native gameplay probes exercise live server state and rendered UI at 1280x720
@@ -137,12 +145,11 @@ Full WoW UI compatibility is **not complete**. In particular:
 - Uncovered macro condition variants and additional combat event families.
   Cast sequences and acknowledged random actions are implemented. See
   [macro support](Macros.md) and [combat-log support](CombatLog.md).
-- Dungeon-finder separate-player matches, vote/reward/backfill verification,
-  raid-browser search and achievements. Catalogs, role checks, premade
-  proposals, ready status, locks/rewards, solo queues and dungeon teleport
-  controls are implemented; see [dungeon finder](DungeonFinder.md).
-  Unit relationships and selection colours are implemented separately; see
-  [faction/reputation reactions](UnitReactions.md).
+- A server-side cancellation case in replacement matchmaking: AzerothCore
+  clears the player's selected random dungeon when a replacement queue is
+  cancelled. Its later random completion reward can then be lost. The native
+  completion route fills the replacement slot; the server limitation is
+  documented in [dungeon finder](DungeonFinder.md).
 - Legacy options without an engine-side implementation; persisting a CVar
   does not imply that its associated rendering or gameplay feature exists.
 - MP3 music decoding. WAV playback and finite UI-sound lifetime are supported.

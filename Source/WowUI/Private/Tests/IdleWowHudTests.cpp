@@ -424,7 +424,7 @@ bool FHudLootState::RunTest(const FString&)
     FWowLootItem B=A; B.Index=7; B.SlotType=1; H.Loot.Items={A,B};
     TestTrue(TEXT("Original loot API preserves coin offset, real metadata and signed random-property links"),F.Lua.ExecuteString(TEXT(R"LUA(
         format=string.format; COPPER_AMOUNT='%d Copper'; RETRIEVING_ITEM_INFO='Retrieving item information...'
-        local groups={GetChatWindowMessages(1)}; local found={}; for _,group in ipairs(groups) do found[group]=true end; assert(found.LOOT and found.MONEY)
+        local groups={GetChatWindowMessages(1)}; local found={}; for _,group in ipairs(groups) do found[group]=true end; assert(found.LOOT and found.MONEY and found.ACHIEVEMENT and found.GUILD_ACHIEVEMENT)
         assert(GetCVarDefault('lastTalkedToGM')==''); SetCVar('lastTalkedToGM','0'); assert(GetCVar('lastTalkedToGM')==''); SetCVar('lastTalkedToGM','')
         assert(GetNumLootItems()==3 and LootSlotIsCoin(1) and LootSlotIsItem(2) and GetLootSlotType(1)==2)
         local icon,name,count,quality,locked=GetLootSlotInfo(2); assert(name=='Moss Agate' and count==3 and quality==2 and not locked)

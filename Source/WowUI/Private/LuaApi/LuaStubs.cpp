@@ -5763,7 +5763,7 @@ lua_pushboolean(L2, PLATFORM_MAC);
     // ── Final batch: remaining missing functions from error log ──
     lua_register(L, "GetChatWindowMessages", ([](lua_State* State) -> int {
         if (luaL_optinteger(State,1,1)!=1) return 0;
-        const char* Groups[]={"SYSTEM","SAY","EMOTE","YELL","WHISPER","PARTY","RAID","GUILD","OFFICER","LOOT","MONEY","SKILL","OPENING","TRADESKILLS"};
+        const char* Groups[]={"SYSTEM","SAY","EMOTE","YELL","WHISPER","PARTY","RAID","GUILD","OFFICER","LOOT","MONEY","SKILL","OPENING","TRADESKILLS","ACHIEVEMENT","GUILD_ACHIEVEMENT"};
         for (const auto* Group:Groups) lua_pushstring(State,Group);
         return UE_ARRAY_COUNT(Groups);
     }));

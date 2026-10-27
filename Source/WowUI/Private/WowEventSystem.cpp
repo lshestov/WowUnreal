@@ -5,6 +5,7 @@
 #include "WowFontManager.h"
 #include "LuaApi/LuaApiRegistry.h"
 #include "WowConnectionManager.h"
+#include "Formats/Dbc/DbcStore.h"
 
 #if __has_include("lua.h")
 extern "C" {
@@ -191,19 +192,23 @@ void FWowEventSystem::UnregisterAllEvents(int64 FrameHandle)
 }
 
 void FWowEventSystem::FireChatMessage(uint8 Type, uint32 Language, uint64 SenderGuid,
-	const FString& SenderName, const FString& Message, const FString& Channel)
+	const FString& SenderName, const FString& Message, const FString& Channel, uint32 Achievement)
 {
 	static const TCHAR* Names[] = {TEXT("SYSTEM"),TEXT("SAY"),TEXT("PARTY"),TEXT("RAID"),TEXT("GUILD"),TEXT("OFFICER"),
 		TEXT("YELL"),TEXT("WHISPER"),TEXT("WHISPER_FOREIGN"),TEXT("WHISPER_INFORM"),TEXT("EMOTE"),TEXT("TEXT_EMOTE"),
 		TEXT("MONSTER_SAY"),TEXT("MONSTER_PARTY"),TEXT("MONSTER_YELL"),TEXT("MONSTER_WHISPER"),TEXT("MONSTER_EMOTE"),TEXT("CHANNEL")};
-	const FString Event = FString(TEXT("CHAT_MSG_")) + (Type < UE_ARRAY_COUNT(Names) ? Names[Type] : TEXT("SYSTEM"));
+	const FString Event = FString(TEXT("CHAT_MSG_")) + (Type==48?TEXT("ACHIEVEMENT"):Type==49?TEXT("GUILD_ACHIEVEMENT"):(Type < UE_ARRAY_COUNT(Names) ? Names[Type] : TEXT("SYSTEM")));
+	FString Body=Message;
+	if((Type==48 || Type==49) && Achievement)
+		if(const auto* Row=FDbcStore::Get().Achievements().Achievement(Achievement))
+			Body.ReplaceInline(TEXT("$a"),*FString::Printf(TEXT("|cffffff00|Hachievement:%u:%016llX:1:0:0:0:0:0:0:0|h[%s]|h|r"),Achievement,SenderGuid,*Row->Name),ESearchCase::CaseSensitive);
 	const FString LanguageName = Language == 7 ? TEXT("Common") : Language == 1 ? TEXT("Orcish") : TEXT("");
     uint32 ChannelId=0; int32 ChannelNumber=0; FString Display=Channel;
 #if HAS_LUA
     if(Type==17 && LuaVM) if(const auto* Context=WowLuaApi::GetContext(LuaVM->GetState()); Context && Context->ConnectionManager)
         if(const auto* Row=Context->ConnectionManager->PacketHandler.FindChannel(Channel)) {ChannelId=Row->Id; ChannelNumber=Row->Number; Display=FString::Printf(TEXT("%d. %s"),ChannelNumber,*Row->Name);}
 #endif
-	FireEvent(Event, {Message,SenderName,LanguageName,Display,TEXT(""),TEXT(""),FString::FromInt(ChannelId),FString::FromInt(ChannelNumber),Channel,TEXT(""),TEXT("0"),
+	FireEvent(Event, {Body,SenderName,LanguageName,Display,TEXT(""),TEXT(""),FString::FromInt(ChannelId),FString::FromInt(ChannelNumber),Channel,TEXT(""),TEXT("0"),
 		FString::Printf(TEXT("0x%016llX"),SenderGuid)});
 }
 
@@ -1793,7 +1798,7 @@ FString FWowEventSystem::OpcodeToEvent(uint16 Opcode)
 	// Battleground status/list events are emitted after typed packet validation.
 
 	// Achievement
-	case 0x0468: return TEXT("ACHIEVEMENT_EARNED");              // SMSG_ACHIEVEMENT_EARNED
+    // Achievement events follow validated snapshots and carry the actual ID.
 
 	// Player progression
 	case 0x01D0: return TEXT("COMBAT_XP_GAIN");                  // SMSG_LOG_XPGAIN

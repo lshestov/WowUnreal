@@ -25,6 +25,7 @@ struct FWowTabardUiView;
 struct FWowPvpUiView;
 struct FWowLfgUiView;
 struct FWowLfrUiView;
+struct FWowAchievementUiView;
 struct FWowItemTemplate;
 struct FWowItemEntity;
 struct FWowGuildEmblem;
@@ -50,6 +51,7 @@ struct FWowLuaContext
     TSharedPtr<FWowPvpUiView> PvpUi;
     TSharedPtr<FWowLfgUiView> LfgUi;
     TSharedPtr<FWowLfrUiView> LfrUi;
+    TSharedPtr<FWowAchievementUiView> AchievementUi;
     TArray<uint64> ArenaOpponents;
     TFunction<uint32()> ResolveDungeonFloor;
     TFunction<uint32()> ResolveArea;
@@ -124,6 +126,9 @@ namespace WowLuaApi
     void UpdateLfgState(lua_State* L);
     void RegisterRaidBrowserApi(lua_State* L);
     void UpdateRaidBrowserState(lua_State* L);
+    void RegisterAchievementApi(lua_State* L);
+    void UpdateAchievementState(lua_State* L);
+    int SetAchievementTooltip(lua_State* L,uint32 Id);
     int SetLfgRewardTooltip(lua_State* L);
     int SetLfgCompletionRewardTooltip(lua_State* L);
     void UpdatePvpState(lua_State* L);

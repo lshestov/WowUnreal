@@ -38,6 +38,7 @@
 #include "Formats/Dbc/MapUiDbc.h"
 #include "Formats/Dbc/PvpUiDbc.h"
 #include "Formats/Dbc/LfgUiDbc.h"
+#include "Formats/Dbc/AchievementUiDbc.h"
 
 class FMpqManager;
 
@@ -62,6 +63,7 @@ public:
     const FMapUiDbc& MapUi() const {return MapUiDbc;}
     const FPvpUiDbc& PvpUi() const {return PvpUiDbc;}
     const FLfgUiDbc& LfgUi() const {return LfgUiDbc;}
+    const FAchievementUiDbc& Achievements() const {return AchievementUiDbc;}
     const TArray<FWorldMapArea>& WorldMapAreas() const {return MapUiDbc.Areas();}
     const TArray<FWorldMapOverlay>& WorldMapOverlays() const {return MapUiDbc.Overlays();}
     struct WOWDATA_API FFaction
@@ -197,6 +199,7 @@ private:
     FTaxiNodesDbc TaxiNodesDbc;
     FItemUiDbc ItemUiDbc;
     FLfgUiDbc LfgUiDbc;
+    FAchievementUiDbc AchievementUiDbc;
     TMap<uint32,FGlyph> GlyphProperties;
     TMap<uint32,FGlyphSlot> GlyphSlots;
     bool bLoaded = false;

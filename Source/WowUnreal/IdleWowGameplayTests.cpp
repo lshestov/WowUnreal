@@ -132,10 +132,14 @@ bool FGameplayChatAndFaction::RunTest(const FString&)
     TestEqual(TEXT("Faction standing updates address the correct row"),Handler.Reputations[0].Standing,1000);
     Update.Data.SetNum(Update.Data.Num()-1); Handler.HandlePacket(0x0124,Update.Data); TestEqual(TEXT("Truncated standing cannot overwrite cached state"),Handler.Reputations[0].Standing,1000);
     FString LastSender,LastMessage; int32 ChatEvents=0;
-    Handler.OnChatMessage.AddLambda([&](uint8,uint32,uint64,const FString& Name,const FString& Message,const FString&) { LastSender=Name; LastMessage=Message; ++ChatEvents; });
+    uint32 ChatAchievement=0;
+    Handler.OnChatMessage.AddLambda([&](uint8,uint32,uint64,const FString& Name,const FString& Message,const FString&,uint32 Achievement) { LastSender=Name; LastMessage=Message; ChatAchievement=Achievement; ++ChatEvents; });
     FWire Gm; Gm.Add(uint8(1)).Add(uint32(7)).Add(uint64(1)).Add(uint32(0)).Add(uint32(7)).Text("Tester").Add(uint64(0)).Add(uint32(6)).Text("Hello").Add(uint8(3));
     Handler.HandlePacket(0x03B3,Gm.Data); TestEqual(TEXT("GM chat includes the explicit sender name"),LastSender,FString(TEXT("Tester"))); TestEqual(TEXT("GM chat body is aligned after the name and receiver"),LastMessage,FString(TEXT("Hello")));
     Gm.Data.SetNum(Gm.Data.Num()-2); Handler.HandlePacket(0x03B3,Gm.Data); TestEqual(TEXT("Truncated GM chat is rejected"),ChatEvents,1);
+    FWire Earned; Earned.Add(uint8(48)).Add(uint32(0)).Add(uint64(1)).Add(uint32(0)).Add(uint64(0)).Add(uint32(3)).Text("$a").Add(uint8(0)).Add(uint32(6));
+    Handler.HandlePacket(0x0096,Earned.Data); TestEqual(TEXT("Achievement chat preserves the appended achievement ID"),ChatAchievement,6u);
+    Earned.Data.SetNum(Earned.Data.Num()-1); Handler.HandlePacket(0x0096,Earned.Data); TestEqual(TEXT("Truncated achievement chat never reaches the UI"),ChatEvents,2);
     FWire Name; Name.Add(uint8(1)).Add(uint8(1)).Add(uint8(0)).Text("Tester").Text("").Add(uint8(1)).Add(uint8(0)).Add(uint8(1)).Add(uint8(0));
     Handler.HandlePacket(0x0051,Name.Data); TestEqual(TEXT("A zero unknown flag identifies a successful name query"),Handler.PlayerNameCache.FindRef(1),FString(TEXT("Tester")));
     return true;

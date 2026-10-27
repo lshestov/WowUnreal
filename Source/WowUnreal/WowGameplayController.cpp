@@ -4142,7 +4142,7 @@ void AWowGameplayController::OnAttackerStateUpdate(uint64 AttackerGuid, uint64 V
 }
 
 
-void AWowGameplayController::OnChatMessage(uint8 Type, uint32 Language, uint64 SenderGuid, const FString& SenderName, const FString& Message, const FString& Channel)
+void AWowGameplayController::OnChatMessage(uint8 Type, uint32 Language, uint64 SenderGuid, const FString& SenderName, const FString& Message, const FString& Channel, uint32 Achievement)
 {
 	// Forward to chat window if available
 	if (ChatWindow.IsValid())
@@ -4156,7 +4156,7 @@ void AWowGameplayController::OnChatMessage(uint8 Type, uint32 Language, uint64 S
 	}
 
     if (UIManager && UIManager->GetEventSystem())
-        UIManager->GetEventSystem()->FireChatMessage(Type, Language, SenderGuid, SenderName, Message, Channel);
+        UIManager->GetEventSystem()->FireChatMessage(Type, Language, SenderGuid, SenderName, Message, Channel, Achievement);
 }
 
 void AWowGameplayController::OnEmote(uint64 EntityGuid, uint32 EmoteId)

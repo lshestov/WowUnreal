@@ -420,6 +420,7 @@ int WowLuaApi::SetHyperlinkTooltip(lua_State* L)
     FString Link=UTF8_TO_TCHAR(luaL_checkstring(L,2)); const int32 Header=Link.Find(TEXT("|H")); if(Header>=0) Link=Link.Mid(Header+2);
     const int32 End=Link.Find(TEXT("|h")); if(End>=0) Link.LeftInline(End);
     TArray<FString> Parts; Link.ParseIntoArray(Parts,TEXT(":"),false); const uint32 Id=Parts.Num()>1?FCString::Strtoui64(*Parts[1],nullptr,10):ItemId(L,2);
+      if(Parts.Num()>1 && Parts[0]==TEXT("achievement")) return SetAchievementTooltip(L,Id);
     if(Parts.Num()>1 && (Parts[0]==TEXT("spell") || Parts[0]==TEXT("enchant") || Parts[0]==TEXT("talent")))
     {
         uint32 Spell=Id;

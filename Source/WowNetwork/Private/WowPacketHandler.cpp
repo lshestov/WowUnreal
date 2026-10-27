@@ -11,6 +11,7 @@ FWowPacketHandler::FWowPacketHandler()
 {
     RegisterPvpHandlers();
     RegisterLfgHandlers();
+    RegisterAchievementHandlers();
     // Register handlers
     Handlers.Add(0x02A5,&FWowPacketHandler::HandleForcedReactions);
     Handlers.Add(WowOpcode::SMSG_GOSSIP_MESSAGE, &FWowPacketHandler::HandleGossipMessage);
@@ -222,7 +223,7 @@ void FWowPacketHandler::HandlePacket(uint16 Opcode, const TArray<uint8>& Data)
         else if(Opcode==0x0219) Text=TEXT("You can only whisper to members of your faction.");
         else if(Opcode==0x01CB) Text=R.ReadCString();
         else Text=TEXT("The server has restricted this chat message.");
-        OnChatMessage.Broadcast(0,0,0,TEXT(""),Text,TEXT(""));
+        OnChatMessage.Broadcast(0,0,0,TEXT(""),Text,TEXT(""),0);
     }
     else if(Opcode==0x0122)
     {
@@ -840,6 +841,8 @@ void FWowPacketHandler::ParseMessageChat(FPacketReader& R,bool Gm)
     if(!MsgLen || MsgLen>uint32(R.Remaining()) || !R.CanRead(MsgLen+1) || R.Data[R.Pos+MsgLen-1]!=0) return;
     FString Message = R.ReadCString();
     uint8 ChatTag = R.ReadU8();
+    uint32 Achievement=0;
+    if(Type==48 || Type==49) {if(R.Remaining()!=4) return; Achievement=R.ReadU32(); if(!Achievement) return;}
 
     // Get sender name from cache
     if (SenderName.IsEmpty() && SenderGuid != 0)
@@ -857,7 +860,7 @@ void FWowPacketHandler::ParseMessageChat(FPacketReader& R,bool Gm)
 
     UE_LOG(LogWowPacket, Log, TEXT("CHAT type=%d lang=%d sender=%s channel=%s: %s"),
            Type, Language, *SenderName, *Channel, *Message);
-    OnChatMessage.Broadcast(Type, Language, SenderGuid, SenderName, Message, Channel);
+    OnChatMessage.Broadcast(Type, Language, SenderGuid, SenderName, Message, Channel, Achievement);
 }
 
 // ── SMSG_INITIAL_SPELLS ──────────────────────────────────────────────────────
@@ -2089,7 +2092,7 @@ void FWowPacketHandler::HandleTextEmote(FPacketReader& R)
         }
 
         // Broadcast as a special chat message (emote type)
-        OnChatMessage.Broadcast(0, 0, SenderGuid, SenderName, EmoteText, TEXT(""));
+        OnChatMessage.Broadcast(0, 0, SenderGuid, SenderName, EmoteText, TEXT(""),0);
     }
 
     // Also trigger the animation if we have the EmoteNum
