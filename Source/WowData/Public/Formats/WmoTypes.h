@@ -72,6 +72,7 @@ struct WOWDATA_API FWmoRootData
 {
     TArray<FWmoMaterial> Materials;
     uint32 NumGroups = 0;
+    TArray<FBox> GroupBounds;
     uint32 RootId = 0;
     struct FPortal { uint16 Start=0, Count=0; };
     struct FPortalRef { uint16 Portal=0, Group=0; int16 Side=0; };

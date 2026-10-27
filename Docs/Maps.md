@@ -118,3 +118,16 @@ rejection of unknown IDs. Four final focused map/loot checks pass without
 warnings. Native disposable-character verification loads Kalimdor, finds the
 ground, sends movement and obtains an actual group-roll reward. The rendered
 world, corpse window and roll tooltip captures are nonempty and inspected.
+
+Large WMO cities are streamed instead of being skipped above 100 groups. The
+root's MOGI bounds determine a stable nearest-first order; one group is built per
+game-thread ticker frame. Smaller WMO starts and doodad spawns are also bounded,
+and root group counts are cached. Root actors retain room/portal metadata while
+groups arrive. Initial login waits for building collision as well as terrain;
+loading cannot place the player on the ADT surface beneath a city. Map changes
+cancel pending city jobs, and component-budget accounting uses full group counts.
+
+The real Stormwind root contains 286 groups. The large-WMO test checks its bounds,
+unique nearest-first scheduling, initial-collision loading gate and cancellation.
+Native verification enters Rebecca Laughlin's shop at the server height, talks
+to the vendor, edits and saves a tabard, and captures the loaded interior.

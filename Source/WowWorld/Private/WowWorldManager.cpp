@@ -7,6 +7,7 @@
 #include "WowAssetCache.h"
 #include "Formats/AdtParser.h"
 #include "Formats/WdtParser.h"
+#include "Formats/WmoParser.h"
 #include "Formats/WdtTypes.h"
 #include "Formats/WdlParser.h"
 #include "Formats/WdlTypes.h"
@@ -334,6 +335,8 @@ AWowWorldManager::AWowWorldManager() { PrimaryActorTick.bCanEverTick = true; Pri
 void AWowWorldManager::BeginPlay()
 {
     Super::BeginPlay();
+    const TWeakObjectPtr<AWowWorldManager> Weak(this);
+    WmoTicker=FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([Weak](float){if(!Weak.IsValid()) return false; if(!Weak->bStreamingSuspended && Weak->bStreamingEnabled) Weak->UpdatePendingWmoLoads(); return true;}));
     const TCHAR* CmdLine = FCommandLine::Get();
     MpqManager = MakeUnique<FMpqManager>();
     AssetCache = MakeUnique<FWowAssetCache>();
@@ -532,6 +535,7 @@ int32 AWowWorldManager::LoadTilesAroundPosition(const FVector& UEPosition, int32
 
     InitialTilesQueued = 0;
     InitialTilesLoaded = 0;
+    InitialObjectTiles=0;
     InitialTileKeys.Empty();
 
     for (int32 DX = -Radius; DX <= Radius; ++DX)
@@ -574,7 +578,7 @@ bool AWowWorldManager::SelectMap(uint32 MapId)
     bStreamingSuspended=true; bStreamingEnabled=false; ++MapGeneration;
     // Old MPQ reads can finish in the background; their generation prevents
     // them from being finalized into this map without blocking the game thread.
-    PendingTileKeys.Reset(); InitialTileKeys.Reset(); InitialTilesQueued=InitialTilesLoaded=0;
+    PendingTileKeys.Reset(); InitialTileKeys.Reset(); InitialTilesQueued=InitialTilesLoaded=InitialObjectTiles=0; PendingWmoLoads.Reset(); WmoGroupCounts.Reset(); PendingObjectGroups=0;
     for(auto& Pair:LoadedTiles) if(IsValid(Pair.Value)) Pair.Value->Destroy(); LoadedTiles.Reset();
     for(auto& Pair:WdlTiles) if(IsValid(Pair.Value)) Pair.Value->Destroy(); WdlTiles.Reset();
     for(auto& Pair:Lod1Tiles) if(IsValid(Pair.Value)) Pair.Value->Destroy(); Lod1Tiles.Reset();
@@ -623,6 +627,7 @@ void AWowWorldManager::EnableTerrainStreaming()
 
 void AWowWorldManager::EndPlay(const EEndPlayReason::Type R)
 {
+    FTSTicker::RemoveTicker(WmoTicker); WmoTicker.Reset(); PendingWmoLoads.Reset();
     // Wait for any pending async loads to complete before cleanup
     for (FPendingTileLoad& Pending : PendingLoads)
     {
@@ -675,6 +680,8 @@ void AWowWorldManager::Tick(float DT)
 
     // Always process completed async loads, even before streaming is enabled
     ProcessPendingLoads();
+    if(!bStreamingSuspended && bStreamingEnabled && MpqManager && MpqManager->IsInitialized())
+    {UpdateStreaming(); UpdateObjectStreaming();}
 
     if (bAutoWaitForInitialLoad && !bAutoTimerArmed)
     {
@@ -727,8 +734,6 @@ void AWowWorldManager::Tick(float DT)
         return;
     }
 
-    UpdateStreaming();
-    UpdateObjectStreaming();
     UpdateZoneAudio();
 
     // Periodically purge stale cache entries and check budget
@@ -1012,8 +1017,8 @@ void AWowWorldManager::UpdateStreaming()
             {
                 if (WmoPair.Value)
                 {
+                    const auto* Area=WmoPair.Value->FindComponentByClass<UWowWmoAreaComponent>(); ActiveWmoGroupCount=FMath::Max(0,ActiveWmoGroupCount-(Area?Area->Groups.Num():1));
                     WmoPair.Value->Destroy();
-                    --ActiveWmoGroupCount; // approximate; exact tracking not critical here
                 }
                 SpawnedWmoIds.Remove(WmoPair.Key);
             }
@@ -1535,6 +1540,7 @@ void AWowWorldManager::UpdateObjectStreaming()
     const float DoodadDespawnRadiusSq = (DoodadRadius * 1.2f) * (DoodadRadius * 1.2f);
     const float WmoRadiusSq = WmoRadius * WmoRadius;
     const float WmoDespawnRadiusSq = (WmoRadius * 1.2f) * (WmoRadius * 1.2f);
+    int32 WmosStarted=0,DoodadsStarted=0; PendingObjectGroups=0;
 
     // Debug: log once per second
     static int32 DebugCounter = 0;
@@ -1607,6 +1613,7 @@ void AWowWorldManager::UpdateObjectStreaming()
                     Placement.Position.Z);
                 float DistSq = FVector::DistSquared(CamLoc, UEPos);
                 if (DistSq > DoodadRadiusSq) continue;
+                if(DoodadsStarted>=2) continue;
 
                 // Spawn it
                 UStaticMeshComponent* Comp = FWowDoodadManager::SpawnSingleDoodad(
@@ -1616,6 +1623,7 @@ void AWowWorldManager::UpdateObjectStreaming()
                     Tile->SpawnedDoodads.Add(Placement.UniqueId, Comp);
                     SpawnedDoodadIds.Add(Placement.UniqueId);
                     ++ActiveDoodadCount;
+                    ++DoodadsStarted;
                 }
             }
         }
@@ -1637,8 +1645,8 @@ void AWowWorldManager::UpdateObjectStreaming()
                 TObjectPtr<AActor>* Act = Tile->SpawnedWmos.Find(Id);
                 if (Act && *Act)
                 {
+                    const auto* Area=(*Act)->FindComponentByClass<UWowWmoAreaComponent>(); ActiveWmoGroupCount=FMath::Max(0,ActiveWmoGroupCount-(Area?Area->Groups.Num():1));
                     (*Act)->Destroy();
-                    --ActiveWmoGroupCount; // approximate
                 }
                 Tile->SpawnedWmos.Remove(Id);
                 SpawnedWmoIds.Remove(Id);
@@ -1666,35 +1674,52 @@ void AWowWorldManager::UpdateObjectStreaming()
             float DistSq = FVector::DistSquared(CamLoc, UEPos);
             if (DistSq > WmoRadiusSq) continue;
 
-            // Check group count - skip huge WMOs (e.g. Stormwind)
-            uint32 GroupCount = FWowWmoRenderer::GetWmoGroupCount(WmoPath, Tile->CachedMpq);
+            // Large cities use the same renderer in a bounded, incremental job.
+            const FString CountKey=WmoPath.ToLower();
+            if(!WmoGroupCounts.Contains(CountKey)) WmoGroupCounts.Add(CountKey,FWowWmoRenderer::GetWmoGroupCount(WmoPath,Tile->CachedMpq));
+            const uint32 GroupCount=WmoGroupCounts[CountKey];
             if (GroupCount == 0) continue;
-            if ((int32)GroupCount > MaxWmoGroupsPerObject)
-            {
-                // Mark as "spawned" so we don't re-check every tick
-                SpawnedWmoIds.Add(Placement.UniqueId);
-                UE_LOG(LogWowWorld, Log, TEXT("Skipping large WMO %s (%d groups > max %d)"),
-                    *WmoPath, GroupCount, MaxWmoGroupsPerObject);
-                continue;
-            }
-
             // Check if adding this WMO would exceed the group limit
             if (ActiveWmoGroupCount + (int32)GroupCount > MaxActiveWmoGroups) continue;
+            if(WmosStarted>=1) {PendingObjectGroups+=int32(GroupCount); continue;}
 
             // Spawn it
-            AActor* WmoActor = FWowWmoRenderer::SpawnWmo(
-                GetWorld(), WmoPath, Placement, Tile->CachedMpq, Tile->CachedCache);
+            AActor* WmoActor=nullptr;
+            if(int32(GroupCount)>MaxWmoGroupsPerObject)
+            {
+                TArray<uint8> Bytes; if(!Tile->CachedMpq->ReadFile(WmoPath,Bytes)) continue;
+                TSharedPtr<FWmoRootData> Root=MakeShared<FWmoRootData>(FWmoParser::ParseRoot(Bytes)); if(!Root->bIsValid || Root->NumGroups!=GroupCount || GroupCount>4096) continue;
+                WmoActor=FWowWmoRenderer::SpawnWmo(GetWorld(),WmoPath,Placement,Tile->CachedMpq,Tile->CachedCache,nullptr,Root.Get(),0,0);
+                if(WmoActor)
+                {
+                    const FVector P=WmoActor->GetActorTransform().InverseTransformPosition(CamLoc)/FWowCoordinate::SCALE;
+                    FPendingWmoLoad Job; Job.Actor=WmoActor; Job.Path=WmoPath; Job.Placement=Placement; Job.Root=Root; Job.Mpq=Tile->CachedMpq; Job.Cache=Tile->CachedCache;
+                    Job.Order=FWowWmoRenderer::GroupLoadOrder(*Root,FVector(P.Y,P.X,P.Z)); PendingWmoLoads.Add(MoveTemp(Job));
+                    UE_LOG(LogWowWorld,Log,TEXT("Streaming large WMO %s (%u groups)"),*WmoPath,GroupCount);
+                }
+            }
+            else WmoActor=FWowWmoRenderer::SpawnWmo(GetWorld(),WmoPath,Placement,Tile->CachedMpq,Tile->CachedCache);
             if (WmoActor)
             {
                 WmoActor->AttachToActor(Tile, FAttachmentTransformRules::KeepWorldTransform);
                 Tile->SpawnedWmos.Add(Placement.UniqueId, WmoActor);
                 SpawnedWmoIds.Add(Placement.UniqueId);
                 ActiveWmoGroupCount += (int32)GroupCount;
+                ++WmosStarted;
             }
         }
     }
+    InitialObjectTiles=PendingObjectGroups?0:InitialTilesLoaded;
 }
 
+void AWowWorldManager::UpdatePendingWmoLoads()
+{
+    PendingWmoLoads.RemoveAll([](const auto& Job){return !Job.Actor.IsValid() || Job.Actor->IsActorBeingDestroyed() || Job.Next>=Job.Order.Num();});
+    if(PendingWmoLoads.IsEmpty()) return;
+    auto& Job=PendingWmoLoads[0]; const int32 Group=Job.Order[Job.Next++];
+    FWowWmoRenderer::SpawnWmo(GetWorld(),Job.Path,Job.Placement,Job.Mpq,Job.Cache,Job.Actor.Get(),Job.Root.Get(),Group,1);
+    if(Job.Next>=Job.Order.Num()) {UE_LOG(LogWowWorld,Log,TEXT("Large WMO streaming complete: %s"),*Job.Path); PendingWmoLoads.RemoveAt(0);}
+}
 void AWowWorldManager::SetupRuntimeVirtualTexture()
 {
     if(TerrainRVT && RVTVolumeComponent) return;

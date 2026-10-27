@@ -196,6 +196,16 @@ FWmoRootData FWmoParser::ParseRoot(const TArray<uint8>& Data)
             (void)nMaterials; // materials count comes from MOMT chunk size
             (void)AmbientBGRA;
         }
+        else if (ChunkMagic == WMO_MOGI)
+        {
+            if(ChunkSize%32==0 && ChunkSize/32<=4096) for(uint32 I=0;I<ChunkSize/32;++I)
+            {
+                uint32 Off=ChunkStart+I*32; ReadU32(Base,Off,DataSize);
+                const float X=ReadFloat(Base,Off,DataSize),Y=ReadFloat(Base,Off,DataSize),Z=ReadFloat(Base,Off,DataSize);
+                const float MX=ReadFloat(Base,Off,DataSize),MY=ReadFloat(Base,Off,DataSize),MZ=ReadFloat(Base,Off,DataSize);
+                Result.GroupBounds.Add(FBox(FVector(X,Y,Z),FVector(MX,MY,MZ)));
+            }
+        }
         else if (ChunkMagic == WMO_MOTX)
         {
             // Texture name string table - just store pointer, will be used by MOMT

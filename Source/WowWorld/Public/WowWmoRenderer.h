@@ -19,10 +19,12 @@ class WOWWORLD_API FWowWmoRenderer
 public:
     /** Spawn a WMO instance at the given placement. Returns the parent actor. */
     static AActor* SpawnWmo(UWorld* World, const FString& WmoPath, const FAdtWmoPlacement& Placement,
-                            FMpqManager* Mpq, FWowAssetCache* Cache);
+                            FMpqManager* Mpq, FWowAssetCache* Cache,AActor* Existing=nullptr,
+                            const FWmoRootData* ParsedRoot=nullptr,int32 FirstGroup=0,int32 GroupLimit=MAX_int32);
 
     /** Query the number of groups in a WMO root file without spawning anything. Returns 0 on failure. */
     static uint32 GetWmoGroupCount(const FString& WmoPath, FMpqManager* Mpq);
+    static TArray<int32> GroupLoadOrder(const FWmoRootData& Root,const FVector& ModelPosition);
     static UPointLightComponent* AddInteriorFill(USceneComponent* Parent,const FWmoGroupData& Group);
 
 private:

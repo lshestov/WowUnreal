@@ -10,8 +10,26 @@
 #include "Components/SceneComponent.h"
 #include "Coord/WowCoordinate.h"
 #include "TimerManager.h"
+#include "WowWmoRenderer.h"
+#include "Formats/WmoParser.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIdleWowLargeWmo,"WowUnreal.World.LargeWmoStreaming",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FIdleWowLargeWmo::RunTest(const FString&)
+{
+    FString Path; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false; FMpqManager Mpq; if(!Mpq.Initialize(Path)) return false;
+    TArray<uint8> Bytes; if(!TestTrue(TEXT("Original Stormwind root is available from MPQ"),Mpq.ReadFile(TEXT("World\\WMO\\Azeroth\\Buildings\\Stormwind\\Stormwind.wmo"),Bytes))) return false;
+    const auto City=FWmoParser::ParseRoot(Bytes); TestTrue(TEXT("The city is larger than the old 100-group skip and retains every MOGI bounding box"),City.bIsValid && City.NumGroups==286 && City.GroupBounds.Num()==286);
+    const FVector Position=City.GroupBounds.IsEmpty()?FVector::ZeroVector:City.GroupBounds.Last().GetCenter(); const auto Order=FWowWmoRenderer::GroupLoadOrder(City,Position); TSet<int32> Unique(Order);
+    TestTrue(TEXT("Every city room is scheduled once, with a containing room first"),Order.Num()==286 && Unique.Num()==286 && City.GroupBounds[Order[0]].ComputeSquaredDistanceToPoint(Position)==0);
+    UWorld* World=UWorld::CreateWorld(EWorldType::Game,false); if(!World) return false; GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+    auto* Manager=World->SpawnActor<AWowWorldManager>(); if(!Manager) {World->DestroyWorld(false); GEngine->DestroyWorldContext(World); return false;}
+    Manager->InitialTilesQueued=Manager->InitialTilesLoaded=1; TestFalse(TEXT("Terrain alone cannot reveal the player before building collision was scanned"),Manager->IsInitialLoadComplete());
+    Manager->InitialObjectTiles=1; FPendingWmoLoad Job; Job.Order={0,1}; Job.Actor=World->SpawnActor<AActor>(); Manager->PendingWmoLoads.Add(Job);
+    TestFalse(TEXT("A city job holds the login loading gate until collision is ready"),Manager->IsInitialLoadComplete());
+    Job.Actor->Destroy(); Manager->UpdatePendingWmoLoads(); TestTrue(TEXT("Destroyed jobs are cancelled without loading or retaining stale geometry"),Manager->PendingWmoLoads.IsEmpty() && Manager->IsInitialLoadComplete());
+    Manager->Destroy(); World->DestroyWorld(false); GEngine->DestroyWorldContext(World); return true;
+}
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIdleWowServerMapSelection,"WowUnreal.World.ServerMapSelection",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FIdleWowServerMapSelection::RunTest(const FString&)
 {

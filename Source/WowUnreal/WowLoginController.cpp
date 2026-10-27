@@ -734,6 +734,7 @@ void AWowLoginController::UpdateLoadingProgress()
         float Progress = (Queued > 0) ? FMath::Clamp((float)Loaded / (float)Queued, 0.0f, 1.0f) : 0.0f;
 
         FString StatusText = FString::Printf(TEXT("Loading terrain... (%d/%d tiles)"), Loaded, Queued);
+        if(Loaded>=Queued && WorldManager->GetPendingWmoGroupCount()>0) StatusText=TEXT("Loading buildings...");
         if (LoadingScreenWidget.IsValid())
         {
             LoadingScreenWidget->SetProgress(0.1f + Progress * 0.9f, StatusText);

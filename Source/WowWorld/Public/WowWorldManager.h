@@ -6,7 +6,9 @@
 #include "Formats/WdtTypes.h"
 #include "Formats/WdlTypes.h"
 #include "Formats/AdtTypes.h"
+#include "Formats/WmoTypes.h"
 #include "Async/Future.h"
+#include "Containers/Ticker.h"
 #include "WowWorldManager.generated.h"
 
 class AWowTerrainTile;
@@ -21,10 +23,22 @@ struct FPendingTileLoad
     uint32 Generation=0;
     TFuture<TSharedPtr<FAdtData>> Future;
 };
+struct FPendingWmoLoad
+{
+    TWeakObjectPtr<AActor> Actor;
+    FString Path;
+    FAdtWmoPlacement Placement;
+    TSharedPtr<FWmoRootData> Root;
+    FMpqManager* Mpq=nullptr;
+    FWowAssetCache* Cache=nullptr;
+    TArray<int32> Order;
+    int32 Next=0;
+};
 
 UCLASS()
 class WOWWORLD_API AWowWorldManager : public AActor
 {
+    friend class FIdleWowLargeWmo;
     GENERATED_BODY()
 public:
     AWowWorldManager();
@@ -53,7 +67,8 @@ public:
     int32 GetInitialTilesLoaded() const { return InitialTilesLoaded; }
 
     /** Whether all initially-queued tiles have finished loading */
-    bool IsInitialLoadComplete() const { return InitialTilesQueued > 0 && InitialTilesLoaded >= InitialTilesQueued; }
+    bool IsInitialLoadComplete() const { return InitialTilesQueued > 0 && InitialTilesLoaded >= InitialTilesQueued && InitialObjectTiles>=InitialTilesQueued && PendingWmoLoads.IsEmpty(); }
+    int32 GetPendingWmoGroupCount() const {int32 Count=PendingObjectGroups; for(const auto& Job:PendingWmoLoads) if(Job.Actor.IsValid()) Count+=Job.Order.Num()-Job.Next; return Count;}
 
     /** Get the terrain RVT for mesh components to write to */
     URuntimeVirtualTexture* GetTerrainRVT() const { return TerrainRVT; }
@@ -115,7 +130,7 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Streaming")
     int32 MaxActiveWmoGroups = 2000;
 
-    /** Skip WMOs with more groups than this to avoid GPU overload. */
+    /** WMOs above this group count stream one group per world tick. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Streaming")
     int32 MaxWmoGroupsPerObject = 100;
 
@@ -153,6 +168,11 @@ private:
     /** Initial load tracking */
     int32 InitialTilesQueued = 0;
     int32 InitialTilesLoaded = 0;
+    int32 InitialObjectTiles=0;
+    TArray<FPendingWmoLoad> PendingWmoLoads;
+    FTSTicker::FDelegateHandle WmoTicker;
+    TMap<FString,uint32> WmoGroupCounts;
+    int32 PendingObjectGroups=0;
     TSet<int64> InitialTileKeys;
 
     /** Track spawned WMO unique IDs to avoid duplicates across tiles */
@@ -185,6 +205,7 @@ private:
     void UnloadTile(int32 TX, int32 TY);
     void UpdateStreaming();
     void UpdateObjectStreaming();
+    void UpdatePendingWmoLoads();
     void UpdateZoneAudio();
     void UpdateWdlStreaming(const FIntPoint& CameraTile);
     void UpdateLod1Streaming(const FIntPoint& CameraTile);

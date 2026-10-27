@@ -498,12 +498,17 @@ build, automation, native autologin and rendered screenshot verification):
     stale map reads and finalize at most one terrain tile per tick. Verified
     Kalimdor login, grounded movement and a server-confirmed loot-roll win;
     four focused checks pass without warnings. See Docs/Maps.md.
-  - [?] Complete loot slots, roll windows and master-looter selection.
+  - [x] Complete loot slots, roll windows and master-looter selection.
     Stable money/item rows, bind prompts, eligibility/countdowns, votes/results,
     real candidate menus, confirmed chat receipts and saved auto-loot settings.
     Server-owned corpse position/lifetime. Windows build, 129-test regression,
     a 126-step/eight-image group route and 39-step/three-image coin/auto route;
     disposable accounts removed and existing characters unchanged. See Docs/Loot.md.
+  - [?] Stream large WMO cities and wait for their building collision at login.
+    Stormwind's 286 groups no longer hit the old 100-group skip. Nearest-first,
+    one-group-per-frame jobs and bounded object starts keep streaming responsive.
+    Verified 134-test regression and a native tabard/vendor route inside the
+    loaded Stormwind shop. See Docs/Maps.md.
   - [ ] Complete guild/inspect/tabard panels and their server-backed state.
   - [ ] Complete PvP/battleground panels and queue/status/scoreboard protocol.
   - [ ] Complete dungeon-finder browsing, role/queue/proposal state and controls.

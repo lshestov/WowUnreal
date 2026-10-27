@@ -37,7 +37,7 @@ FString FWowWmoRenderer::GetGroupPath(const FString& RootPath, int32 GroupIndex)
 }
 
 AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const FAdtWmoPlacement& Placement,
-                                   FMpqManager* Mpq, FWowAssetCache* Cache)
+    FMpqManager* Mpq, FWowAssetCache* Cache,AActor* Existing,const FWmoRootData* ParsedRoot,int32 FirstGroup,int32 GroupLimit)
 {
     if (!World || !Mpq || WmoPath.IsEmpty())
     {
@@ -46,13 +46,14 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
 
     // Read and parse root WMO
     TArray<uint8> RootRaw;
-    if (!Mpq->ReadFile(WmoPath, RootRaw))
+    if (!ParsedRoot && !Mpq->ReadFile(WmoPath, RootRaw))
     {
         UE_LOG(LogWowWmo, Verbose, TEXT("Failed to read WMO root: %s"), *WmoPath);
         return nullptr;
     }
 
-    FWmoRootData RootData = FWmoParser::ParseRoot(RootRaw);
+    const FWmoRootData OwnedRoot=ParsedRoot?FWmoRootData():FWmoParser::ParseRoot(RootRaw);
+    const FWmoRootData& RootData=ParsedRoot?*ParsedRoot:OwnedRoot;
     if (!RootData.bIsValid || RootData.NumGroups == 0)
     {
         UE_LOG(LogWowWmo, Verbose, TEXT("Invalid WMO root or no groups: %s"), *WmoPath);
@@ -63,14 +64,16 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
     FActorSpawnParameters SpawnParams;
     SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
-    AActor* WmoActor = World->SpawnActor<AActor>(AActor::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
+    AActor* WmoActor = Existing?Existing:World->SpawnActor<AActor>(AActor::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
     if (!WmoActor)
     {
         return nullptr;
     }
 
     // Create root component
-    USceneComponent* RootComp = NewObject<USceneComponent>(WmoActor, TEXT("WmoRoot"));
+    USceneComponent* RootComp=Existing?WmoActor->GetRootComponent():NewObject<USceneComponent>(WmoActor,TEXT("WmoRoot"));
+    if(!Existing)
+    {
     WmoActor->SetRootComponent(RootComp);
     RootComp->RegisterComponent();
 
@@ -90,13 +93,17 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
     auto* Area=NewObject<UWowWmoAreaComponent>(WmoActor);
     WmoActor->AddInstanceComponent(Area); Area->RegisterComponent();
     Area->Path=WmoPath; Area->RootId=RootData.RootId; Area->NameSet=Placement.NameSet; Area->Bounds=RootData.BoundingBox;
-    Area->PortalVertices=MoveTemp(RootData.PortalVertices); Area->Portals=MoveTemp(RootData.Portals); Area->PortalRefs=MoveTemp(RootData.PortalRefs);
+    Area->PortalVertices=RootData.PortalVertices; Area->Portals=RootData.Portals; Area->PortalRefs=RootData.PortalRefs;
     Area->Groups.SetNum(RootData.NumGroups);
+    }
+    auto* Area=WmoActor->FindComponentByClass<UWowWmoAreaComponent>();
+    const FVector UEPos=WmoActor->GetActorLocation();
 
     int32 GroupsLoaded = 0, InteriorFills=0;
+    TInlineComponentArray<UPointLightComponent*> ExistingLights; WmoActor->GetComponents(ExistingLights); InteriorFills=ExistingLights.Num();
 
     // Load each group as UStaticMesh with Nanite support
-    for (uint32 GroupIdx = 0; GroupIdx < RootData.NumGroups; ++GroupIdx)
+    for (uint32 GroupIdx = FMath::Max(FirstGroup,0); GroupIdx < RootData.NumGroups && GroupIdx<uint64(FMath::Max(FirstGroup,0))+uint64(FMath::Max(GroupLimit,0)); ++GroupIdx)
     {
         FString GroupPath = GetGroupPath(WmoPath, GroupIdx);
 
@@ -294,7 +301,7 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
         }
     }
 
-    if (GroupsLoaded == 0)
+    if (GroupsLoaded == 0 && !Existing && GroupLimit!=0)
     {
         WmoActor->Destroy();
         return nullptr;
@@ -306,6 +313,11 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
     return WmoActor;
 }
 
+TArray<int32> FWowWmoRenderer::GroupLoadOrder(const FWmoRootData& Root,const FVector& ModelPosition)
+{
+    TArray<int32> Order; for(uint32 I=0;I<Root.NumGroups && I<4096;++I) Order.Add(int32(I));
+    Order.Sort([&](int32 A,int32 B) {const auto Distance=[&](int32 I){return Root.GroupBounds.IsValidIndex(I) && Root.GroupBounds[I].IsValid?Root.GroupBounds[I].ComputeSquaredDistanceToPoint(ModelPosition):MAX_dbl;}; const double DA=Distance(A),DB=Distance(B); return DA==DB?A<B:DA<DB;}); return Order;
+}
 UPointLightComponent* FWowWmoRenderer::AddInteriorFill(USceneComponent* Parent,const FWmoGroupData& Group)
 {
     // MOGP Indoor and MOCV describe local ambient lighting. Keep the fill on
