@@ -51,7 +51,7 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FOnGroupInviteReceived, const FString& /*Inv
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnPartyCommandResult, uint8 /*Command*/, const FString& /*PlayerName*/, uint8 /*Result*/);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnTaxiNodesShown, uint64 /*NpcGuid*/, uint32 /*CurrentNodeId*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnTaxiActivateReply, uint8 /*Result*/);
-DECLARE_MULTICAST_DELEGATE_FiveParams(FOnTeleportRequest, uint64 /*Guid*/, uint32 /*Flags*/, uint32 /*Time*/, FVector /*Position*/, float /*Orientation*/);
+DECLARE_MULTICAST_DELEGATE_FiveParams(FOnTeleportRequest, uint64 /*Guid*/, uint32 /*OrderCounter*/, uint32 /*Time*/, FVector /*Position*/, float /*Orientation*/);
 DECLARE_MULTICAST_DELEGATE_FiveParams(FOnMapTransfer, uint32 /*MapId*/, float /*X*/, float /*Y*/, float /*Z*/, float /*Orientation*/);
 DECLARE_MULTICAST_DELEGATE(FOnPlayerDeath);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnEntityDeath, uint64 /*Guid*/);
@@ -535,6 +535,7 @@ private:
     // Internal parsing
     void ParseUpdateBlock(FPacketReader& R);
     void ParseMovementInfo(FPacketReader& R, FWowMovementInfo& Out);
+    static bool ParseMovementPayload(FPacketReader& R,FWowMovementInfo& Out,uint32& Time);
     void ParseUpdateFields(FPacketReader& R, FWowEntity& Entity);
 
     // Internal Warden response sender (bound to WardenHandler)

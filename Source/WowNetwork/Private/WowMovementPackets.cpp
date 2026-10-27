@@ -49,3 +49,47 @@ void UWowConnectionManager::SendMovementInfo(int32 Opcode,const FWowMovementInfo
     const uint32 Time=uint32(uint64(FPlatformTime::Seconds()*1000.0));
     WorldSocket->SendPacket(uint32(Opcode),BuildMovementPacket(PacketHandler.EntityManager.LocalPlayerGuid,Movement,Time));
 }
+
+TArray<uint8> UWowConnectionManager::BuildTeleportAckPacket(uint64 Guid,uint32 OrderCounter,uint32 TimeMilliseconds)
+{
+    TArray<uint8> Data; PackedMoveGuid(Data,Guid); AppendMove(Data,OrderCounter); AppendMove(Data,TimeMilliseconds); return Data;
+}
+void UWowConnectionManager::SendTeleportAck(uint64 Guid,uint32 OrderCounter,uint32 TimeMilliseconds)
+{
+    if(!WorldSocket || State!=EWowSessionState::WorldInGame || Guid!=PacketHandler.EntityManager.LocalPlayerGuid) return;
+    WorldSocket->SendPacket(WowOpcode::MSG_MOVE_TELEPORT_ACK,BuildTeleportAckPacket(Guid,OrderCounter,TimeMilliseconds));
+}
+
+bool FWowPacketHandler::ParseMovementPayload(FPacketReader& R,FWowMovementInfo& Out,uint32& Time)
+{
+    FWowMovementInfo Move=Out;
+    const auto ReadGuid=[&](uint64& Guid) {
+        if(!R.CanRead(1)) return false; const uint8 Mask=R.ReadU8(); int32 Count=0;
+        for(int32 I=0;I<8;++I) if(Mask&(1<<I)) ++Count; if(!R.CanRead(Count)) return false;
+        Guid=0; for(int32 I=0;I<8;++I) if(Mask&(1<<I)) Guid|=uint64(R.ReadU8())<<(8*I); return true;
+    };
+    if(!R.CanRead(26)) return false;
+    Move.MoveFlags=R.ReadU32(); Move.MoveFlags2=R.ReadU16(); const uint32 Stamp=R.ReadU32();
+    Move.Position={R.ReadFloat(),R.ReadFloat(),R.ReadFloat()}; Move.Orientation=R.ReadFloat();
+    if(Move.Position.ContainsNaN() || !FMath::IsFinite(Move.Orientation) || FMath::Abs(Move.Position.X)>20000 || FMath::Abs(Move.Position.Y)>20000) return false;
+    Move.TransportGuid=0; Move.TransportOffset=FVector::ZeroVector; Move.TransportOrientation=0;
+    if(Move.MoveFlags&0x200)
+    {
+        if(!ReadGuid(Move.TransportGuid) || !R.CanRead(21)) return false;
+        Move.TransportOffset={R.ReadFloat(),R.ReadFloat(),R.ReadFloat()}; Move.TransportOrientation=R.ReadFloat(); R.ReadU32(); R.ReadU8();
+        if(Move.TransportOffset.ContainsNaN() || !FMath::IsFinite(Move.TransportOrientation)) return false;
+        if(Move.MoveFlags2&0x200) {if(!R.CanRead(4)) return false; R.ReadU32();}
+    }
+    Move.Pitch=0;
+    if((Move.MoveFlags&0x02200000) || (Move.MoveFlags2&0x20)) {if(!R.CanRead(4)) return false; Move.Pitch=R.ReadFloat(); if(!FMath::IsFinite(Move.Pitch)) return false;}
+    if(!R.CanRead(4)) return false; Move.FallTime=R.ReadU32();
+    Move.JumpZSpeed=Move.JumpSinAngle=Move.JumpXYSpeed=0; Move.JumpCosAngle=1;
+    if(Move.MoveFlags&0x1000)
+    {
+        if(!R.CanRead(16)) return false; Move.JumpZSpeed=R.ReadFloat(); Move.JumpSinAngle=R.ReadFloat(); Move.JumpCosAngle=R.ReadFloat(); Move.JumpXYSpeed=R.ReadFloat();
+        if(!FMath::IsFinite(Move.JumpZSpeed) || !FMath::IsFinite(Move.JumpSinAngle) || !FMath::IsFinite(Move.JumpCosAngle) || !FMath::IsFinite(Move.JumpXYSpeed)) return false;
+    }
+    if(Move.MoveFlags&0x04000000) {if(!R.CanRead(4) || !FMath::IsFinite(R.ReadFloat())) return false;}
+    if(R.Remaining()) return false;
+    Move.bHasActiveSpline=false; Move.SplineWaypoints.Reset(); Out=Move; Time=Stamp; return true;
+}

@@ -258,7 +258,6 @@ namespace WowOpcode
     inline constexpr uint16 SMSG_CORPSE_RECLAIM_DELAY   = 0x015B;
     inline constexpr uint16 SMSG_RESURRECT_REQUEST      = 0x015C;
     inline constexpr uint16 CMSG_RESURRECT_RESPONSE     = 0x015F;
-    inline constexpr uint16 SMSG_MOVE_TELEPORT          = 0x02F0;
 
     // ── Mail System ─────────────────────────────────────────────────────────
     inline constexpr uint16 CMSG_SEND_MAIL             = 0x0238;

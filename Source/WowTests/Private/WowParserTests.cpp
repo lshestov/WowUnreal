@@ -883,6 +883,40 @@ bool FMailPackets::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNearTeleportPackets,"WowUnreal.Gameplay.NearTeleportPackets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FNearTeleportPackets::RunTest(const FString&)
+{
+    TStrongObjectPtr<UWowConnectionManager> C(NewObject<UWowConnectionManager>()); auto Socket=WowTestUtils::AttachTestWorldSocket(*C,0); auto& H=C->PacketHandler;
+    constexpr uint64 Guid=0x1000200030004001ULL; H.EntityManager.LocalPlayerGuid=Guid; H.CurrentMapId=530;
+    H.EntityManager.PromoteToTyped(Guid,WowTypeMask::PLAYER|WowTypeMask::UNIT);
+    auto* Player=H.EntityManager.GetLocalPlayer(); Player->Movement.RunSpeed=12;
+    FWowMovementInfo Move; Move.Position={-8895,-88,86}; Move.Orientation=1.25; Move.MoveFlags=0x200|0x1000|0x04000000; Move.MoveFlags2=0x220;
+    Move.TransportGuid=0xF01000000000001FULL; Move.TransportOffset={1,2,3}; Move.TransportOrientation=.5f; Move.Pitch=.25f; Move.FallTime=125;
+    Move.JumpZSpeed=4; Move.JumpXYSpeed=2; Move.JumpSinAngle=.6f; Move.JumpCosAngle=.8f;
+    constexpr uint32 Order=0xA1020304u,Time=1234567;
+    auto Request=UWowConnectionManager::BuildMovementPacket(Guid,Move,Time); FPacketReader Prefix(Request); Prefix.ReadPackedGuid(); const int32 GuidBytes=Prefix.Pos;
+    Request.Insert(reinterpret_cast<const uint8*>(&Order),4,GuidBytes);
+    int32 Teleports=0; H.OnTeleportRequest.AddLambda([&](uint64 G,uint32 Counter,uint32 Stamp,FVector Position,float Orientation) {
+        ++Teleports; TestTrue(TEXT("Server order, clock and movement reach the controller unchanged"),G==Guid && Counter==Order && Stamp==Time && Position.Equals(Move.Position) && Orientation==Move.Orientation);
+        C->SendTeleportAck(G,Counter,Stamp);
+    });
+    H.HandlePacket(WowOpcode::MSG_MOVE_TELEPORT_ACK,Request);
+    uint32 Opcode=0; TArray<uint8> Payload;
+    TestTrue(TEXT("Near teleport updates shared position while preserving server speeds"),Teleports==1 && H.CurrentMapId==530 && Player->Movement.Position.Equals(Move.Position) && Player->Movement.RunSpeed==12 && Player->Movement.TransportGuid==Move.TransportGuid && Player->Movement.Pitch==Move.Pitch && Player->Movement.JumpZSpeed==4);
+    TestTrue(TEXT("Near teleport sends a real packed acknowledgement"),WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload) && Opcode==WowOpcode::MSG_MOVE_TELEPORT_ACK);
+    FPacketReader Ack(Payload); TestTrue(TEXT("Acknowledgement contains only packed GUID, order and timestamp"),Ack.ReadPackedGuid()==Guid && Ack.ReadU32()==Order && Ack.ReadU32()==Time && !Ack.Remaining());
+    Player->Movement.Position={10,20,30};
+    for(int32 Size=0;Size<Request.Num();++Size) {TArray<uint8> Short; Short.Append(Request.GetData(),Size); H.HandlePacket(WowOpcode::MSG_MOVE_TELEPORT_ACK,Short);}
+    TestTrue(TEXT("Every truncated optional movement field leaves position and acknowledgements unchanged"),Teleports==1 && Player->Movement.Position.Equals(FVector(10,20,30)) && !WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload));
+    auto Invalid=Request; const float Nan=std::numeric_limits<float>::quiet_NaN(); FMemory::Memcpy(Invalid.GetData()+GuidBytes+4+10,&Nan,4); H.HandlePacket(WowOpcode::MSG_MOVE_TELEPORT_ACK,Invalid);
+    TestTrue(TEXT("Non-finite movement cannot teleport the player"),Teleports==1 && Player->Movement.Position.Equals(FVector(10,20,30)));
+    auto Remote=UWowConnectionManager::BuildMovementPacket(2,Move,Time); H.EntityManager.GetOrCreate(2); H.HandlePacket(WowOpcode::MSG_MOVE_TELEPORT,Remote);
+    TestTrue(TEXT("Other-unit teleport notifications update only their own movement"),H.EntityManager.Find(2)->Movement.Position.Equals(Move.Position) && Teleports==1);
+    C->SendTeleportAck(2,Order,Time); TestFalse(TEXT("Other movers cannot produce a local acknowledgement"),WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload));
+    H.HandlePacket(0x2F0,Request); TestEqual(TEXT("Deprecated pet opcode cannot trigger a teleport"),Teleports,1);
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMacroCastPackets,"WowUnreal.UI.MacroCastPackets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FMacroCastPackets::RunTest(const FString&)
 {

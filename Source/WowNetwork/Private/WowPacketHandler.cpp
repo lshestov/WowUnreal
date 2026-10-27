@@ -90,7 +90,6 @@ FWowPacketHandler::FWowPacketHandler()
     // ── Death / Corpse / Resurrection handlers ──────────────────────────────
     Handlers.Add(WowOpcode::SMSG_CORPSE_RECLAIM_DELAY,     &FWowPacketHandler::HandleCorpseReclaimDelay);
     Handlers.Add(WowOpcode::SMSG_RESURRECT_REQUEST,        &FWowPacketHandler::HandleResurrectRequest);
-    Handlers.Add(WowOpcode::SMSG_MOVE_TELEPORT,            &FWowPacketHandler::HandleMoveTeleport);
 
     // ── Name query handlers ─────────────────────────────────────────────────
     Handlers.Add(WowOpcode::SMSG_NAME_QUERY_RESPONSE,      &FWowPacketHandler::HandleNameQueryResponse);
@@ -111,7 +110,8 @@ FWowPacketHandler::FWowPacketHandler()
 
     // Warden and teleport handlers
     Handlers.Add(WowOpcode::SMSG_WARDEN_DATA,       &FWowPacketHandler::HandleWardenData);
-    Handlers.Add(WowOpcode::MSG_MOVE_TELEPORT,      &FWowPacketHandler::HandleMoveTeleport);
+    Handlers.Add(WowOpcode::MSG_MOVE_TELEPORT,      &FWowPacketHandler::HandleMovement);
+    Handlers.Add(WowOpcode::MSG_MOVE_TELEPORT_ACK,  &FWowPacketHandler::HandleMoveTeleport);
     Handlers.Add(WowOpcode::SMSG_TRANSFER_PENDING,  &FWowPacketHandler::HandleTransferPending);
     Handlers.Add(WowOpcode::SMSG_NEW_WORLD,         &FWowPacketHandler::HandleNewWorld);
 
@@ -752,49 +752,13 @@ void FWowPacketHandler::HandleDestroyObject(FPacketReader& R)
 
 void FWowPacketHandler::HandleMovement(FPacketReader& R)
 {
-    uint64 Guid = R.ReadPackedGuid();
+    if(!R.CanRead(1)) return;
+    const uint8 Mask=R.ReadU8(); int32 Count=0; for(int32 I=0;I<8;++I) if(Mask&(1<<I)) ++Count;
+    if(!R.CanRead(Count)) return; uint64 Guid=0; for(int32 I=0;I<8;++I) if(Mask&(1<<I)) Guid|=uint64(R.ReadU8())<<(8*I);
     FWowEntity* Entity = EntityManager.Find(Guid);
     if (!Entity) return;
-
-    FWowMovementInfo Info;
-    Info.MoveFlags = R.ReadU32();
-    Info.MoveFlags2 = R.ReadU16();
-    R.ReadU32(); // timestamp
-
-    Info.Position.X = R.ReadFloat();
-    Info.Position.Y = R.ReadFloat();
-    Info.Position.Z = R.ReadFloat();
-    Info.Orientation = R.ReadFloat();
-
-    // Transport
-    if (Info.MoveFlags & 0x00000200)
-    {
-        Info.TransportGuid = R.ReadPackedGuid();
-        Info.TransportOffset.X = R.ReadFloat();
-        Info.TransportOffset.Y = R.ReadFloat();
-        Info.TransportOffset.Z = R.ReadFloat();
-        Info.TransportOrientation = R.ReadFloat();
-        R.ReadU32(); // time
-        R.ReadU8();  // seat
-    }
-
-    if (Info.MoveFlags & (0x00200000 | 0x02000000))
-    {
-        R.ReadFloat(); // pitch
-    }
-
-    Info.FallTime = R.ReadU32();
-
-    if (Info.MoveFlags & 0x00001000)
-    {
-        R.ReadFloat(); R.ReadFloat(); R.ReadFloat(); R.ReadFloat();
-    }
-
-    if (Info.MoveFlags & 0x04000000)
-    {
-        R.ReadFloat();
-    }
-
+    FWowMovementInfo Info=Entity->Movement; uint32 Time=0;
+    if(!ParseMovementPayload(R,Info,Time)) return;
     Entity->Movement = Info;
     EntityManager.OnEntityUpdated.Broadcast(*Entity);
 }
@@ -2072,56 +2036,20 @@ void FWowPacketHandler::HandleResurrectRequest(FPacketReader& R)
 
 void FWowPacketHandler::HandleMoveTeleport(FPacketReader& R)
 {
-    // Handle both old format (MSG_MOVE_TELEPORT with PackedGUID) and new format (SMSG_MOVE_TELEPORT with full GUID)
-
-    uint64 Guid = 0;
-    uint32 Flags = 0;
-    uint32 Time = 0;
-    uint32 MapId = 0;
-    float X = 0.0f, Y = 0.0f, Z = 0.0f, Orientation = 0.0f;
-
-    // Try to read as new format first (SMSG_MOVE_TELEPORT)
-    if (R.CanRead(8 + 4 + 4 + 4*4 + 1))
-    {
-        Guid = R.ReadU64();
-        uint32 Counter = R.ReadU32();
-        MapId = R.ReadU32();
-        X = R.ReadFloat();
-        Y = R.ReadFloat();
-        Z = R.ReadFloat();
-        Orientation = R.ReadFloat();
-    }
-    else
-    {
-        // Try to read as old format (MSG_MOVE_TELEPORT with PackedGUID)
-        Guid = R.ReadPackedGuid();
-        Flags = R.ReadU32();
-        Time = R.ReadU32();
-        X = R.ReadFloat();
-        Y = R.ReadFloat();
-        Z = R.ReadFloat();
-        Orientation = R.ReadFloat();
-    }
-
-    // Read optional unknown byte if available
-    if (R.CanRead(1))
-    {
-        R.ReadU8();
-    }
-
-    FVector Position(X, Y, Z);
-
-    UE_LOG(LogWowPacket, Log, TEXT("MOVE_TELEPORT: guid=%llu map=%u pos=(%.1f,%.1f,%.1f) orient=%.2f"),
-        Guid, MapId, X, Y, Z, Orientation);
-
-    // Broadcast both legacy teleport request and new player teleport for compatibility
-    OnTeleportRequest.Broadcast(Guid, Flags, Time, Position, Orientation);
-
-    // Check if this is for the local player
-    if (Guid == EntityManager.LocalPlayerGuid)
-    {
-        OnPlayerTeleport.Broadcast(MapId, X, Y, Z);
-    }
+    // 12340 near teleport: packed mover GUID, server order, MovementInfo.
+    if(!R.CanRead(1)) return; const uint8 Mask=R.ReadU8(); int32 Count=0;
+    for(int32 I=0;I<8;++I) if(Mask&(1<<I)) ++Count;
+    if(!R.CanRead(Count+4)) return; uint64 Guid=0;
+    for(int32 I=0;I<8;++I) if(Mask&(1<<I)) Guid|=uint64(R.ReadU8())<<(8*I);
+    const uint32 OrderCounter=R.ReadU32(); auto* Entity=EntityManager.Find(Guid);
+    if(!Entity || Guid!=EntityManager.LocalPlayerGuid) return;
+    FWowMovementInfo Move=Entity->Movement; uint32 Time=0;
+    if(!ParseMovementPayload(R,Move,Time)) return;
+    Entity->Movement=Move;
+    OnTeleportRequest.Broadcast(Guid,OrderCounter,Time,Move.Position,Move.Orientation);
+    EntityManager.OnEntityUpdated.Broadcast(*Entity);
+    OnPlayerTeleport.Broadcast(CurrentMapId,Move.Position.X,Move.Position.Y,Move.Position.Z);
+    UE_LOG(LogWowPacket,Log,TEXT("MOVE_TELEPORT_ACK request: guid=%llu counter=%u map=%u pos=(%.3f,%.3f,%.3f)"),Guid,OrderCounter,CurrentMapId,Move.Position.X,Move.Position.Y,Move.Position.Z);
 }
 
 void FWowPacketHandler::HandleTransferPending(FPacketReader& R)

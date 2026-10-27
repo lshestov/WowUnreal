@@ -215,7 +215,6 @@ private:
     // Teleport handling
     void OnTeleportRequest(uint64 Guid, uint32 Flags, uint32 Time, FVector Position, float Orientation);
     void OnMapTransfer(uint32 MapId, float X, float Y, float Z, float Orientation);
-    void SendTeleportAck(uint64 Guid, uint32 Flags, uint32 Time);
     void SendWorldportAck();
     bool bHasServerPosition = false;
 

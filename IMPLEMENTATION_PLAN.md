@@ -400,7 +400,7 @@ build, automation, native autologin and rendered screenshot verification):
     and return, then 27-step and 31-step final split/cancel/count/geometry checks.
     QA peers use native authentication/Warden and are deleted through the server;
     original inventory and zero money are verified after each run. See Docs/Trade.md.
-- [?] 5. Chat/combat/macros: hyperlinks, remaining combat events and macro execution families.
+- [x] 5. Chat/combat/macros: hyperlinks, remaining combat events and macro execution families.
   - [x] Native chat hyperlink areas from real text blocks, original click/hover
     signatures and default hyperlink-only mouse input, including wrapped links.
     Original item/spell references and player whisper editor; real GetSpell tuple,
@@ -423,7 +423,7 @@ build, automation, native autologin and rendered screenshot verification):
     Localized failure tokens and DBC named description formulas. Verified Windows
     build, 104-test regression, focused families/filter/metadata cases and native
     periodic healing, application/refresh/removal, cast rejection, links and reload.
-  - [?] Advanced macro execution families and acknowledgement-driven sequences.
+  - [x] Advanced macro execution families and acknowledgement-driven sequences.
     Original MPQ sequence/random managers, matching spell/counter acknowledgements,
     target/combat/time/modifier resets, dynamic action icons and additional
     conditions. Native item-target/equipment/aura/form/cast/channel commands,
@@ -434,10 +434,13 @@ build, automation, native autologin and rendered screenshot verification):
 - [ ] 6. Maps: points of interest, tracking, interior minimaps and original map bootstrap.
   - [ ] Resolve actual zone/subzone from streamed terrain areas and join/replace
     built-in zone channels using their real DBC definitions and server replies.
-  - [ ] Server near teleports: handle the actual 12340 MSG_MOVE_TELEPORT_ACK
-    request (packed GUID, order counter, MovementInfo) and reply with packed GUID;
-    update actor/camera and shared map position. Current legacy handler is bound
-    to other opcodes and misses same-map teleports, including GM verification.
+  - [?] Server near teleports: actual 12340 MSG_MOVE_TELEPORT_ACK request and
+    packed acknowledgement, atomic complete MovementInfo, shared actor/network
+    position, capsule feet placement and inverse login/movement facing. Observer
+    notifications remain distinct. Verified Windows build, 107 regression tests
+    (two existing warnings), optional/truncated/invalid packet checks and a native
+    two-metre server round trip with two rendered captures and exact position
+    restoration. See Docs/Movement.md.
 - [ ] 7. Group/special windows: party/loot, PvP, dungeon finder and achievements.
   - [ ] Restore NPC portrait captures and friendly NPC unit-frame reactions.
 

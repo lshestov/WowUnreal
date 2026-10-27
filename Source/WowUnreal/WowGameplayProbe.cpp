@@ -301,6 +301,16 @@ struct FWowGameplayProbe
             double Range=3; Step->TryGetNumberField(TEXT("range"),Range);
             if (Actor && IsValid(*Actor)) Done=Walk(C,(*Actor)->GetActorLocation(),Range);
         }
+        else if (Op==TEXT("assert_position"))
+        {
+            const auto Values=Step->GetArrayField(TEXT("position"));
+            if(Values.Num()!=3 || !C.GetPawn()) {Failure=TEXT("Invalid position assertion"); Finish(C,false); return;}
+            const FVector Expected(Values[0]->AsNumber(),Values[1]->AsNumber(),Values[2]->AsNumber());
+            FVector Feet=C.GetPawn()->GetActorLocation(); if(const auto* Character=Cast<ACharacter>(C.GetPawn())) Feet.Z-=Character->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+            double Tolerance=1.5; Step->TryGetNumberField(TEXT("tolerance"),Tolerance); Tolerance=FMath::Clamp(Tolerance,.01,10.);
+            const auto* Player=C.ConnectionManager->PacketHandler.EntityManager.GetLocalPlayer();
+            Done=Player && FVector::Distance(FWowCoordinate::UEToWow(Feet),Expected)<=Tolerance && FVector::Distance(Player->Movement.Position,Expected)<=Tolerance;
+        }
         else if (Op==TEXT("walk"))
         {
             const auto Values=Step->GetArrayField(TEXT("position"));

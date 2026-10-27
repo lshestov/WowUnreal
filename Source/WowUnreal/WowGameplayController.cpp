@@ -1921,7 +1921,7 @@ void AWowGameplayController::UpdateEntitySplineMovement(float DeltaTime)
 	}
 }
 
-void AWowGameplayController::OnTeleportRequest(uint64 Guid, uint32 Flags, uint32 Time, FVector Position, float Orientation)
+void AWowGameplayController::OnTeleportRequest(uint64 Guid, uint32 OrderCounter, uint32 Time, FVector Position, float Orientation)
 {
 	if (!ConnectionManager) return;
 
@@ -1941,12 +1941,19 @@ void AWowGameplayController::OnTeleportRequest(uint64 Guid, uint32 Flags, uint32
 	APawn* LocalPawn = GetPawn();
 	if (LocalPawn)
 	{
-		LocalPawn->SetActorLocation(UEPosition, false, nullptr, ETeleportType::TeleportPhysics);
-		LocalPawn->SetActorRotation(FRotator(0.0f, FMath::RadiansToDegrees(Orientation), 0.0f));
+		FVector Center=UEPosition;
+		if(auto* PlayerPawn=Cast<ACharacter>(LocalPawn))
+		{
+			Center.Z+=PlayerPawn->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+			PlayerPawn->SetBase(nullptr); PlayerPawn->GetCharacterMovement()->StopMovementImmediately();
+		}
+		LocalPawn->SetActorLocation(Center, false, nullptr, ETeleportType::TeleportPhysics);
+		const float Yaw=-FMath::RadiansToDegrees(Orientation);
+		LocalPawn->SetActorRotation(FRotator(0.0f, Yaw, 0.0f));
 
 		if (APlayerController* PC = Cast<APlayerController>(LocalPawn->GetController()))
 		{
-			PC->SetControlRotation(FRotator(0.0f, FMath::RadiansToDegrees(Orientation), 0.0f));
+			PC->SetControlRotation(FRotator(PC->GetControlRotation().Pitch,Yaw,0.0f));
 		}
 
 		UE_LOG(LogWowGameplay, Log, TEXT("Teleported to: WoW=(%.1f,%.1f,%.1f) UE=(%.0f,%.0f,%.0f) orient=%.2f"),
@@ -1958,7 +1965,7 @@ void AWowGameplayController::OnTeleportRequest(uint64 Guid, uint32 Flags, uint32
 	}
 
 	// Send acknowledgment to server
-	SendTeleportAck(Guid, Flags, Time);
+	ConnectionManager->SendTeleportAck(Guid,OrderCounter,Time);
 }
 
 void AWowGameplayController::OnMapTransfer(uint32 MapId, float X, float Y, float Z, float Orientation)
@@ -1994,24 +2001,6 @@ void AWowGameplayController::OnMapTransfer(uint32 MapId, float X, float Y, float
 	// 1. Clear all existing entities
 	// 2. Load the new map's terrain and doodads
 	// 3. Wait for SMSG_LOGIN_VERIFY_WORLD for the new map
-}
-
-void AWowGameplayController::SendTeleportAck(uint64 Guid, uint32 Flags, uint32 Time)
-{
-	if (!ConnectionManager) return;
-
-	// CMSG_MOVE_TELEPORT_ACK: uint64 guid + uint32 flags + uint32 time
-	TArray<uint8> Data;
-	Data.SetNumUninitialized(16); // 8 + 4 + 4
-
-	FMemory::Memcpy(Data.GetData(), &Guid, 8);
-	FMemory::Memcpy(Data.GetData() + 8, &Flags, 4);
-	FMemory::Memcpy(Data.GetData() + 12, &Time, 4);
-
-	ConnectionManager->SendRawPacket(WowOpcode::MSG_MOVE_TELEPORT_ACK, Data);
-
-	UE_LOG(LogWowGameplay, Log, TEXT("Sent CMSG_MOVE_TELEPORT_ACK: guid=%llu flags=0x%08X time=%u"),
-		Guid, Flags, Time);
 }
 
 void AWowGameplayController::SendWorldportAck()

@@ -66,6 +66,9 @@ bool FIdleWowPlayerCamera::RunTest(const FString& Parameters)
     TestTrue(TEXT("Normal camera pitch"), FMath::IsNearlyZero(FMath::FindDeltaAngleDegrees(Controller->GetControlRotation().Pitch, -20.0), 0.01));
     Player->ApplyLoginSpawn(Feet, 0.0f);
     TestEqual(TEXT("Repeated spawn does not accumulate height"), Player->GetActorLocation().Z, Feet.Z + HalfHeight);
+    Player->ApplyLoginSpawn(Feet,1.25f);
+    TestTrue(TEXT("Server facing survives the movement coordinate round trip"),FMath::IsNearlyEqual(-FMath::DegreesToRadians(Player->GetActorRotation().Yaw),1.25,.001));
+    TestTrue(TEXT("Camera and player use the same converted facing"),FMath::IsNearlyZero(FMath::FindDeltaAngleDegrees(Controller->GetControlRotation().Yaw,Player->GetActorRotation().Yaw),.001));
     World->DestroyWorld(false);
     GEngine->DestroyWorldContext(World);
     return true;

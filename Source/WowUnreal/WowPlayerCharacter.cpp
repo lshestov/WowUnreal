@@ -298,7 +298,7 @@ void AWowPlayerCharacter::ApplyLoginSpawn(const FVector& SpawnPos, float Orienta
 	const bool bIsAutomatedCapture = FParse::Param(FCommandLine::Get(), TEXT("aerialview"));
 	const float CapsuleHalfHeight = GetCapsuleComponent() ? GetCapsuleComponent()->GetScaledCapsuleHalfHeight() : 0.0f;
 	FVector StabilizedPos = SpawnPos + FVector(0.0f, 0.0f, CapsuleHalfHeight);
-	const float YawDegrees = FMath::RadiansToDegrees(OrientationRadians);
+	const float YawDegrees = -FMath::RadiansToDegrees(OrientationRadians);
 
 	if (bIsAutomatedCapture)
 	{
