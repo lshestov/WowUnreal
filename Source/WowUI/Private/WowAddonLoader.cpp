@@ -168,6 +168,7 @@ bool ProcessXmlDirectivesRecursive(
 					UE_LOG(LogWowAddon, Warning, TEXT("  Could not load script: %s"), *ScriptPath);
 				}
 			}
+			else if(!Dir.ScriptCode.IsEmpty()) LuaVM->ExecuteString(Dir.ScriptCode,NormalizedXmlPath+TEXT(":inline"));
 			break;
 
 		case FWowXmlDirective::EType::Include:

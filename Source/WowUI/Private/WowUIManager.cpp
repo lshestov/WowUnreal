@@ -258,6 +258,7 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 					UE_LOG(LogWowUIManager, Warning, TEXT("Failed to load FrameXML script: %s"), *ScriptPath);
 				}
 			}
+			else if(!Dir.ScriptCode.IsEmpty()) LuaVM->ExecuteString(Dir.ScriptCode,TEXT("FrameXML:inline"));
 			break;
 		}
 		case FWowXmlDirective::EType::Frame:

@@ -25,7 +25,17 @@ FWowLabelMarkup UWowTextBlock::ParseMarkup(const FString& Text)
     {
         Result.Plain+=Pending;
         if(Color.IsEmpty() && Link<0) Result.Rich+=EscapeLabel(Pending);
-        else if(!Pending.IsEmpty()) Result.Rich+=FString::Printf(TEXT("<wowtext c=\"%s\" l=\"%d\">%s</>"),*Color,Link,*EscapeLabel(Pending));
+        else if(!Pending.IsEmpty())
+        {
+            // Slate's rich-text parser treats runs as single-line spans. Split
+            // a WoW colour/link that crosses paragraphs into per-line runs.
+            TArray<FString> Lines; Pending.ParseIntoArray(Lines,TEXT("\n"),false);
+            for(int32 I=0;I<Lines.Num();++I)
+            {
+                if(I) Result.Rich.AppendChar('\n');
+                if(!Lines[I].IsEmpty()) Result.Rich+=FString::Printf(TEXT("<wowtext c=\"%s\" l=\"%d\">%s</>"),*Color,Link,*EscapeLabel(Lines[I]));
+            }
+        }
         Pending.Empty();
     };
     for(int32 I=0;I<Text.Len();++I)

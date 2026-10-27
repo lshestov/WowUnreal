@@ -492,7 +492,7 @@ build, automation, native autologin and rendered screenshot verification):
   - [?] Complete original party/raid frames, remote member state and group controls.
     Atomic roster/full/delta stats; remote players/pets and map positions; focus,
     typed ready checks and acknowledged controls. Original template parenting,
-    name-label draw order and bounded Lua collection. Windows build, 123-test
+    name-label draw order, XML initializers and bounded Lua collection. Windows build, 124-test
     regression and a final 55-step/six-image native route; see Docs/Groups.md.
   - [ ] Complete loot slots, roll windows and master-looter selection.
   - [ ] Complete guild/inspect/tabard panels and their server-backed state.

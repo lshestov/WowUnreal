@@ -102,6 +102,20 @@ bool FHudAnonymousHierarchy::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudInlineXmlScript,"WowUnreal.Hud.InlineXmlScript",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudInlineXmlScript::RunTest(const FString&)
+{
+    FHudFixture F;
+    const char* Xml="<Ui><Frame name='InlinePanel' id='3'/><Script><![CDATA[InlineValue=InlinePanel:GetID()+7; assert(InlineValue < 11)]]></Script><Script file='Other.lua'/></Ui>";
+    TArray<uint8> Bytes; Bytes.Append(reinterpret_cast<const uint8*>(Xml),FCStringAnsi::Strlen(Xml));
+    const auto Directives=FWowFrameXmlParser::ParseXml(Bytes,TEXT("InlineScriptFixture"));
+    if(!TestEqual(TEXT("Inline and file scripts keep their document positions"),Directives.Num(),3)) return false;
+    TestTrue(TEXT("Inline code is retained separately from file references"),Directives[1].Type==FWowXmlDirective::EType::Script && Directives[1].FilePath.IsEmpty() && Directives[1].ScriptCode.Contains(TEXT("InlineValue < 11")) && Directives[2].FilePath==TEXT("Other.lua"));
+    F.Frames.CreateFrame(Directives[0].FrameDef);
+    TestTrue(TEXT("An inline script can initialize the frames already created before it"),F.Lua.ExecuteString(Directives[1].ScriptCode) && F.Lua.ExecuteString(TEXT("assert(InlineValue==10)")));
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudScaledAnchors, "WowUnreal.Hud.ScaledAnchorsAndInput",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FHudScaledAnchors::RunTest(const FString&)
@@ -956,6 +970,9 @@ bool FHudInlineLabels::RunTest(const FString&)
 {
     const auto Parsed=UWowTextBlock::ParseMarkup(TEXT("Before |cffff0000red|r |TInterface/Icons/Example:16:24:2:-1:64:64:4:36:8:40|t |Hitem:123|h[item]|h || <text>"));
     TestEqual(TEXT("Markup preserves visible text and escaped pipes"),Parsed.Plain,FString(TEXT("Before red  [item] | <text>")));
+    const auto Paragraphs=UWowTextBlock::ParseMarkup(TEXT("|cffffffffFirst line\n\nSecond line|r"));
+    TestEqual(TEXT("Multiline colours preserve the visible paragraph breaks"),Paragraphs.Plain,FString(TEXT("First line\n\nSecond line")));
+    TestEqual(TEXT("Each coloured line forms a separate Slate run, preventing literal markup in raid help text"),Paragraphs.Rich,FString(TEXT("<wowtext c=\"ffffffff\" l=\"-1\">First line</>\n\n<wowtext c=\"ffffffff\" l=\"-1\">Second line</>")));
     TestEqual(TEXT("Mail expiration grammar chooses visible plural forms"),UWowTextBlock::ParseMarkup(TEXT("|cff00ff001 |4Day:Days;|r / 20 |4Day:Days; / 22 |4день:дня:дней; / 11 |4день:дня:дней;")).Plain,FString(TEXT("1 Day / 20 Days / 22 дня / 11 дней")));
     TestEqual(TEXT("Malformed and escaped grammar remains literal"),UWowTextBlock::ParseMarkup(TEXT("||4Day:Days; |4bad")).Plain,FString(TEXT("|4Day:Days; |4bad")));
     if(!TestEqual(TEXT("Inline texture parsed"),Parsed.Icons.Num(),1)) return false;

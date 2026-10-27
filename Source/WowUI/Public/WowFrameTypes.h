@@ -221,6 +221,7 @@ struct FWowXmlDirective
 
 	// For Include/Script
 	FString FilePath;
+	FString ScriptCode;
 
 	// For Font
 	FString FontName;

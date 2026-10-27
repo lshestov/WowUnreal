@@ -43,7 +43,8 @@ Addon OnLoad batches use bounded incremental GC between groups of callbacks;
 they no longer repeatedly traverse the entire UI heap for every small handler.
 Pressure collection allows bounded growth above a retained live heap before
 retrying, while preserving the allocator limit and emergency collection reserve.
-Normal/pushed/disabled button art stays below artwork labels, so opaque raid
+Top-level inline XML scripts run in document order alongside referenced Lua
+files, including the stock raid event/update initializer. Normal/pushed/disabled button art stays below artwork labels, so opaque raid
 button backgrounds do not cover the first member-name text region.
 
 Verification covers malformed/truncated roster and stat packets, remote health,
@@ -63,5 +64,8 @@ The final native route passes 55 steps with six inspected, nonempty screenshots,
 including ready-check activation through the original roster button. The open
 roster's UI median is 0.85 ms and p95 is 2.70 ms, versus 62.64/358.44 ms before
 the retained-heap collection fix. First-load work remains visible in the maximum;
-it is not represented by the steady median. The broad regression contains 123
+it is not represented by the steady median. A second 55-step route checks the
+actual XML-installed raid callbacks. An 11-step/three-image solo/ReloadUI route
+also verifies multiline colour runs without rendering internal Slate markup.
+The broad regression contains 124
 passing tests; optional DBC and fixture warnings are recorded in its report.

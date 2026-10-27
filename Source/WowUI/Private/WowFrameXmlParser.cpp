@@ -208,6 +208,7 @@ TArray<FWowXmlDirective> ParseXmlWithFXmlFallback(const FString& XmlContent, con
 			FWowXmlDirective Dir;
 			Dir.Type = FWowXmlDirective::EType::Script;
 			Dir.FilePath = Child->GetAttribute(TEXT("file"));
+			Dir.ScriptCode = Child->GetContent();
 			Directives.Add(MoveTemp(Dir));
 		}
 		else if (Tag.Equals(TEXT("Font"), ESearchCase::IgnoreCase))
@@ -1450,11 +1451,13 @@ TArray<FWowXmlDirective> FWowFrameXmlParser::ParseXml(const TArray<uint8>& Data,
 		if (TagName == TEXT("Script"))
 		{
 			FString File = UTF8_TO_TCHAR(Child.attribute("file").as_string());
-			if (!File.IsEmpty())
+			const FString Code=UTF8_TO_TCHAR(Child.child_value());
+			if (!File.IsEmpty() || !Code.IsEmpty())
 			{
 				FWowXmlDirective Dir;
 				Dir.Type = FWowXmlDirective::EType::Script;
 				Dir.FilePath = File;
+				Dir.ScriptCode = Code;
 				Directives.Add(Dir);
 			}
 		}

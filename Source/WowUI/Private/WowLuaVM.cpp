@@ -159,6 +159,7 @@ void FWowLuaVM::Shutdown()
 		lua_close(L);
 		L = nullptr;
 		MemoryUsed = 0;
+		PressureCollectionWatermark=0;
 	}
 #endif
 }
