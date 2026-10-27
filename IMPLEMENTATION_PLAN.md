@@ -528,13 +528,17 @@ build, automation, native autologin and rendered screenshot verification):
       - [x] Load the new server map and collision on far transfers; preserve
         quests/inventory, clear old visible objects and acknowledge world entry.
   - [ ] Complete dungeon-finder browsing, role/queue/proposal state and controls.
-    - [?] Load original dungeon/group definitions and authoritative locks/rewards;
+    - [x] Load original dungeon/group definitions and authoritative locks/rewards;
       restore the original browser, roles and queue controls.
       Verified Windows build, packet/catalog automation and a native 40-step
       queue/cancel route with six validated and inspected captures. See
       Docs/DungeonFinder.md.
     - [ ] Complete role checks, five-player proposals, teleport and group controls;
       verify native disposable multiplayer routes and rendered screenshots.
+      - [?] Load WDT global WMO maps and hold world entry until their collision
+        is ready (required by Stockades/Ragefire Chasm dungeon transfers).
+        Verified build, five focused checks and a native 30-step route through
+        Stockades/Ragefire/world with three inspected, nonempty captures.
   - [ ] Complete achievements, criteria, tracking and comparison state.
 
 - [x] Stock options category placement and text: numeric-offset SetPoint overloads, runtime $parent references, constrained description wrapping, and XML markup rendered without asset paths while Lua keeps original strings. Verified 64 automation tests and native category clicks, character/spellbook windows and rendered screenshots.

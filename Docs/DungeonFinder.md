@@ -29,3 +29,21 @@ tuples, class roles, server restrictions and the original table contracts.
 Role checks, proposals, dungeon transfers, vote kicks and raid-browser search
 results require additional verification; a working browser does not establish
 that those multiplayer routes are complete.
+
+## Dungeon map prerequisite
+
+WDT files flagged as global WMO maps provide one MWMO name and MODF placement,
+rather than ADT terrain tiles. The loader validates both chunks, retains the
+doodad/name set and scale, and maps a zero MODF origin to the map center as in
+AzerothCore's vmap MapObject::Extract. The existing WMO renderer supplies the
+same materials, rooms and collision as outdoor buildings.
+
+Model groups load one per frame, starting near the destination. The world-entry
+gate waits for the actual model and all scheduled groups; no ADT tiles are
+invented for these maps. Repeated requests reuse the model. Transfers and world
+shutdown destroy it and discard pending jobs.
+
+Verified in a rendered disposable-account route: Stockades (26 groups),
+Ragefire Chasm (12 groups), valid walkable floors and return to Azeroth. The
+parser/lifecycle check also covers truncated WDT files, incomplete trailing
+chunks, the unchanged Deadmines terrain path and old-model cleanup.

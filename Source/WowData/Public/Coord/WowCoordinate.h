@@ -29,6 +29,10 @@ struct WOWDATA_API FWowCoordinate
     static constexpr float ADT_CENTER_X = 32.0f * TILE_SIZE + TILE_SIZE * 0.5f;
     static constexpr float ADT_CENTER_Z = 32.0f * TILE_SIZE + TILE_SIZE * 0.5f;
 
+    /** WDT global MODF uses zero X/Z for the map origin (AzerothCore MapObject::Extract). */
+    static FVector WdtWmoToAdt(const FVector& Position)
+    {return Position.X==0 && Position.Z==0?FVector(MAP_ORIGIN,Position.Y,MAP_ORIGIN):Position;}
+
     /** Convert WoW ADT coords (X=east, Y=up, Z=south) to UE coords (centered on map) */
     static FVector AdtToUE(float NgX, float NgY, float NgZ)
     {

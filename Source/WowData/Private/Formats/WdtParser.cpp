@@ -7,6 +7,7 @@ static constexpr uint32 WDT_MVER = MakeFourCC('R', 'E', 'V', 'M');
 static constexpr uint32 WDT_MPHD = MakeFourCC('D', 'H', 'P', 'M');
 static constexpr uint32 WDT_MAIN = MakeFourCC('N', 'I', 'A', 'M');
 static constexpr uint32 WDT_MWMO = MakeFourCC('O', 'M', 'W', 'M');
+static constexpr uint32 WDT_MODF = MakeFourCC('F', 'D', 'O', 'M');
 
 FWdtData FWdtParser::Parse(const TArray<uint8>& Data)
 {
@@ -16,13 +17,14 @@ FWdtData FWdtParser::Parse(const TArray<uint8>& Data)
     const uint8* Ptr = Data.GetData();
     const uint8* End = Ptr + Data.Num();
 
-    while (Ptr + 8 <= End)
+    bool HasMain=false;
+    while (End-Ptr >= 8)
     {
         uint32 Magic = *reinterpret_cast<const uint32*>(Ptr);
         uint32 Size  = *reinterpret_cast<const uint32*>(Ptr + 4);
         const uint8* ChunkData = Ptr + 8;
 
-        if (ChunkData + Size > End) break;
+        if (Size>uint64(End-ChunkData)) return FWdtData();
 
         if (Magic == WDT_MPHD)
         {
@@ -36,6 +38,7 @@ FWdtData FWdtParser::Parse(const TArray<uint8>& Data)
         {
             if (Size >= 64 * 64 * 8)
             {
+                HasMain=true;
                 int32 TileCount = 0;
                 for (int32 y = 0; y < 64; y++)
                 {
@@ -53,14 +56,25 @@ FWdtData FWdtParser::Parse(const TArray<uint8>& Data)
         {
             if (Size > 0)
             {
+                bool Terminated=false; for(uint32 I=0;I<Size;++I) if(!ChunkData[I]) {Terminated=true; break;} if(!Terminated) return FWdtData();
                 Result.GlobalWmoPath = FString(UTF8_TO_TCHAR(reinterpret_cast<const char*>(ChunkData)));
             }
+        }
+        else if(Magic==WDT_MODF)
+        {
+            if(Size!=64 || Result.bHasGlobalWmoPlacement) return FWdtData();
+            uint32 Header[2]; float Values[12]; uint16 Fields[4];
+            FMemory::Memcpy(Header,ChunkData,8); FMemory::Memcpy(Values,ChunkData+8,48); FMemory::Memcpy(Fields,ChunkData+56,8);
+            for(float V:Values) if(!FMath::IsFinite(V)) return FWdtData();
+            auto& P=Result.GlobalWmoPlacement; P.NameIndex=int32(Header[0]); P.UniqueId=Header[1];
+            P.Position=FVector(Values[0],Values[1],Values[2]); P.Rotation=FVector(Values[3],Values[4],Values[5]); P.BoundingBox=FBox(FVector(Values[6],Values[7],Values[8]),FVector(Values[9],Values[10],Values[11]));
+            P.Flags=Fields[0]; P.DoodadSet=Fields[1]; P.NameSet=Fields[2]; P.Scale=Fields[3]; Result.bHasGlobalWmoPlacement=true;
         }
 
         Ptr = ChunkData + Size;
     }
 
-    Result.bIsValid = true;
+    Result.bIsValid = Ptr==End && ((Result.Flags&1)?Result.bHasGlobalWmoPlacement && !Result.GlobalWmoPath.IsEmpty() && Result.GlobalWmoPlacement.NameIndex==0:HasMain);
     UE_LOG(LogWdt, Log, TEXT("WDT parsed: flags=0x%X, bigAlpha=%d, globalWmo='%s'"),
         Result.Flags, Result.bUseBigAlpha ? 1 : 0, *Result.GlobalWmoPath);
     return Result;

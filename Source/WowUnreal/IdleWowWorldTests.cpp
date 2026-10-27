@@ -13,8 +13,31 @@
 #include "WowWmoRenderer.h"
 #include "WowTerrainTile.h"
 #include "Formats/WmoParser.h"
+#include "Formats/WdtParser.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIdleWowGlobalWmo,"WowUnreal.World.GlobalWmoMaps",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FIdleWowGlobalWmo::RunTest(const FString&)
+{
+    FString Path; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false; FMpqManager Mpq; if(!Mpq.Initialize(Path)) return false;
+    TArray<uint8> Bytes; if(!Mpq.ReadFile(TEXT("World\\Maps\\StormwindJail\\StormwindJail.wdt"),Bytes)) return false;
+    const auto Stockade=FWdtParser::Parse(Bytes);
+    TestTrue(TEXT("Original global MODF retains names, zero-origin placement and doodad set"),Stockade.bIsValid && (Stockade.Flags&1) && Stockade.bHasGlobalWmoPlacement && Stockade.GlobalWmoPlacement.Position.IsZero() && Stockade.GlobalWmoPlacement.DoodadSet==0 && Stockade.GlobalWmoPath.EndsWith(TEXT("StormwindJail.wmo")));
+    for(int32 N=0;N<Bytes.Num();++N) {const auto Cut=FWdtParser::Parse(TArray<uint8>(Bytes.GetData(),N)); if(Cut.bIsValid) {AddError(TEXT("Truncated global WDT published a usable placement")); break;}}
+    auto Extra=Bytes; Extra.Add(0); TestFalse(TEXT("Incomplete trailing chunks cannot publish a WDT"),FWdtParser::Parse(Extra).bIsValid);
+    TestTrue(TEXT("Global MODF zero origin matches the server's centered map coordinates"),FWowCoordinate::AdtToUE(FWowCoordinate::MAP_ORIGIN,0,FWowCoordinate::MAP_ORIGIN).Equals(FWowCoordinate::WowToUE(0,0,0)) && FWowCoordinate::WdtWmoToAdt(FVector::ZeroVector)==FVector(FWowCoordinate::MAP_ORIGIN,0,FWowCoordinate::MAP_ORIGIN));
+    if(!Mpq.ReadFile(TEXT("World\\Maps\\DeadminesInstance\\DeadminesInstance.wdt"),Bytes)) return false; const auto Terrain=FWdtParser::Parse(Bytes); TestTrue(TEXT("Terrain dungeons keep their existing tile path"),Terrain.bIsValid && !(Terrain.Flags&1) && Terrain.GlobalWmoPath.IsEmpty());
+    auto& D=FDbcStore::Get(); if(!D.IsLoaded()) D.LoadAll(Mpq);
+    UWorld* World=UWorld::CreateWorld(EWorldType::Game,false); if(!World) return false; GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+    auto* Manager=World->SpawnActor<AWowWorldManager>(); if(!Manager) {World->DestroyWorld(false); GEngine->DestroyWorldContext(World); return false;}
+    Manager->SelectMap(34); Manager->MpqManager=MakeUnique<FMpqManager>(); Manager->MpqManager->Initialize(Path); Manager->AssetCache=MakeUnique<FWowAssetCache>(); Manager->WdtData=MakeUnique<FWdtData>(Stockade);
+    TestFalse(TEXT("A global map is not ready before its model exists"),Manager->IsInitialLoadComplete());
+    TestTrue(TEXT("Global map schedules model groups without inventing ADT tiles"),Manager->LoadGlobalWmo(FWowCoordinate::WowToUE(48,0,-16)) && Manager->LoadedTiles.IsEmpty() && Manager->InitialTilesQueued==0 && Manager->PendingWmoLoads.Num()==1);
+    auto* Building=Manager->GlobalWmo.Get(); TestTrue(TEXT("The collision loading gate remains closed while model groups are pending"),Building && !Manager->IsInitialLoadComplete() && Manager->GetPendingWmoGroupCount()>0);
+    TestTrue(TEXT("Repeated load requests reuse the model and bounded group job"),Manager->LoadGlobalWmo(FVector::ZeroVector) && Manager->GlobalWmo==Building && Manager->PendingWmoLoads.Num()==1);
+    TestTrue(TEXT("Map transfer destroys the previous global building and pending work"),Manager->SelectMap(0) && !Manager->GlobalWmo && Manager->PendingWmoLoads.IsEmpty() && Building->IsActorBeingDestroyed());
+    Manager->Destroy(); World->DestroyWorld(false); GEngine->DestroyWorldContext(World); return true;
+}
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIdleWowLargeWmo,"WowUnreal.World.LargeWmoStreaming",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FIdleWowLargeWmo::RunTest(const FString&)
 {

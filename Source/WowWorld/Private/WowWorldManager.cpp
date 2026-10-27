@@ -527,6 +527,7 @@ void AWowWorldManager::BeginPlay()
 
 int32 AWowWorldManager::LoadTilesAroundPosition(const FVector& UEPosition, int32 Radius)
 {
+    if(WdtData && (WdtData->Flags&1)) {LoadGlobalWmo(UEPosition); return 0;}
     FIntPoint CenterTile = FWowCoordinate::WorldToTile(UEPosition);
     int32 Queued = 0;
 
@@ -579,6 +580,7 @@ bool AWowWorldManager::SelectMap(uint32 MapId)
     // Old MPQ reads can finish in the background; their generation prevents
     // them from being finalized into this map without blocking the game thread.
     PendingTileKeys.Reset(); InitialTileKeys.Reset(); InitialTilesQueued=InitialTilesLoaded=InitialObjectTiles=0; PendingWmoLoads.Reset(); WmoGroupCounts.Reset(); PendingObjectGroups=0;
+    if(IsValid(GlobalWmo)) GlobalWmo->Destroy(); GlobalWmo=nullptr;
     for(auto& Pair:LoadedTiles) if(IsValid(Pair.Value))
     {
         for(auto& Wmo:Pair.Value->SpawnedWmos) if(IsValid(Wmo.Value)) Wmo.Value->Destroy();
@@ -632,6 +634,7 @@ void AWowWorldManager::EnableTerrainStreaming()
 
 void AWowWorldManager::EndPlay(const EEndPlayReason::Type R)
 {
+    if(IsValid(GlobalWmo)) GlobalWmo->Destroy(); GlobalWmo=nullptr;
     FTSTicker::RemoveTicker(WmoTicker); WmoTicker.Reset(); PendingWmoLoads.Reset();
     // Wait for any pending async loads to complete before cleanup
     for (FPendingTileLoad& Pending : PendingLoads)
@@ -941,6 +944,7 @@ bool AWowWorldManager::IsTileLoaded(int32 TX, int32 TY) const
 
 void AWowWorldManager::UpdateStreaming()
 {
+    if(WdtData && (WdtData->Flags&1)) return;
     // Get camera position
     APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
     if (!PC) return;
@@ -1533,6 +1537,7 @@ void AWowWorldManager::UpdateZoneAudio()
 
 void AWowWorldManager::UpdateObjectStreaming()
 {
+    if(WdtData && (WdtData->Flags&1)) return;
     APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
     if (!PC) return;
 
@@ -1717,6 +1722,19 @@ void AWowWorldManager::UpdateObjectStreaming()
     InitialObjectTiles=PendingObjectGroups?0:InitialTilesLoaded;
 }
 
+bool AWowWorldManager::LoadGlobalWmo(const FVector& Position)
+{
+    if(IsValid(GlobalWmo)) return true;
+    if(!WdtData || !WdtData->bIsValid || !(WdtData->Flags&1) || !WdtData->bHasGlobalWmoPlacement || !MpqManager || !AssetCache) return false;
+    TArray<uint8> Bytes; if(!MpqManager->ReadFile(WdtData->GlobalWmoPath,Bytes)) return false;
+    TSharedPtr<FWmoRootData> Root=MakeShared<FWmoRootData>(FWmoParser::ParseRoot(Bytes)); if(!Root->bIsValid || !Root->NumGroups || Root->NumGroups>4096) return false;
+    auto Placement=WdtData->GlobalWmoPlacement; Placement.Position=FWowCoordinate::WdtWmoToAdt(Placement.Position);
+    GlobalWmo=FWowWmoRenderer::SpawnWmo(GetWorld(),WdtData->GlobalWmoPath,Placement,MpqManager.Get(),AssetCache.Get(),nullptr,Root.Get(),0,0);
+    if(!GlobalWmo) return false; GlobalWmo->AttachToActor(this,FAttachmentTransformRules::KeepWorldTransform);
+    const FVector P=GlobalWmo->GetActorTransform().InverseTransformPosition(Position)/FWowCoordinate::SCALE;
+    FPendingWmoLoad Job; Job.Actor=GlobalWmo; Job.Path=WdtData->GlobalWmoPath; Job.Placement=Placement; Job.Root=Root; Job.Mpq=MpqManager.Get(); Job.Cache=AssetCache.Get(); Job.Order=FWowWmoRenderer::GroupLoadOrder(*Root,FVector(P.Y,P.X,P.Z)); PendingWmoLoads.Add(MoveTemp(Job));
+    ActiveWmoGroupCount=Root->NumGroups; UE_LOG(LogWowWorld,Log,TEXT("Streaming global WMO %s (%u groups)"),*WdtData->GlobalWmoPath,Root->NumGroups); return true;
+}
 void AWowWorldManager::UpdatePendingWmoLoads()
 {
     PendingWmoLoads.RemoveAll([](const auto& Job){return !Job.Actor.IsValid() || Job.Actor->IsActorBeingDestroyed() || Job.Next>=Job.Order.Num();});

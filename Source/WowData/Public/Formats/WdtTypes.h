@@ -1,5 +1,6 @@
 #pragma once
 #include "CoreMinimal.h"
+#include "Formats/AdtTypes.h"
 
 struct WOWDATA_API FWdtData
 {
@@ -7,5 +8,7 @@ struct WOWDATA_API FWdtData
     uint32 Flags = 0;
     bool bUseBigAlpha = false;
     FString GlobalWmoPath;
+    FAdtWmoPlacement GlobalWmoPlacement;
+    bool bHasGlobalWmoPlacement=false;
     bool bIsValid = false;
 };

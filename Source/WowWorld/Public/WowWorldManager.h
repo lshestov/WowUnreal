@@ -40,6 +40,7 @@ class WOWWORLD_API AWowWorldManager : public AActor
 {
     friend class FIdleWowLargeWmo;
     friend class FIdleWowServerMapSelection;
+    friend class FIdleWowGlobalWmo;
     GENERATED_BODY()
 public:
     AWowWorldManager();
@@ -68,7 +69,7 @@ public:
     int32 GetInitialTilesLoaded() const { return InitialTilesLoaded; }
 
     /** Whether all initially-queued tiles have finished loading */
-    bool IsInitialLoadComplete() const { return InitialTilesQueued > 0 && InitialTilesLoaded >= InitialTilesQueued && InitialObjectTiles>=InitialTilesQueued && PendingWmoLoads.IsEmpty(); }
+    bool IsInitialLoadComplete() const { if(WdtData && (WdtData->Flags&1)) return WdtData->bIsValid && IsValid(GlobalWmo) && PendingWmoLoads.IsEmpty(); return InitialTilesQueued > 0 && InitialTilesLoaded >= InitialTilesQueued && InitialObjectTiles>=InitialTilesQueued && PendingWmoLoads.IsEmpty(); }
     int32 GetPendingWmoGroupCount() const {int32 Count=PendingObjectGroups; for(const auto& Job:PendingWmoLoads) if(Job.Actor.IsValid()) Count+=Job.Order.Num()-Job.Next; return Count;}
 
     /** Get the terrain RVT for mesh components to write to */
@@ -171,6 +172,7 @@ private:
     int32 InitialTilesLoaded = 0;
     int32 InitialObjectTiles=0;
     TArray<FPendingWmoLoad> PendingWmoLoads;
+    UPROPERTY() TObjectPtr<AActor> GlobalWmo;
     FTSTicker::FDelegateHandle WmoTicker;
     TMap<FString,uint32> WmoGroupCounts;
     int32 PendingObjectGroups=0;
@@ -207,6 +209,7 @@ private:
     void UpdateStreaming();
     void UpdateObjectStreaming();
     void UpdatePendingWmoLoads();
+    bool LoadGlobalWmo(const FVector& Position);
     void UpdateZoneAudio();
     void UpdateWdlStreaming(const FIntPoint& CameraTile);
     void UpdateLod1Streaming(const FIntPoint& CameraTile);
