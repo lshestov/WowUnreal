@@ -153,6 +153,87 @@ bool FHudFontAlignment::RunTest(const FString&)
     )LUA")));
     return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudUnitReactions,"WowUnreal.Hud.UnitReactions",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudUnitReactions::RunTest(const FString&)
+{
+    FString Path; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false;
+    FMpqManager Mpq; if(!Mpq.Initialize(Path)) return false; auto& D=FDbcStore::Get();
+    if(!D.IsLoaded()) D.LoadAll(Mpq); if(!D.IsDeferredLoaded()) D.LoadDeferred(Mpq);
+    FHudFixture F; TStrongObjectPtr<UWowConnectionManager> C(NewObject<UWowConnectionManager>());
+    auto& H=C->PacketHandler; auto& E=H.EntityManager; E.LocalPlayerGuid=1;
+    auto& P=E.PromoteToTyped(1,WowTypeMask::UNIT|WowTypeMask::PLAYER);
+    auto& N=E.PromoteToTyped(0xf130000000000064,WowTypeMask::UNIT);
+    auto& Other=E.PromoteToTyped(2,WowTypeMask::UNIT|WowTypeMask::PLAYER);
+    P.SetField(UnitField::FACTIONTEMPLATE,1); P.SetField(UnitField::FLAGS,8); P.SetField(UnitField::BYTES_0,1|(1<<8));
+    N.SetField(UnitField::FACTIONTEMPLATE,12); Other.SetField(UnitField::FACTIONTEMPLATE,2); Other.SetField(UnitField::FLAGS,8);
+    F.Context.EntityManager=&E; F.Context.ConnectionManager=C.Get(); C->SendSetSelection(N.Guid);
+    H.Reputations.SetNum(128); const FDbcStore::FFaction* Stormwind=nullptr;
+    for(const auto& Row:D.Factions()) if(Row.Id==72) Stormwind=&Row;
+    if(!TestNotNull(TEXT("Original Stormwind faction metadata exists"),Stormwind)) return false;
+    auto& Rep=H.Reputations[Stormwind->Index]; Rep.Flags=1;
+    TestTrue(TEXT("Original friendly NPC frame is green, self is Friendly, not fabricated Exalted"),F.Lua.ExecuteString(TEXT("assert(UnitReaction('target','player')==5 and UnitReaction('player','player')==5 and UnitIsFriend('player','target') and not UnitCanAttack('player','target'))")));
+    TestTrue(TEXT("FrameXML selection colour is green for a friendly NPC"),F.Lua.ExecuteString(TEXT("local r,g,b=UnitSelectionColor('target'); assert(r==0 and g==1 and b==0); assert(UnitPlayerOrPetInParty('target')==nil and UnitPlayerOrPetInRaid('target')==nil)")));
+    Rep.Standing=42000-Stormwind->BaseFor(1,1);
+    TestTrue(TEXT("NPC standing and player attitude have distinct directions"),WowLuaApi::UnitReactionRank(&F.Context,&N,&P)==8 && WowLuaApi::UnitReactionRank(&F.Context,&P,&N)==5);
+    Rep.Flags|=2;
+    TestTrue(TEXT("At War changes the player's attitude without fabricating NPC standing"),WowLuaApi::UnitReactionRank(&F.Context,&P,&N)==2 && WowLuaApi::UnitReactionRank(&F.Context,&N,&P)==8 && WowLuaApi::CanUnitAttack(&F.Context,&P,&N));
+    H.ForcedReactions.Add(72,1);
+    TestTrue(TEXT("Server-forced faction reaction overrides both reputation directions"),WowLuaApi::UnitReactionRank(&F.Context,&N,&P)==1 && WowLuaApi::UnitReactionRank(&F.Context,&P,&N)==1);
+    H.ForcedReactions.Reset(); Rep.Flags=1; P.SetField(UnitField::FLAGS_2,4);
+    TestEqual(TEXT("Ignore-reputation units use faction-template masks"),WowLuaApi::UnitReactionRank(&F.Context,&N,&P),5);
+    P.SetField(UnitField::FLAGS_2,0); Rep.Standing=0;
+    N.SetField(UnitField::FACTIONTEMPLATE,121); P.SetField(PlayerField::FLAGS,0x100); H.ForcedReactions.Add(21,8);
+    TestTrue(TEXT("Contested guard hostility precedes its forced attitude; player direction retains forced override"),WowLuaApi::UnitReactionRank(&F.Context,&N,&P)==2 && WowLuaApi::UnitReactionRank(&F.Context,&P,&N)==8);
+    P.SetField(PlayerField::FLAGS,0); H.ForcedReactions.Reset();
+    N.SetField(UnitField::FACTIONTEMPLATE,32);
+    TestTrue(TEXT("Neutral Northshire wolves are yellow and remain attackable"),F.Lua.ExecuteString(TEXT("assert(UnitReaction('target','player')==4 and not UnitIsEnemy('player','target') and UnitCanAttack('player','target'))")));
+    TestTrue(TEXT("FrameXML selection colour is yellow for a neutral wolf"),F.Lua.ExecuteString(TEXT("local r,g,b=UnitSelectionColor('target'); assert(r==1 and g==1 and b==0)")));
+    N.SetField(UnitField::FLAGS,0x100);
+    TestFalse(TEXT("PC immunity blocks attack independently from neutral reaction"),WowLuaApi::CanUnitAttack(&F.Context,&P,&N)); N.SetField(UnitField::FLAGS,0);
+    N.SetField(UnitField::FACTIONTEMPLATE,14);
+    TestEqual(TEXT("Hostile creature faction uses actual enemy mask"),WowLuaApi::UnitReactionRank(&F.Context,&N,&P),2);
+    N.SetField(UnitField::FACTIONTEMPLATE,1630); P.SetField(UnitField::FACTIONTEMPLATE,35);
+    TestEqual(TEXT("Default hostility applies without a matching group mask"),D.ItemUi().DefaultReaction(1630,35),2);
+    P.SetField(UnitField::FACTIONTEMPLATE,1);
+    TestTrue(TEXT("Opposing players need PvP eligibility in addition to hostility"),WowLuaApi::UnitReactionRank(&F.Context,&P,&Other)==2 && !WowLuaApi::CanUnitAttack(&F.Context,&P,&Other));
+    TestTrue(TEXT("Unflagged opposing player uses the original blue selection colour"),WowLuaApi::UnitSelectionColor(&F.Context,&Other).Equals(FLinearColor(0,0,1,1)));
+    Other.SetField(UnitField::BYTES_2,1<<8); TestTrue(TEXT("Flagged opposing player can be attacked"),WowLuaApi::CanUnitAttack(&F.Context,&P,&Other));
+    TestTrue(TEXT("One-way PvP eligibility uses the original yellow selection colour"),WowLuaApi::UnitSelectionColor(&F.Context,&Other).Equals(FLinearColor(1,1,0,1)));
+    P.SetField(UnitField::BYTES_2,1<<8);
+    TestTrue(TEXT("Mutual PvP eligibility uses red"),WowLuaApi::UnitSelectionColor(&F.Context,&Other).Equals(FLinearColor(1,0,0,1)));
+    P.SetField(UnitField::BYTES_2,0);
+    Other.SetField(UnitField::BYTES_2,9<<8); TestFalse(TEXT("Sanctuary blocks a flagged opponent"),WowLuaApi::CanUnitAttack(&F.Context,&P,&Other));
+    Other.SetField(UnitField::FACTIONTEMPLATE,1); Other.SetField(UnitField::BYTES_2,4<<8); P.SetField(UnitField::BYTES_2,4<<8);
+    TestTrue(TEXT("FFA permits combat between same-faction players"),WowLuaApi::UnitReactionRank(&F.Context,&P,&Other)==2 && WowLuaApi::CanUnitAttack(&F.Context,&P,&Other));
+    FWowGroupMember Member; Member.Guid=2; H.GroupInfo.Members.Add(Member); H.GroupInfo.MemberCount=2;
+    TestTrue(TEXT("Player/pet membership APIs return the native numeric-or-nil shape"),F.Lua.ExecuteString(TEXT("assert(UnitPlayerOrPetInParty('party1')==1 and UnitPlayerOrPetInRaid('party1')==nil)")));
+    TestEqual(TEXT("Party membership precedes FFA reaction"),WowLuaApi::UnitReactionRank(&F.Context,&P,&Other),5);
+    P.SetField(PlayerField::BASE,99); Other.SetField(PlayerField::BASE,99); P.SetField(PlayerField::BASE+8,1); Other.SetField(PlayerField::BASE+8,2);
+    TestTrue(TEXT("Opposing duel teams precede party friendship"),WowLuaApi::UnitReactionRank(&F.Context,&P,&Other)==2 && WowLuaApi::CanUnitAttack(&F.Context,&P,&Other));
+    auto& Pet=E.PromoteToTyped(0xf140000000000008,WowTypeMask::UNIT); Pet.SetField(UnitField::FLAGS,8); Pet.SetField(UnitField::SUMMONEDBY,1);
+    TestEqual(TEXT("Owner and controlled pet are friendly"),WowLuaApi::UnitReactionRank(&F.Context,&P,&Pet),5);
+    C->SendSetSelection(N.Guid); N.SetField(UnitField::FACTIONTEMPLATE,12); P.SetField(UnitField::BYTES_2,0); P.SetField(PlayerField::BASE+8,0);
+    TestTrue(TEXT("Reaction listener is registered"),F.Lua.ExecuteString(TEXT("ReactionProbe=CreateFrame('Frame'); ReactionProbe:RegisterEvent('UNIT_FACTION'); ReactionProbe:SetScript('OnEvent',function(self,event,unit) if unit=='target' then reactionEvents=(reactionEvents or 0)+1 end end)")));
+    WowLuaApi::UpdateUnitReactions(F.Lua.GetState()); H.ForcedReactions.Add(72,2); WowLuaApi::UpdateUnitReactions(F.Lua.GetState()); WowLuaApi::UpdateUnitReactions(F.Lua.GetState());
+    TestTrue(TEXT("Changed reputation/force refreshes an existing target once without retargeting"),F.Lua.ExecuteString(TEXT("assert(reactionEvents==1 and UnitReaction('target','player')==2)")));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudForcedReactionPackets,"WowUnreal.UI.ForcedReactionPackets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudForcedReactionPackets::RunTest(const FString&)
+{
+    FWowPacketHandler H; TArray<uint8> Data;
+    const auto U32=[&](uint32 V) {Data.Append(reinterpret_cast<const uint8*>(&V),4);};
+    U32(2); U32(72); U32(0); U32(76); U32(7); H.HandlePacket(0x02A5,Data);
+    TestTrue(TEXT("Wire reputation ranks are zero-based; Lua reactions are one-based"),H.ForcedReactions.FindRef(72)==1 && H.ForcedReactions.FindRef(76)==8);
+    for(int32 N=0;N<Data.Num();++N) {TArray<uint8> Cut(Data.GetData(),N); H.HandlePacket(0x02A5,Cut); TestEqual(TEXT("Every truncated packet preserves complete previous state"),H.ForcedReactions.Num(),2);}
+    Data.Add(0); H.HandlePacket(0x02A5,Data); TestEqual(TEXT("Trailing data is rejected"),H.ForcedReactions.Num(),2);
+    Data.Reset(); U32(1); U32(72); U32(8); H.HandlePacket(0x02A5,Data); TestEqual(TEXT("Out-of-range rank cannot overwrite reaction"),H.ForcedReactions.FindRef(72),uint8(1));
+    Data.Reset(); U32(2); U32(72); U32(1); U32(72); U32(2); H.HandlePacket(0x02A5,Data); TestEqual(TEXT("Duplicate faction rejects the complete replacement"),H.ForcedReactions.Num(),2);
+    Data.Reset(); U32(0); H.HandlePacket(0x02A5,Data); TestEqual(TEXT("Empty authoritative list clears overrides"),H.ForcedReactions.Num(),0);
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudLiveResources, "WowUnreal.Hud.LiveResourcesAndStance",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FHudLiveResources::RunTest(const FString&)

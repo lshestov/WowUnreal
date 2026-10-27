@@ -108,7 +108,7 @@ TArray<WowMinimapUi::FBlip> WowMinimapUi::Blips(FWowLuaContext* C)
         else
         {
             if(E.GetField(UnitField::HEALTH)==0) continue;
-            const uint32 Faction=E.GetField(UnitField::FACTIONTEMPLATE); const int32 Reaction=FDbcStore::Get().ItemUi().DefaultReaction(Faction,Player->GetFactionTemplate());
+            const int32 Reaction=WowLuaApi::UnitReactionRank(C,&E,Player);
             if(H.GroupInfo.FindMember(E.Guid)) Icon=H.GroupInfo.IsRaidGroup()?0:1;
             else if(E.GetField64(UnitField::SUMMONEDBY)==Player->Guid || E.GetField64(UnitField::CHARMEDBY)==Player->Guid) Icon=15;
             else if(Track && Track->Type==1 && (Track->Flags&E.GetField(UnitField::NPC_FLAGS)) && Reaction>=4) Icon=8;

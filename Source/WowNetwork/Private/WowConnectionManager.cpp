@@ -125,7 +125,7 @@ void UWowConnectionManager::SelectRealm(int32 I)
             TArray<uint64> Guids; PacketHandler.EntityManager.GetAll().GetKeys(Guids);
             for(uint64 Guid:Guids) PacketHandler.EntityManager.Remove(Guid);
             PacketHandler.EntityManager.LocalPlayerGuid=0; TargetGuid=0; CursorPayload=FCursorPayloadState();
-            PacketHandler.KnownSpells.Reset(); PacketHandler.ActionButtons.Reset(); PacketHandler.QuestLog.Reset(); PacketHandler.ResetTalentState(); PacketHandler.Reputations.Reset();
+            PacketHandler.KnownSpells.Reset(); PacketHandler.ActionButtons.Reset(); PacketHandler.QuestLog.Reset(); PacketHandler.ResetTalentState(); PacketHandler.Reputations.Reset(); PacketHandler.ForcedReactions.Reset();
             PacketHandler.SpellCooldowns.Reset(); PacketHandler.SpellCooldownInfo.Reset(); PacketHandler.CombatHistory.Reset(); PacketHandler.Casts.Reset(); PacketHandler.LocalCastRequests.Reset(); PacketHandler.HasPendingAttackCast=false;
             PacketHandler.GroupInfo=FWowGroupInfo(); PacketHandler.PetActionBar=FWowPetActionBarState(); PacketHandler.ResetChannels();
             PacketHandler.ResetMapState();
@@ -311,9 +311,8 @@ void UWowConnectionManager::SendChatMessage(const FString& Message,int32 Type,co
 
 void UWowConnectionManager::SendSetSelection(int64 InTargetGuid)
 {
-    if (!WorldSocket.IsValid()) return;
-
     TargetGuid = InTargetGuid;
+    if (!WorldSocket.IsValid()) return;
 
     TArray<uint8> Data;
     Data.SetNumUninitialized(8);

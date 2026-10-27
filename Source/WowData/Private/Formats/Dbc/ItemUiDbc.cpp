@@ -4,13 +4,14 @@
 
 int32 FItemUiDbc::DefaultReaction(uint32 From,uint32 To) const
 {
-    if(From && From==To) return 5;
     const auto* A=ReactionTemplates.Find(From); const auto* B=ReactionTemplates.Find(To); if(!A || !B) return 0;
-    for(uint32 Id:A->Enemies) if(Id && Id==B->Faction) return 2;
-    for(uint32 Id:A->Friends) if(Id && Id==B->Faction) return 5;
     if(A->EnemyGroup&B->Group) return 2;
-    if((A->FriendGroup&B->Group) || (B->FriendGroup&A->Group)) return 5;
-    return 4;
+    for(uint32 Id:A->Enemies) {if(!Id) break; if(Id==B->Faction) return 2;}
+    if(A->FriendGroup&B->Group) return 5;
+    for(uint32 Id:A->Friends) {if(!Id) break; if(Id==B->Faction) return 5;}
+    if(B->FriendGroup&A->Group) return 5;
+    for(uint32 Id:B->Friends) {if(!Id) break; if(Id==A->Faction) return 5;}
+    return (A->Flags&0x2000)?2:4;
 }
 
 bool FItemUiDbc::Load(FMpqManager& Mpq)

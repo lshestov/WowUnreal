@@ -17,6 +17,7 @@ public:
     const FString* ClassName(uint32 Class) const { return Classes.Find(Class); }
     const FString* SubclassName(uint32 Class,uint32 Subclass) const { return Subclasses.Find((uint64(Class)<<32)|Subclass); }
     uint32 FactionForTemplate(uint32 Id) const { return FactionTemplates.FindRef(Id); }
+    const FReactionTemplate* ReactionTemplate(uint32 Id) const {return ReactionTemplates.Find(Id);}
     int32 DefaultReaction(uint32 From,uint32 To) const;
     uint32 BankBagPrice(uint32 Slot) const { return BankBagPrices.FindRef(Slot); }
     const FEnchant* Enchant(uint32 Id) const { return Enchants.Find(Id); }

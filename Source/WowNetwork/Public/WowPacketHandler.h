@@ -251,6 +251,7 @@ public:
     TArray<FSavedInstance> SavedInstances;
     struct FReputation { int32 Standing=0; uint8 Flags=0; };
     TArray<FReputation> Reputations;
+    TMap<uint32,uint8> ForcedReactions; // Faction.dbc ID -> Lua reaction rank (1..8).
 
     /** ── Social System ──────────────────────────────────────────────────── */
     /** Friends list */
@@ -528,6 +529,7 @@ private:
     void HandleSetProficiency(FPacketReader& R);
     void HandleAccountDataTimes(FPacketReader& R);
     void HandlePartyMemberStats(FPacketReader& R);
+    void HandleForcedReactions(FPacketReader& R);
 
     // ── NPC interaction handlers ────────────────────────────────────────────
     void HandleGossipMessage(FPacketReader& R);

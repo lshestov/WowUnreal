@@ -1697,7 +1697,7 @@ FString FWowEventSystem::OpcodeToEvent(uint16 Opcode)
 	case 0x0329: case 0x04EB: return TEXT("PLAYER_DIFFICULTY_CHANGED");
 
 	// Targeting
-	case 0x0122: case 0x0123: case 0x0124: case 0x0313: return TEXT("UPDATE_FACTION");
+	case 0x0122: case 0x0123: case 0x0124: case 0x0313: case 0x02A5: return TEXT("UPDATE_FACTION");
 	case 0x0078: return TEXT("");
 
 	// Unit updates

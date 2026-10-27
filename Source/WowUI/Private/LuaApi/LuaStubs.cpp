@@ -345,36 +345,6 @@ enum class EWowUnitRelationship : uint8
     Friendly,
 };
 
-static bool IsAllianceRace(uint8 RaceId)
-{
-    switch (RaceId)
-    {
-    case 1:  // Human
-    case 3:  // Dwarf
-    case 4:  // Night Elf
-    case 7:  // Gnome
-    case 11: // Draenei
-        return true;
-    default:
-        return false;
-    }
-}
-
-static bool IsHordeRace(uint8 RaceId)
-{
-    switch (RaceId)
-    {
-    case 2:  // Orc
-    case 5:  // Undead
-    case 6:  // Tauren
-    case 8:  // Troll
-    case 10: // Blood Elf
-        return true;
-    default:
-        return false;
-    }
-}
-
 static uint64 ResolveControllingGuid(const FWowEntity* Entity)
 {
     if (!Entity)
@@ -430,97 +400,33 @@ static bool IsGuidInPlayerGroup(const FWowLuaContext* Ctx, uint64 Guid)
     return GroupInfo.FindMember(Guid) != nullptr;
 }
 
-static int32 GetPlayerTeam(const FWowLuaContext* Ctx, uint64 Guid)
-{
-    if (!Ctx || !Ctx->EntityManager || Guid == 0)
-    {
-        return 0;
-    }
-
-    const FWowEntity* Entity = Ctx->EntityManager->Find(Guid);
-    if (!Entity || !Entity->IsPlayer())
-    {
-        return 0;
-    }
-
-    const FWowUnitEntity* Unit = static_cast<const FWowUnitEntity*>(Entity);
-    const uint8 RaceId = Unit->GetRaceId();
-    if (IsAllianceRace(RaceId))
-    {
-        return 1;
-    }
-
-    if (IsHordeRace(RaceId))
-    {
-        return 2;
-    }
-
-    return 0;
-}
-
 static EWowUnitRelationship GetUnitRelationship(const FWowLuaContext* Ctx, const FWowEntity* Unit1, const FWowEntity* Unit2)
 {
-    if (!Ctx || !Unit1 || !Unit2)
+    const int32 Rank=WowLuaApi::UnitReactionRank(Ctx,Unit1,Unit2);
+    return Rank>=5?EWowUnitRelationship::Friendly:Rank<4?EWowUnitRelationship::Hostile:EWowUnitRelationship::Neutral;
+}
+
+static int L_UnitPlayerOrPetInGroup(lua_State* L,bool Raid)
+{
+    const auto* C=WowLuaApi::GetContext(L); const uint64 Guid=ResolveUnitGuid(L);
+    bool Found=false;
+    if(C && C->ConnectionManager && C->EntityManager && Guid)
     {
-        return EWowUnitRelationship::Neutral;
-    }
-
-    const uint64 ControllerGuid1 = ResolveControllingGuid(Unit1);
-    const uint64 ControllerGuid2 = ResolveControllingGuid(Unit2);
-
-    if (ControllerGuid1 != 0 && ControllerGuid1 == ControllerGuid2)
-    {
-        return EWowUnitRelationship::Friendly;
-    }
-
-    if (IsGuidInPlayerGroup(Ctx, ControllerGuid1) && IsGuidInPlayerGroup(Ctx, ControllerGuid2))
-    {
-        return EWowUnitRelationship::Friendly;
-    }
-
-    const int32 Team1 = GetPlayerTeam(Ctx, ControllerGuid1);
-    const int32 Team2 = GetPlayerTeam(Ctx, ControllerGuid2);
-    if (Team1 != 0 && Team2 != 0)
-    {
-        return Team1 == Team2 ? EWowUnitRelationship::Friendly : EWowUnitRelationship::Hostile;
-    }
-
-    if (Unit1->IsUnit() && Unit2->IsUnit())
-    {
-        const uint32 FactionTemplate1 = static_cast<const FWowUnitEntity*>(Unit1)->GetFactionTemplate();
-        const uint32 FactionTemplate2 = static_cast<const FWowUnitEntity*>(Unit2)->GetFactionTemplate();
-
-        if (FactionTemplate1 != 0 && FactionTemplate2 != 0)
+        const auto& Group=C->ConnectionManager->PacketHandler.GroupInfo;
+        if(!Group.IsEmpty() && Group.IsRaidGroup()==Raid)
         {
-            if (FactionTemplate1 == FactionTemplate2)
+            const auto Matches=[&](uint64 Member)
             {
-                return EWowUnitRelationship::Friendly;
-            }
-
-            if (FactionTemplate1 == 2000 || FactionTemplate2 == 2000)
-            {
-                return EWowUnitRelationship::Neutral;
-            }
-        }
-
-        const bool bUnit1IsPlayerSide = IsGuidInPlayerGroup(Ctx, ControllerGuid1) || Team1 != 0;
-        const bool bUnit2IsPlayerSide = IsGuidInPlayerGroup(Ctx, ControllerGuid2) || Team2 != 0;
-        if (bUnit1IsPlayerSide != bUnit2IsPlayerSide)
-        {
-            const uint32 OtherFactionTemplate = bUnit1IsPlayerSide ? FactionTemplate2 : FactionTemplate1;
-            if (OtherFactionTemplate == 2000)
-            {
-                return EWowUnitRelationship::Neutral;
-            }
-
-            if (OtherFactionTemplate > 100)
-            {
-                return EWowUnitRelationship::Hostile;
-            }
+                if(Guid==Member) return true;
+                const auto* E=C->EntityManager->Find(Member); if(!E) return false;
+                const uint64 Pet=E->GetField64(UnitField::CHARM)?E->GetField64(UnitField::CHARM):E->GetField64(UnitField::SUMMON);
+                return Pet && Pet==Guid;
+            };
+            if(Raid) Found=Matches(C->EntityManager->LocalPlayerGuid);
+            for(const auto& Member:Group.Members) if(Matches(Member.Guid)) {Found=true; break;}
         }
     }
-
-    return EWowUnitRelationship::Neutral;
+    if(Found) lua_pushinteger(L,1); else lua_pushnil(L); return 1;
 }
 
 uint32 WowLuaApi::CombatLogFlags(FWowLuaContext* C,uint64 Guid)
@@ -540,19 +446,6 @@ uint32 WowLuaApi::CombatLogFlags(FWowLuaContext* C,uint64 Guid)
     Flags|=Player?0x400:Pet?0x1000:Entity && Entity->IsGameObject()?0x4000:0x800;
     if(C && C->ConnectionManager && C->ConnectionManager->GetTargetGuid()==Guid) Flags|=0x10000;
     return Flags;
-}
-
-static int32 GetUnitReactionRank(const FWowLuaContext* Ctx, const FWowEntity* Unit1, const FWowEntity* Unit2)
-{
-    switch (GetUnitRelationship(Ctx, Unit1, Unit2))
-    {
-    case EWowUnitRelationship::Friendly:
-        return 8;
-    case EWowUnitRelationship::Hostile:
-        return 2;
-    default:
-        return 4;
-    }
 }
 
 // ─── Instance / Group ───────────────────────────────────────────────────────────
@@ -4735,36 +4628,9 @@ void WowLuaApi::RegisterStubs(lua_State* L)
         lua_pushboolean(L2, 0); return 1;
     });
 
-    // UnitSelectionColor — returns r,g,b,a for unit frame name/health bar coloring
     lua_register(L, "UnitSelectionColor", [](lua_State* L2) -> int {
-        FWowEntity* Entity = ResolveUnit(L2);
-        if (Entity)
-        {
-            // Friendly = green, hostile = red, neutral = yellow
-            FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
-            bool bFriendly = false;
-            if (Ctx && Ctx->EntityManager)
-            {
-                uint64 LocalGuid = Ctx->EntityManager->LocalPlayerGuid;
-                bFriendly = (Entity->Guid == LocalGuid) || Entity->IsPlayer();
-            }
-            if (bFriendly)
-            {
-                lua_pushnumber(L2, 0.0); lua_pushnumber(L2, 1.0);
-                lua_pushnumber(L2, 0.0); lua_pushnumber(L2, 1.0);
-            }
-            else
-            {
-                lua_pushnumber(L2, 1.0); lua_pushnumber(L2, 0.0);
-                lua_pushnumber(L2, 0.0); lua_pushnumber(L2, 1.0);
-            }
-        }
-        else
-        {
-            lua_pushnumber(L2, 1.0); lua_pushnumber(L2, 1.0);
-            lua_pushnumber(L2, 1.0); lua_pushnumber(L2, 1.0);
-        }
-        return 4;
+        const auto Color=WowLuaApi::UnitSelectionColor(WowLuaApi::GetContext(L2),ResolveUnit(L2));
+        lua_pushnumber(L2,Color.R); lua_pushnumber(L2,Color.G); lua_pushnumber(L2,Color.B); lua_pushnumber(L2,Color.A); return 4;
     });
 
     // GetTimeToWellRested — returns seconds until fully rested (0 = already rested)
@@ -5359,11 +5225,12 @@ lua_pushboolean(L2, PLATFORM_MAC);
         FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
         FWowEntity* Entity1 = ResolveUnit(L2, 1);
         FWowEntity* Entity2 = ResolveUnit(L2, 2);
-        const bool bCanAttack = Entity1 && Entity2 &&
-            GetUnitRelationship(Ctx, Entity1, Entity2) == EWowUnitRelationship::Hostile;
+        const bool bCanAttack = WowLuaApi::CanUnitAttack(Ctx,Entity1,Entity2);
         lua_pushboolean(L2, bCanAttack ? 1 : 0);
         return 1;
     });
+    lua_register(L,"UnitPlayerOrPetInParty",[](lua_State* S)->int {return L_UnitPlayerOrPetInGroup(S,false);});
+    lua_register(L,"UnitPlayerOrPetInRaid",[](lua_State* S)->int {return L_UnitPlayerOrPetInGroup(S,true);});
     lua_register(L, "UnitInRaid", [](lua_State* L2) -> int {
         FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
         if (!Ctx || !Ctx->ConnectionManager)
@@ -6400,7 +6267,7 @@ lua_pushboolean(L2, PLATFORM_MAC);
             return 1;
         }
 
-        lua_pushnumber(L2, GetUnitReactionRank(Ctx, Unit1, Unit2));
+        lua_pushnumber(L2, WowLuaApi::UnitReactionRank(Ctx, Unit1, Unit2));
         return 1;
     });
 

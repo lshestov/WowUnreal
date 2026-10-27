@@ -478,11 +478,23 @@ build, automation, native autologin and rendered screenshot verification):
     restores original position/UI and verifies unchanged health, inventory,
     money, level, XP and exploration. See Docs/IndoorMinimap.md.
 - [ ] 7. Group/special windows: party/loot, PvP, dungeon finder and achievements.
-  - [?] Restore NPC/player portrait captures with authored M2 cameras and the
+  - [x] Restore NPC/player portrait captures with authored M2 cameras and the
     runtime head-socket cache. Verified Windows build, 117 regression tests
     (three existing warning tests), corrected fixture and final two-test check,
     and an 11-step/three-image NPC/animal/ReloadUI route; see Docs/Portraits.md.
-  - [ ] Correct unit-frame reactions from faction templates, reputation and PvP.
+  - [?] Correct unit-frame reactions and selection colours from faction
+    templates, directed reputation/At War, forced reactions, ownership, group,
+    duel teams and PvP eligibility. Atomic forced-reaction packets; original
+    party/pet membership API shapes. Verified Windows build, 119 regression
+    tests (three existing warning tests), four final focused checks and a
+    14-step/three-image native friendly/neutral/ReloadUI route with actual
+    name-background colour assertions. See Docs/UnitReactions.md.
+  - [ ] Complete original party/raid frames, remote member state and group controls.
+  - [ ] Complete loot slots, roll windows and master-looter selection.
+  - [ ] Complete guild/inspect/tabard panels and their server-backed state.
+  - [ ] Complete PvP/battleground panels and queue/status/scoreboard protocol.
+  - [ ] Complete dungeon-finder browsing, role/queue/proposal state and controls.
+  - [ ] Complete achievements, criteria, tracking and comparison state.
 
 - [x] Stock options category placement and text: numeric-offset SetPoint overloads, runtime $parent references, constrained description wrapping, and XML markup rendered without asset paths while Lua keeps original strings. Verified 64 automation tests and native category clicks, character/spellbook windows and rendered screenshots.
 - [x] Stock FrameXML visibility: preserve hidden branches during parent Show/layout, respect explicit hidden=false, remove frame-name and Flash overrides. Verified 63 automation tests, native action-bar options/window clicks and rendered screenshots at 1280x720 and 1920x1080.

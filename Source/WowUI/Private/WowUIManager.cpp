@@ -461,6 +461,7 @@ void UWowUIManager::TickWorldImages(UWorld* World)
     if(bUILoaded && LuaVM && Now>=NextItemComparisonUpdate)
     {
         NextItemComparisonUpdate=Now+.2; LuaVM->BeginCallback();
+        WowLuaApi::UpdateUnitReactions(LuaVM->GetState());
         WowLuaApi::UpdateMinimapState(LuaVM->GetState());
         WowLuaApi::UpdateMapState(LuaVM->GetState());
         WowLuaApi::UpdateItemComparisons(LuaVM->GetState());

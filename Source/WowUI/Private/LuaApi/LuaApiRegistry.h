@@ -40,6 +40,7 @@ struct FWowLuaContext
     TFunction<AActor*(uint64)> ResolveActor;
     TFunction<void()> ReloadUI;
     TMap<FName,int32> SelectedRows;
+    TMap<FString,uint64> UnitReactionState;
     FString CursorTexture;
     bool CursorHidden=false,SoftwareCursorVisible=false;
 };
@@ -88,6 +89,10 @@ namespace WowLuaApi
     int SetGlyphTooltip(lua_State* L);
     int SetTalentTooltip(lua_State* L);
     void RegisterUnitApi(lua_State* L);
+    int32 UnitReactionRank(const FWowLuaContext* Context,const FWowEntity* From,const FWowEntity* To);
+    bool CanUnitAttack(const FWowLuaContext* Context,const FWowEntity* From,const FWowEntity* To);
+    FLinearColor UnitSelectionColor(const FWowLuaContext* Context,const FWowEntity* Unit);
+    void UpdateUnitReactions(lua_State* L);
     void RegisterPanelApi(lua_State* L);
     void RegisterReputationApi(lua_State* L);
     void RegisterSettingsApi(lua_State* L);
