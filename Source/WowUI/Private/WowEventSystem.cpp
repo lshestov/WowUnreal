@@ -1553,6 +1553,16 @@ void FWowEventSystem::CompileFrameScripts(int64 Handle, const FWowFrameDef& Def)
 	}
 }
 
+void FWowEventSystem::BindFrameParentKey(int64 Parent,int64 Child,const FString& Key)
+{
+#if HAS_LUA
+    auto* L=LuaVM?LuaVM->GetState():nullptr; if(!L || Key.IsEmpty()) return;
+    const int32 Top=lua_gettop(L);
+    if(PushFrameObject(Parent) && PushFrameObject(Child)) lua_setfield(L,-2,TCHAR_TO_UTF8(*Key));
+    lua_settop(L,Top);
+#endif
+}
+
 void FWowEventSystem::BeginOnLoadBatch()
 {
 	++DeferredOnLoadDepth;
@@ -1771,8 +1781,7 @@ FString FWowEventSystem::OpcodeToEvent(uint16 Opcode)
 	case 0x0067: return TEXT("FRIENDLIST_UPDATE");               // SMSG_FRIEND_LIST (correct opcode)
 
 	// Battleground / PvP
-	case 0x02E8: return TEXT("UPDATE_BATTLEFIELD_STATUS");       // SMSG_BATTLEFIELD_STATUS
-	case 0x02EC: return TEXT("BATTLEFIELDS_SHOW");
+	// Battleground status/list events are emitted after typed packet validation.
 
 	// Achievement
 	case 0x0468: return TEXT("ACHIEVEMENT_EARNED");              // SMSG_ACHIEVEMENT_EARNED

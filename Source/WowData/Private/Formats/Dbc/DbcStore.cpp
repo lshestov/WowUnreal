@@ -493,6 +493,7 @@ void FDbcStore::LoadDeferred(FMpqManager& Mpq)
     if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\SpellDuration.dbc"),Parser)) SpellDbc.LoadTimes(Parser,false);
     if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\SpellCastTimes.dbc"),Parser)) SpellDbc.LoadTimes(Parser,true);
     MapUiDbc.Load(Mpq);
+    PvpUiDbc.Load(Mpq);
     if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\SkillLineAbility.dbc"),Parser)) SpellBookDbc.LoadAbilities(Parser);
     if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\SkillRaceClassInfo.dbc"),Parser)) SpellBookDbc.LoadRaceClassInfo(Parser);
     if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\CreatureFamily.dbc"),Parser)) TalentTabDbc.LoadPetFamilies(Parser);

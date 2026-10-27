@@ -36,6 +36,7 @@
 #include "Formats/Dbc/TaxiNodesDbc.h"
 #include "Formats/Dbc/ItemUiDbc.h"
 #include "Formats/Dbc/MapUiDbc.h"
+#include "Formats/Dbc/PvpUiDbc.h"
 
 class FMpqManager;
 
@@ -58,6 +59,7 @@ public:
     using FWorldMapArea=FMapUiDbc::FArea;
     using FWorldMapOverlay=FMapUiDbc::FOverlay;
     const FMapUiDbc& MapUi() const {return MapUiDbc;}
+    const FPvpUiDbc& PvpUi() const {return PvpUiDbc;}
     const TArray<FWorldMapArea>& WorldMapAreas() const {return MapUiDbc.Areas();}
     const TArray<FWorldMapOverlay>& WorldMapOverlays() const {return MapUiDbc.Overlays();}
     struct WOWDATA_API FFaction
@@ -169,6 +171,7 @@ private:
     TMap<uint32,TArray<uint32>> QuestXPValues;
     TMap<int32,int32> QuestReputationValues;
     FMapUiDbc MapUiDbc;
+    FPvpUiDbc PvpUiDbc;
     TArray<FFaction> UiFactions;
     TArray<FCurrency> UiCurrencies;
     uint32 TitleMax=0;

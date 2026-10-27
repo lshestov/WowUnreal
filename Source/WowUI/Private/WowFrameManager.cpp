@@ -1675,6 +1675,7 @@ int64 FWowFrameManager::CreateFrame(const FWowFrameDef& Def)
 			ChildWithParent.Parent = Resolved.Name;
 		}
 		const int64 ChildHandle=CreateFrame(ChildWithParent);
+        if(EventSystem && !ChildWithParent.ParentKey.IsEmpty()) EventSystem->BindFrameParentKey(Handle,ChildHandle,ChildWithParent.ParentKey);
 		if(ChildWithParent.bScrollChild) SetScrollChild(Handle,ChildHandle);
 	}
 
@@ -2108,7 +2109,7 @@ void FWowFrameManager::DebugDumpLayout() const
 
 // ── Mouse Hit-Testing & Click Dispatch ───────────────────────────────────────
 
-int64 FWowFrameManager::HitTestFrames(float ScreenX, float ScreenY) const
+int64 FWowFrameManager::HitTestFrames(float ScreenX, float ScreenY,bool ForWheel) const
 {
     // OnUpdate animations can invalidate geometry before the pointer pass.
     // Rebuild the full cache so movement never becomes a spurious OnLeave.
@@ -2120,7 +2121,7 @@ int64 FWowFrameManager::HitTestFrames(float ScreenX, float ScreenY) const
     {
         const auto& Entry = Pair.Value;
         if(!Entry.Widget.IsValid()) continue;
-        if(!Entry.bMouseEnabled && !Entry.bMouseWheelEnabled)
+        if(!Entry.bMouseEnabled && !(ForWheel && Entry.bMouseWheelEnabled))
         {
             FString Data,Text;
             if(!const_cast<FWowFrameManager*>(this)->MessageHyperlinkAt(Pair.Key,FVector2D(ScreenX,ScreenY),Data,Text)) continue;

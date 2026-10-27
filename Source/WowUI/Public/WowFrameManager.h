@@ -252,7 +252,7 @@ public:
 
 	/** Find the topmost interactive frame under a screen position (pixels).
 	 *  Returns frame handle or -1 if no interactive frame found. */
-	int64 HitTestFrames(float ScreenX, float ScreenY) const;
+	int64 HitTestFrames(float ScreenX, float ScreenY,bool ForWheel=false) const;
 	bool DispatchKeyboard(const FString& Key,bool bDown);
     int64 GetCharacterCaptureFrame() const;
     bool DispatchCharacter(TCHAR Character);

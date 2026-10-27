@@ -461,7 +461,7 @@ struct FWowGameplayProbe
             if(Handle<0 || !Frames->IsFrameDrawn(Handle)) { Failure=FString::Printf(TEXT("UI frame '%s' is not visible"),*Name); Finish(C,false); return; }
             const auto Rect=Frames->GetLayoutRect(Handle); const float Scale=Frames->GetScreenScale();
             const float X=(Rect.X+Rect.Z*.5f)*Scale,Y=(Rect.Y+Rect.W*.5f)*Scale;
-            const int64 Hit=Frames->HitTestFrames(X,Y); bool Allowed=Hit==Handle;
+            const int64 Hit=Frames->HitTestFrames(X,Y,Op==TEXT("wheel_frame")); bool Allowed=Hit==Handle;
             if(Op==TEXT("wheel_frame")) for(int64 Parent=Hit,Depth=0;Parent>=0 && Depth<64;++Depth,Parent=Frames->GetParentHandle(Parent)) Allowed|=Parent==Handle;
             if(!Allowed) { Failure=FString::Printf(TEXT("UI frame %s is obscured by %s"),*Name,*Frames->GetFrameName(Hit)); Finish(C,false); return; }
             Frames->UpdateMouseHover(X,Y);

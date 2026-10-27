@@ -49,5 +49,5 @@ void FWowPacketHandler::HandleArenaIdentity(FPacketReader& R)
 {
     if(!R.CanRead(4)) return; FArenaIdentity A; A.Id=R.ReadU32(); const int32 Start=R.Pos; A.Name=R.ReadCString(); if(!A.Id || R.Pos<=Start || R.Data[R.Pos-1]!=0 || R.Pos-Start>128 || R.Remaining()!=24) return;
     A.Size=R.ReadU32(); if(A.Size!=2 && A.Size!=3 && A.Size!=5) return; A.Background=R.ReadU32(); A.Emblem=R.ReadU32(); A.EmblemColor=R.ReadU32(); A.Border=R.ReadU32(); A.BorderColor=R.ReadU32();
-    if(ArenaIdentities.Num()>=128 && !ArenaIdentities.Contains(A.Id)) return; ArenaIdentities.Add(A.Id,MoveTemp(A)); ++Inspect.HonorRevision;
+    if(ArenaIdentities.Num()>=128 && !ArenaIdentities.Contains(A.Id)) return; ArenaIdentities.Add(A.Id,MoveTemp(A)); ++Inspect.HonorRevision; ++Pvp.ArenaRevision;
 }

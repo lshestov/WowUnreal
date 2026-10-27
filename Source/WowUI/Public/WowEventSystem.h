@@ -48,6 +48,7 @@ public:
 
 	/** Create or update a Lua table representing a frame (sets it as a named global if the frame has a name) */
 	void CreateFrameObject(int64 Handle, const FString& FrameName, int32 FrameID = 0);
+    void BindFrameParentKey(int64 Parent,int64 Child,const FString& Key);
 	/** Push the canonical Lua object, including unnamed frames. */
 	bool PushFrameObject(int64 Handle);
 

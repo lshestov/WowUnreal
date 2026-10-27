@@ -205,6 +205,11 @@ void WowLuaApi::UpdateGroupState(lua_State* L)
         if(const auto* Remote=H.RemoteGroupMembers.Find(C->FocusGuid)) Status=Remote->Status;
         Update(TEXT("focus"),C->FocusGuid,Status);
     }
+    for(int32 I=0;I<C->ArenaOpponents.Num();++I)
+    {
+        const uint64 Guid=C->ArenaOpponents[I]; Update(TEXT("arena")+FString::FromInt(I+1),Guid,C->EntityManager->Find(Guid)?1:0);
+        if(const auto* E=H.FindUiUnit(Guid); E && E->GetField64(UnitField::SUMMON)) Update(TEXT("arenapet")+FString::FromInt(I+1),E->GetField64(UnitField::SUMMON),1);
+    }
     V.Units=MoveTemp(Units);
     const bool TimedOut=H.ReadyCheck.bActive && H.ReadyCheck.GetTimeLeftSeconds()<=0;
     if(TimedOut) {if(H.ReadyCheck.InitiatorGuid==Local(C)) C->ConnectionManager->SendFinishReadyCheck(); H.ReadyCheck.Clear();}

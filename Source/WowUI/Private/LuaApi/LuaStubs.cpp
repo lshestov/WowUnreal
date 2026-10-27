@@ -172,6 +172,14 @@ static uint64 ResolveDirectUnitGuid(const FWowLuaContext* Ctx, const FString& Un
         return Ctx->FocusGuid && (Ctx->ConnectionManager?Ctx->ConnectionManager->PacketHandler.FindUiUnit(Ctx->FocusGuid):Ctx->EntityManager->Find(Ctx->FocusGuid))?Ctx->FocusGuid:0;
     }
 
+    if(UnitToken.StartsWith(TEXT("arena"),ESearchCase::IgnoreCase))
+    {
+        const bool Pet=UnitToken.StartsWith(TEXT("arenapet"),ESearchCase::IgnoreCase); const FString Index=UnitToken.RightChop(Pet?8:5);
+        if(Index.Len()!=1 || Index[0]<TCHAR('1') || Index[0]>TCHAR('5') || !Ctx->ArenaOpponents.IsValidIndex(Index[0]-TCHAR('1'))) return 0;
+        const uint64 Guid=Ctx->ArenaOpponents[Index[0]-TCHAR('1')]; if(!Pet) return Guid;
+        const auto* Owner=Ctx->ConnectionManager?Ctx->ConnectionManager->PacketHandler.FindUiUnit(Guid):Ctx->EntityManager->Find(Guid); return Owner?Owner->GetField64(UnitField::SUMMON):0;
+    }
+
     if (UnitToken.Equals(TEXT("mouseover"), ESearchCase::IgnoreCase))
     {
         return 0;

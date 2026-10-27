@@ -44,6 +44,10 @@ compatibility work.
   read-only equipment/talent/honor inspection; and the tabard vendor's editor,
   acknowledged emblem purchase and equipped appearance. All use real server
   state; see [guild, inspection and tabards](GuildInspectTabard.md).
+- Original PvP/honor tabs, battleground descriptions and rewards, real queue
+  state and minimap cancellation, arena team roster controls and NPC skirmish
+  queue. Packet/UI support and native verification limits are recorded in
+  [PvP](Pvp.md).
 - Game menu, window close order, logout and character re-entry, ReloadUI and
   saved per-character UI preferences. Windowed mode remains the initial mode.
 - Audio volume/toggles, window mode and resolution, gamma, texture quality,
@@ -109,7 +113,7 @@ The Windows Editor and packaged Development client are built from the same
 source tree. `WowUnreal.Hud`, `WowUnreal.UI`, `WowUnreal.Gameplay` and the related
 player, collision, equipment, lighting, rendering, traversal and performance
 suites cover both isolated controls and live protocol state. The interface
-regression set, including runtime animation, contains 134 tests. Existing optional character texture-layout
+regression set, including runtime animation, contains 136 tests. Existing optional character texture-layout
 DBC and test-fixture size warnings remain.
 
 Native gameplay probes exercise live server state and rendered UI at 1280x720
@@ -128,7 +132,7 @@ Full WoW UI compatibility is **not complete**. In particular:
 - Advanced macro commands such as cast sequences, complete conditional syntax,
   additional combat event families. See
   [macro support](Macros.md) and [combat-log support](CombatLog.md).
-- Complete PvP/battleground, LFG and achievement panels and protocol support.
+- Native complete-match PvP verification, LFG and achievement panels/protocol.
   Unit relationships and selection colours are implemented separately; see
   [faction/reputation reactions](UnitReactions.md).
 - Legacy options without an engine-side implementation; persisting a CVar

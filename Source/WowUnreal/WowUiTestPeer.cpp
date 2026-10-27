@@ -121,6 +121,12 @@ void FWowUiTestPeer::Tick()
 bool FWowUiTestPeer::Command(const FString& Action,int32 Slot,uint32 Value)
 {
     if(!Ready()) return false;
+    if(Action==TEXT("arena_accept"))
+    {
+        auto& H=Client->PacketHandler; const FString MasterName=H.PlayerNameCache.FindRef(MasterGuid);
+        if(MasterName.IsEmpty() || H.Pvp.Inviter!=MasterName || H.Pvp.Invitation.IsEmpty()) return false;
+        Client->SendRawPacket(0x351,{}); H.Pvp.Inviter.Empty(); H.Pvp.Invitation.Empty(); return true;
+    }
     if(Action==TEXT("guild_accept"))
     {
         auto& H=Client->PacketHandler; const FString MasterName=H.PlayerNameCache.FindRef(MasterGuid);

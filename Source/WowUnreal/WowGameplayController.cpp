@@ -1344,7 +1344,10 @@ bool AWowGameplayController::InputKey(const FInputKeyEventArgs& Params)
 		auto Routed=Params; Routed.Key=*Held; HeldBindingKeys.Remove(Params.Key); return Super::InputKey(Routed);
 	}
 	if(Params.Event==IE_Pressed && UIManager && UIManager->GetFrameManager() && (Params.Key==EKeys::MouseScrollUp || Params.Key==EKeys::MouseScrollDown))
-		if(UIManager->GetFrameManager()->DispatchMouseWheel(GetUiFrameUnderCursor(),Params.Key==EKeys::MouseScrollUp?1.f:-1.f)) return true;
+    {
+        float UiMouseX=0,UiMouseY=0; GetMousePosition(UiMouseX,UiMouseY); auto* Frames=UIManager->GetFrameManager();
+        if(Frames->DispatchMouseWheel(Frames->HitTestFrames(UiMouseX,UiMouseY,true),Params.Key==EKeys::MouseScrollUp?1.f:-1.f)) return true;
+    }
 	if (Params.Event == IE_Pressed
 		&& IsWowUiConsumingKeyboardInput()
 		&& ShouldSuppressGameplayHotkey(Params.Key))

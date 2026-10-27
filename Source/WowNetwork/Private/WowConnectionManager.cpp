@@ -132,7 +132,7 @@ void UWowConnectionManager::SelectRealm(int32 I)
             PacketHandler.ResetMapState();
             PacketHandler.Merchant.Clear(); PacketHandler.CurrentBankerGuid=0; ResetMailState(); ResetTradeState();
             PacketHandler.ResetLootState();
-            RepairCursor=false; PacketHandler.GuildCanRepair=false; PacketHandler.GuildRepairRequested=false; PacketHandler.GuildRepairId=0; PacketHandler.GuildWithdrawMoney=0; PacketHandler.ResetGuildState(); PacketHandler.ResetInspectState(); PacketHandler.ArenaIdentities.Reset(); PacketHandler.ItemRefunds.Empty(); PacketHandler.RequestedItemRefunds.Empty(); PacketHandler.TotalPlayedTime=0; PacketHandler.PlayedTimeReceived=0; PacketHandler.PlayedTimeRequested=false;
+            RepairCursor=false; PacketHandler.GuildCanRepair=false; PacketHandler.GuildRepairRequested=false; PacketHandler.GuildRepairId=0; PacketHandler.GuildWithdrawMoney=0; PacketHandler.ResetGuildState(); PacketHandler.ResetInspectState(); PacketHandler.ArenaIdentities.Reset(); PacketHandler.ResetPvpState(); PacketHandler.ItemRefunds.Empty(); PacketHandler.RequestedItemRefunds.Empty(); PacketHandler.TotalPlayedTime=0; PacketHandler.PlayedTimeReceived=0; PacketHandler.PlayedTimeRequested=false;
             PacketHandler.WeaponProficiency=PacketHandler.ArmorProficiency=0; PacketHandler.HasWeaponProficiency=PacketHandler.HasArmorProficiency=false;
             RequestCharacterList(); return;
         }
@@ -1567,7 +1567,7 @@ void UWowConnectionManager::Disconnect()
 
     PacketHandler.EntityManager.Clear();
             PacketHandler.Merchant.Clear(); PacketHandler.CurrentBankerGuid=0; ResetMailState(); ResetTradeState();
-    RepairCursor=false; PacketHandler.GuildCanRepair=false; PacketHandler.GuildRepairRequested=false; PacketHandler.GuildRepairId=0; PacketHandler.GuildWithdrawMoney=0; PacketHandler.ResetGuildState(); PacketHandler.ResetInspectState(); PacketHandler.ArenaIdentities.Reset(); PacketHandler.ItemRefunds.Empty(); PacketHandler.RequestedItemRefunds.Empty(); PacketHandler.TotalPlayedTime=0; PacketHandler.PlayedTimeReceived=0; PacketHandler.PlayedTimeRequested=false;
+    RepairCursor=false; PacketHandler.GuildCanRepair=false; PacketHandler.GuildRepairRequested=false; PacketHandler.GuildRepairId=0; PacketHandler.GuildWithdrawMoney=0; PacketHandler.ResetGuildState(); PacketHandler.ResetInspectState(); PacketHandler.ArenaIdentities.Reset(); PacketHandler.ResetPvpState(); PacketHandler.ItemRefunds.Empty(); PacketHandler.RequestedItemRefunds.Empty(); PacketHandler.TotalPlayedTime=0; PacketHandler.PlayedTimeReceived=0; PacketHandler.PlayedTimeRequested=false;
     PacketHandler.WeaponProficiency=PacketHandler.ArmorProficiency=0; PacketHandler.HasWeaponProficiency=PacketHandler.HasArmorProficiency=false;
     PacketHandler.CombatHistory.Reset(); PacketHandler.Casts.Reset(); PacketHandler.LocalCastRequests.Reset(); PacketHandler.HasPendingAttackCast=false;
     PacketHandler.OnLoginVerifyWorld.Clear();

@@ -18,6 +18,9 @@ recorded nonzero GUID and removes that character through the ordinary protocol.
 `disband` enters a recorded QA leader only after matching its guild ID/name and
 verifying every roster GUID belongs to that fixture. It sends the ordinary guild
 disband request, waits for the membership acknowledgement and disconnects.
+`disband_arena` applies the same ID/name/complete-membership ownership checks to
+the fixture's recorded QA arena team, then waits for its actual player-field
+membership removal. It cannot delete or disband a user's arena team.
 All modes require an isolated `QA_UI_` account, a matching `Uiq` character, a
 hex ownership token, at most one character on the account, and the project's
 single loopback realm at 127.0.0.1:8085. Unexpected identities fail closed.

@@ -4,6 +4,7 @@
 #include "WowEntityManager.h"
 #include "WowWardenHandler.h"
 #include "WowCombatLog.h"
+#include "WowPvpState.h"
 
 DECLARE_DELEGATE_OneParam(FOnWowCombatLog,const FWowCombatEntry&);
 DECLARE_DELEGATE_RetVal_OneParam(uint32,FOnWowCombatFlags,uint64);
@@ -230,6 +231,8 @@ public:
     } Inspect;
     struct FArenaIdentity {uint32 Id=0,Size=0,Background=0,Emblem=0,EmblemColor=0,Border=0,BorderColor=0; FString Name;};
     TMap<uint32,FArenaIdentity> ArenaIdentities;
+    FWowPvpState Pvp;
+    void ResetPvpState();
     void ResetInspectState(uint64 Guid=0);
     TArray<FWowGlyphChange> LastGlyphChanges;
     void ResetTalentState();
@@ -454,6 +457,23 @@ public:
     FOnOpcodeReceived OnOpcodeReceived;
 
 private:
+    void RegisterPvpHandlers();
+    void HandleBattlefieldStatus(FPacketReader& R);
+    void HandleBattlefieldList(FPacketReader& R);
+    void HandlePvpScores(FPacketReader& R);
+    void HandlePvpPositions(FPacketReader& R);
+    void HandlePvpResult(FPacketReader& R);
+    void HandleArenaRoster(FPacketReader& R);
+    void HandleArenaStats(FPacketReader& R);
+    void HandleArenaInvite(FPacketReader& R);
+    void HandleArenaResult(FPacketReader& R);
+    void HandleArenaEvent(FPacketReader& R);
+    void HandleWorldPvpEntry(FPacketReader& R);
+    void HandleWorldPvpQueueInvite(FPacketReader& R);
+    void HandleWorldPvpQueued(FPacketReader& R);
+    void HandleWorldPvpEntered(FPacketReader& R);
+    void HandleWorldPvpLeft(FPacketReader& R);
+    void AddWorldPvpEvent(uint32 Id,uint32 Kind,uint32 A=0,uint32 B=0,uint32 C=0,uint32 D=0);
     void HandleItemQueryResponse(FPacketReader& R);
     void HandleBuyItemResult(FPacketReader& R);
     void HandleBuyItemFailure(FPacketReader& R);

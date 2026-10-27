@@ -329,6 +329,49 @@ bool FHudGroupState::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudPvpState,"WowUnreal.Hud.PvpState",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudPvpState::RunTest(const FString&)
+{
+    FHudFixture F; TStrongObjectPtr<UWowConnectionManager> C(NewObject<UWowConnectionManager>()); auto& H=C->PacketHandler;
+    const FString Xml=TEXT("<Ui><Button name='PvpRow'><Size x='295' y='16'/><Frames><Frame parentKey='status'><Size x='16' y='16'/><Layers><Layer><Texture parentKey='texture'/></Layer></Layers></Frame></Frames><Scripts><OnLoad>assert(self.status and self.status.texture and self.status:GetName()==nil); PvpParentKeyReady=true</OnLoad></Scripts></Button></Ui>");
+    const FTCHARToUTF8 Utf8(*Xml); TArray<uint8> Bytes; Bytes.Append(reinterpret_cast<const uint8*>(Utf8.Get()),Utf8.Length()); const auto Definitions=FWowFrameXmlParser::ParseXml(Bytes,TEXT("PvpRow"));
+    if(!TestEqual(TEXT("Original anonymous status child parses"),Definitions.Num(),1)) return false;
+    F.Frames.CreateFrame(Definitions[0].FrameDef); TestTrue(TEXT("Anonymous parentKey frames and their nested texture exist before the row OnLoad"),F.Lua.ExecuteString(TEXT("assert(PvpParentKeyReady and PvpRow.status.texture:GetParent()==PvpRow.status)")));
+    TestTrue(TEXT("Create an original-style wheel-only overlay above a list button"),F.Lua.ExecuteString(TEXT("PvpClickable=CreateFrame('Button','PvpClickable',UIParent); PvpClickable:SetSize(200,60); PvpClickable:SetPoint('CENTER'); PvpClickable:SetFrameLevel(10); PvpWheelOverlay=CreateFrame('ScrollFrame','PvpWheelOverlay',UIParent); PvpWheelOverlay:SetSize(200,60); PvpWheelOverlay:SetPoint('CENTER'); PvpWheelOverlay:SetFrameLevel(11); PvpWheelOverlay:EnableMouseWheel(true); PvpWheelOverlay:SetScript('OnMouseWheel',function(self,delta) PvpWheelDelta=delta end)")));
+    F.Frames.RefreshLayout(); const auto Rect=F.Frames.GetLayoutRect(F.Frames.FindFrame(TEXT("PvpClickable"))); const float X=(Rect.X+20)*F.Frames.GetScreenScale(),Y=(Rect.Y+20)*F.Frames.GetScreenScale();
+    TestEqual(TEXT("Wheel-only overlays do not steal clicks from list buttons"),F.Frames.HitTestFrames(X,Y),F.Frames.FindFrame(TEXT("PvpClickable")));
+    const int64 Wheel=F.Frames.HitTestFrames(X,Y,true); TestEqual(TEXT("The same rectangle still receives wheel input"),Wheel,F.Frames.FindFrame(TEXT("PvpWheelOverlay")));
+    F.Frames.DispatchMouseWheel(Wheel,-1); TestTrue(TEXT("Wheel callback receives the real numeric delta"),F.Lua.ExecuteString(TEXT("assert(PvpWheelDelta==-1); PvpClickable:Hide(); PvpWheelOverlay:Hide()")));
+    F.Context.ConnectionManager=C.Get(); F.Context.EntityManager=&H.EntityManager; H.EntityManager.LocalPlayerGuid=1;
+    auto& P=H.EntityManager.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER);
+    P.SetField(UnitField::END+0x435,7|(3u<<16)); P.SetField(UnitField::END+0x436,123); P.SetField(UnitField::END+0x437,99); P.SetField(UnitField::END+0x438,444); P.SetField(UnitField::END+0x469,321); P.SetField(UnitField::END+0x46A,654);
+    H.Pvp.Queues[0].Type=2; H.Pvp.Queues[0].Status=1; H.Pvp.Queues[0].Elapsed=1200; H.Pvp.Queues[0].At=FPlatformTime::Seconds(); H.Pvp.Queues[0].Wait=40000;
+    TestTrue(TEXT("Honor tuples use actual player fields and queued time uses the receipt clock"),F.Lua.ExecuteString(TEXT(R"LUA(
+        local hk,honor=GetPVPSessionStats(); assert(hk==7 and honor==123)
+        hk,honor=GetPVPYesterdayStats(); assert(hk==3 and honor==99)
+        assert(GetPVPLifetimeStats()==444 and GetHonorCurrency()==321 and GetArenaCurrency()==654)
+        assert(GetBattlefieldStatus(1)=='queued' and GetBattlefieldStatus(2)=='none')
+        assert(GetBattlefieldEstimatedWaitTime(1)==40000 and GetBattlefieldTimeWaited(1)>=1200)
+        assert(GetBattlefieldWinner()==nil and GetWorldPVPQueueStatus(1)=='none')
+    )LUA")));
+    H.Pvp.Winner=0; H.Pvp.ScoreArena=true; H.Pvp.Scores.Add({42,3,0,0,0,456,789,1,{}}); H.PlayerNameCache.Add(42,TEXT("Enemy")); H.PlayerIdentities.Add(42,{2,0,1,TEXT("")});
+    TestTrue(TEXT("Winner zero remains a winner, arena faction filtering preserves actual score rows"),F.Lua.ExecuteString(TEXT(R"LUA(
+        LOCALIZED_CLASS_NAMES_MALE={WARRIOR='Warrior'}
+        assert(GetBattlefieldWinner()==0 and GetNumBattlefieldScores()==1)
+        local name,kb,hk,deaths,honor,faction,rank,race,class,token,damage,healing=GetBattlefieldScore(1)
+        assert(name=='Enemy' and kb==3 and faction==1 and class=='Warrior' and token=='WARRIOR' and damage==456 and healing==789)
+        SetBattlefieldScoreFaction(0); assert(GetNumBattlefieldScores()==0)
+        SetBattlefieldScoreFaction(1); assert(GetNumBattlefieldScores()==1)
+        SetBattlefieldScoreFaction(nil); assert(GetNumBattlefieldScores()==1)
+    )LUA")));
+    F.Context.ArenaOpponents={42}; auto& Enemy=H.EntityManager.PromoteToTyped(42,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER); Enemy.SetField(UnitField::BYTES_0,2|(1u<<8)|(1u<<24)); Enemy.SetField(UnitField::HEALTH,123); Enemy.SetField(UnitField::MAXHEALTH,456);
+    TestTrue(TEXT("Arena tokens resolve real opponent health and identity"),F.Lua.ExecuteString(TEXT("assert(GetNumArenaOpponents()==1 and UnitName('arena1')=='Enemy' and UnitHealth('arena1')==123); ArenaHealthWatch=CreateFrame('Frame'); ArenaHealthWatch:RegisterEvent('UNIT_HEALTH'); ArenaHealthWatch:RegisterEvent('UNIT_RAGE'); ArenaHealthWatch:SetScript('OnEvent',function(self,event,unit) if unit=='arena1' then ArenaHealth=UnitHealth(unit) end end)")));
+    WowLuaApi::UpdateGroupState(F.Lua.GetState()); TestTrue(TEXT("Arena frames receive initial unit health events"),F.Lua.ExecuteString(TEXT("assert(ArenaHealth==123)")));
+    Enemy.SetField(UnitField::HEALTH,99); WowLuaApi::UpdateGroupState(F.Lua.GetState()); TestTrue(TEXT("Subsequent opponent damage updates the live arena frame"),F.Lua.ExecuteString(TEXT("assert(ArenaHealth==99)")));
+    H.ResetPvpState(); TestTrue(TEXT("Session reset exposes no stale score or winner"),F.Lua.ExecuteString(TEXT("assert(GetNumBattlefieldScores()==0 and GetBattlefieldWinner()==nil and GetBattlefieldStatus(1)=='none')")));
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudGuildState,"WowUnreal.Hud.GuildState",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FHudGuildState::RunTest(const FString&)
 {

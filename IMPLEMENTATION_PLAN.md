@@ -509,7 +509,7 @@ build, automation, native autologin and rendered screenshot verification):
     one-group-per-frame jobs and bounded object starts keep streaming responsive.
     Verified 134-test regression and a native tabard/vendor route inside the
     loaded Stormwind shop. See Docs/Maps.md.
-  - [?] Complete guild/inspect/tabard panels and their server-backed state.
+  - [x] Complete guild/inspect/tabard panels and their server-backed state.
     Atomic guild/inspect/emblem packets, original roster/rank/info/log controls,
     remote equipment/talents/honor and server-confirmed tabard customization.
     Windows build, 134-test regression and focused final checks; 78-step guild
@@ -517,6 +517,11 @@ build, automation, native autologin and rendered screenshot verification):
     Disposable accounts/guilds removed, existing characters unchanged.
     See Docs/GuildInspectTabard.md.
   - [ ] Complete PvP/battleground panels and queue/status/scoreboard protocol.
+    - [?] Original browser/honor tabs, NPC arena queue, team roster controls,
+      typed queue/score/world-PvP packets and live arena unit events. Verified
+      Windows build, focused protocol/UI checks, 40-step BG queue and 47-step
+      arena-team routes with 12 validated, inspected captures. See Docs/Pvp.md.
+    - [ ] Verify rendered multiplayer matches, invitation entry and final scores.
   - [ ] Complete dungeon-finder browsing, role/queue/proposal state and controls.
   - [ ] Complete achievements, criteria, tracking and comparison state.
 

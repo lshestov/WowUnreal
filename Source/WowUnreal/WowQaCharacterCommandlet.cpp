@@ -16,7 +16,7 @@ int32 UWowQaCharacterCommandlet::Main(const FString& Params)
     FString Path,Mode,Text,Account,Password,Name,Token;
     TSharedPtr<FJsonObject> Config;
     if(!FParse::Value(*Params,TEXT("fixture="),Path) || !FParse::Value(*Params,TEXT("mode="),Mode)
-        || FPaths::GetCleanFilename(Path)!=TEXT("wowunreal-ui-primary-fixture.json") || (Mode!=TEXT("prepare") && Mode!=TEXT("delete") && Mode!=TEXT("disband"))
+        || FPaths::GetCleanFilename(Path)!=TEXT("wowunreal-ui-primary-fixture.json") || (Mode!=TEXT("prepare") && Mode!=TEXT("delete") && Mode!=TEXT("disband") && Mode!=TEXT("disband_arena"))
         || !FFileHelper::LoadFileToString(Text,*Path) || Text.Len()>16384
         || !FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Text),Config) || !Config) return 1;
     if(!Config->TryGetStringField(TEXT("account"),Account) || !Config->TryGetStringField(TEXT("password"),Password)
@@ -31,10 +31,11 @@ int32 UWowQaCharacterCommandlet::Main(const FString& Params)
     const uint64 Expected=uint64(ExpectedNumber); if(Mode!=TEXT("prepare") && !Expected) return 1;
     double ClassNumber=8; Config->TryGetNumberField(TEXT("class"),ClassNumber); if(ClassNumber!=1 && ClassNumber!=8) return 1;
     FString GuildName; double GuildNumber=0; TSet<uint64> Owned;
-    if(Mode==TEXT("disband"))
+    const bool ArenaDisband=Mode==TEXT("disband_arena");
+    if(Mode==TEXT("disband") || ArenaDisband)
     {
-        if(!Config->TryGetStringField(TEXT("qaGuildName"),GuildName) || !Config->TryGetNumberField(TEXT("qaGuildId"),GuildNumber)
-            || !GuildName.StartsWith(TEXT("QA UI ")) || GuildName.Len()!=14 || GuildNumber<1 || GuildNumber>MAX_uint32 || FMath::FloorToDouble(GuildNumber)!=GuildNumber) return 1;
+        if(!Config->TryGetStringField(ArenaDisband?TEXT("qaArenaName"):TEXT("qaGuildName"),GuildName) || !Config->TryGetNumberField(ArenaDisband?TEXT("qaArenaId"):TEXT("qaGuildId"),GuildNumber)
+            || !GuildName.StartsWith(ArenaDisband?TEXT("QA Arena "):TEXT("QA UI ")) || GuildName.Len()!=(ArenaDisband?17:14) || GuildNumber<1 || GuildNumber>MAX_uint32 || FMath::FloorToDouble(GuildNumber)!=GuildNumber) return 1;
         Owned.Add(Expected); const TSharedPtr<FJsonObject>* Secondary=nullptr;
         if(Config->TryGetObjectField(TEXT("secondary"),Secondary)) {double Peer=0; (*Secondary)->TryGetNumberField(TEXT("guid"),Peer); if(Peer>=1 && Peer<=MAX_uint32) Owned.Add(uint64(Peer));}
     }
@@ -64,11 +65,31 @@ int32 UWowQaCharacterCommandlet::Main(const FString& Params)
             {
                 Guid=uint64(Characters[0].Guid); if(Expected && Guid!=Expected) break;
                 if(Mode==TEXT("prepare")) {Result=TEXT("prepared"); break;}
-                if(Mode==TEXT("disband")) {if(!Entering) {Entering=true; Client->EnterWorld(int64(Guid));}}
+                if(Mode==TEXT("disband") || ArenaDisband) {if(!Entering) {Entering=true; Client->EnterWorld(int64(Guid));}}
                 else if(!Deleting) {Deleting=true; Client->DeleteCharacter(int64(Guid));}
             }
             else if(Mode==TEXT("delete")) {Result=TEXT("deleted"); break;}
             else if(!Creating) {Creating=true; Client->CreateCharacter(Name,1,uint8(ClassNumber),0);}
+        }
+        else if(State==EWowSessionState::WorldInGame && ArenaDisband)
+        {
+            auto& H=Client->PacketHandler; const auto* P=H.EntityManager.GetLocalPlayer();
+            if(P)
+            {
+                int32 Slot=-1; for(int32 I=0;I<3;++I) if(P->GetField(UnitField::END+0x454+I*7)==uint32(GuildNumber)) Slot=I;
+                if(Slot<0) {if(Disbanding) Result=TEXT("arena_disbanded"); if(Disbanding || Queried) break;}
+                else
+                {
+                    if(P->GetField(UnitField::END+0x454+Slot*7+2)!=0) break;
+                    if(!Queried) {Queried=true; const uint32 Id=uint32(GuildNumber); TArray<uint8> B; B.Append(reinterpret_cast<const uint8*>(&Id),4); Client->SendRawPacket(0x34B,B); Client->SendRawPacket(0x34D,B);}
+                    const auto* M=H.ArenaIdentities.Find(uint32(GuildNumber)); const auto* T=H.Pvp.ArenaTeams.Find(uint32(GuildNumber));
+                    if(M && T && !T->Members.IsEmpty() && !Disbanding)
+                    {
+                        bool Safe=M->Name==GuildName; for(const auto& Member:T->Members) Safe&=Owned.Contains(Member.Guid);
+                        if(!Safe) break; Disbanding=true; const uint32 Id=uint32(GuildNumber); TArray<uint8> B; B.Append(reinterpret_cast<const uint8*>(&Id),4); Client->SendRawPacket(0x355,B);
+                    }
+                }
+            }
         }
         else if(State==EWowSessionState::WorldInGame && Mode==TEXT("disband"))
         {
