@@ -2,6 +2,7 @@
 #include "WowConnectionManager.h"
 #include "WowEntityManager.h"
 #include "WowFrameManager.h"
+#include "WowEventSystem.h"
 #include "Formats/Dbc/DbcStore.h"
 
 #if __has_include("lua.h")
@@ -66,6 +67,12 @@ int AttackPower(lua_State* L,bool Ranged)
 }
 void WowLuaApi::RegisterUnitApi(lua_State* L)
 {
+    RegisterUnit(L,"FocusUnit",[](lua_State* S)->int {
+        auto* C=GetContext(S); if(!C) return 0; if(lua_isnoneornil(S,1)) {lua_settop(S,0); lua_pushstring(S,"target");}
+        const auto* E=ResolveUnitToken(S); if(!E || !E->IsUnit() || C->FocusGuid==E->Guid) return 0;
+        C->FocusGuid=E->Guid; if(C->EventSystem) C->EventSystem->FireEvent(TEXT("PLAYER_FOCUS_CHANGED")); return 0;
+    });
+    RegisterUnit(L,"ClearFocus",[](lua_State* S)->int {auto* C=GetContext(S); if(C && C->FocusGuid) {C->FocusGuid=0; if(C->EventSystem) C->EventSystem->FireEvent(TEXT("PLAYER_FOCUS_CHANGED"));} return 0;});
     RegisterUnit(L,"GetCombatRatingBonus",[](lua_State* S)->int {
         const int32 Rating=luaL_checkinteger(S,1)-1; lua_settop(S,0); lua_pushstring(S,"player"); const auto* E=ResolveUnitToken(S);
         double Bonus=0;

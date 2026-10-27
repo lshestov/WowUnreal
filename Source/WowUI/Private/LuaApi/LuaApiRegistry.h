@@ -17,6 +17,7 @@ struct FWowClassUiView;
 struct FWowChannelUiView;
 struct FWowMapUiView;
 struct FWowMinimapUiView;
+struct FWowGroupUiView;
 struct FWowItemTemplate;
 struct FWowItemEntity;
 
@@ -33,6 +34,7 @@ struct FWowLuaContext
     TSharedPtr<FWowChannelUiView> Channels;
     TSharedPtr<FWowMapUiView> Map;
     TSharedPtr<FWowMinimapUiView> Minimap;
+    TSharedPtr<FWowGroupUiView> GroupUi;
     TFunction<uint32()> ResolveDungeonFloor;
     TFunction<uint32()> ResolveArea;
     uint32 LastAreaId=0,LastZoneId=0;
@@ -41,6 +43,7 @@ struct FWowLuaContext
     TFunction<void()> ReloadUI;
     TMap<FName,int32> SelectedRows;
     TMap<FString,uint64> UnitReactionState;
+    uint64 FocusGuid=0;
     FString CursorTexture;
     bool CursorHidden=false,SoftwareCursorVisible=false;
 };
@@ -89,6 +92,8 @@ namespace WowLuaApi
     int SetGlyphTooltip(lua_State* L);
     int SetTalentTooltip(lua_State* L);
     void RegisterUnitApi(lua_State* L);
+    void RegisterGroupApi(lua_State* L);
+    void UpdateGroupState(lua_State* L);
     int32 UnitReactionRank(const FWowLuaContext* Context,const FWowEntity* From,const FWowEntity* To);
     bool CanUnitAttack(const FWowLuaContext* Context,const FWowEntity* From,const FWowEntity* To);
     FLinearColor UnitSelectionColor(const FWowLuaContext* Context,const FWowEntity* Unit);

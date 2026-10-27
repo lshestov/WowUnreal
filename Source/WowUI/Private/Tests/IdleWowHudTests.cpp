@@ -94,6 +94,11 @@ bool FHudAnonymousHierarchy::RunTest(const FString&)
     FWowFrameDef Menu; Menu.Name=TEXT("UnpositionedMenu"); Menu.Width=150; Menu.Height=30; Menu.Parent=TEXT("UIParent");
     const auto MenuHandle=F.Frames.CreateFrame(Menu);
     TestTrue(TEXT("Unpositioned menus do not appear in the center of the world"),F.Frames.GetWidgetForHandle(MenuHandle)->GetVisibility()==ESlateVisibility::Collapsed);
+    FWowFrameDef Template; Template.Name=TEXT("OwnedTemplate"); Template.Parent=TEXT("UnitPanel"); Template.bVirtual=true;
+    Template.Width=Template.Height=20; Template.Anchors.Add({EWowAnchorPoint::TOPLEFT,TEXT(""),EWowAnchorPoint::TOPLEFT,5,-5}); F.Frames.CreateFrame(Template);
+    FWowFrameDef Child; Child.Name=TEXT("TemplateChild"); Child.Inherits=TEXT("OwnedTemplate"); const auto Inherited=F.Frames.CreateFrame(Child);
+    TestEqual(TEXT("An XML template's explicit parent is inherited by a top-level instance"),F.Frames.GetParentHandle(Inherited),H);
+    F.Frames.SetFrameVisible(H,false); TestFalse(TEXT("Inherited parent controls visibility of the instantiated group"),F.Frames.IsFrameDrawn(Inherited));
     return true;
 }
 
@@ -231,6 +236,72 @@ bool FHudForcedReactionPackets::RunTest(const FString&)
     Data.Reset(); U32(1); U32(72); U32(8); H.HandlePacket(0x02A5,Data); TestEqual(TEXT("Out-of-range rank cannot overwrite reaction"),H.ForcedReactions.FindRef(72),uint8(1));
     Data.Reset(); U32(2); U32(72); U32(1); U32(72); U32(2); H.HandlePacket(0x02A5,Data); TestEqual(TEXT("Duplicate faction rejects the complete replacement"),H.ForcedReactions.Num(),2);
     Data.Reset(); U32(0); H.HandlePacket(0x02A5,Data); TestEqual(TEXT("Empty authoritative list clears overrides"),H.ForcedReactions.Num(),0);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudGroupState,"WowUnreal.Hud.GroupState",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudGroupState::RunTest(const FString&)
+{
+    FString Path; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false;
+    FMpqManager Mpq; if(!Mpq.Initialize(Path)) return false; auto& D=FDbcStore::Get();
+    if(!D.IsLoaded()) D.LoadAll(Mpq); if(!D.IsDeferredLoaded()) D.LoadDeferred(Mpq);
+    FHudFixture F; TStrongObjectPtr<UWowConnectionManager> C(NewObject<UWowConnectionManager>());
+    auto& H=C->PacketHandler; auto& E=H.EntityManager; E.LocalPlayerGuid=1;
+    auto& P=E.PromoteToTyped(1,WowTypeMask::UNIT|WowTypeMask::PLAYER); P.SetField(UnitField::BYTES_0,1|(1<<8)); P.SetField(UnitField::LEVEL,20);
+    P.SetField(UnitField::HEALTH,449); P.SetField(UnitField::MAXHEALTH,449); P.Movement.Position=FVector(-8895,-88,86);
+    H.PlayerNameCache.Add(1,TEXT("Main")); H.PlayerNameCache.Add(2,TEXT("Alpha")); H.PlayerNameCache.Add(3,TEXT("Beta"));
+    auto& G=H.GroupInfo; G.RawGroupType=2; G.GroupType=1; G.GroupGuid=123; G.MemberCount=3; G.LeaderGuid=1; G.SelfRoles=2; G.LootMethod=2; G.MasterLooter=2; G.LootThreshold=3;
+    FWowGroupMember A; A.Guid=2; A.Name=TEXT("Alpha"); A.Group=0; A.Flags=1; A.Roles=4; A.Status=1; A.Class=8; A.Level=20;
+    FWowGroupMember B; B.Guid=3; B.Name=TEXT("Beta"); B.Group=1; B.Flags=2; B.Roles=8; B.Status=1; B.Class=11; B.Level=20; G.Members={A,B};
+    for(const auto& M:G.Members)
+    {
+        auto& S=H.RemoteGroupMembers.FindOrAdd(M.Guid); S.Player.Guid=M.Guid; S.Player.TypeMask=WowTypeMask::UNIT|WowTypeMask::PLAYER;
+        S.Player.SetField(UnitField::BYTES_0,1|(uint32(M.Class)<<8)|(1u<<24)); S.Player.SetField(UnitField::LEVEL,20); S.Player.SetField(UnitField::FLAGS,8);
+        S.Player.SetField(UnitField::HEALTH,100); S.Player.SetField(UnitField::MAXHEALTH,200); S.Player.SetField(UnitField::POWER2,150); S.Player.SetField(UnitField::MAXPOWER2,1000);
+        S.Player.Movement.Position=P.Movement.Position+FVector(M.Guid==2?100:300,0,0); S.HasPosition=true; S.Map=0; S.Zone=12; S.Status=1;
+    }
+    F.Context.ConnectionManager=C.Get(); F.Context.EntityManager=&E; F.Context.ResolveArea=[]{return 12u;};
+    TestTrue(TEXT("Remote party/raid APIs use real snapshots and subgroup identities"),F.Lua.ExecuteString(TEXT(R"LUA(
+        assert(GetNumPartyMembers()==1 and GetNumRaidMembers()==3 and GetRealNumPartyMembers()==1)
+        assert(GetPartyMember(1)==1 and GetPartyMember(2)==nil and UnitName('party1')=='Alpha')
+        assert(select(2,UnitClassBase('party1'))=='MAGE' and UnitClassBase('party4')==nil)
+        assert(UnitIsUnit('player','Main') and UnitIsUnit('raid3','Beta') and UnitIsUnit('party1','Alpha'))
+        assert(not UnitIsUnit('player',nil) and not UnitIsUnit('missing','missing'))
+        assert(UnitInParty('party1')==1 and UnitInParty('raid3')==nil and UnitInRaid('party1')==2)
+        assert(UnitPlayerOrPetInParty('party1')==1 and UnitPlayerOrPetInParty('raid3')==nil and UnitPlayerOrPetInRaid('raid3')==1)
+        assert(UnitExists('party1') and UnitIsConnected('party1') and not UnitIsVisible('party1') and UnitInRange('party1')==nil)
+        assert(UnitHealth('party1')==100 and UnitHealthMax('party1')==200 and UnitPower('party1')==15 and UnitPowerMax('party1')==100 and UnitLevel('party1')==20)
+        local tank,heal,dps=UnitGroupRolesAssigned('party1'); assert(tank==nil and heal==1 and dps==nil)
+        local name,rank,subgroup,level,class,file,zone,online,dead,role,master,t,h,d=GetRaidRosterInfo(3)
+        assert(name=='Beta' and rank==0 and subgroup==2 and level==20 and file=='DRUID' and zone and online==1 and dead==nil and role=='MAINTANK' and master==nil and t==nil and h==nil and d==1)
+        assert(select('#',GetRaidRosterInfo(0))==14 and GetRaidRosterInfo(0)==nil)
+        local method,party,raid=GetLootMethod(); assert(method=='master' and party==nil and raid==2 and GetLootThreshold()==3)
+        assert(GetPartyAssignment('MAINTANK')=='raid3' and GetPartyAssignment('MAINTANK','raid3')==1)
+        SetRaidRosterSelection(3); assert(GetRaidRosterSelection()==3)
+        FocusObserver=CreateFrame('Frame'); FocusObserver:RegisterEvent('PLAYER_FOCUS_CHANGED'); focusEvents=0; FocusObserver:SetScript('OnEvent',function() focusEvents=focusEvents+1 end)
+        FocusUnit('party1'); assert(UnitExists('focus') and UnitGUID('focus')==UnitGUID('party1') and UnitHealth('focus')==100); ClearFocus(); assert(not UnitExists('focus') and focusEvents==2)
+        SetMapToCurrentZone(); local x,y=GetPlayerMapPosition('party1'); assert(x>0 and x<1 and y>0 and y<1)
+        groupEvents={}; GroupObserver=CreateFrame('Frame'); GroupObserver:RegisterEvent('UNIT_HEALTH'); GroupObserver:RegisterEvent('UNIT_MANA')
+        GroupObserver:SetScript('OnEvent',function(self,event,unit) local key=event..unit; groupEvents[key]=(groupEvents[key] or 0)+1 end)
+    )LUA")));
+    const auto Blips=WowMinimapUi::Blips(&F.Context); TestTrue(TEXT("Unstreamed online group member has a real remote minimap position"),Blips.ContainsByPredicate([](const auto& Dot){return Dot.Guid==2 && Dot.Icon==0;}));
+    auto& Pet=H.RemoteGroupMembers[2]; Pet.Pet.Guid=0xf14000000000000a; Pet.Pet.TypeMask=WowTypeMask::UNIT;
+    Pet.Pet.SetField(UnitField::HEALTH,7); Pet.Pet.SetField(UnitField::MAXHEALTH,10); Pet.Pet.SetField(UnitField::SUMMONEDBY,2); Pet.PetName=TEXT("RemotePet");
+    Pet.Player.SetField(UnitField::SUMMON,uint32(Pet.Pet.Guid)); Pet.Player.SetField(UnitField::SUMMON+1,uint32(Pet.Pet.Guid>>32));
+    TestTrue(TEXT("Both remote pet aliases retain the actual pet name and health"),F.Lua.ExecuteString(TEXT("assert(UnitGUID('raidpet2')==UnitGUID('partypet1') and UnitName('raidpet2')=='RemotePet' and UnitHealth('partypet1')==7)")));
+    WowLuaApi::UpdateGroupState(F.Lua.GetState()); H.RemoteGroupMembers[2].Player.SetField(UnitField::HEALTH,80); WowLuaApi::UpdateGroupState(F.Lua.GetState()); WowLuaApi::UpdateGroupState(F.Lua.GetState());
+    TestTrue(TEXT("Changed health updates both aliases once, and unchanged pulses do not repeat events"),F.Lua.ExecuteString(TEXT("assert(groupEvents.UNIT_HEALTHparty1==2 and groupEvents.UNIT_HEALTHraid2==2 and UnitHealth('party1')==80)")));
+    TestTrue(TEXT("Ready-check observer loads"),F.Lua.ExecuteString(TEXT("ReadyObserver=CreateFrame('Frame'); ReadyObserver:RegisterEvent('READY_CHECK_CONFIRM'); ReadyObserver:RegisterEvent('READY_CHECK_FINISHED'); readyReplies={}; ReadyObserver:SetScript('OnEvent',function(self,event,unit,value) if event=='READY_CHECK_CONFIRM' then readyReplies[unit]=value else readyPreempted=unit end end)")));
+    H.ReadyCheck.Begin(1); H.ReadyCheck.SetResponse(1,1); H.ReadyCheck.SetResponse(2,1); WowLuaApi::UpdateGroupState(F.Lua.GetState());
+    TestTrue(TEXT("Ready-check replies preserve stock numeric flags for every member alias"),F.Lua.ExecuteString(TEXT("assert(readyReplies.party1==1 and readyReplies.raid2==1 and readyReplies.player==1 and GetReadyCheckStatus('Alpha')=='ready')")));
+    H.ReadyCheck.EndTimeSeconds=FPlatformTime::Seconds()-1; WowLuaApi::UpdateGroupState(F.Lua.GetState());
+    TestTrue(TEXT("Timeout finishes the check without pretending it was superseded"),F.Lua.ExecuteString(TEXT("assert(readyPreempted==false and GetReadyCheckTimeLeft()==0)")));
+    H.RemoteGroupMembers[2].Status=0; WowLuaApi::UpdateGroupState(F.Lua.GetState());
+    TestTrue(TEXT("Offline transition refreshes health-based connection art without changing identity"),F.Lua.ExecuteString(TEXT("assert(not UnitIsConnected('party1') and UnitName('party1')=='Alpha' and groupEvents.UNIT_HEALTHparty1==3)")));
+    G.Members.RemoveAt(0); G.MemberCount=2; ++H.GroupRevision; WowLuaApi::UpdateGroupState(F.Lua.GetState());
+    TestTrue(TEXT("Roster selection follows the GUID after preceding member removal"),F.Lua.ExecuteString(TEXT("assert(GetRaidRosterSelection()==2 and UnitName('raid2')=='Beta' and GetNumPartyMembers()==0)")));
+    H.ResetGroupState(); WowLuaApi::UpdateGroupState(F.Lua.GetState());
+    TestTrue(TEXT("Group destruction clears frame identities and raid selection"),F.Lua.ExecuteString(TEXT("assert(GetNumPartyMembers()==0 and GetNumRaidMembers()==0 and not UnitExists('party1') and GetRaidRosterSelection()==0)")));
     return true;
 }
 
@@ -1498,6 +1569,9 @@ bool FButtonStateRegions::RunTest(const FString&)
     auto* Disabled=F.Frames.GetNamedTexture(TEXT("MenuTestDisabledTexture"));
     TestTrue(TEXT("Normal state renders an opaque region with its explicit size"),Normal && Normal->GetRenderOpacity()==1 && Normal->GetVisibility()!=ESlateVisibility::Collapsed && Cast<UCanvasPanelSlot>(Normal->Slot)->GetSize().X>60);
     TestTrue(TEXT("Button icons draw above the empty-slot background"),Cast<UCanvasPanelSlot>(Normal->Slot)->GetZOrder()>Cast<UCanvasPanelSlot>(F.Frames.GetNamedTexture(TEXT("MenuBackground"))->Slot)->GetZOrder());
+    TestTrue(TEXT("A button can use an artwork name label independently from its default caption"),F.Lua.ExecuteString(TEXT("MenuArtwork=MenuTest:CreateFontString('MenuArtwork','ARTWORK'); MenuArtwork:SetText('Member'); MenuArtwork:SetPoint('CENTER')")));
+    const auto* Artwork=F.Frames.GetNamedFontString(TEXT("MenuArtwork"));
+    TestTrue(TEXT("Opaque normal button art stays below artwork text"),Artwork && Cast<UCanvasPanelSlot>(Artwork->Slot)->GetZOrder()>Cast<UCanvasPanelSlot>(Normal->Slot)->GetZOrder());
     const auto Rect=F.Frames.GetLayoutRect(Handle);
     F.Frames.UpdateMouseHover((Rect.X+Rect.Z*.5f)*F.Frames.GetScreenScale(),(Rect.Y+Rect.W*.5f)*F.Frames.GetScreenScale());
     TestTrue(TEXT("Reanchoring a child during a mouse handler preserves mouse-over queries"),F.Lua.ExecuteString(TEXT("MenuTest:GetNormalTexture():SetPoint('CENTER',MenuTest,'CENTER',0,0); assert(MenuTest:IsMouseOver())")));
@@ -1874,6 +1948,16 @@ bool FUiIncrementalGc::RunTest(const FString&)
     }
     TestTrue(TEXT("All callbacks run without dropping updates or exceeding the sandbox"),F.Lua.ExecuteString(TEXT("assert(BudgetTicks==180); assert(BudgetFrame.lastValue==string.rep('x',64)..'1024:180')")));
     TestTrue(TEXT("Incremental collection bounds transient memory"),Peak<F.Lua.GetMemoryLimit()*9/10);
+    return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUiRetainedGc,"WowUnreal.Performance.UiRetainedHeap",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FUiRetainedGc::RunTest(const FString&)
+{
+    FHudFixture F; F.Lua.SetMemoryLimit(32*1024*1024);
+    if(!TestTrue(TEXT("A large retained addon table fits inside the hard sandbox limit"),F.Lua.ExecuteString(TEXT("Retained={}; for i=1,22000 do Retained[i]=string.rep('x',1000)..i end")))) return false;
+    TestTrue(TEXT("Crossing the soft threshold triggers a pressure collection"),F.Lua.CollectGarbageIfNeeded(.60));
+    for(int32 I=0;I<32;++I) TestFalse(TEXT("An unchanged live heap does not trigger a full collection on every callback"),F.Lua.CollectGarbageIfNeeded(.60));
+    TestTrue(TEXT("Retained addon state is preserved with hard-limit headroom"),F.Lua.ExecuteString(TEXT("assert(#Retained==22000 and #Retained[22000]==1005)")) && F.Lua.GetMemoryUsage()<F.Lua.GetMemoryLimit()*9/10);
     return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudXmlTextureDefaults,"WowUnreal.Hud.XmlTextureDefaults",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)

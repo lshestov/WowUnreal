@@ -56,7 +56,7 @@ int32 WowMinimapUi::CommonTracking(FWowLuaContext* C)
 FVector WowMinimapUi::Position(FWowLuaContext* C,uint64 Guid)
 {
     if(C && C->ResolveActor) if(auto* A=C->ResolveActor(Guid)) {FVector P=A->GetActorLocation(); if(const auto* Pawn=Cast<ACharacter>(A)) P.Z-=Pawn->GetCapsuleComponent()->GetScaledCapsuleHalfHeight(); return FWowCoordinate::UEToWow(P);}
-    const auto* E=C && C->EntityManager?C->EntityManager->Find(Guid):nullptr; return E?E->Movement.Position:FVector::ZeroVector;
+    const auto* E=C && C->ConnectionManager?C->ConnectionManager->PacketHandler.FindUiUnit(Guid):C && C->EntityManager?C->EntityManager->Find(Guid):nullptr; return E?E->Movement.Position:FVector::ZeroVector;
 }
 FWowWmoLocation WowMinimapUi::Location(FWowLuaContext* C)
 {
@@ -124,6 +124,15 @@ TArray<WowMinimapUi::FBlip> WowMinimapUi::Blips(FWowLuaContext* C)
             Name=E.IsPlayer()?H.PlayerNameCache.FindRef(E.Guid):H.CreatureNameCache.FindRef(E.Entry);
         }
         if(Icon>=0) {FBlip B; B.Guid=E.Guid; B.Icon=uint8(Icon); B.Position=Pos; B.Name=Name.IsEmpty()?TEXT("Unknown"):Name; Out.Add(MoveTemp(B));}
+        if(Out.Num()==512) break;
+    }
+    for(const auto& Pair:H.RemoteGroupMembers)
+    {
+        if(Out.Num()>=512) break;
+        const auto& Member=Pair.Value;
+        if(C->EntityManager->Find(Pair.Key) || !H.GroupInfo.FindMember(Pair.Key) || !(Member.Status&1) || !Member.HasPosition || Member.Map!=H.CurrentMapId) continue;
+        if(FVector::DistSquared2D(Member.Player.Movement.Position,Center)>R*R) continue;
+        FBlip B; B.Guid=Pair.Key; B.Icon=H.GroupInfo.IsRaidGroup()?0:1; B.Position=Member.Player.Movement.Position; B.Name=H.PlayerNameCache.FindRef(Pair.Key); Out.Add(MoveTemp(B));
         if(Out.Num()==512) break;
     }
     Out.Sort([](const auto& A,const auto& B){return A.Icon==B.Icon?A.Guid<B.Guid:A.Icon<B.Icon;}); return Out;

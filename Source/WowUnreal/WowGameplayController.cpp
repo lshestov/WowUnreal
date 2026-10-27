@@ -3344,7 +3344,7 @@ void AWowGameplayController::UpdateTargetHighlight()
 
 void AWowGameplayController::CreatePartyFrame()
 {
-	if (!ConnectionManager || PartyFrameWidget.IsValid())
+	if (!ConnectionManager || PartyFrameWidget.IsValid() || (UIManager && UIManager->IsUILoaded()))
 	{
 		return;
 	}
@@ -3398,8 +3398,6 @@ void AWowGameplayController::OnGroupUpdated()
 
 	if (ConnectionManager->PacketHandler.GroupInfo.IsRaidGroup())
 	{
-		FireUIEvent(TEXT("RAID_ROSTER_UPDATE"));
-
 		if (ConnectionManager->PacketHandler.GroupInfo.GroupGuid != LastRaidGroupGuid)
 		{
 			LastRaidGroupGuid = ConnectionManager->PacketHandler.GroupInfo.GroupGuid;
@@ -3777,6 +3775,7 @@ void AWowGameplayController::OnDuelUpdated(const FWowDuelState& DuelState)
 void AWowGameplayController::OnGroupInviteReceived(const FString& InviterName)
 {
 	UE_LOG(LogWowGameplay, Log, TEXT("Group invite received from %s"), *InviterName);
+	if(UIManager && UIManager->IsUILoaded()) {FireUIEvent(TEXT("PARTY_INVITE_REQUEST"),{InviterName}); return;}
 
 	// Close any existing invite dialog
 	if (PartyInviteWidget.IsValid())
@@ -3812,35 +3811,17 @@ void AWowGameplayController::OnGroupInviteReceived(const FString& InviterName)
 
 void AWowGameplayController::OnPartyCommandResult(uint8 Command, const FString& PlayerName, uint8 Result)
 {
-	// Log the result and potentially show a message
-	const TCHAR* CommandName = TEXT("Unknown");
-	switch (Command)
-	{
-	case 0: CommandName = TEXT("Invite"); break;
-	case 1: CommandName = TEXT("Leave"); break;
-	case 2: CommandName = TEXT("Remove"); break;
-	default: break;
-	}
-
-	const TCHAR* ResultName = TEXT("Unknown");
-	switch (Result)
-	{
-	case 0: ResultName = TEXT("Success"); break;
-	case 1: ResultName = TEXT("Cannot find player"); break;
-	case 2: ResultName = TEXT("Player not in your group"); break;
-	case 3: ResultName = TEXT("Player already in group"); break;
-	default: break;
-	}
-
-	UE_LOG(LogWowGameplay, Log, TEXT("Party command result: %s for %s - %s"),
-		CommandName, *PlayerName, ResultName);
-
-	// Add message to chat window
-	if (ChatWindow.IsValid())
-	{
-		FString Message = FString::Printf(TEXT("%s %s: %s"), CommandName, *PlayerName, ResultName);
-		ChatWindow->AddCombatMessage(Message, FLinearColor::Yellow);
-	}
+    UE_LOG(LogWowGameplay,Log,TEXT("Party result: command=%u member=%s result=%u"),Command,*PlayerName,Result);
+    if(!Result) return;
+    static const TCHAR* Keys[]={TEXT(""),TEXT("ERR_BAD_PLAYER_NAME_S"),TEXT("ERR_TARGET_NOT_IN_GROUP_S"),TEXT("ERR_TARGET_NOT_IN_INSTANCE_S"),TEXT("ERR_GROUP_FULL"),TEXT("ERR_ALREADY_IN_GROUP_S"),TEXT("ERR_NOT_IN_GROUP"),TEXT("ERR_NOT_LEADER"),TEXT("ERR_PLAYER_WRONG_FACTION"),TEXT("ERR_IGNORING_YOU_S"),TEXT(""),TEXT(""),TEXT("ERR_LFG_PENDING"),TEXT("ERR_INVITE_RESTRICTED"),TEXT("ERR_INVITE_IN_COMBAT"),TEXT("ERR_INVITE_UNKNOWN_REALM"),TEXT("ERR_INVITE_NO_PARTY_SERVER"),TEXT("ERR_INVITE_PARTY_BUSY"),TEXT("ERR_PARTY_TARGET_AMBIGUOUS"),TEXT("ERR_PARTY_LFG_INVITE_RAID_LOCKED"),TEXT("ERR_PARTY_LFG_BOOT_LIMIT"),TEXT("ERR_PARTY_LFG_BOOT_COOLDOWN_S"),TEXT("ERR_PARTY_LFG_BOOT_IN_PROGRESS"),TEXT("ERR_PARTY_LFG_BOOT_TOO_FEW_PLAYERS"),TEXT("ERR_PARTY_LFG_BOOT_NOT_ELIGIBLE_S"),TEXT("ERR_RAID_DISALLOWED_BY_LEVEL"),TEXT("ERR_PARTY_LFG_BOOT_IN_COMBAT"),TEXT("ERR_VOTE_KICK_REASON_NEEDED"),TEXT("ERR_PARTY_LFG_BOOT_DUNGEON_COMPLETE"),TEXT("ERR_PARTY_LFG_BOOT_LOOT_ROLLS"),TEXT("ERR_PARTY_LFG_TELEPORT_IN_COMBAT")};
+    const FString Key=Result==14 && Command==4?TEXT("ERR_GROUP_SWAP_FAILED"):Result<UE_ARRAY_COUNT(Keys)?Keys[Result]:TEXT("");
+    const auto* Events=UIManager?UIManager->GetEventSystem():nullptr;
+    FString Message=Events && !Key.IsEmpty()?Events->ResolveText(Key):FString();
+    if(Message.IsEmpty() || Message==Key) Message=TEXT("The group command could not be completed.");
+    Message.ReplaceInline(TEXT("%s"),*PlayerName);
+    Message.ReplaceInline(TEXT("%d"),*FString::FromInt(ConnectionManager?ConnectionManager->PacketHandler.LastPartyCommandValue:0));
+    FireUIEvent(TEXT("UI_ERROR_MESSAGE"),{Message});
+    if(ChatWindow.IsValid()) ChatWindow->AddCombatMessage(Message,FLinearColor::Yellow);
 }
 
 void AWowGameplayController::OnTaxiNodesShown(uint64 NpcGuid, uint32 CurrentNodeId)

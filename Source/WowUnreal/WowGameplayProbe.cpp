@@ -228,6 +228,7 @@ struct FWowGameplayProbe
                 Peer=MakeUnique<FWowUiTestPeer>();
                 if(!Peer->Start(Spec->GetStringField(TEXT("peerFixture")),Handler.EntityManager.LocalPlayerGuid,Op==TEXT("peer_cleanup"))) {Failure=TEXT("Invalid coordinator-owned QA peer fixture"); Finish(C,false); return;}
             }
+            if(Op==TEXT("peer_cleanup")) Peer->Stop();
             Done=Op==TEXT("peer_cleanup")?Peer->Complete():Peer->Ready();
             if(Done && Op==TEXT("peer_start"))
             {
@@ -236,7 +237,7 @@ struct FWowGameplayProbe
             }
         }
         else if(Op==TEXT("peer_target")) {if(Peer && Peer->Ready() && Handler.EntityManager.Find(Peer->Guid())) {C.SetTarget(Peer->Guid()); Done=true;}}
-        else if(Op==TEXT("peer_trade"))
+        else if(Op==TEXT("peer_trade") || Op==TEXT("peer_command"))
         {
             if(Peer) {double Slot=0,Value=0; Step->TryGetNumberField(TEXT("slot"),Slot); Step->TryGetNumberField(TEXT("value"),Value); Done=Peer->Command(Step->GetStringField(TEXT("action")),int32(Slot),uint32(Value));}
         }
@@ -603,6 +604,7 @@ struct FWowGameplayProbe
                     const auto Metric=MakeShared<FJsonObject>();
                     Metric->SetNumberField(TEXT("samples"),Values.Num()); Metric->SetNumberField(TEXT("mean"),Sum/Values.Num());
                     Metric->SetNumberField(TEXT("median"),Values[Values.Num()/2]); Metric->SetNumberField(TEXT("p95"),Values[FMath::FloorToInt((Values.Num()-1)*.95)]);
+                    Metric->SetNumberField(TEXT("max"),Values.Last());
                     Metrics->SetObjectField(Column.Key,Metric);
                 }
                 Result->SetObjectField(TEXT("profile"),Metrics); Profile.Reset();

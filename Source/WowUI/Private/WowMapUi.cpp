@@ -113,11 +113,18 @@ FVector2D WowMapUi::Project(FWowLuaContext* C,uint32 MapId,const FVector& Positi
 FVector2D WowMapUi::PlayerPosition(FWowLuaContext* C,uint64 Guid)
 {
     if(!C || !C->ConnectionManager || !C->EntityManager) return {-1,-1};
-    const auto* E=C->EntityManager->Find(Guid); if(!E) return {-1,-1};
+    const auto* E=C->EntityManager->Find(Guid);
+    uint32 Map=C->ConnectionManager->PacketHandler.CurrentMapId;
+    if(!E)
+    {
+        const auto* Remote=C->ConnectionManager->PacketHandler.RemoteGroupMembers.Find(Guid);
+        if(!Remote || !(Remote->Status&1) || !Remote->HasPosition || Remote->Map==MAX_uint32) return {-1,-1};
+        E=&Remote->Player; Map=Remote->Map;
+    }
     FVector Position=E->Movement.Position;
     if(C->ResolveActor) if(auto* Actor=C->ResolveActor(Guid))
     {Position=Actor->GetActorLocation(); if(const auto* Character=Cast<ACharacter>(Actor)) Position.Z-=Character->GetCapsuleComponent()->GetScaledCapsuleHalfHeight(); Position=FWowCoordinate::UEToWow(Position);}
-    return Project(C,C->ConnectionManager->PacketHandler.CurrentMapId,Position,Guid==C->EntityManager->LocalPlayerGuid?CurrentFloor(C):0);
+    return Project(C,Map,Position,Guid==C->EntityManager->LocalPlayerGuid?CurrentFloor(C):0);
 }
 bool WowMapUi::Explored(FWowLuaContext* C,uint32 AreaId)
 {

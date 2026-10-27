@@ -75,6 +75,9 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(WowOpcode::SMSG_CHANNEL_NOTIFY,           &FWowPacketHandler::HandleChannelNotify);
     Handlers.Add(0x009B,&FWowPacketHandler::HandleChannelList);
     Handlers.Add(WowOpcode::SMSG_GROUP_LIST,               &FWowPacketHandler::HandleGroupList);
+    Handlers.Add(0x007C,&FWowPacketHandler::HandleGroupDestroyed);
+    Handlers.Add(0x0079,&FWowPacketHandler::HandleGroupLeader);
+    Handlers.Add(0x02F2,&FWowPacketHandler::HandlePartyMemberStatsFull);
     Handlers.Add(WowOpcode::MSG_RAID_TARGET_UPDATE,        &FWowPacketHandler::HandleRaidTargetUpdate);
     Handlers.Add(WowOpcode::MSG_RAID_READY_CHECK,          &FWowPacketHandler::HandleRaidReadyCheck);
     Handlers.Add(WowOpcode::MSG_RAID_READY_CHECK_CONFIRM,  &FWowPacketHandler::HandleRaidReadyCheckConfirm);
@@ -524,6 +527,7 @@ void FWowPacketHandler::ParseUpdateBlock(FPacketReader& R)
         for (uint32 i = 0; i < Count && R.Remaining() > 0; ++i)
         {
             uint64 Guid = R.ReadPackedGuid();
+            CacheGroupUnit(Guid);
             EntityManager.Remove(Guid);
             EntitiesDestroyed++;
         }
@@ -752,7 +756,7 @@ void FWowPacketHandler::HandleDestroyObject(FPacketReader& R)
     // Death animation is triggered by health→0 in OnEntityUpdated.
     // Always remove from entity manager — the gameplay controller's OnEntityDestroyed
     // will clean up the actor.
-    Casts.Remove(Guid); EntityManager.Remove(Guid);
+    CacheGroupUnit(Guid); Casts.Remove(Guid); EntityManager.Remove(Guid);
     EntitiesDestroyed++;
 }
 
@@ -1389,130 +1393,6 @@ void FWowPacketHandler::HandleGuildEvent(FPacketReader& R)
 // repeated otherMemberCount: CString name, uint64 guid, uint8 online, uint8 subgroup, uint8 flags, uint8 roles,
 // uint64 leaderGuid, optional loot data
 
-void FWowPacketHandler::HandleGroupList(FPacketReader& R)
-{
-    if (!R.CanRead(4)) return;
-
-    const uint8 RawGroupType = R.ReadU8();
-    const uint8 SelfSubgroup = R.ReadU8();
-    const uint8 SelfFlags = R.ReadU8();
-    const uint8 SelfRoles = R.ReadU8();
-
-    if ((RawGroupType & WowGroupType::LFG) != 0)
-    {
-        if (!R.CanRead(5)) return;
-        R.Skip(1); // completed dungeon flag
-        R.Skip(4); // dungeon id
-    }
-
-    if (!R.CanRead(16)) return;
-    const uint64 GroupGuid = R.ReadU64();
-    const uint32 Counter = R.ReadU32();
-    const uint32 OtherMemberCount = R.ReadU32();
-
-    const uint64 PreviousGroupGuid = GroupInfo.GroupGuid;
-    const bool bHadRaidTargets = RaidTargets.HasAnyIcons();
-    const bool bHadReadyCheck = ReadyCheck.bActive;
-
-    GroupInfo.Clear();
-    GroupInfo.RawGroupType = RawGroupType;
-    GroupInfo.GroupType = (RawGroupType & WowGroupType::RAID) != 0 ? 1 : 0;
-    GroupInfo.GroupGuid = GroupGuid;
-    GroupInfo.SelfSubgroup = SelfSubgroup;
-    GroupInfo.SelfFlags = SelfFlags;
-    GroupInfo.SelfRoles = SelfRoles;
-    GroupInfo.Members.Reserve(OtherMemberCount);
-
-    for (uint32 i = 0; i < OtherMemberCount; ++i)
-    {
-        const FString MemberName = R.ReadCString();
-
-        if (!R.CanRead(12)) break; // guid + online + subgroup + flags + roles
-        const uint64 MemberGuid = R.ReadU64();
-        const uint8 Online = R.ReadU8();
-        const uint8 MemberSubgroup = R.ReadU8();
-        const uint8 MemberFlags = R.ReadU8();
-        const uint8 MemberRoles = R.ReadU8();
-
-        FWowGroupMember Member;
-        Member.Guid = MemberGuid;
-        Member.Name = MemberName;
-        Member.Group = MemberSubgroup;
-        Member.Flags = MemberFlags;
-        Member.Roles = MemberRoles;
-        Member.Status = Online;
-
-        // Try to get level and class from entity data
-        if (auto* Entity = EntityManager.Find(MemberGuid))
-        {
-            if (Entity->IsUnit())
-            {
-                Member.Level = static_cast<uint8>(Entity->GetLevel());
-                Member.Class = static_cast<uint8>(Entity->GetFieldByte(UnitField::BYTES_0, 1));
-            }
-        }
-
-        GroupInfo.Members.Add(Member);
-
-        UE_LOG(LogWowPacket, Verbose, TEXT("  Member: %s (GUID=%llu online=%d level=%d class=%d)"),
-               *MemberName, MemberGuid, Online, Member.Level, Member.Class);
-    }
-
-    if (!R.CanRead(8)) return;
-    GroupInfo.LeaderGuid = R.ReadU64();
-
-    if (OtherMemberCount > 0 && R.CanRead(12))
-    {
-        R.Skip(1); // loot method
-        R.Skip(8); // master looter guid
-        R.Skip(1); // loot threshold
-        R.Skip(1); // dungeon difficulty
-        R.Skip(1); // raid difficulty
-        if (R.CanRead(1))
-        {
-            R.Skip(1); // heroic raid difficulty toggle
-        }
-    }
-
-    const bool bHasGroup = (GroupInfo.LeaderGuid != 0) || (OtherMemberCount > 0);
-    GroupInfo.MemberCount = bHasGroup ? static_cast<uint8>(FMath::Min<uint32>(OtherMemberCount + 1, MAX_uint8)) : 0;
-
-    if (!bHasGroup)
-    {
-        GroupInfo.Clear();
-    }
-
-    const bool bGroupChanged = PreviousGroupGuid != 0 && PreviousGroupGuid != GroupInfo.GroupGuid;
-
-    if (!GroupInfo.IsRaidGroup() || bGroupChanged)
-    {
-        RaidTargets.Clear();
-        ReadyCheck.Clear();
-    }
-
-    UE_LOG(LogWowPacket, Log, TEXT("GROUP_LIST: rawType=0x%02X normalizedType=%d members=%d leader=%llu groupGuid=%llu counter=%u"),
-        RawGroupType,
-        GroupInfo.GroupType,
-        GroupInfo.MemberCount,
-        GroupInfo.LeaderGuid,
-        GroupGuid,
-        Counter);
-
-    OnGroupUpdated.Broadcast();
-
-    if ((bHadRaidTargets && !RaidTargets.HasAnyIcons()) || (bHadReadyCheck && !ReadyCheck.bActive))
-    {
-        if (bHadRaidTargets)
-        {
-            OnRaidTargetsUpdated.Broadcast(RaidTargets);
-        }
-        if (bHadReadyCheck)
-        {
-            OnReadyCheckUpdated.Broadcast(ReadyCheck);
-        }
-    }
-}
-
 // ── MSG_RAID_TARGET_UPDATE ─────────────────────────────────────────────────
 // uint8 mode
 // mode 1: repeated uint8 icon, uint64 targetGuid
@@ -1555,10 +1435,12 @@ void FWowPacketHandler::HandleRaidTargetUpdate(FPacketReader& R)
 
 void FWowPacketHandler::HandleRaidReadyCheck(FPacketReader& R)
 {
-    if (!R.CanRead(8)) return;
+    if (R.Remaining()!=8) return;
 
     const uint64 InitiatorGuid = R.ReadU64();
+    if(!InitiatorGuid || (InitiatorGuid!=EntityManager.LocalPlayerGuid && !GroupInfo.FindMember(InitiatorGuid))) return;
     ReadyCheck.Begin(InitiatorGuid);
+    ReadyCheck.SetResponse(InitiatorGuid,1);
     UE_LOG(LogWowPacket, Log, TEXT("RAID_READY_CHECK: initiator=%llu"), InitiatorGuid);
     OnReadyCheckUpdated.Broadcast(ReadyCheck);
 }
@@ -1568,15 +1450,12 @@ void FWowPacketHandler::HandleRaidReadyCheck(FPacketReader& R)
 
 void FWowPacketHandler::HandleRaidReadyCheckConfirm(FPacketReader& R)
 {
-    if (!R.CanRead(9)) return;
+    if (R.Remaining()!=9) return;
 
     const uint64 ResponderGuid = R.ReadU64();
     const uint8 ResponseState = R.ReadU8();
 
-    if (!ReadyCheck.bActive)
-    {
-        ReadyCheck.Begin(0);
-    }
+    if (!ReadyCheck.bActive || ResponseState>1 || !ResponderGuid || (ResponderGuid!=EntityManager.LocalPlayerGuid && !GroupInfo.FindMember(ResponderGuid))) return;
 
     ReadyCheck.SetResponse(ResponderGuid, ResponseState);
     UE_LOG(LogWowPacket, Log, TEXT("RAID_READY_CHECK_CONFIRM: responder=%llu state=%d"), ResponderGuid, ResponseState);
@@ -1587,24 +1466,24 @@ void FWowPacketHandler::HandleRaidReadyCheckConfirm(FPacketReader& R)
 
 void FWowPacketHandler::HandleRaidReadyCheckFinished(FPacketReader& R)
 {
-    static_cast<void>(R);
+    if(R.Remaining()) return;
     ReadyCheck.Clear();
     UE_LOG(LogWowPacket, Log, TEXT("RAID_READY_CHECK_FINISHED"));
     OnReadyCheckUpdated.Broadcast(ReadyCheck);
 }
 
 // ── SMSG_PARTY_COMMAND_RESULT ──────────────────────────────────────────────
-// uint32 command, FString member, uint32 result
+// uint32 command, CString member, uint32 result, uint32 value
 
 void FWowPacketHandler::HandlePartyCommandResult(FPacketReader& R)
 {
-    if (!R.CanRead(4)) return;
-
-    uint32 Command = R.ReadU32();
-    FString Member = R.ReadCString();
-
-    if (!R.CanRead(4)) return;
-    uint32 Result = R.ReadU32();
+    if (!R.CanRead(13)) return;
+    const uint32 Command=R.ReadU32(); int32 Length=0;
+    while(Length<R.Remaining() && R.Data[R.Pos+Length]) ++Length;
+    if(Length>63 || Length==R.Remaining()) return;
+    const FString Member=R.ReadCString(); if(R.Remaining()!=8) return;
+    const uint32 Result=R.ReadU32(),Value=R.ReadU32(); if(Command>4 || Result>30) return;
+    LastPartyCommandValue=Value;
 
     UE_LOG(LogWowPacket, Log, TEXT("PARTY_COMMAND_RESULT: command=%d member='%s' result=%d"),
            Command, *Member, Result);
@@ -1617,10 +1496,12 @@ void FWowPacketHandler::HandlePartyCommandResult(FPacketReader& R)
 
 void FWowPacketHandler::HandleGroupInvite(FPacketReader& R)
 {
-    FString InviterName = R.ReadCString();
-    UE_LOG(LogWowPacket, Log, TEXT("GROUP_INVITE from '%s'"), *InviterName);
-
-    OnGroupInviteReceived.Broadcast(InviterName);
+    if(!R.CanRead(1)) return; const uint8 Allowed=R.ReadU8(); FString InviterName;
+    int32 N=0; while(N<R.Remaining() && R.Data[R.Pos+N]) ++N;
+    if(N==R.Remaining() || N==0 || N>63 || Allowed>1) return; InviterName=R.ReadCString();
+    if(R.Remaining()!=9) return; R.ReadU32(); if(R.ReadU8()!=0) return; R.ReadU32();
+    if(!Allowed) return;
+    PendingGroupInviter=InviterName; OnGroupInviteReceived.Broadcast(InviterName);
 }
 
 // ── SMSG_SHOWTAXINODES ──────────────────────────────────────────────────────
@@ -2105,6 +1986,13 @@ void FWowPacketHandler::HandleNameQueryResponse(FPacketReader& R)
         uint8 Class = R.ReadU8();
 
         PlayerNameCache.Add(Guid, Name);
+        PlayerIdentities.Add(Guid,{Race,Gender,Class,RealmName});
+        if(auto* State=RemoteGroupMembers.Find(Guid))
+        {
+            State->Player.SetField(UnitField::BYTES_0,(State->Player.GetField(UnitField::BYTES_0)&0xff000000u)|uint32(Race)|(uint32(Class)<<8)|(uint32(Gender)<<16));
+            ++State->Revision; ++RemoteGroupRevision;
+            if(auto* Member=GroupInfo.Members.FindByPredicate([Guid](const auto& M){return M.Guid==Guid;})) Member->Class=Class;
+        }
 
         UE_LOG(LogWowPacket, Log, TEXT("NAME_QUERY_RESPONSE: GUID=%llu, Name=%s, Realm=%s"),
             Guid, *Name, *RealmName);
@@ -2508,26 +2396,6 @@ void FWowPacketHandler::HandleAccountDataTimes(FPacketReader& R)
     }
 
     // No action needed - just prevents server disconnect
-}
-
-void FWowPacketHandler::HandlePartyMemberStats(FPacketReader& R)
-{
-    // SMSG_PARTY_MEMBER_STATS
-    // Complex packet with variable structure
-
-    if (!R.CanRead(9)) // packed guid + mask
-    {
-        UE_LOG(LogWowPacket, Warning, TEXT("PARTY_MEMBER_STATS: packet too short"));
-        return;
-    }
-
-    uint64 MemberGuid = R.ReadPackedGuid();
-    uint32 Mask = R.ReadU32();
-
-    UE_LOG(LogWowPacket, Log, TEXT("PARTY_MEMBER_STATS: Member GUID %llu, Mask 0x%08X"), MemberGuid, Mask);
-
-    // For now, just skip the rest - full implementation would parse all the conditional fields
-    // This prevents errors when receiving these packets
 }
 
 // ── NPC interaction handlers ────────────────────────────────────────────

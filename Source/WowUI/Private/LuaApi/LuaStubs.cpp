@@ -169,7 +169,7 @@ static uint64 ResolveDirectUnitGuid(const FWowLuaContext* Ctx, const FString& Un
 
     if (UnitToken.Equals(TEXT("focus"), ESearchCase::IgnoreCase))
     {
-        return 0;
+        return Ctx->FocusGuid && (Ctx->ConnectionManager?Ctx->ConnectionManager->PacketHandler.FindUiUnit(Ctx->FocusGuid):Ctx->EntityManager->Find(Ctx->FocusGuid))?Ctx->FocusGuid:0;
     }
 
     if (UnitToken.Equals(TEXT("mouseover"), ESearchCase::IgnoreCase))
@@ -202,12 +202,13 @@ static uint64 ResolveDirectUnitGuid(const FWowLuaContext* Ctx, const FString& Un
 
         const int32 PartyIndex = IndexString[0] - TCHAR('1');
         const FWowGroupInfo& GroupInfo = Ctx->ConnectionManager->PacketHandler.GroupInfo;
-        if (!GroupInfo.Members.IsValidIndex(PartyIndex))
+        const auto* PartyEntry=GroupInfo.PartyMember(PartyIndex);
+        if (!PartyEntry)
         {
             return 0;
         }
 
-        if (FWowPlayerEntity* PartyMember = Ctx->EntityManager->FindPlayer(GroupInfo.Members[PartyIndex].Guid))
+        if (const auto* PartyMember = Ctx->ConnectionManager->PacketHandler.FindUiUnit(PartyEntry->Guid))
         {
             return PartyMember->GetField64(UnitField::SUMMON);
         }
@@ -230,9 +231,18 @@ static uint64 ResolveDirectUnitGuid(const FWowLuaContext* Ctx, const FString& Un
 
         const int32 PartyIndex = IndexString[0] - TCHAR('1');
         const FWowGroupInfo& GroupInfo = Ctx->ConnectionManager->PacketHandler.GroupInfo;
-        return GroupInfo.Members.IsValidIndex(PartyIndex) ? GroupInfo.Members[PartyIndex].Guid : 0;
+        const auto* Member=GroupInfo.PartyMember(PartyIndex); return Member?Member->Guid:0;
     }
 
+    if (UnitToken.StartsWith(TEXT("raidpet"), ESearchCase::IgnoreCase) && Ctx->ConnectionManager)
+    {
+        const FString IndexString=UnitToken.RightChop(7);
+        if(IndexString.IsEmpty() || !IndexString.IsNumeric()) return 0;
+        const int32 Index=FCString::Atoi(*IndexString); auto& H=Ctx->ConnectionManager->PacketHandler;
+        if(!H.GroupInfo.IsRaidGroup() || Index<1 || Index>H.GroupInfo.MemberCount) return 0;
+        const uint64 Owner=Index==1?Ctx->EntityManager->LocalPlayerGuid:H.GroupInfo.Members[Index-2].Guid;
+        const auto* E=H.FindUiUnit(Owner); return E?E->GetField64(UnitField::SUMMON):0;
+    }
     if (UnitToken.StartsWith(TEXT("raid"), ESearchCase::IgnoreCase))
     {
         if (!Ctx->ConnectionManager)
@@ -275,6 +285,12 @@ static uint64 ResolveDirectUnitGuid(const FWowLuaContext* Ctx, const FString& Un
         return GroupInfo.Members.IsValidIndex(MemberIndex) ? GroupInfo.Members[MemberIndex].Guid : 0;
     }
 
+    if(Ctx->ConnectionManager)
+    {
+        auto& H=Ctx->ConnectionManager->PacketHandler;
+        for(const auto& Pair:H.PlayerNameCache)
+            if(Pair.Value.Equals(UnitToken,ESearchCase::IgnoreCase) && H.FindUiUnit(Pair.Key)) return Pair.Key;
+    }
     return 0;
 }
 
@@ -308,7 +324,7 @@ static uint64 ResolveUnitGuidToken(const FWowLuaContext* Ctx, const FString& Uni
             }
         }
 
-        if (FWowEntity* BaseEntity = Ctx->EntityManager->Find(BaseGuid))
+        if (FWowEntity* BaseEntity = Ctx->ConnectionManager?Ctx->ConnectionManager->PacketHandler.FindUiUnit(BaseGuid):Ctx->EntityManager->Find(BaseGuid))
         {
             return BaseEntity->GetField64(UnitField::TARGET);
         }
@@ -335,7 +351,7 @@ static FWowEntity* ResolveUnit(lua_State* L, int ArgIdx = 1)
     if (!Ctx || !Ctx->EntityManager) return nullptr;
 
     uint64 Guid = ResolveUnitGuid(L, ArgIdx);
-    return Guid != 0 ? Ctx->EntityManager->Find(Guid) : nullptr;
+    return Guid?(Ctx->ConnectionManager?Ctx->ConnectionManager->PacketHandler.FindUiUnit(Guid):Ctx->EntityManager->Find(Guid)):nullptr;
 }
 
 enum class EWowUnitRelationship : uint8
@@ -413,17 +429,17 @@ static int L_UnitPlayerOrPetInGroup(lua_State* L,bool Raid)
     if(C && C->ConnectionManager && C->EntityManager && Guid)
     {
         const auto& Group=C->ConnectionManager->PacketHandler.GroupInfo;
-        if(!Group.IsEmpty() && Group.IsRaidGroup()==Raid)
+        if(!Group.IsEmpty() && (!Raid || Group.IsRaidGroup()))
         {
             const auto Matches=[&](uint64 Member)
             {
                 if(Guid==Member) return true;
-                const auto* E=C->EntityManager->Find(Member); if(!E) return false;
+                const auto* E=C->ConnectionManager->PacketHandler.FindUiUnit(Member); if(!E) return false;
                 const uint64 Pet=E->GetField64(UnitField::CHARM)?E->GetField64(UnitField::CHARM):E->GetField64(UnitField::SUMMON);
                 return Pet && Pet==Guid;
             };
             if(Raid) Found=Matches(C->EntityManager->LocalPlayerGuid);
-            for(const auto& Member:Group.Members) if(Matches(Member.Guid)) {Found=true; break;}
+            for(const auto& Member:Group.Members) if((Raid || Member.Group==Group.SelfSubgroup) && Matches(Member.Guid)) {Found=true; break;}
         }
     }
     if(Found) lua_pushinteger(L,1); else lua_pushnil(L); return 1;
@@ -463,9 +479,9 @@ static int L_GetNumPartyMembers(lua_State* L)
     if (Ctx && Ctx->ConnectionManager)
     {
         const FWowGroupInfo& GroupInfo = Ctx->ConnectionManager->PacketHandler.GroupInfo;
-        if (!GroupInfo.IsEmpty() && !GroupInfo.IsRaidGroup())
+        if (!GroupInfo.IsEmpty())
         {
-            lua_pushnumber(L, FMath::Max(0, static_cast<int32>(GroupInfo.MemberCount) - 1));
+            lua_pushnumber(L, GroupInfo.PartyCount());
             return 1;
         }
     }
@@ -717,6 +733,8 @@ static int L_UnitName(lua_State* L)
             return 1;
         }
 
+        for(const auto& Pair:Ctx->ConnectionManager->PacketHandler.RemoteGroupMembers)
+            if(Pair.Value.Pet.Guid==Guid && !Pair.Value.PetName.IsEmpty()) {lua_pushstring(L,TCHAR_TO_UTF8(*Pair.Value.PetName)); return 1;}
         // For NPCs, look up by entry ID in creature name cache
         FWowEntity* Entity = Ctx->EntityManager->Find(Guid);
         if (Entity && !Entity->IsPlayer())
@@ -894,7 +912,7 @@ static int L_UnitClass(lua_State* L)
         if (Entity->IsUnit())
         {
             uint8 ClassId = Unit->GetClassId();
-            if (ClassId < UE_ARRAY_COUNT(WowClassNames))
+            if (ClassId>0 && ClassId!=10 && ClassId < UE_ARRAY_COUNT(WowClassNames))
             {
                 lua_pushstring(L, WowClassNames[ClassId]);
                 lua_pushstring(L, WowClassTokens[ClassId]);
@@ -902,8 +920,8 @@ static int L_UnitClass(lua_State* L)
             }
         }
     }
-    lua_pushstring(L, "Warrior");
-    lua_pushstring(L, "WARRIOR");
+    lua_pushnil(L);
+    lua_pushnil(L);
     return 2;
 }
 
@@ -4562,7 +4580,7 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "PartialPlayTime", [](lua_State* State) -> int { lua_pushboolean(State, false); return 1; });
     lua_register(L, "NoPlayTime", [](lua_State* State) -> int { lua_pushboolean(State, false); return 1; });
     lua_register(L, "IsPVPTimerRunning", [](lua_State* State) -> int { lua_pushboolean(State, false); return 1; });
-    lua_register(L, "UnitIsVisible", [](lua_State* State) -> int { lua_pushboolean(State, ResolveUnit(State) != nullptr); return 1; });
+    lua_register(L, "UnitIsVisible", [](lua_State* State) -> int {const auto* C=WowLuaApi::GetContext(State); lua_pushboolean(State,C && C->EntityManager && C->EntityManager->Find(ResolveUnitGuid(State))); return 1;});
     lua_register(L, "UnitGroupRolesAssigned", [](lua_State* State) -> int {
         lua_pushboolean(State, false); lua_pushboolean(State, false); lua_pushboolean(State, false); return 3;
     });
@@ -4593,6 +4611,7 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "UnitManaMax", L_UnitPowerMax);   // WoW 3.3.5 alias
     lua_register(L, "UnitPowerType", L_UnitPowerType);
     lua_register(L, "UnitClass", L_UnitClass);
+    lua_register(L, "UnitClassBase", L_UnitClass);
     lua_register(L, "UnitRace", L_UnitRace);
     lua_register(L, "UnitIsDead", L_UnitIsDead);
     lua_register(L, "UnitIsDeadOrGhost", L_UnitIsDeadOrGhost);
@@ -5078,9 +5097,15 @@ lua_pushboolean(L2, PLATFORM_MAC);
             return 1;
         }
 
-        // Return true if entity exists (means it's connected/online)
-        FWowEntity* Entity = Ctx->EntityManager->Find(UnitGuid);
-        lua_pushboolean(L2, Entity != nullptr);
+        const FWowEntity* Entity = Ctx->EntityManager->Find(UnitGuid);
+        bool Online=Entity!=nullptr;
+        if(Ctx->ConnectionManager)
+        {
+            const auto& H=Ctx->ConnectionManager->PacketHandler;
+            if(const auto* State=H.RemoteGroupMembers.Find(UnitGuid)) Online=(State->Status&1)!=0;
+            else for(const auto& Pair:H.RemoteGroupMembers) if(Pair.Value.Pet.Guid==UnitGuid) {Online=(Pair.Value.Status&1)!=0; break;}
+        }
+        lua_pushboolean(L2,Online);
         return 1;
     });
     lua_register(L, "UnitChannelInfo", [](lua_State* L2) -> int {
@@ -6220,9 +6245,9 @@ lua_pushboolean(L2, PLATFORM_MAC);
     lua_register(L, "AcceptGroup", [](lua_State* L2) -> int { return 0; });
     lua_register(L, "DeclineGroup", [](lua_State* L2) -> int { return 0; });
     lua_register(L, "UnitIsUnit", [](lua_State* L2) -> int {
-        const char* u1 = luaL_optstring(L2, 1, "");
-        const char* u2 = luaL_optstring(L2, 2, "");
-        lua_pushboolean(L2, strcmp(u1, u2) == 0);
+        if(lua_isnoneornil(L2,1) || lua_isnoneornil(L2,2)) {lua_pushnil(L2); return 1;}
+        const auto* First=ResolveUnit(L2,1); const auto* Second=ResolveUnit(L2,2);
+        if(First && Second && First->Guid && First->Guid==Second->Guid) lua_pushinteger(L2,1); else lua_pushnil(L2);
         return 1;
     });
     lua_register(L, "UnitIsGroupLeader", [](lua_State* L2) -> int {

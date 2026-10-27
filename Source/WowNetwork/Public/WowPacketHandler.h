@@ -278,6 +278,15 @@ public:
 
     /** Group/Party information */
     FWowGroupInfo GroupInfo;
+    TMap<uint64,FWowRemoteGroupMember> RemoteGroupMembers;
+    struct FPlayerIdentity {uint8 Race=0,Gender=0,Class=0; FString Realm;};
+    TMap<uint64,FPlayerIdentity> PlayerIdentities;
+    uint32 GroupRevision=0,RemoteGroupRevision=0;
+    FString PendingGroupInviter;
+    uint32 LastPartyCommandValue=0;
+    FWowEntity* FindUiUnit(uint64 Guid);
+    void CacheGroupUnit(uint64 Guid);
+    void ResetGroupState();
 
     /** Active raid target icon state */
     FWowRaidTargetState RaidTargets;
@@ -529,6 +538,10 @@ private:
     void HandleSetProficiency(FPacketReader& R);
     void HandleAccountDataTimes(FPacketReader& R);
     void HandlePartyMemberStats(FPacketReader& R);
+    void HandlePartyMemberStatsFull(FPacketReader& R);
+    void ParsePartyMemberStats(FPacketReader& R,bool Full);
+    void HandleGroupDestroyed(FPacketReader& R);
+    void HandleGroupLeader(FPacketReader& R);
     void HandleForcedReactions(FPacketReader& R);
 
     // ── NPC interaction handlers ────────────────────────────────────────────

@@ -1202,6 +1202,17 @@ struct FWowGuildRankAccess
 };
 
 // Group/Party member information
+struct FWowRemoteGroupMember
+{
+    // UI snapshots stay separate from streamed world objects and never spawn actors.
+    FWowPlayerEntity Player;
+    FWowUnitEntity Pet;
+    FString PetName;
+    uint16 Status=0,Zone=0;
+    uint32 Map=MAX_uint32,VehicleSeat=0,Revision=0;
+    bool HasPosition=false;
+};
+
 struct FWowGroupMember
 {
     uint64 Guid = 0;
@@ -1290,7 +1301,7 @@ struct FWowReadyCheckState
     double EndTimeSeconds = 0.0;
     TMap<uint64, uint8> Responses;
 
-    void Begin(uint64 InInitiatorGuid, double DurationSeconds = 35.0)
+    void Begin(uint64 InInitiatorGuid, double DurationSeconds = 30.0)
     {
         bActive = true;
         InitiatorGuid = InInitiatorGuid;
@@ -1338,6 +1349,10 @@ struct FWowGroupInfo
     uint8 SelfSubgroup = 0;
     uint8 SelfFlags = 0;
     uint8 SelfRoles = 0;
+    uint8 LootMethod=0,LootThreshold=2,DungeonDifficulty=0,RaidDifficulty=0,RaidHeroic=0;
+    uint64 MasterLooter=0;
+    uint32 LfgDungeon=0;
+    uint8 LfgState=0;
     TArray<FWowGroupMember> Members;
 
     void Clear()
@@ -1350,6 +1365,7 @@ struct FWowGroupInfo
         SelfSubgroup = 0;
         SelfFlags = 0;
         SelfRoles = 0;
+        LootMethod=0; LootThreshold=2; DungeonDifficulty=0; RaidDifficulty=0; RaidHeroic=0; MasterLooter=0; LfgDungeon=0; LfgState=0;
         Members.Empty();
     }
 
@@ -1367,6 +1383,14 @@ struct FWowGroupInfo
     {
         return !IsEmpty() && GroupType == 0;
     }
+
+    const FWowGroupMember* PartyMember(int32 Index) const
+    {
+        if(Index<0 || Index>=4) return nullptr;
+        for(const auto& Member:Members) if(Member.Group==SelfSubgroup && Index--==0) return &Member;
+        return nullptr;
+    }
+    int32 PartyCount() const {int32 Count=0; for(const auto& Member:Members) if(Member.Group==SelfSubgroup && Count<4) ++Count; return Count;}
 
     bool IsLfgGroup() const
     {

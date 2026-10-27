@@ -2,6 +2,8 @@
 #include "WowUiDressUpPreview.h"
 #include "WowPortraitCameraData.h"
 #include "WowEntityManager.h"
+#include "WowConnectionManager.h"
+#include "Formats/Dbc/DbcStore.h"
 #include "WowFrameManager.h"
 #include "LuaApi/LuaApiRegistry.h"
 #include "Components/CanvasPanel.h"
@@ -13,6 +15,7 @@
 #include "Components/CapsuleComponent.h"
 #include "Engine/SceneCapture2D.h"
 #include "Engine/TextureRenderTarget2D.h"
+#include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "Engine/SkeletalMesh.h"
 #include "Rendering/SkeletalMeshRenderData.h"
@@ -32,6 +35,8 @@ struct FWowUiModelRenderer::FSlot
     float Yaw=0;
     double NextCapture=0;
     bool bLogged=false;
+    bool Captured=false;
+    FString FallbackPortrait;
     TUniquePtr<FWowUiDressUpPreview> Preview;
     float ModelScale=1,BaseModelScale=1;
     FVector Position=FVector::ZeroVector;
@@ -82,7 +87,7 @@ void FWowUiModelRenderer::Configure(const FString& Key,UImage* Image,uint64 Guid
     Brush.SetResourceObject(Slot.Material.IsValid()?static_cast<UObject*>(Slot.Material.Get()):static_cast<UObject*>(Slot.Target.Get()));
     Brush.ImageSize=FVector2D(Portrait?128:256,Portrait?128:384);
     Image->SetBrush(Brush); Image->SetRenderOpacity(1); Image->SetColorAndOpacity(FLinearColor::White);
-    if(Owned->Guid!=Guid) { Owned->Guid=Guid; Owned->NextCapture=0; Owned->bLogged=false; }
+    if(Owned->Guid!=Guid) { Owned->Guid=Guid; Owned->NextCapture=0; Owned->bLogged=false; Owned->Captured=false; Owned->FallbackPortrait.Empty(); }
     Image->SetVisibility(Guid?ESlateVisibility::HitTestInvisible:ESlateVisibility::Collapsed);
 }
 
@@ -153,12 +158,32 @@ void FWowUiModelRenderer::Tick(UWorld* World)
     for(auto& Pair:Slots)
     {
         auto& S=*Pair.Value;
+        if(S.bPortrait && !Frames.IsRegionOwnerDrawn(Pair.Key)) continue;
         if(S.Handle>=0 && !Frames.IsFrameDrawn(S.Handle)) { if(S.Preview && S.Preview->GetActor()) S.Preview->ReleaseActor(); continue; }
         if(!S.Image.IsValid() || !S.Guid || Now<S.NextCapture) continue;
         if(S.Image->GetVisibility()==ESlateVisibility::Collapsed) continue;
         auto* Actor=Context.ResolveActor(S.Guid);
         if(S.Preview) { if(!S.Preview->Rebuild(World,Context,Mpq,Cache)) { S.NextCapture=Now+.2; continue; } Actor=S.Preview->GetActor(); }
-        if(!IsValid(Actor)) continue;
+        if(!IsValid(Actor))
+        {
+            if(S.bPortrait && Context.ConnectionManager)
+            {
+                const auto* Unit=Context.ConnectionManager->PacketHandler.FindUiUnit(S.Guid);
+                FString Art=TEXT("Interface\\CharacterFrame\\TemporaryPortrait-Pet");
+                if(Unit && Unit->IsPlayer())
+                {
+                    const auto* Race=FDbcStore::Get().ChrRaces().GetById(Unit->GetFieldByte(UnitField::BYTES_0,0));
+                    Art=Race?FString(TEXT("Interface\\CharacterFrame\\TemporaryPortrait-"))+(Unit->GetFieldByte(UnitField::BYTES_0,2)==1?TEXT("Female-"):TEXT("Male-"))+Race->ClientFileString:TEXT("Interface\\Icons\\INV_Misc_QuestionMark");
+                }
+                if(S.FallbackPortrait!=Art) if(auto* Texture=Frames.LoadUITexture(Art))
+                {
+                    S.FallbackPortrait=Art;
+                    if(S.Material.IsValid()) S.Material->SetTextureParameterValue(TEXT("Image"),Texture);
+                    else {auto Brush=S.Image->GetBrush(); Brush.SetResourceObject(Texture); S.Image->SetBrush(Brush);}
+                }
+            }
+            S.NextCapture=Now+.2; continue;
+        }
         if(!S.Camera.IsValid() || S.Camera->GetWorld()!=World)
         {
             FActorSpawnParameters Params; Params.ObjectFlags=RF_Transient;
@@ -245,6 +270,7 @@ void FWowUiModelRenderer::Tick(UWorld* World)
             S.bLogged=true;
         }
         Capture->SetWorldLocationAndRotation(Position,(Focus-Position).Rotation());
-        Capture->CaptureScene(); S.NextCapture=Now+.1;
+        if(S.Material.IsValid()) S.Material->SetTextureParameterValue(TEXT("Image"),S.Target.Get());
+        Capture->CaptureScene(); S.Captured=true; S.NextCapture=Now+.1;
     }
 }

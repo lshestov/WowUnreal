@@ -13,7 +13,7 @@ const FWowEntity* Controller(const FWowLuaContext* C,const FWowEntity* E)
         if(E->IsPlayer()) return E;
         const uint64 Owner=E->GetField64(UnitField::CHARMEDBY)?E->GetField64(UnitField::CHARMEDBY):E->GetField64(UnitField::SUMMONEDBY);
         if(!Owner || Owner==E->Guid || !C || !C->EntityManager) break;
-        E=C->EntityManager->Find(Owner);
+        E=C->ConnectionManager?C->ConnectionManager->PacketHandler.FindUiUnit(Owner):C->EntityManager->Find(Owner);
     }
     return nullptr;
 }

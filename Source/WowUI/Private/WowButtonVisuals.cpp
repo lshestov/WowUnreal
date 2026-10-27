@@ -77,7 +77,7 @@ FString FWowFrameManager::EnsureButtonTexture(int64 Handle,const FString& State)
     ButtonRegionHidden.Add(Texture.Name,Hidden);
     CreateLayerContent(Canvas,RegionOwner,Handle);
     if(auto* Image=GetNamedTexture(Texture.Name)) if(auto* Slot=Cast<UCanvasPanelSlot>(Image->Slot))
-        Slot->SetZOrder(State==TEXT("Highlight")?450:State.Contains(TEXT("Checked"))?400:200);
+        Slot->SetZOrder(State==TEXT("Highlight")?450:State.Contains(TEXT("Checked"))?400:100);
     RefreshButtonVisuals(Handle);
     return Texture.Name;
 }

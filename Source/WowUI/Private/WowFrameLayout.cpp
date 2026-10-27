@@ -23,6 +23,12 @@ bool FWowFrameManager::IsFrameDrawn(int64 Handle) const
     return true;
 }
 
+bool FWowFrameManager::IsRegionOwnerDrawn(const FString& Name) const
+{
+    const auto* Owner=RegionOwners.Find(Name);
+    return !Owner || IsFrameDrawn(FindFrame(*Owner));
+}
+
 bool FWowFrameManager::IsFrameHierarchyShown(int64 Handle) const
 {
     if(Handle<0 || !Frames.Contains(Handle)) return false;

@@ -626,6 +626,7 @@ void FWowFrameManager::MergeTemplate(FWowFrameDef& Target, const FWowFrameDef& T
 		Target.bHiddenSpecified = Template.bHiddenSpecified;
 	}
 	if (Target.ParentKey.IsEmpty()) Target.ParentKey = Template.ParentKey;
+	if (Target.Parent.IsEmpty()) Target.Parent = Template.Parent;
 
 	// EnableMouse / EnableKeyboard — inherit from template
 	if (Template.bEnableMouse && !Target.bEnableMouse) Target.bEnableMouse = true;

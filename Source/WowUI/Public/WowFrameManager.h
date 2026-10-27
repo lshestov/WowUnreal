@@ -127,6 +127,7 @@ public:
 	bool IsFrameVisible(int64 Handle) const;
 	bool IsFrameHierarchyShown(int64 Handle) const;
 	bool IsFrameDrawn(int64 Handle) const;
+	bool IsRegionOwnerDrawn(const FString& Name) const;
 
 	/** Set frame size and update widget */
 	void SetFrameSize(int64 Handle, float W, float H);

@@ -130,6 +130,7 @@ namespace
 		TArray<FLuaSavedGlobal> SavedGlobals;
 		SetWowHandlerGlobals(L, lua_gettop(L), 0, TArray<int32>(), SavedGlobals);
 
+		const double Started=FPlatformTime::Seconds();
 		if (lua_pcall(L, 1, 0, 0) != 0)
 		{
 			RestoreLuaGlobals(L, SavedGlobals);
@@ -147,6 +148,8 @@ namespace
 			RestoreLuaGlobals(L, SavedGlobals);
 		}
 
+		const double Milliseconds=(FPlatformTime::Seconds()-Started)*1000;
+		if(Milliseconds>100) UE_LOG(LogWowEvent,Log,TEXT("Slow OnLoad %s: %.1f ms"),*FrameName,Milliseconds);
 		return true;
 	}
 }
@@ -329,6 +332,7 @@ void FWowEventSystem::FireEventTyped(const FString& EventName,TFunctionRef<int32
 
 		TArray<FLuaSavedGlobal> SavedGlobals;
 		SetWowHandlerGlobals(L, SelfIndex, EventIndex, LegacyArgIndices, SavedGlobals);
+		const double Started=FPlatformTime::Seconds();
 		if (lua_pcall(L, NumArgs, 0, 0) != 0)
 		{
 			RestoreLuaGlobals(L, SavedGlobals);
@@ -341,6 +345,8 @@ void FWowEventSystem::FireEventTyped(const FString& EventName,TFunctionRef<int32
 			RestoreLuaGlobals(L, SavedGlobals);
 		}
 
+		const double Milliseconds=(FPlatformTime::Seconds()-Started)*1000;
+		if(Milliseconds>100) UE_LOG(LogWowEvent,Log,TEXT("Slow event %s on %s: %.1f ms"),*EventName,FrameManager?*FrameManager->GetFrameName(Handle):TEXT("unknown"),Milliseconds);
 		if ((HandleIndex & 15) == 15)
 		{
 			LuaVM->CollectGarbageIfNeeded(0.60);
@@ -1576,14 +1582,18 @@ void FWowEventSystem::EndOnLoadBatch()
 	const TArray<int64> PendingHandles = MoveTemp(DeferredOnLoadHandles);
 	DeferredOnLoadHandles.Reset();
 
+	int32 Index=0;
 	for (int64 Handle : PendingHandles)
 	{
 		LuaVM->BeginCallback();
-		LuaVM->CollectGarbageIfNeeded(.60);
+		if((Index&15)==0) LuaVM->CollectGarbageIfNeeded(.60);
 		const FString FrameName = FrameManager ? FrameManager->GetFrameName(Handle) : FString();
 		RunOnLoadHandler(L, FrameManager, ScriptRefs, FrameObjectRefs, Handle, FrameName);
-		LuaVM->StepGarbageCollector();
+		// Lua already collects while allocating. A 1 MiB explicit GC step for
+		// every small OnLoad repeatedly traverses the whole stock UI heap.
+		if((++Index&15)==0) LuaVM->StepGarbageCollector(32);
 	}
+	LuaVM->StepGarbageCollector(32);
 #endif
 }
 
@@ -1726,11 +1736,9 @@ FString FWowEventSystem::OpcodeToEvent(uint16 Opcode)
 	case 0x02C2: case 0x02C3: return TEXT("UPDATE_WORLD_STATES");
 
 	// Group / raid
-	case 0x007D: return TEXT("GROUP_ROSTER_UPDATE");             // SMSG_GROUP_LIST
+	case 0x007D: case 0x007C: case 0x0079: return FString(); // Typed group-state bridge.
 	case 0x0321: return TEXT("RAID_TARGET_UPDATE");              // MSG_RAID_TARGET_UPDATE
-	case 0x0322: return TEXT("READY_CHECK");                     // MSG_RAID_READY_CHECK
-	case 0x03AE: return TEXT("READY_CHECK_CONFIRM");             // MSG_RAID_READY_CHECK_CONFIRM
-	case 0x03C6: return TEXT("READY_CHECK_FINISHED");            // MSG_RAID_READY_CHECK_FINISHED
+	case 0x0322: case 0x03AE: case 0x03C6: return FString(); // Typed ready-check bridge.
 	case 0x0286: return TEXT("RAID_GROUP_ONLY");                 // SMSG_RAID_GROUP_ONLY
 
 	// Combat

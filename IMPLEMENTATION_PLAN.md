@@ -482,14 +482,18 @@ build, automation, native autologin and rendered screenshot verification):
     runtime head-socket cache. Verified Windows build, 117 regression tests
     (three existing warning tests), corrected fixture and final two-test check,
     and an 11-step/three-image NPC/animal/ReloadUI route; see Docs/Portraits.md.
-  - [?] Correct unit-frame reactions and selection colours from faction
+  - [x] Correct unit-frame reactions and selection colours from faction
     templates, directed reputation/At War, forced reactions, ownership, group,
     duel teams and PvP eligibility. Atomic forced-reaction packets; original
     party/pet membership API shapes. Verified Windows build, 119 regression
     tests (three existing warning tests), four final focused checks and a
     14-step/three-image native friendly/neutral/ReloadUI route with actual
     name-background colour assertions. See Docs/UnitReactions.md.
-  - [ ] Complete original party/raid frames, remote member state and group controls.
+  - [?] Complete original party/raid frames, remote member state and group controls.
+    Atomic roster/full/delta stats; remote players/pets and map positions; focus,
+    typed ready checks and acknowledged controls. Original template parenting,
+    name-label draw order and bounded Lua collection. Windows build, 123-test
+    regression and a final 55-step/six-image native route; see Docs/Groups.md.
   - [ ] Complete loot slots, roll windows and master-looter selection.
   - [ ] Complete guild/inspect/tabard panels and their server-backed state.
   - [ ] Complete PvP/battleground panels and queue/status/scoreboard protocol.

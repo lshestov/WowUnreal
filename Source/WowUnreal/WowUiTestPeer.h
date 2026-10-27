@@ -22,6 +22,10 @@ private:
     uint64 MasterGuid=0,CharacterGuid=0;
     bool Creating=false,Entering=false,Stopping=false,Deleting=false,Finished=false,Cleanup=false,WorldReady=false;
     double LastPing=0,StopAt=0;
+    bool Walking=false,WalkComplete=false;
+    int32 WalkRequest=0;
+    FVector WalkOrigin=FVector::ZeroVector;
+    double WalkAt=0,WalkDistance=0;
     void Status(const FString& Phase);
     void Fail(const TCHAR* Message);
 };

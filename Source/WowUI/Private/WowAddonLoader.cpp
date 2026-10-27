@@ -625,7 +625,9 @@ bool LoadAddonInternal(
 
 	if (EventSystem)
 	{
+		const double Started=FPlatformTime::Seconds();
 		EventSystem->EndOnLoadBatch();
+		UE_LOG(LogWowAddon,Log,TEXT("Addon %s OnLoad batch: %.1f ms"),*AddonName,(FPlatformTime::Seconds()-Started)*1000);
 	}
 
 	MarkAddonLoadedInternal(AddonName);

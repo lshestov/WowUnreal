@@ -31,6 +31,11 @@ compatibility work.
   editors, including wrapped links and background mouse passthrough. See
   [chat hyperlinks](ChatLinks.md).
 - Outdoor minimap and zone/continent map textures, player position and zoom.
+  Original POIs, tracking and WMO room/floor handling are described in
+  [maps](Maps.md), [minimap tracking](Minimap.md) and [indoor maps](IndoorMinimap.md).
+- Original party frames, raid roster, remote members/pets, focus, subgroup and
+  leadership controls, server-confirmed loot settings and ready checks. Remote
+  group positions also appear on the map/minimap; see [groups](Groups.md).
 - Game menu, window close order, logout and character re-entry, ReloadUI and
   saved per-character UI preferences. Windowed mode remains the initial mode.
 - Audio volume/toggles, window mode and resolution, gamma, texture quality,
@@ -96,7 +101,7 @@ The Windows Editor and packaged Development client are built from the same
 source tree. `WowUnreal.Hud`, `WowUnreal.UI`, `WowUnreal.Gameplay` and the related
 player, collision, equipment, lighting, rendering, traversal and performance
 suites cover both isolated controls and live protocol state. The interface
-regression set, including runtime animation, contains 119 tests. Existing optional character texture-layout
+regression set, including runtime animation, contains 123 tests. Existing optional character texture-layout
 DBC and test-fixture size warnings remain.
 
 Native gameplay probes exercise live server state and rendered UI at 1280x720
@@ -118,9 +123,7 @@ Full WoW UI compatibility is **not complete**. In particular:
 - Complete PvP/battleground, LFG and achievement panels and protocol support.
   Unit relationships and selection colours are implemented separately; see
   [faction/reputation reactions](UnitReactions.md).
-- Remote party-member map/minimap updates, alongside the broader group-window
-  work. Original map POIs, tracking and WMO room/floor handling are described in
-  [maps](Maps.md), [minimap tracking](Minimap.md) and [indoor maps](IndoorMinimap.md).
+- Loot roll/master-looter windows and the guild/inspect/tabard panels.
 - Legacy options without an engine-side implementation; persisting a CVar
   does not imply that its associated rendering or gameplay feature exists.
 - MP3 music decoding. WAV playback and finite UI-sound lifetime are supported.

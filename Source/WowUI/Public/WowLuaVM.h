@@ -25,7 +25,7 @@ public:
     bool CollectGarbageIfNeeded(double PressureThreshold = 0.75);
 
     /** Memory limit in bytes (default 128 MB, 0 = unlimited) */
-    void SetMemoryLimit(SIZE_T LimitBytes) { MemoryLimit = LimitBytes; }
+    void SetMemoryLimit(SIZE_T LimitBytes) { MemoryLimit = LimitBytes; PressureCollectionWatermark=0; }
     SIZE_T GetMemoryUsage() const { return MemoryUsed; }
     SIZE_T GetMemoryLimit() const { return MemoryLimit; }
 
@@ -43,6 +43,7 @@ private:
     // Memory sandbox
     SIZE_T MemoryUsed = 0;
     SIZE_T MemoryLimit = 128 * 1024 * 1024; // 128 MB default
+    SIZE_T PressureCollectionWatermark=0;
 
     // Execution timeout
     int32 InstructionLimit = 100000000; // 100M instructions — WoW FrameXML OnUpdate scripts need headroom

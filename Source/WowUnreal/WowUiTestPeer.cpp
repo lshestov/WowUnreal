@@ -44,7 +44,10 @@ void FWowUiTestPeer::Stop()
     if(Stopping || Finished) return;
     Stopping=true; StopAt=FPlatformTime::Seconds();
     if(!Client.IsValid()) { Finished=true; return; }
+    if(auto* Player=Client->PacketHandler.EntityManager.GetLocalPlayer()) Client->SendMovement(WowOpcode::MSG_MOVE_STOP,Player->Movement.Position,Player->Movement.Orientation,0);
+    Walking=false;
     Client->SendCancelTrade();
+    if(Client->PacketHandler.GroupInfo.FindMember(MasterGuid)) Client->SendRawPacket(0x007B,{});
     if(Client->GetState()==EWowSessionState::WorldInGame) Client->RequestLogout();
 }
 void FWowUiTestPeer::Tick()
@@ -89,9 +92,19 @@ void FWowUiTestPeer::Tick()
         if(!WorldReady)
         {
             WorldReady=true; TArray<uint8> Data; Data.Append(reinterpret_cast<const uint8*>(&CharacterGuid),8);
-            Client->SendRawPacket(0x026A,Data); Client->SendRawPacket(0x00FC,{}); Status(TEXT("in_world"));
+            Client->SendRawPacket(0x026A,Data); Client->SendRawPacket(0x00FC,{}); Client->SendNameQuery(int64(MasterGuid)); Status(TEXT("in_world"));
         }
         if(Now-LastPing>10) {Client->SendKeepAlive(); LastPing=Now;}
+        if(Walking && Now-WalkAt>=.1)
+        {
+            const double Elapsed=FMath::Min(Now-WalkAt,.25); WalkAt=Now;
+            WalkDistance=FMath::Min(WalkDistance+Elapsed*6.,double(FMath::Abs(WalkRequest)));
+            const FVector Position=WalkOrigin+FVector(FMath::Sign(WalkRequest)*WalkDistance,0,0);
+            const bool Done=WalkDistance>=FMath::Abs(WalkRequest);
+            if(auto* Player=Client->PacketHandler.EntityManager.GetLocalPlayer()) {Player->Movement.Position=Position; Player->Movement.Orientation=WalkRequest>=0?0:PI;}
+            Client->SendMovement(Done?WowOpcode::MSG_MOVE_STOP:WowOpcode::MSG_MOVE_HEARTBEAT,Position,WalkRequest>=0?0:PI,Done?0:1);
+            if(Done) {Walking=false; WalkComplete=true;}
+        }
         auto& T=Client->PacketHandler.CurrentTrade;
         if(T.TraderGuid && T.TraderGuid!=MasterGuid) {Client->SendCancelTrade(); return;}
         if(T.Status==WowTradeStatus::BEGIN_TRADE) Client->SendBeginTrade();
@@ -101,6 +114,43 @@ void FWowUiTestPeer::Tick()
 bool FWowUiTestPeer::Command(const FString& Action,int32 Slot,uint32 Value)
 {
     if(!Ready()) return false;
+    if(Action.StartsWith(TEXT("group_")))
+    {
+        auto& H=Client->PacketHandler; const auto& G=H.GroupInfo;
+        const FString MasterName=H.PlayerNameCache.FindRef(MasterGuid);
+        if(Action==TEXT("group_invite"))
+        {
+            if(MasterName.IsEmpty()) return false;
+            FTCHARToUTF8 Name(*MasterName); TArray<uint8> Bytes; Bytes.Append(reinterpret_cast<const uint8*>(Name.Get()),Name.Length()); Bytes.Add(0); Bytes.AddZeroed(4);
+            Client->SendRawPacket(0x006E,Bytes); return true;
+        }
+        if(Action==TEXT("group_accept"))
+        {
+            if(MasterName.IsEmpty() || H.PendingGroupInviter!=MasterName) return false;
+            TArray<uint8> Bytes; Bytes.AddZeroed(4); Client->SendRawPacket(0x0072,Bytes); H.PendingGroupInviter.Empty(); return true;
+        }
+        if(!G.FindMember(MasterGuid)) return false;
+        if(Action==TEXT("group_promote"))
+        {
+            if(G.LeaderGuid!=CharacterGuid) return false;
+            TArray<uint8> Bytes; Bytes.Append(reinterpret_cast<const uint8*>(&MasterGuid),8); Client->SendRawPacket(0x0078,Bytes); return true;
+        }
+        if(Action==TEXT("group_ready")) {if(!H.ReadyCheck.bActive) return false; Client->SendReadyCheckConfirm(true); return true;}
+        if(Action==TEXT("group_leave")) {Client->SendRawPacket(0x007B,{}); return true;}
+        if(Action==TEXT("group_walk"))
+        {
+            if(Slot==0 || FMath::Abs(Slot)>150 || H.CurrentMapId!=0) return false;
+            if(WalkComplete && WalkRequest==Slot) {WalkComplete=false; return true;}
+            if(!Walking)
+            {
+                const auto* Player=H.EntityManager.GetLocalPlayer(); if(!Player) return false;
+                WalkOrigin=Player->Movement.Position; WalkRequest=Slot; WalkAt=FPlatformTime::Seconds(); WalkDistance=0; Walking=true;
+                Client->SendMovement(WowOpcode::MSG_MOVE_START_FORWARD,WalkOrigin,Slot>=0?0:PI,1);
+            }
+            return false;
+        }
+        return false;
+    }
     auto& T=Client->PacketHandler.CurrentTrade;
     if(T.TraderGuid && T.TraderGuid!=MasterGuid) return false;
     if(Action==TEXT("initiate")) {Client->SendInitiateTrade(int64(MasterGuid)); return true;}

@@ -267,12 +267,17 @@ bool FWowLuaVM::CollectGarbageIfNeeded(double PressureThreshold)
 
 	const double ClampedThreshold = FMath::Clamp(PressureThreshold, 0.0, 1.0);
 	const SIZE_T PressureLimit = static_cast<SIZE_T>(static_cast<double>(MemoryLimit) * ClampedThreshold);
-	if (MemoryUsed < PressureLimit)
+	if (MemoryUsed < PressureLimit || (MemoryUsed<PressureCollectionWatermark && MemoryUsed<MemoryLimit*9/10))
 	{
 		return false;
 	}
 
 	CollectGarbage();
+	// A stock addon may retain more than the soft threshold. Recollecting that
+	// live heap on every callback cannot reclaim it and stalls every frame.
+	// Allow bounded growth before the next pressure collection; the allocator's
+	// hard limit and an emergency collection at 90% remain in force.
+	PressureCollectionWatermark=MemoryUsed+FMath::Max<SIZE_T>(1024*1024,MemoryLimit/20);
 	return true;
 #else
 	return false;
