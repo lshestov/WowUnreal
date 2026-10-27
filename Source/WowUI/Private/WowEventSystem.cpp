@@ -745,7 +745,7 @@ void FWowEventSystem::InitializeTextureRegion(const FWowTextureElement& Texture,
     {
         if(!Texture.File.IsEmpty()) { lua_pushstring(L,TCHAR_TO_UTF8(*Texture.File)); lua_setfield(L,-2,"__texture"); }
         lua_pushstring(L,TCHAR_TO_UTF8(*Layer)); lua_setfield(L,-2,"__drawLayer");
-        if(!Texture.Animations.IsEmpty()) { lua_pushnumber(L,Texture.VertexColor.A); lua_setfield(L,-2,"__alpha"); }
+        lua_pushnumber(L,Texture.Alpha); lua_setfield(L,-2,"__alpha");
         for(const auto& Definition:Texture.Animations) if(CreateAnimationGroup(Definition)) lua_pop(L,1);
         lua_pushstring(L,Texture.bAdditive?"ADD":"BLEND"); lua_setfield(L,-2,"__blendMode");
         const double Values[]={Texture.Left,Texture.Right,Texture.Top,Texture.Bottom}; const char* Keys[]={"__texLeft","__texRight","__texTop","__texBottom"};
@@ -1085,6 +1085,15 @@ void FWowEventSystem::CompileFrameScripts(int64 Handle, const FWowFrameDef& Def)
 		if (L && FrameRef)
 		{
 			lua_rawgeti(L, LUA_REGISTRYINDEX, *FrameRef); // push frame table
+            if(!Def.Animations.IsEmpty())
+            {
+                lua_getfield(L,-1,"__xmlAnimationsReady"); const bool Ready=lua_toboolean(L,-1)!=0; lua_pop(L,1);
+                if(!Ready)
+                {
+                    for(const auto& Animation:Def.Animations) if(CreateAnimationGroup(Animation)) lua_pop(L,1);
+                    lua_pushboolean(L,1); lua_setfield(L,-2,"__xmlAnimationsReady");
+                }
+            }
 
 			auto GetPreferredFieldKey = [&](const FString& ParentKey, const FString& ChildName) -> FString
 			{

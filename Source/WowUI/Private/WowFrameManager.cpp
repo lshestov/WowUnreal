@@ -516,6 +516,7 @@ void FWowFrameManager::SetFrameMouseEnabled(int64 Handle, bool bEnabled)
 	if (FFrameEntry* Entry = Frames.Find(Handle))
 	{
 		Entry->bMouseEnabled = bEnabled;
+        Entry->Def.bEnableMouse=bEnabled; Entry->Def.bHasEnableMouse=true;
 	}
 }
 
@@ -570,7 +571,7 @@ void FWowFrameManager::SetFrameRegisteredClicks(int64 Handle, const TArray<FStri
 bool FWowFrameManager::IsFrameMouseEnabled(int64 Handle) const
 {
 	const FFrameEntry* Entry = Frames.Find(Handle);
-	return Entry ? Entry->bMouseEnabled : false;
+    return Entry && (Entry->bMouseEnabled || (!Entry->Def.bHasEnableMouse && EventSystem && (EventSystem->HasFrameScript(Handle,TEXT("OnEnter")) || EventSystem->HasFrameScript(Handle,TEXT("OnLeave")))));
 }
 
 bool FWowFrameManager::IsFrameKeyboardEnabled(int64 Handle) const
@@ -632,7 +633,7 @@ void FWowFrameManager::MergeTemplate(FWowFrameDef& Target, const FWowFrameDef& T
 	if (Target.Parent.IsEmpty()) Target.Parent = Template.Parent;
 
 	// EnableMouse / EnableKeyboard — inherit from template
-	if (Template.bEnableMouse && !Target.bEnableMouse) Target.bEnableMouse = true;
+    if(!Target.bHasEnableMouse && Template.bHasEnableMouse) {Target.bEnableMouse=Template.bEnableMouse; Target.bHasEnableMouse=true;}
 	Target.bMovable|=Template.bMovable; Target.bResizable|=Template.bResizable; Target.bClampedToScreen|=Template.bClampedToScreen;
 	Target.bMotionScriptsWhileDisabled|=Template.bMotionScriptsWhileDisabled;
 	if(Target.HitInsets.Equals(FVector4(0,0,0,0))) Target.HitInsets=Template.HitInsets;
@@ -682,6 +683,13 @@ void FWowFrameManager::MergeTemplate(FWowFrameDef& Target, const FWowFrameDef& T
 	{
 		Target.NamedObjectGlobals.AddUnique(NamedObject);
 	}
+    TArray<FWowAnimationDef> MergedAnimations=Template.Animations;
+    for(const auto& Animation:Target.Animations)
+    {
+        MergedAnimations.RemoveAll([&](const auto& Base){return (!Animation.ParentKey.IsEmpty() && Animation.ParentKey==Base.ParentKey) || (!Animation.Name.IsEmpty() && Animation.Name==Base.Name);});
+        MergedAnimations.Add(Animation);
+    }
+    Target.Animations=MoveTemp(MergedAnimations);
 
 	// Children — template children are prepended
 	TArray<FWowFrameDef> MergedChildren = Template.Children;
@@ -843,7 +851,7 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 			TransparentBrush.DrawAs = ESlateBrushDrawType::NoDrawType;
 			ImgWidget->SetBrush(TransparentBrush);
 			auto Tint=Tex.VertexColor;
-            if(!Tex.Animations.IsEmpty()) { ImgWidget->SetRenderOpacity(Tint.A); Tint.A=1; }
+            ImgWidget->SetRenderOpacity(Tex.Alpha);
             ImgWidget->SetColorAndOpacity(Tint);
 			if (Tex.bHidden)
 			{
@@ -870,10 +878,15 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 				}
 			}
 
-			// If no file specified, hide until Lua sets a texture via SetTexture()
+			// XML Color defines a solid texture even without an image file.
 			if (Tex.File.IsEmpty())
 			{
-				ImgWidget->SetRenderOpacity(0.0f);
+				if(Tex.bHasColor)
+				{
+					FSlateBrush Solid; Solid.DrawAs=ESlateBrushDrawType::Box; Solid.ImageSize=FVector2D(1,1);
+					ImgWidget->SetBrush(Solid);
+				}
+				else ImgWidget->SetRenderOpacity(0.0f);
 			}
 
 			// Load the BLP texture if specified
@@ -1570,11 +1583,11 @@ int64 FWowFrameManager::CreateFrame(const FWowFrameDef& Def)
 	int64 Handle = NextHandle++;
 	FFrameEntry Entry;
 	Entry.Def = Resolved;
-	Entry.bMouseEnabled = Resolved.bEnableMouse ||
+	Entry.bMouseEnabled = Resolved.bHasEnableMouse ? Resolved.bEnableMouse : (Resolved.bEnableMouse ||
 		Resolved.Type == EWowFrameType::Button ||
 		Resolved.Type == EWowFrameType::CheckButton ||
 		Resolved.Type == EWowFrameType::EditBox ||
-		Resolved.Type == EWowFrameType::Slider;
+		Resolved.Type == EWowFrameType::Slider);
 	Entry.bKeyboardEnabled = Resolved.bEnableKeyboard ||
 		Resolved.Type == EWowFrameType::EditBox;
 	Entry.bMouseWheelEnabled = Resolved.Scripts.ContainsByPredicate([](const FWowScriptHandler& Script){return Script.Event==TEXT("OnMouseWheel");});
@@ -2149,7 +2162,7 @@ int64 FWowFrameManager::HitTestFrames(float ScreenX, float ScreenY,bool ForWheel
     {
         const auto& Entry = Pair.Value;
         if(!Entry.Widget.IsValid()) continue;
-        if(!Entry.bMouseEnabled && !(ForWheel && Entry.bMouseWheelEnabled))
+        if(!IsFrameMouseEnabled(Pair.Key) && !(ForWheel && Entry.bMouseWheelEnabled))
         {
             FString Data,Text;
             if(!const_cast<FWowFrameManager*>(this)->MessageHyperlinkAt(Pair.Key,FVector2D(ScreenX,ScreenY),Data,Text)) continue;

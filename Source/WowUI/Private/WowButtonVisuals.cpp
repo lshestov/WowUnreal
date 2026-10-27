@@ -18,6 +18,8 @@ FWowTextureElement FWowFrameManager::ResolveTexture(const FWowTextureElement& Te
         Name.TrimStartAndEndInline(); const auto* Source=TextureTemplates.Find(Name); if(!Source) continue;
         const auto Base=ResolveTexture(*Source,Depth+1);
         if(Result.File.IsEmpty()) Result.File=Base.File;
+        if(!Result.bHasColor && Base.bHasColor) {Result.VertexColor=Base.VertexColor; Result.bHasColor=true;}
+        if(!Result.bHasAlpha && Base.bHasAlpha) {Result.Alpha=Base.Alpha; Result.bHasAlpha=true;}
         if(Result.Width<=0) Result.Width=Base.Width; if(Result.Height<=0) Result.Height=Base.Height;
         if(Result.Anchors.IsEmpty()) Result.Anchors=Base.Anchors;
         if(Result.Animations.IsEmpty()) Result.Animations=Base.Animations;

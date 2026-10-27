@@ -129,13 +129,15 @@ bool FWowUiTestPeer::Command(const FString& Action,int32 Slot,uint32 Value)
     if(!Ready()) return false;
     if(Action.StartsWith(TEXT("lfg_")))
     {
-        const auto& H=Client->PacketHandler; const auto* P=H.EntityManager.GetLocalPlayer(); if(!P || !H.GroupInfo.FindMember(MasterGuid)) return false;
+        const auto& H=Client->PacketHandler; const auto* P=H.EntityManager.GetLocalPlayer();
+        const bool Solo=H.GroupInfo.IsEmpty() && (Action==TEXT("lfg_join") || Action==TEXT("lfg_proposal"));
+        if(!P || (!Solo && !H.GroupInfo.FindMember(MasterGuid))) return false;
         const uint8 Class=P->GetClassId(); const uint32 Available=9u|((Class==1 || Class==2 || Class==6 || Class==11)?2u:0u)|((Class==2 || Class==5 || Class==7 || Class==11)?4u:0u);
         const auto Packet=[&](uint32 Op,const TArray<uint8>& Bytes){Client->SendRawPacket(Op,Bytes); return true;};
         const auto Append=[](TArray<uint8>& Bytes,auto V){Bytes.Append(reinterpret_cast<const uint8*>(&V),sizeof(V));}; TArray<uint8> Bytes;
         if(Action==TEXT("lfg_join"))
         {
-            const auto* D=FDbcStore::Get().LfgUi().Dungeon(Value); if(!D || H.GroupInfo.LeaderGuid!=CharacterGuid || Slot<0 || (uint32(Slot)&~Available) || !(Slot&14)) return false;
+            const auto* D=FDbcStore::Get().LfgUi().Dungeon(Value); if(!D || (!Solo && H.GroupInfo.LeaderGuid!=CharacterGuid) || Slot<0 || (uint32(Slot)&~Available) || !(Slot&14)) return false;
             Append(Bytes,uint32(Slot)); Bytes.Add(0); Bytes.Add(0); Bytes.Add(1); Append(Bytes,D->Entry()); Bytes.Add(3); Bytes.AddZeroed(4); return Packet(0x35C,Bytes);
         }
         if(Action==TEXT("lfg_role"))
@@ -150,6 +152,7 @@ bool FWowUiTestPeer::Command(const FString& Action,int32 Slot,uint32 Value)
         }
         if(Action==TEXT("lfg_teleport")) {if(!H.GroupInfo.IsLfgGroup() || Slot<0 || Slot>1) return false; Bytes.Add(uint8(Slot)); return Packet(0x370,Bytes);}
         if(Action==TEXT("lfg_vote")) {if(!H.Lfg.Boot.Progress || Slot<0 || Slot>1) return false; if(H.Lfg.Boot.Voted) return true; Bytes.Add(uint8(Slot)); return Packet(0x36C,Bytes);}
+        if(Action==TEXT("lfg_boot")) {if(!H.GroupInfo.IsLfgGroup() || !Value || uint64(Value)==CharacterGuid || !H.GroupInfo.FindMember(Value)) return false; Append(Bytes,uint64(Value)); const char* Reason="Owned QA vote verification"; Bytes.Append(reinterpret_cast<const uint8*>(Reason),FCStringAnsi::Strlen(Reason)+1); return Packet(0x76,Bytes);}
         if(Action==TEXT("lfg_leave")) return Packet(0x35D,Bytes);
         return false;
     }

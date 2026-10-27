@@ -50,6 +50,7 @@ struct FTooltipState
     FVector2D AnchorOffset=FVector2D::ZeroVector;
 	int32 SpellId = 0;
 	FString UnitToken;
+    uint64 UnitGuid=0;
 	float MinimumWidth = 0.f;
 
     void ClearContent()
@@ -61,6 +62,7 @@ struct FTooltipState
         ItemName.Empty(); ItemId=0;
 		SpellId = 0;
 		UnitToken.Empty();
+        UnitGuid=0;
 	}
     void Clear()
     {

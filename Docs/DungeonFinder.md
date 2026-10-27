@@ -47,10 +47,37 @@ validated and inspected. The route explicitly collects Unreal garbage three
 times between map transfers. All five accounts/characters are disposable;
 pre-existing characters and inventories remain unchanged.
 
-Vote-kick, backfill and final-reward packets/APIs are implemented but still
-require native multiplayer verification. Separate-player matchmaking and
-raid-browser search/listings remain pending; the premade route does not
-establish those paths as complete.
+Separate-player matchmaking is verified in a rendered 135-step five-account
+route. The primary queues for a random classic dungeon, while four owned
+participants select Stockades with actual tank/healer/damage roles. The route
+checks a rejected kick vote, the stock reason popup, a successful kick,
+replacement queue statistics and an accepted replacement. It kills the final
+boss through the normal damage/reward path in the owned instance, checks the
+actual experience/money changes, renders the completion alert and item tooltip,
+and returns all participants to the world. Twelve captures were validated and
+inspected; all accounts/characters are disposable.
+
+The stock popup's SetLFGBootVote name aliases the typed vote API. Queue status
+from an earlier search is unavailable after requeueing until a fresh status
+arrives. A valid completion reward marks the matching group finished even when
+no separate party packet follows, ending queue/replacement controls.
+
+These routes also exposed missing general FrameXML behavior. Color-only XML
+textures now render masks, with region alpha separate from vertex color. Frame
+animation groups, inherited definitions and GetRegionParent execute the original
+alert animations. Hover handlers enable mouse input unless XML or Lua explicitly
+overrides it; reward frames receive real pointer events. Tooltip IsUnit compares
+the displayed GUID and clears with its content. Eight focused checks cover these
+paths, packet truncation/atomicity, queue freshness and original Lua contracts.
+The complete 142-check regression also passes (138 clean checks and the same
+four previously recorded optional-data/fixture warning cases).
+
+The current server clears a player's selected random dungeon when a replacement
+queue is cancelled (LFGMgr::LeaveLfg sets player state to NONE). This can prevent
+its later random-completion reward. The client sends the original cancellation
+packet; the successful reward route fills the replacement instead. This is a
+server behavior, not a client-side reward substitute. Raid-browser listings and
+achievement presentation remain separate pending tasks.
 
 ## Dungeon map prerequisite
 

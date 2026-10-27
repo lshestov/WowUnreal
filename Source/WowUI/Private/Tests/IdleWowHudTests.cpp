@@ -373,6 +373,7 @@ bool FHudPvpState::RunTest(const FString&)
     TestTrue(TEXT("Absent arena slots and pets have nil GUIDs instead of a truthy zero string"),F.Lua.ExecuteString(TEXT("assert(UnitGUID('arena1')=='0x000000000000002A' and UnitGUID('arena2')==nil and UnitGUID('arenapet1')==nil)")));
     Enemy.SetField(UnitField::LEVEL,80);
     TestTrue(TEXT("Unit tooltips expose real names/tokens and replace old owner anchors"),F.Lua.ExecuteString(TEXT("ArenaTooltip=CreateFrame('GameTooltip','ArenaTooltip',UIParent); ArenaTooltip:SetOwner(PvpRow,'ANCHOR_RIGHT'); ArenaTooltip:SetOwner(UIParent,'ANCHOR_NONE'); ArenaTooltip:SetPoint('BOTTOMRIGHT',UIParent,'BOTTOMRIGHT',-13,13); assert(ArenaTooltip:SetUnit('arena1') and ArenaTooltip:IsVisible()); local name,unit=ArenaTooltip:GetUnit(); assert(name=='Enemy' and unit=='arena1' and ArenaTooltip:NumLines()>=2 and ArenaTooltip:GetWidth()<400); assert(ArenaTooltipTextLeft1:GetText()=='Enemy'); ArenaTooltip:FadeOut(); assert(not ArenaTooltip:IsVisible() and not ArenaTooltip:IsOwned(UIParent) and ArenaTooltip:GetOwner()==nil); ArenaTooltip:SetOwner(UIParent,'ANCHOR_NONE'); assert(not ArenaTooltip:SetUnit('arena5') and not ArenaTooltip:IsVisible() and ArenaTooltip:GetUnit()==nil and not ArenaTooltip:IsOwned(UIParent))")));
+    TestTrue(TEXT("Tooltip unit identity uses the displayed GUID and clears with its content"),F.Lua.ExecuteString(TEXT("assert(ArenaTooltip:SetUnit('arena1') and ArenaTooltip:IsUnit('arena1') and not ArenaTooltip:IsUnit('player')); ArenaTooltip:ClearLines(); assert(not ArenaTooltip:IsUnit('arena1')); ArenaTooltip:Hide()")));
     TestTrue(TEXT("Arena tokens resolve real opponent health and identity"),F.Lua.ExecuteString(TEXT("assert(GetNumArenaOpponents()==1 and UnitName('arena1')=='Enemy' and UnitHealth('arena1')==123); ArenaHealthWatch=CreateFrame('Frame'); ArenaHealthWatch:RegisterEvent('UNIT_HEALTH'); ArenaHealthWatch:RegisterEvent('UNIT_RAGE'); ArenaHealthWatch:SetScript('OnEvent',function(self,event,unit) if unit=='arena1' then ArenaHealth=UnitHealth(unit) end end)")));
     WowLuaApi::UpdateGroupState(F.Lua.GetState()); TestTrue(TEXT("Arena frames receive initial unit health events"),F.Lua.ExecuteString(TEXT("assert(ArenaHealth==123)")));
     Enemy.SetField(UnitField::HEALTH,99); WowLuaApi::UpdateGroupState(F.Lua.GetState()); TestTrue(TEXT("Subsequent opponent damage updates the live arena frame"),F.Lua.ExecuteString(TEXT("assert(ArenaHealth==99)")));
@@ -2126,9 +2127,13 @@ bool FHudXmlTextureDefaults::RunTest(const FString&)
 {
     FHudFixture F;
     const char* Xml=R"XML(<Ui><Texture name="UnanchoredTextureTemplate" virtual="true"><Size x="32" y="16"/></Texture>
+      <Texture name="SolidTextureTemplate" virtual="true"><Color r="0" g="0" b="0" a="0.93"/></Texture>
       <Frame name="DefaultTextureOwner"><Size x="172" y="96"/><Anchors><Anchor point="CENTER"/></Anchors><Layers><Layer>
        <Texture name="$parentFill" inherits="UnanchoredTextureTemplate"/>
        <Texture name="$parentAnchored" inherits="UnanchoredTextureTemplate"><Anchors><Anchor point="BOTTOMRIGHT"/></Anchors></Texture>
+       <Texture name="$parentBlack" inherits="SolidTextureTemplate"/>
+       <Texture name="$parentWhite" inherits="SolidTextureTemplate"><Color r="1" g="1" b="1" a="1"/></Texture>
+       <Texture name="$parentDim" inherits="SolidTextureTemplate" alpha="0.25"/>
       </Layer></Layers></Frame></Ui>)XML";
     TArray<uint8> Bytes; Bytes.Append(reinterpret_cast<const uint8*>(Xml),FCStringAnsi::Strlen(Xml));
     const auto Parsed=FWowFrameXmlParser::ParseXml(Bytes,TEXT("XmlTextureDefaults"));
@@ -2138,6 +2143,13 @@ bool FHudXmlTextureDefaults::RunTest(const FString&)
     const auto* Anchored=Cast<UCanvasPanelSlot>(F.Frames.GetNamedTexture(TEXT("DefaultTextureOwnerAnchored"))->Slot);
     TestTrue(TEXT("XML PostLoad defaults stretch even explicitly sized unanchored textures"),Fill && Fill->GetAnchors().Maximum==FVector2D(1,1));
     TestTrue(TEXT("Explicit child anchors override the default of an inherited template"),Anchored && Anchored->GetAnchors().Maximum==FVector2D(0,0) && Anchored->GetSize()==FVector2D(32,16));
+    const auto* Black=F.Frames.GetNamedTexture(TEXT("DefaultTextureOwnerBlack"));
+    const auto* White=F.Frames.GetNamedTexture(TEXT("DefaultTextureOwnerWhite"));
+    TestTrue(TEXT("A color-only XML texture renders its inherited opaque mask"),Black && Black->GetBrush().DrawAs==ESlateBrushDrawType::Box && Black->GetRenderOpacity()==1 && Black->GetColorAndOpacity().Equals(FLinearColor(0,0,0,.93f)));
+    TestTrue(TEXT("An explicit white color overrides an inherited solid color"),White && White->GetColorAndOpacity()==FLinearColor::White);
+    TestTrue(TEXT("An empty texture without Color remains invisible"),F.Frames.GetNamedTexture(TEXT("DefaultTextureOwnerFill"))->GetRenderOpacity()==0);
+    TestTrue(TEXT("Region alpha is separate from the XML color's alpha"),F.Frames.GetNamedTexture(TEXT("DefaultTextureOwnerDim"))->GetRenderOpacity()==.25f && F.Frames.GetNamedTexture(TEXT("DefaultTextureOwnerDim"))->GetColorAndOpacity().A==.93f);
+    TestTrue(TEXT("Hover handlers enable frames while an explicit mouse override is respected"),F.Lua.ExecuteString(TEXT("HoverFrame=CreateFrame('Frame','HoverFrame',UIParent); assert(not HoverFrame:IsMouseEnabled()); HoverFrame:SetScript('OnEnter',function() end); assert(HoverFrame:IsMouseEnabled()); HoverFrame:EnableMouse(false); assert(not HoverFrame:IsMouseEnabled()); HoverFrame:SetScript('OnLeave',function() end); assert(not HoverFrame:IsMouseEnabled()); DefaultTextureOwnerDim:SetAlpha(.4); DefaultTextureOwnerDim:SetTexture(1,1,1); assert(math.abs(DefaultTextureOwnerDim:GetAlpha()-.4)<.001)")));
     TestTrue(TEXT("Lua-created regions still require their own anchors"),F.Lua.ExecuteString(TEXT("LocalTexture=DefaultTextureOwner:CreateTexture('LocalTexture'); LocalTexture:SetSize(32,16); assert(not LocalTexture:IsVisible() and LocalTexture:GetNumPoints()==0)")));
     return true;
 }
@@ -2166,8 +2178,10 @@ bool FHudTextureAnimations::RunTest(const FString&)
     FHudFixture F;
     const char* Xml=R"XML(<Ui><Texture name="SparkleTemplate" virtual="true"><Size x="13" y="13"/>
       <Animations><AnimationGroup name="$parentMotion" parentKey="motion"><Translation name="$parentTranslate" parentKey="translate" duration="1"/></AnimationGroup></Animations></Texture>
+      <Frame name="FrameAnimationTemplate" virtual="true"><Animations><AnimationGroup name="$parentAnimOut" parentKey="animOut"><Alpha parentKey="fade" duration="1" change="-1"><Scripts><OnFinished>self:GetRegionParent():Hide();</OnFinished></Scripts></Alpha></AnimationGroup></Animations></Frame>
+      <Frame name="FrameAnimationOwner" inherits="FrameAnimationTemplate"><Size x="100" y="100"/><Anchors><Anchor point="CENTER"/></Anchors></Frame>
       <Frame name="AnimationOwner"><Size x="200" y="200"/><Anchors><Anchor point="CENTER"/></Anchors>
-       <Layers><Layer><Texture name="$parentGlow" parentKey="glow"><Size x="50" y="50"/><Anchors><Anchor point="CENTER"/></Anchors><Color a="0"/>
+       <Layers><Layer><Texture name="$parentGlow" parentKey="glow" alpha="0"><Size x="50" y="50"/><Anchors><Anchor point="CENTER"/></Anchors><Color/>
         <Animations><AnimationGroup name="$parentPulse" parentKey="pulse"><Alpha duration="1" change="1"/><Scripts><OnFinished>self:GetParent():Hide(); self.finished=true;</OnFinished></Scripts></AnimationGroup></Animations>
        </Texture></Layer></Layers></Frame></Ui>)XML";
     TArray<uint8> Bytes; Bytes.Append(reinterpret_cast<const uint8*>(Xml),FCStringAnsi::Strlen(Xml));
@@ -2176,6 +2190,8 @@ bool FHudTextureAnimations::RunTest(const FString&)
     TestTrue(TEXT("Animation groups retain canonical parents and XML keys"),F.Lua.ExecuteString(TEXT(R"LUA(
         assert(AnimationOwner.glow.pulse:GetParent()==AnimationOwner.glow)
         assert(AnimationOwnerGlowPulse==AnimationOwner.glow.pulse)
+        assert(FrameAnimationOwner.animOut==FrameAnimationOwnerAnimOut and FrameAnimationOwner.animOut.fade:GetRegionParent()==FrameAnimationOwner)
+        FrameAnimationOwner:Show(); FrameAnimationOwner.animOut:Play()
         AnimationOwner.glow:Show(); AnimationOwner.glow.pulse:Play()
         Particle=AnimationOwner:CreateTexture('Particle','OVERLAY','SparkleTemplate'); Particle:SetPoint('CENTER',AnimationOwner,'CENTER',10,20)
         assert(Particle.motion.translate:GetParent()==Particle.motion)
@@ -2190,12 +2206,14 @@ bool FHudTextureAnimations::RunTest(const FString&)
     F.Frames.UpdateMouseHover((R.X+R.Z*.5f)*S,(R.Y+R.W*.5f)*S);
     TestTrue(TEXT("Alpha and translation progress using elapsed time"),F.Lua.ExecuteString(TEXT(R"LUA(
         assert(math.abs(AnimationOwner.glow:GetAlpha()-.5)<.001 and Particle.motion:IsPlaying())
+        assert(math.abs(FrameAnimationOwner:GetAlpha()-.5)<.001 and FrameAnimationOwner.animOut:IsPlaying())
         assert(AnimationButton.enters==1 and not AnimationButton.leaves)
         local _,_,_,x,y=Particle:GetPoint(); assert(math.abs(x-30)<.001 and math.abs(y-50)<.001)
     )LUA")));
     F.Events.TickOnUpdate(.6f);
     TestTrue(TEXT("Completion restores base transform and invokes the texture handler"),F.Lua.ExecuteString(TEXT(R"LUA(
         assert(not AnimationOwner.glow:IsShown() and AnimationOwner.glow.pulse.finished)
+        assert(not FrameAnimationOwner:IsShown() and FrameAnimationOwner.animOut:IsStopped())
         assert(not Particle.motion:IsPlaying()); local _,_,_,x,y=Particle:GetPoint(); assert(x==10 and y==20)
         local g=Particle:CreateAnimationGroup(); local a=g:CreateAnimation('Translation'); a:SetOffset(10,0); a:SetDuration(1)
         g:SetScript('OnStop',function(self) self.stopped=true end); g:Play(); g:Pause(); assert(g:IsPaused()); g:Play(); g:Stop(); assert(g.stopped and g:IsStopped()); g:Play(); Particle:StopAnimating(); assert(g:IsStopped() and select(2,Particle:GetAnimationGroups())==g)

@@ -533,20 +533,23 @@ build, automation, native autologin and rendered screenshot verification):
       Verified Windows build, packet/catalog automation and a native 40-step
       queue/cancel route with six validated and inspected captures. See
       Docs/DungeonFinder.md.
-    - [ ] Complete role checks, five-player proposals, teleport and group controls;
+    - [?] Complete role checks, five-player proposals, teleport and group controls;
       verify native disposable multiplayer routes and rendered screenshots.
       - [x] Premade role checks, accepted/declined proposals, original ready
         status and minimap teleport controls. Verified six focused checks and
         a 127-step five-account route with nine inspected captures and three
         explicit Unreal garbage collections between map transfers.
-      - [ ] Verify separate-player matchmaking, vote kicks, backfill and random
+      - [?] Verify separate-player matchmaking, vote kicks, backfill and random
         completion rewards through rendered multiplayer routes.
+        Verified eight focused checks and a 135-step five-account route with
+        twelve inspected captures: separate queues, both vote outcomes, reason
+        popup, replacement, real completion reward/tooltip and return.
       - [x] Load WDT global WMO maps and hold world entry until their collision
         is ready (required by Stockades/Ragefire Chasm dungeon transfers).
         Verified build, five focused checks and a native 30-step route through
         Stockades/Ragefire/world with three inspected, nonempty captures.
     - [ ] Complete original raid-browser listings, search results and controls.
-    - [?] Fix stock character-frame bootstrap identity and timed notification
+    - [x] Fix stock character-frame bootstrap identity and timed notification
       fading discovered during the dungeon-finder routes.
       Verified six focused checks and a 21-step native route with four
       inspected captures. See Docs/MessageFrames.md.

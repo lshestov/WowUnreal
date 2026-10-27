@@ -269,6 +269,28 @@ struct FWowGameplayProbe
             else if(Field==TEXT("item_count")) {Value=0; const uint32 Entry=Step->GetIntegerField(TEXT("entry")); for(const auto* Item:N->PacketHandler.EntityManager.GetInventoryItems()) if(Item->Entry==Entry) Value+=Item->GetStackCount();}
             if(Value!=int64(Step->GetNumberField(TEXT("value")))) {Failure=TEXT("QA peer assertion differs from server state"); Finish(C,false); return;} Done=true;
         }
+        else if(Op==TEXT("lfg_boot_owned") || Op==TEXT("lfg_finish_owned"))
+        {
+            TSet<uint64> Owned{Handler.EntityManager.LocalPlayerGuid};
+            for(const auto& Candidate:Peers) if(Candidate && Candidate->Ready()) Owned.Add(Candidate->Guid());
+            const auto& G=Handler.GroupInfo; const auto* Dungeon=FDbcStore::Get().LfgUi().Dungeon(G.LfgDungeon);
+            bool Valid=Owned.Num()==5 && Handler.CurrentMapId==34 && G.IsLfgGroup() && Dungeon && Dungeon->Id==12 && G.MemberCount>=4 && G.MemberCount<=5;
+            for(const auto& Member:G.Members) Valid&=Owned.Contains(Member.Guid);
+            if(!Valid) {Failure=TEXT("LFG fixture action requires an owned Stockades group"); Finish(C,false); return;}
+            if(Op==TEXT("lfg_boot_owned"))
+            {
+                if(G.MemberCount!=5 || !Peers[0] || !Peers[3] || !Peers[0]->Ready() || !Peers[3]->Ready() || Peers[0]->Get()->PacketHandler.GroupInfo.GroupGuid!=G.GroupGuid || Peers[3]->Get()->PacketHandler.GroupInfo.GroupGuid!=G.GroupGuid || Peers[3]->Guid()>MAX_uint32) {Failure=TEXT("LFG vote fixture membership changed"); Finish(C,false); return;}
+                Done=Peers[0]->Command(TEXT("lfg_boot"),0,uint32(Peers[3]->Guid()));
+            }
+            else
+            {
+                const auto* Target=Handler.EntityManager.Find(C.TargetGuid); const auto* Player=Handler.EntityManager.GetLocalPlayer();
+                if(!Target || !Player || !Target->IsUnit() || Target->IsPlayer() || Target->Entry!=1716 || FVector::DistSquared(Target->Movement.Position,Player->Movement.Position)>900) {Failure=TEXT("LFG completion target is not the owned instance boss"); Finish(C,false); return;}
+                // Deal damage through the normal reward path: .die can leave the
+                // creature's required player damage unmet and skip encounter credit.
+                Connection->SendChatMessage(TEXT(".damage 100000")); Done=true;
+            }
+        }
         else if(Op==TEXT("arena_finish_owned") || Op==TEXT("arena_damage_owned"))
         {
             const auto ActiveQueue=[](const FWowPacketHandler& H)->const FWowPvpState::FQueue* {for(const auto& Q:H.Pvp.Queues) if(Q.Status==3 && Q.Arena==2) return &Q; return nullptr;};

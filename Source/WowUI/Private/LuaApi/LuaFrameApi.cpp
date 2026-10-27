@@ -1022,6 +1022,11 @@ static int LF_GetFrameLevel(lua_State* L)
 }
 
 // frame:EnableMouse(enable)
+static int LF_IsMouseEnabled(lua_State* L)
+{
+    auto* C=WowLuaApi::GetContext(L);
+    lua_pushboolean(L,C && C->FrameManager && C->FrameManager->IsFrameMouseEnabled(GetFrameHandle(L,1))); return 1;
+}
 static int LF_EnableMouse(lua_State* L)
 {
 	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
@@ -1241,7 +1246,7 @@ static int LF_TextureSetTexture(lua_State* L)
 			Brush.DrawAs = ESlateBrushDrawType::Box;
 			Brush.ImageSize = FVector2D(1, 1);
 			Brush.TintColor = FSlateColor(FLinearColor(lua_tonumber(L,2), lua_tonumber(L,3), lua_tonumber(L,4), luaL_optnumber(L,5,1)));
-			Image->SetBrush(Brush); Image->SetRenderOpacity(1);
+			Image->SetBrush(Brush); lua_getfield(L,1,"__alpha"); Image->SetRenderOpacity(luaL_optnumber(L,-1,1)); lua_pop(L,1);
 		}
 		return 0;
 	}
@@ -3062,6 +3067,12 @@ static int LF_TooltipGetSpell(lua_State* L)
 }
 
 // tooltip:GetUnit() -- returns unit token for currently displayed unit
+static int LF_TooltipIsUnit(lua_State* L)
+{
+    auto* C=WowLuaApi::GetContext(L); const auto* Unit=WowLuaApi::ResolveUnitToken(L,2);
+    const auto* State=C && C->FrameManager?C->FrameManager->GetTooltipState(GetFrameHandle(L,1)):nullptr;
+    lua_pushboolean(L,State && Unit && State->UnitGuid && State->UnitGuid==Unit->Guid); return 1;
+}
 static int LF_TooltipGetUnit(lua_State* L)
 {
 	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
@@ -3115,6 +3126,7 @@ static int LF_TooltipSetUnit(lua_State* L)
 	const auto* Entity=WowLuaApi::ResolveUnitToken(L,2);
 	if(!Entity || !Entity->IsUnit()) {Ctx->FrameManager->TooltipClearLines(TooltipHandle); LF_Hide(L); lua_pushboolean(L,false); return 1;}
 	Ctx->FrameManager->TooltipSetUnit(TooltipHandle, UTF8_TO_TCHAR(UnitToken));
+    Ctx->FrameManager->GetTooltipState(TooltipHandle)->UnitGuid=Entity->Guid;
 	const auto Read=[&](const char* Function)->FString
 	{
 		lua_getglobal(L,Function); lua_pushvalue(L,2); lua_call(L,1,1);
@@ -3219,6 +3231,7 @@ static const luaL_Reg FrameMethods[] =
 
 	// Input
 	{"EnableMouse", LF_EnableMouse},
+    {"IsMouseEnabled", LF_IsMouseEnabled},
 	{"EnableKeyboard", LF_EnableKeyboard},
 	{"EnableMouseWheel", LF_EnableMouseWheel},
 	{"SetMovable", LF_SetMovable},
@@ -3551,6 +3564,7 @@ static const luaL_Reg FrameMethods[] =
 	{"GetItem", LF_TooltipGetItem},
 	{"GetSpell", LF_TooltipGetSpell},
 	{"GetUnit", LF_TooltipGetUnit},
+    {"IsUnit", LF_TooltipIsUnit},
 	{"SetItem", LF_TooltipSetItem},
 	{"SetLFGDungeonReward", WowLuaApi::SetLfgRewardTooltip},
     {"SetLFGCompletionReward", WowLuaApi::SetLfgCompletionRewardTooltip},

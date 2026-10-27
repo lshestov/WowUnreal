@@ -62,6 +62,9 @@ struct FWowTextureElement
 	bool bVirtual=false;
     bool bXmlDefaults=false; // PostLoadXML stretches textures lacking anchors.
 	bool bHasTexCoords=false;
+	bool bHasColor=false;
+    bool bHasAlpha=false;
+    float Alpha=1.f;
 	bool bAdditive = false;
     bool bSliderThumb=false;
 	FString Name;
@@ -166,6 +169,7 @@ struct WOWUI_API FWowFrameDef
 	bool bHiddenSpecified = false; // XML hidden="false" overrides a hidden template.
 	bool bSetAllPoints = false;
 	bool bEnableMouse = false;
+    bool bHasEnableMouse=false;
 	bool bEnableKeyboard = false;
 	bool bScrollChild = false;
 	bool bMovable=false,bResizable=false,bClampedToScreen=false;
@@ -186,6 +190,7 @@ struct WOWUI_API FWowFrameDef
 	TArray<FWowAnchor> Anchors;
 	TArray<FWowLayer> Layers;
 	TArray<FWowScriptHandler> Scripts;
+	TArray<FWowAnimationDef> Animations;
 	TArray<FString> NamedObjectGlobals;
 	TArray<FWowFrameDef> Children;
 

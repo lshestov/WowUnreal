@@ -20,6 +20,7 @@ end
 local common={}
 function common:GetName() return self.__name end
 function common:GetParent() return self.parent end
+function common:GetRegionParent() return self.kind=='AnimationGroup' and self.parent or self.parent.parent end
 function common:GetObjectType() return self.kind end
 function common:IsObjectType(t) return t==self.kind or t=='Animation' end
 function common:SetScript(event,f) self.scripts[event]=f end

@@ -57,6 +57,9 @@ bool FLfgPacketsTest::RunTest(const FString&)
     TestTrue(TEXT("Boot state retains victim, reason, votes and a monotonic deadline"),H.Lfg.Boot.Victim==42 && H.Lfg.Boot.Agrees==1 && H.Lfg.Boot.Reason==TEXT("Owned QA test") && H.Lfg.Boot.Deadline>FPlatformTime::Seconds());
     FLfgWire Final; Final.Add(uint32(258)).Add(uint32(6)).Add(uint8(0)).Add(uint32(1)).Add(uint32(100)).Add(uint32(200)).Add(uint32(0)).Add(uint32(0)).Add(uint8(1)).Add(uint32(51999)).Add(uint32(123)).Add(uint32(1)); Atomic(0x1FF,Final.B,[&]{return H.Lfg.RewardRevision;});
     TestTrue(TEXT("Completion reward skips the wire count without shifting amounts/items"),H.Lfg.RewardSpecific==6 && H.Lfg.FinalReward.Experience==200 && H.Lfg.FinalReward.Items[0].Id==51999);
+    H.GroupInfo.RawGroupType=WowGroupType::LFG; H.GroupInfo.LfgDungeon=6; H.Lfg.Party.Queued=true; H.Lfg.ContinueDungeon=6;
+    H.HandlePacket(0x1FF,Final.B);
+    TestTrue(TEXT("Completion ends replacement and queue state without requiring another group packet"),H.GroupInfo.LfgState==2 && !H.Lfg.Party.Queued && !H.Lfg.ContinueDungeon);
     H.ResetLfgState(); TestTrue(TEXT("Reset clears outstanding role, proposal, vote and reward snapshots"),!H.Lfg.Proposal.Valid && H.Lfg.RoleCheck.Members.IsEmpty() && !H.Lfg.Boot.Progress && H.Lfg.FinalReward.Items.IsEmpty());
     return true;
 }
@@ -83,6 +86,9 @@ bool FLfgUiTest::RunTest(const FString&)
     )LUA")));
     H.Lfg.Player.Has=true; H.Lfg.Player.Queued=true; H.Lfg.Player.Dungeons={258}; H.Lfg.Queue.Dungeon=258; H.Lfg.Queue.At=FPlatformTime::Seconds(); H.Lfg.Queue.Elapsed=30;
     TestTrue(TEXT("Queue mode comes from server and original table argument is updated in place"),Lua.ExecuteString(TEXT("assert(GetLFGMode()=='queued'); local queued={old=true}; GetLFGQueuedList(queued); assert(queued[258] and queued.old==nil); local valid,_,tank,heal,dps,kind,name,avg,tw,hw,dw,mw,at=GetLFGQueueStats(); assert(valid and tank==1 and heal==1 and dps==3 and kind==6 and avg==-1 and GetTime()-at>=30)")));
+    H.Lfg.Player.QueuedAt=H.Lfg.Queue.At+1;
+    TestTrue(TEXT("Requeueing cannot expose statistics from an earlier search"),Lua.ExecuteString(TEXT("assert(not GetLFGQueueStats())")));
+    H.Lfg.Player.QueuedAt=0;
     H.Lfg.Locks.Add(258,4); TestTrue(TEXT("Server restrictions override locally eligible levels"),Lua.ExecuteString(TEXT("assert(not IsLFGDungeonJoinable(258) and GetLFDChoiceLockedState()[258]==4 and GetRandomDungeonBestChoice()==nil)")));
     TestTrue(TEXT("Original encounter definitions are available"),D.LfgUi().Encounters().Num()>0);
     H.Lfg.RoleCheck.State=2; H.Lfg.RoleCheck.Dungeons={6}; H.Lfg.RoleCheck.Members.Add({1,0,20,false});
@@ -95,6 +101,7 @@ bool FLfgUiTest::RunTest(const FString&)
     H.Lfg.Proposal.Members[0].Answered=H.Lfg.Proposal.Members[0].Accepted=true; ++H.Lfg.ProposalRevision; WowLuaApi::UpdateLfgState(Lua.GetState()); TestTrue(TEXT("Only a received proposal answer changes readiness; updates do not reopen the dialog"),Lua.ExecuteString(TEXT("assert(select(7,GetLFGProposal())); assert(select(4,GetLFGProposalMember(1)) and select(5,GetLFGProposalMember(1))); assert(LfgEvents.LFG_PROPOSAL_SHOW==1 and LfgEvents.LFG_PROPOSAL_UPDATE==2)")));
     H.GroupInfo.RawGroupType=WowGroupType::LFG|WowGroupType::LFG_RESTRICTED; H.GroupInfo.LfgDungeon=6; H.CurrentMapId=36;
     TestTrue(TEXT("Restrictions and dungeon presence follow the real LFG group and selected map"),Lua.ExecuteString(TEXT("assert(HasLFGRestrictions() and IsInLFGDungeon())")));
+    TestTrue(TEXT("Original static-popup boot-vote API is registered"),Lua.ExecuteString(TEXT("assert(type(SetLFGBootVote)=='function' and SetLFGBootVote==VoteInBootProposal)")));
     WowLuaApi::ClearContext(Lua.GetState()); Lua.Shutdown(); return true;
 }
 #endif

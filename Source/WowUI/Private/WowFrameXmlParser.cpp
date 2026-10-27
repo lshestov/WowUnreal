@@ -485,6 +485,7 @@ static FWowTextureElement ParseTextureNode(const FXmlNode* Node)
     Tex.Inherits=Node->GetAttribute(TEXT("inherits")); Tex.bVirtual=Node->GetAttribute(TEXT("virtual")).Equals(TEXT("true"),ESearchCase::IgnoreCase);
 	Tex.ParentKey = Node->GetAttribute(TEXT("parentKey"));
     Tex.bHidden=Node->GetAttribute(TEXT("hidden")).Equals(TEXT("true"),ESearchCase::IgnoreCase);
+    {const FString Alpha=Node->GetAttribute(TEXT("alpha")); Tex.bHasAlpha=!Alpha.IsEmpty(); if(Tex.bHasAlpha) Tex.Alpha=FMath::Clamp(FCString::Atof(*Alpha),0.f,1.f);}
     Tex.bSetAllPoints=Node->GetAttribute(TEXT("setAllPoints")).Equals(TEXT("true"),ESearchCase::IgnoreCase);
     if(const auto* Anim=Node->FindChildNode(TEXT("Animations"))) for(const auto* C:Anim->GetChildrenNodes()) Tex.Animations.Add(ParseAnimationNode(C));
 	Tex.File = Node->GetAttribute(TEXT("file"));
@@ -518,6 +519,7 @@ static FWowTextureElement ParseTextureNode(const FXmlNode* Node)
 	if (ColorNode)
 	{
 		Tex.VertexColor = ParseColor(ColorNode);
+		Tex.bHasColor = true;
 	}
 
 	return Tex;
@@ -782,6 +784,7 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 	Def.bHiddenSpecified = bool(Node.attribute("hidden"));
 	Def.bSetAllPoints = Node.attribute("setAllPoints").as_bool(false);
 	Def.bEnableMouse = Node.attribute("enableMouse").as_bool(false);
+    Def.bHasEnableMouse=bool(Node.attribute("enableMouse"));
 	Def.bEnableKeyboard = Node.attribute("enableKeyboard").as_bool(false);
 	Def.bMovable=Node.attribute("movable").as_bool(false);
 	Def.bResizable=Node.attribute("resizable").as_bool(false);
@@ -885,6 +888,7 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 						T.bAdditive=FString(UTF8_TO_TCHAR(Tex.attribute("alphaMode").as_string())).Equals(TEXT("ADD"),ESearchCase::IgnoreCase);
 						T.bSetAllPoints = Tex.attribute("setAllPoints").as_bool(false);
 						T.bHidden = Tex.attribute("hidden").as_bool(false);
+                        T.bHasAlpha=bool(Tex.attribute("alpha")); T.Alpha=FMath::Clamp(Tex.attribute("alpha").as_float(1.f),0.f,1.f);
 
 						// Size
 						pugi::xml_node TexSize = Tex.child("Size");
@@ -955,6 +959,7 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 						pugi::xml_node TexColor = Tex.child("Color");
 						if (TexColor)
 						{
+							T.bHasColor = true;
 							T.VertexColor = FLinearColor(
 								TexColor.attribute("r").as_float(1.0f),
 								TexColor.attribute("g").as_float(1.0f),
@@ -1076,6 +1081,7 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 		else if (Tag == TEXT("Animations"))
 		{
 			CollectNamedObjectGlobals_Pugi(Child, Def.NamedObjectGlobals);
+            for(auto Animation:Child.children()) if(Animation.type()==pugi::node_element) Def.Animations.Add(ParseAnimationNode(Animation));
 		}
 		else if (Tag == TEXT("Frames"))
 		{
@@ -1231,6 +1237,7 @@ static FWowFrameDef ParseFrameNode(const FXmlNode* Node)
 
 	FString EnableMouse = Node->GetAttribute(TEXT("enableMouse"));
 	Def.bEnableMouse = EnableMouse.Equals(TEXT("true"), ESearchCase::IgnoreCase);
+    Def.bHasEnableMouse=!EnableMouse.IsEmpty();
 
 	FString EnableKeyboard = Node->GetAttribute(TEXT("enableKeyboard"));
 	Def.bEnableKeyboard = EnableKeyboard.Equals(TEXT("true"), ESearchCase::IgnoreCase);
@@ -1288,6 +1295,7 @@ static FWowFrameDef ParseFrameNode(const FXmlNode* Node)
 		else if (Tag.Equals(TEXT("Animations"), ESearchCase::IgnoreCase))
 		{
 			CollectNamedObjectGlobals(Child, Def.NamedObjectGlobals);
+            for(const auto* Animation:Child->GetChildrenNodes()) Def.Animations.Add(ParseAnimationNode(Animation));
 		}
 		else if (Tag.Equals(TEXT("Backdrop"), ESearchCase::IgnoreCase))
 		{

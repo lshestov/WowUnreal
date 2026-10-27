@@ -116,4 +116,10 @@ void FWowPacketHandler::HandleLfgReward(FPacketReader& R)
     // Reward() consumes the leading done flag; the final-reward packet inserts a count after it.
     TArray<uint8> Tail; Tail.Add(Done); Tail.Append(R.Data+R.Pos,R.Remaining()); FPacketReader Reader(Tail); if(!Reward(Reader,RewardData) || Reader.Remaining()) return;
     Lfg.RewardRandom=Random; Lfg.RewardSpecific=Specific; Lfg.FinalReward=MoveTemp(RewardData); ++Lfg.RewardRevision;
+    // Completion is authoritative even when no separate party update follows.
+    if(GroupInfo.IsLfgGroup() && (GroupInfo.LfgDungeon&0xFFFFFF)==Specific)
+    {
+        GroupInfo.LfgState=2; ++GroupRevision;
+        Lfg.Player.Queued=false; Lfg.Party.Queued=false; Lfg.ContinueDungeon=0; ++Lfg.Revision;
+    }
 }
