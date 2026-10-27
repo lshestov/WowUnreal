@@ -1,4 +1,5 @@
 #include "WowUiMapRenderer.h"
+#include "WowMapUi.h"
 #include "WowFrameManager.h"
 #include "LuaApi/LuaApiRegistry.h"
 #include "WowConnectionManager.h"
@@ -53,63 +54,6 @@ UTexture2D* FWowUiMapRenderer::Texture(const FString& Path)
     if(auto* Found=Tiles.Find(Path)) return Found->Get();
     Pending.AddUnique(Path); return nullptr;
 }
-void FWowUiMapRenderer::CurrentZone()
-{
-    if(!Context.ConnectionManager) return;
-    const auto PositionNow=Position(); const uint32 MapId=Context.ConnectionManager->PacketHandler.CurrentMapId;
-    const auto& Areas=FDbcStore::Get().WorldMapAreas(); double Smallest=DBL_MAX; AreaIndex=INDEX_NONE;
-    for(int32 I=0; I<Areas.Num(); ++I)
-    {
-        const auto& Area=Areas[I]; const auto P=Area.Project(PositionNow);
-        const double Size=FMath::Abs((Area.X1-Area.X2)*(Area.Y1-Area.Y2));
-        if(Area.MapId==MapId && P.X>=0 && P.X<=1 && P.Y>=0 && P.Y<=1 && Size<Smallest) { Smallest=Size; AreaIndex=I; }
-    }
-}
-void FWowUiMapRenderer::CreateMap()
-{
-    if(MapHandle>=0) return;
-    FWowFrameDef Def; Def.Name=TEXT("IdleWowWorldMapFrame"); Def.Parent=TEXT("UIParent"); Def.Width=1042; Def.Height=724;
-    Def.bHidden=true; Def.Strata=EWowFrameStrata::FULLSCREEN; Def.bEnableMouse=true;
-    FWowAnchor Center; Center.RelativeTo=Def.Parent; Def.Anchors.Add(Center);
-    FWowBackdrop Backdrop; Backdrop.BgFile=TEXT("Interface\\DialogFrame\\UI-DialogBox-Background"); Def.Backdrop=Backdrop;
-    FWowLayer Layer; FWowFontStringElement Title; Title.Name=TEXT("IdleWowMapTitle"); Title.Text=TEXT("Map"); Title.Width=800; Title.Height=24; Title.FontHeight=16;
-    FWowAnchor TitleAnchor; TitleAnchor.Point=TitleAnchor.RelativePoint=EWowAnchorPoint::TOP; TitleAnchor.OffsetY=-5; Title.Anchors.Add(TitleAnchor); Layer.FontStrings.Add(Title); Def.Layers.Add(Layer);
-    MapHandle=Frames.CreateFrame(Def);
-    FWowFrameDef Art; Art.Name=TEXT("IdleWowWorldMapArt"); Art.Parent=Def.Name; Art.Width=1002; Art.Height=668; Art.bEnableMouse=true;
-    FWowAnchor A; A.Point=A.RelativePoint=EWowAnchorPoint::TOPLEFT; A.OffsetX=20; A.OffsetY=-32; Art.Anchors.Add(A);
-    Art.Scripts.Add({TEXT("OnMouseUp"),TEXT("IdleWowMapCommand(4)"),TEXT("")});
-    const auto ArtHandle=Frames.CreateFrame(Art); MapImage=ImageFor(Frames,ArtHandle,1); MapTarget.Reset(Target(1024,768));
-    if(MapImage.IsValid()) { FSlateBrush Brush; Brush.DrawAs=ESlateBrushDrawType::Image; Brush.SetResourceObject(MapTarget.Get()); Brush.SetUVRegion(FBox2D(FVector2D(0,0),FVector2D(1002.f/1024,668.f/768))); MapImage->SetBrush(Brush); }
-    const TCHAR* Names[]={TEXT("IdleWowMapParent"),TEXT("IdleWowMapCurrent"),TEXT("IdleWowMapClose")};
-    const TCHAR* Labels[]={TEXT("Continent"),TEXT("Current zone"),TEXT("Close")};
-    for(int32 I=0; I<3; ++I)
-    {
-        FWowFrameDef Button; Button.Name=Names[I]; Button.Parent=Def.Name; Button.Type=EWowFrameType::Button; Button.Inherits=TEXT("UIPanelButtonTemplate"); Button.Width=130; Button.Height=22; Button.ButtonText=Labels[I]; Button.FrameLevel=10;
-        FWowAnchor B; B.Point=B.RelativePoint=EWowAnchorPoint::BOTTOMLEFT; B.OffsetX=20+I*145; B.OffsetY=2; Button.Anchors.Add(B);
-        Button.Scripts.Add({TEXT("OnClick"),FString::Printf(TEXT("IdleWowMapCommand(%d)"),I+1),TEXT("")}); Frames.CreateFrame(Button);
-    }
-}
-void FWowUiMapRenderer::Command(int32 Cmd)
-{
-    CreateMap(); const auto& Areas=FDbcStore::Get().WorldMapAreas();
-    if(Cmd==0) { const bool Visible=Frames.IsFrameHierarchyShown(MapHandle); if(!Visible) CurrentZone(); Frames.SetFrameVisible(MapHandle,!Visible); }
-    else if(Cmd==3) Frames.SetFrameVisible(MapHandle,false);
-    else if(Cmd==2) CurrentZone();
-    else if(Cmd==1 && Areas.IsValidIndex(AreaIndex))
-    {
-        const uint32 MapId=Areas[AreaIndex].MapId;
-        for(int32 I=0; I<Areas.Num(); ++I) if(Areas[I].MapId==MapId && Areas[I].AreaId==0) { AreaIndex=I; break; }
-    }
-    else if(Cmd==4 && Areas.IsValidIndex(AreaIndex))
-    {
-        const auto& Area=Areas[AreaIndex]; const auto R=Frames.GetLayoutRect(Frames.FindFrame(TEXT("IdleWowWorldMapArt")));
-        const auto P=Frames.GetPointerPosition()/Frames.GetScreenScale();
-        const FVector World(Area.X1-(P.Y-R.Y)/R.W*(Area.X1-Area.X2),Area.Y1-(P.X-R.X)/R.Z*(Area.Y1-Area.Y2),0);
-        for(int32 I=0; I<Areas.Num(); ++I) if(Areas[I].MapId==Area.MapId && Areas[I].AreaId)
-        { const auto Q=Areas[I].Project(World); if(Q.X>=0 && Q.X<=1 && Q.Y>=0 && Q.Y<=1) { AreaIndex=I; break; } }
-    }
-    NextDraw=0;
-}
 void FWowUiMapRenderer::Tick(UWorld* World)
 {
     if(!World || !Context.ConnectionManager || !Context.EntityManager || !Context.EntityManager->GetLocalPlayer()) return;
@@ -161,29 +105,39 @@ void FWowUiMapRenderer::Tick(UWorld* World)
         }
         UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(World,Draw);
     }
-    const auto& Areas=FDbcStore::Get().WorldMapAreas();
-    if(MapTarget.IsValid() && Frames.IsFrameDrawn(MapHandle) && Areas.IsValidIndex(AreaIndex))
+    DrawQuestBlobs(World);
+}
+void FWowUiMapRenderer::DrawQuestBlobs(UWorld* World)
+{
+    if(!Context.Map) return;
+    int32 Rendered=0;
+    for(const auto& Pair:Context.Map->Blobs)
     {
-        const auto& Area=Areas[AreaIndex];
-        if(auto* Title=Frames.GetNamedFontString(TEXT("IdleWowMapTitle"))) { const auto* Named=FDbcStore::Get().AreaTable().GetById(Area.AreaId); Title->SetText(FText::FromString(Named?Named->Name:Map?Map->Name:Area.Name)); }
-        UKismetRenderingLibrary::ClearRenderTarget2D(World,MapTarget.Get(),FLinearColor::Black);
+        const int64 Handle=Pair.Key; if(!Frames.IsFrameDrawn(Handle) || ++Rendered>8) continue;
+        auto& Image=BlobImages.FindOrAdd(Handle); auto& RenderTarget=BlobTargets.FindOrAdd(Handle);
+        if(!Image.IsValid()) {Image=ImageFor(Frames,Handle,-10); if(!Image.IsValid()) continue;}
+        if(!RenderTarget.IsValid()) {RenderTarget.Reset(Target(1024,768)); FSlateBrush B; B.DrawAs=ESlateBrushDrawType::Image; B.SetResourceObject(RenderTarget.Get()); B.SetUVRegion(FBox2D(FVector2D::ZeroVector,FVector2D(1002./1024,668./768))); Image->SetBrush(B);}
+        const auto& Style=Pair.Value; const auto Shapes=WowMapUi::QuestShapes(&Context,Style);
+        UKismetRenderingLibrary::ClearRenderTarget2D(World,RenderTarget.Get(),FLinearColor::Transparent);
+        if(Shapes.IsEmpty()) continue;
+        auto* Fill=Texture(Style.FillTexture); auto* Border=Texture(Style.BorderTexture);
         UCanvas* Canvas=nullptr; FVector2D Size; FDrawToRenderTargetContext Draw;
-        UKismetRenderingLibrary::BeginDrawCanvasToRenderTarget(World,MapTarget.Get(),Canvas,Size,Draw);
-        if(Canvas)
+        UKismetRenderingLibrary::BeginDrawCanvasToRenderTarget(World,RenderTarget.Get(),Canvas,Size,Draw);
+        if(Canvas) for(const auto& Shape:Shapes)
         {
-            for(int32 I=0; I<12; ++I) if(auto* Tile=Texture(FString::Printf(TEXT("Interface\\WorldMap\\%s\\%s%d.blp"),*Area.Name,*Area.Name,I+1))) Canvas->K2_DrawTexture(Tile,FVector2D((I%4)*256,(I/4)*256),FVector2D(256),FVector2D::ZeroVector,FVector2D::UnitVector,FLinearColor::White,BLEND_Opaque);
-            for(const auto& Overlay:FDbcStore::Get().WorldMapOverlays()) if(Overlay.MapAreaId==Area.Id)
+            if(Shape.Points.Num()<3) continue; const auto Pixels=[](const FVector2D& P){return P*FVector2D(1002,668);};
+            TArray<FCanvasUVTri> Triangles; const FLinearColor Color(1,1,1,Style.FillAlpha/255);
+            for(int32 I=1;I<Shape.Points.Num()-1;++I)
             {
-                bool Explored=false;
-                for(uint32 Id:Overlay.Areas) if(const auto* A=FDbcStore::Get().AreaTable().GetById(Id); A && A->ExploreFlag<4096)
-                    Explored|=(Player->GetField(PlayerField::BASE+0x037D+A->ExploreFlag/32)&(1u<<(A->ExploreFlag%32)))!=0;
-                if(!Explored) continue;
-                const int32 Columns=FMath::DivideAndRoundUp(Overlay.Width,256),Rows=FMath::DivideAndRoundUp(Overlay.Height,256);
-                for(int32 Y=0; Y<Rows; ++Y) for(int32 X=0; X<Columns; ++X)
-                    if(auto* Tile=Texture(FString::Printf(TEXT("Interface\\WorldMap\\%s\\%s%d.blp"),*Area.Name,*Overlay.Name,Y*Columns+X+1)))
-                        Canvas->K2_DrawTexture(Tile,FVector2D(Overlay.X+X*256,Overlay.Y+Y*256),FVector2D(Tile->GetSizeX(),Tile->GetSizeY()),FVector2D::ZeroVector,FVector2D::UnitVector,FLinearColor::White,BLEND_Translucent);
+                FCanvasUVTri T; T.V0_Pos=Pixels(Shape.Points[0]); T.V1_Pos=Pixels(Shape.Points[I]); T.V2_Pos=Pixels(Shape.Points[I+1]);
+                T.V0_UV=T.V0_Pos/64; T.V1_UV=T.V1_Pos/64; T.V2_UV=T.V2_Pos/64; T.V0_Color=T.V1_Color=T.V2_Color=Color; Triangles.Add(T);
             }
-            const auto P=Area.Project(Pos); if(Area.MapId==MapId && P.X>=0 && P.X<=1 && P.Y>=0 && P.Y<=1) Arrow(Canvas,P*FVector2D(1002,668),-Facing,10);
+            if(Fill) Canvas->K2_DrawTriangle(Fill,Triangles);
+            for(int32 I=0;I<Shape.Points.Num();++I)
+            {
+                const auto A=Pixels(Shape.Points[I]),B=Pixels(Shape.Points[(I+1)%Shape.Points.Num()]),D=B-A;
+                if(Border) Canvas->K2_DrawTexture(Border,A,FVector2D(D.Length(),8*Style.BorderScale),FVector2D::ZeroVector,FVector2D::UnitVector,FLinearColor(1,1,1,Style.BorderAlpha/255),BLEND_Translucent,FMath::RadiansToDegrees(FMath::Atan2(D.Y,D.X)),FVector2D(0,.5));
+            }
         }
         UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(World,Draw);
     }

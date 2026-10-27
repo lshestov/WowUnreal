@@ -794,6 +794,7 @@ struct WOWNETWORK_API FWowEntity
     uint32 TypeMask = 0;  // WowTypeMask bitmask
     uint32 Entry = 0;
     float Scale = 1.0f;
+    uint32 VehicleId=0;
 
     FWowMovementInfo Movement;
 

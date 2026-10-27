@@ -124,7 +124,7 @@ void UWowUIManager::InitializeCore()
 	ModelRenderer=MakeShared<FWowUiModelRenderer>(*FrameManager,*UIContext);
 	MapRenderer=MakeShared<FWowUiMapRenderer>(*FrameManager,*UIContext);
     CursorRenderer=MakeShared<FWowUiCursorRenderer>(*FrameManager,*UIContext);
-	FrameManager->OnMapCommand=[this](int32 Command){ MapRenderer->Command(Command); };
+	FrameManager->OnMapCommand=[this](int32 Command){ MapCommand(Command); };
 	FrameManager->OnPortrait=[this](const FString& Name,uint64 Guid){ ModelRenderer->Portrait(Name,Guid); };
 	FrameManager->OnUnitModel=[this](int64 Handle,uint64 Guid){ ModelRenderer->Model(Handle,Guid); };
 	FrameManager->OnModelFacing=[this](int64 Handle,float Yaw){ ModelRenderer->Facing(Handle,Yaw); };
@@ -453,6 +453,7 @@ void UWowUIManager::SetAreaResolver(TFunction<uint32()> Resolver) {if(UIContext)
 
 void UWowUIManager::TickWorldImages(UWorld* World)
 {
+    if(bUILoaded && LuaVM) WowLuaApi::UpdateMapArt(LuaVM->GetState());
     if(bUILoaded && CursorRenderer && LuaVM) CursorRenderer->Tick(LuaVM->GetState());
     if(ModelRenderer) ModelRenderer->Tick(World);
     if(MapRenderer) MapRenderer->Tick(World);
@@ -470,7 +471,15 @@ void UWowUIManager::TickWorldImages(UWorld* World)
     }
 }
 
-void UWowUIManager::MapCommand(int32 Command) { if(MapRenderer) MapRenderer->Command(Command); }
+void UWowUIManager::MapCommand(int32 Command)
+{
+    if(!LuaVM) return;
+    const TCHAR* Script=Command==3?TEXT("if WorldMapFrame then HideUIPanel(WorldMapFrame) end"):
+        Command==2?TEXT("SetMapToCurrentZone()"):
+        Command==1?TEXT("ZoomOut()"):
+        TEXT("if WorldMapFrame then if WorldMapFrame:IsShown() then HideUIPanel(WorldMapFrame) else ShowUIPanel(WorldMapFrame) end end");
+    LuaVM->ExecuteString(Script,TEXT("=world_map_command"));
+}
 
 void UWowUIManager::ProcessPendingReload()
 {
@@ -483,6 +492,7 @@ void UWowUIManager::ProcessPendingReload()
     FWowSavedVariables::SaveAll(LuaVM->GetState());
     auto Resolver=UIContext->ResolveActor;
     auto AreaResolver=UIContext->ResolveArea;
+    auto FloorResolver=UIContext->ResolveDungeonFloor;
     auto Rows=UIContext->SelectedRows;
     auto Action=FrameManager->OnSecureActionDispatch;
     auto Spell=FrameManager->OnSecureSpellDispatch;
@@ -495,6 +505,7 @@ void UWowUIManager::ProcessPendingReload()
     InitializeCore();
     UIContext->ResolveActor=MoveTemp(Resolver); UIContext->SelectedRows=MoveTemp(Rows);
     UIContext->ResolveArea=MoveTemp(AreaResolver);
+    UIContext->ResolveDungeonFloor=MoveTemp(FloorResolver);
     FrameManager->OnSecureActionDispatch=Action; FrameManager->OnSecureSpellDispatch=Spell;
     FrameManager->Initialize(RootCanvas);
     SetConnectionManager(ConnectionManager);

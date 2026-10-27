@@ -14,6 +14,7 @@
 #include "WowSavedVariables.h"
 #include "WowAddonLoader.h"
 #include "../WowUiCursorRenderer.h"
+#include "../WowMapUi.h"
 #include "Formats/DbcParser.h"
 #include "Misc/Paths.h"
 #include "HAL/FileManager.h"
@@ -565,6 +566,78 @@ bool FHudAreaZones::RunTest(const FString&)
     TestTrue(TEXT("Real Outland areas enable flight conditions"),F.Lua.ExecuteString(TEXT("assert(GetZoneText()=='Hellfire Peninsula' and IsFlyableArea())")));
     H.CurrentMapId=571; Area=4395;
     TestTrue(TEXT("Dalaran respects its actual no-fly area flag"),F.Lua.ExecuteString(TEXT("assert(GetZoneText()=='Dalaran' and not IsFlyableArea())")));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudFrameReparent,"WowUnreal.Hud.FrameReparentVisibility",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudFrameReparent::RunTest(const FString&)
+{
+    FHudFixture F;
+    return TestTrue(TEXT("Reparenting updates child traversal, event visibility and descendant geometry without stale links"),F.Lua.ExecuteString(TEXT(R"LUA(
+        TreeA=CreateFrame('Frame','TreeA',UIParent); TreeA:SetSize(200,200); TreeA:SetPoint('TOPLEFT',UIParent,'TOPLEFT',0,0)
+        TreeB=CreateFrame('Frame','TreeB',UIParent); TreeB:SetSize(100,100); TreeB:SetPoint('TOPLEFT',UIParent,'TOPLEFT',300,0)
+        TreeChild=CreateFrame('Frame','TreeChild',TreeA); TreeChild:SetSize(40,40); TreeChild:SetPoint('TOPLEFT',TreeB,'TOPLEFT',10,-10)
+        TreeLeaf=CreateFrame('Frame','TreeLeaf',TreeChild); TreeLeaf:SetAllPoints(TreeChild)
+        assert(TreeA:GetNumChildren()==1 and TreeB:GetNumChildren()==0 and TreeChild:GetNumChildren()==1)
+        TreeShows=0; TreeHides=0; TreeLeaf:SetScript('OnShow',function() TreeShows=TreeShows+1 end); TreeLeaf:SetScript('OnHide',function() TreeHides=TreeHides+1 end)
+        TreeChild:SetParent(TreeB); assert(TreeA:GetNumChildren()==0 and TreeB:GetNumChildren()==1 and TreeB:GetChildren()==TreeChild)
+        TreeA:Hide(); assert(TreeLeaf:IsVisible() and TreeHides==0)
+        TreeB:Hide(); assert(not TreeLeaf:IsVisible() and TreeHides==1); TreeB:Show(); assert(TreeLeaf:IsVisible() and TreeShows==1)
+        TreeB:SetScale(.5); assert(math.abs(TreeChild:GetWidth()-40)<.001 and math.abs(TreeLeaf:GetWidth()-40)<.001)
+    )LUA")));
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudWorldMap,"WowUnreal.Hud.WorldMapApi",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudWorldMap::RunTest(const FString&)
+{
+    FString Path; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false; FMpqManager Mpq; if(!Mpq.Initialize(Path)) return false;
+    auto& Dbc=FDbcStore::Get(); if(!Dbc.IsLoaded()) Dbc.LoadAll(Mpq); if(!Dbc.IsDeferredLoaded()) Dbc.LoadDeferred(Mpq);
+    FWowAssetCache Cache; FHudFixture F; F.Frames.SetMpqManager(&Mpq); F.Frames.SetAssetCache(&Cache); TStrongObjectPtr<UWowConnectionManager> C(NewObject<UWowConnectionManager>()); auto& H=C->PacketHandler; H.EntityManager.LocalPlayerGuid=1;
+    H.EntityManager.PromoteToTyped(1,WowTypeMask::PLAYER|WowTypeMask::UNIT); auto* P=H.EntityManager.GetLocalPlayer(); P->Movement.Position={-8895,-88,86}; P->SetField(UnitField::HEALTH,449);
+    F.Context.ConnectionManager=C.Get(); F.Context.EntityManager=&H.EntityManager; F.Context.ResolveArea=[]{return 9u;};
+    TestTrue(TEXT("Original map selection uses sorted localized zones and raw DBC IDs"),F.Lua.ExecuteString(TEXT(R"LUA(
+        SetMapToCurrentZone(); assert(GetCurrentMapAreaID()==31 and GetCurrentMapContinent()==2 and GetCurrentMapZone()>0)
+        assert(GetMapInfo()=='Elwynn' and select('#',GetMapInfo())==3)
+        local x,y=GetPlayerMapPosition('player'); assert(x>0 and x<1 and y>0 and y<1); assert(GetPlayerMapPosition('target')==0)
+        local zone=GetCurrentMapZone(); assert(select(zone,GetMapZones(2))=='Elwynn Forest')
+        SetMapZoom(2); assert(GetMapInfo()=='Azeroth' and GetCurrentMapZone()==0 and GetCurrentMapAreaID()==15)
+        local x,y=GetPlayerMapPosition('player'); assert(x>0 and x<1 and y>0 and y<1)
+        assert(UpdateMapHighlight(x,y)=='Elwynn Forest','physical continent hit mask'); ProcessMapClick(x,y); assert(GetMapInfo()=='Elwynn'); SetMapZoom(2)
+        ZoomOut(); assert(GetCurrentMapContinent()==0 and GetMapInfo()==nil); x,y=GetPlayerMapPosition('player'); assert(x>0 and x<1 and y>0 and y<1)
+        ZoomOut(); assert(GetCurrentMapContinent()==-1 and GetPlayerMapPosition('player')==0)
+        SetMapByID(504); assert(GetCurrentMapAreaID()==505 and GetMapInfo()=='Dalaran' and GetCurrentMapDungeonLevel()==1 and GetNumDungeonMapLevels()==2)
+        SetDungeonMapLevel(2); assert(GetCurrentMapDungeonLevel()==2); SetMapToCurrentZone(); assert(GetCurrentMapAreaID()==31)
+        local f=CreateFrame('QuestPOIFrame','MapBlobFixture',UIParent); assert(f:GetObjectType()=='QuestPOIFrame')
+        f:SetFillTexture('Interface\\WorldMap\\UI-QuestBlob-Inside'); f:SetBorderTexture('Interface\\WorldMap\\UI-QuestBlob-Outside')
+        f:SetAlpha(255); assert(f:GetAlpha()==1); f:SetFillAlpha(500); f:SetBorderAlpha(-4); f:SetMergeThreshold(1); f:SetNumSplinePoints(1)
+        CreateWorldMapArrowFrame(UIParent); assert(PlayerArrowFrame and PlayerArrowEffectFrame)
+        assert(GetCVarDefault('questPOI')=='1' and GetCVarBool('questPOI')); SetupFullscreenScale(MapBlobFixture); assert(MapBlobFixture:GetScale()>0 and MapBlobFixture:GetScale()<=1)
+        assert(GetNumBattlefieldVehicles()==0 and GetBattlefieldVehicleInfo(1)==nil)
+    )LUA")));
+    FWowQuestLogEntry Q; Q.QuestId=783; H.QuestLog.Add(Q); FWowQuestTemplate T; T.Id=783; T.CreatureId[0]=1; T.CreatureCount[0]=5; T.CompletedText=TEXT("Return to Marshal McBride"); H.QuestTemplates.Add(783,T);
+    FWowPacketHandler::FQuestPoi Poi; Poi.MapId=0; Poi.AreaId=30; Poi.Objective=0; Poi.Points={{-8900,-100},{-8880,-100},{-8880,-80},{-8900,-80}}; H.QuestPois.Add(783,{Poi});
+    auto ReturnPoi=Poi; ReturnPoi.Objective=-1; ReturnPoi.AreaId=301; H.QuestPois[783].Insert(ReturnPoi,0);
+    TestTrue(TEXT("Real quest polygons and objective indexes feed original map APIs"),F.Lua.ExecuteString(TEXT(R"LUA(
+        assert(QuestMapUpdateAllQuests()==1); local q,i=QuestPOIGetQuestIDByVisibleIndex(1); assert(q==783 and i==1)
+        SelectQuestLogEntry(2); assert(GetQuestLogCompletionText(1)=='Return to Marshal McBride' and GetQuestLogCompletionText()=='','explicit quest index must not read the selection')
+        QuestPOIUpdateIcons(); local complete,x,y,objective=QuestPOIGetIconInfo(783); assert(not complete and x>0 and y>0 and objective==0)
+        assert(GetQuestWorldMapAreaID(783)==30); MapBlobFixture:DrawQuestBlob(783,true)
+        local log,n=MapBlobFixture:UpdateMouseOverTooltip(x,y); assert(log==1 and n==1 and MapBlobFixture:GetTooltipIndex(1)==0)
+        MapBlobFixture:DrawQuestBlob(783,false); assert(MapBlobFixture:UpdateMouseOverTooltip(x,y)==nil)
+        SetMapZoom(2); assert(QuestMapUpdateAllQuests()==0); SetMapToCurrentZone()
+    )LUA")));
+    const auto* Blob=WowMapUi::View(&F.Context).Blobs.Find(F.Frames.FindFrame(TEXT("MapBlobFixture")));
+    H.QuestTemplates[783].Objectives=TEXT("Speak with Marshal McBride."); H.QuestTemplates[783].CompletedText.Empty();
+    TestTrue(TEXT("An empty completion string falls back to actual quest objectives"),F.Lua.ExecuteString(TEXT("assert(GetQuestLogCompletionText(1)=='Speak with Marshal McBride.')")));
+    H.QuestTemplates[783].CompletedText=TEXT("Other completion"); H.QuestTemplates[783].Flags|=0x40000;
+    TestTrue(TEXT("Auto-complete quest flags use the objective summary"),F.Lua.ExecuteString(TEXT("assert(GetQuestLogCompletionText(1)=='Speak with Marshal McBride.')")));
+    TestTrue(TEXT("Blob properties use the original bounded ranges"),Blob && Blob->FillAlpha==255 && Blob->BorderAlpha==0 && Blob->MergeThreshold==.5f && Blob->SplinePoints==8);
+    TestTrue(TEXT("Original map art can be queued while retaining Lua texture state"),F.Lua.ExecuteString(TEXT("MapQueueTex=UIParent:CreateTexture('MapQueueTex'); MapQueueTex:SetTexture('Interface\\\\WorldMap\\\\Elwynn\\\\Elwynn1'); MapQueueTex:SetTexCoord(.2,.8,.1,.9); MapQueueTex:SetAlpha(.4); assert(MapQueueTex:GetTexture()=='Interface\\\\WorldMap\\\\Elwynn\\\\Elwynn1')")));
+    TestEqual(TEXT("The map does not decode a new atlas in its Lua callback"),F.Context.Map->PendingArt.Num(),1);
+    WowLuaApi::UpdateMapArt(F.Lua.GetState()); auto* Art=F.Frames.GetNamedTexture(TEXT("MapQueueTex"));
+    TestTrue(TEXT("The deferred upload preserves opacity and cropped UVs"),Art && Art->GetBrush().GetResourceObject() && FMath::IsNearlyEqual(Art->GetRenderOpacity(),.4f) && FBox2f(Art->GetBrush().GetUVRegion()).Min.Equals(FVector2f(.2f,.1f)));
+    F.Lua.ExecuteString(TEXT("MapQueueTex:SetTexture('Interface\\\\WorldMap\\\\Elwynn\\\\Elwynn2'); MapQueueTex:SetTexture(nil)")); WowLuaApi::UpdateMapArt(F.Lua.GetState());
+    TestTrue(TEXT("Clearing pending art prevents a stale asynchronous result"),Art && Art->GetBrush().DrawAs==ESlateBrushDrawType::NoDrawType && F.Context.Map->PendingArt.IsEmpty());
     return true;
 }
 

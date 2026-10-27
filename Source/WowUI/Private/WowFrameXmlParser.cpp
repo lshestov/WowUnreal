@@ -278,6 +278,7 @@ EWowFrameType FWowFrameXmlParser::ParseFrameType(const FString& TypeName)
 		{TEXT("DressUpModel"),           EWowFrameType::DressUpModel},
 		{TEXT("TabardModel"),            EWowFrameType::TabardModel},
 		{TEXT("WorldFrame"),             EWowFrameType::WorldFrame},
+        {TEXT("QuestPOIFrame"),           EWowFrameType::QuestPOIFrame},
 	};
 	if (const EWowFrameType* Found = Map.Find(TypeName))
 	{
@@ -749,7 +750,7 @@ static bool IsFrameTypeTag(const FString& Tag)
 		TEXT("SimpleHTML"), TEXT("Slider"), TEXT("StatusBar"), TEXT("Cooldown"),
 		TEXT("ColorSelect"), TEXT("GameTooltip"), TEXT("Minimap"),
 		TEXT("Model"), TEXT("PlayerModel"), TEXT("DressUpModel"),
-		TEXT("TabardModel"), TEXT("WorldFrame")
+		TEXT("TabardModel"), TEXT("WorldFrame"), TEXT("QuestPOIFrame")
 	};
 	return FrameTags.Contains(Tag);
 }

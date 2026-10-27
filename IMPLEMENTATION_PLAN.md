@@ -432,7 +432,7 @@ build, automation, native autologin and rendered screenshot verification):
     checks and a native 35-step/five-image round trip with exact fixture cleanup.
     See Docs/Macros.md.
 - [ ] 6. Maps: points of interest, tracking, interior minimaps and original map bootstrap.
-  - [?] Resolve actual zone/subzone from streamed terrain areas and join/replace
+  - [x] Resolve actual zone/subzone from streamed terrain areas and join/replace
     built-in zone channels using their real DBC definitions and server replies.
     Centre-offset chunk coordinates, player-position resolver retained on reload,
     complete server-area fallback, real territory/flight flags and actual zone
@@ -448,8 +448,16 @@ build, automation, native autologin and rendered screenshot verification):
     (two existing warnings), optional/truncated/invalid packet checks and a native
     two-metre server round trip with two rendered captures and exact position
     restoration. See Docs/Movement.md.
-  - [ ] Restore original world-map bootstrap, region selection/projection,
-    overlays, player arrows, landmarks and quest POIs/blobs.
+  - [?] Original world map: stock FrameXML bootstrap/panels, actual continent and
+    localized zone selection, physical hit masks and transforms, explored
+    overlays, dungeon floors, player arrows/ping, landmarks/gossip and real
+    server quest POIs/polygons/tooltips. Corpse/release packet caches and strict
+    malformed-packet handling; scoped scroll layout and indexed child traversal
+    keep the map responsive. Verified Windows package, 111 regression tests
+    (two existing warning tests), final focused API checks and 41 native steps
+    with nine inspected captures, sub-second opening, an actual floor-button
+    click, objective toggles and ReloadUI. Temporary quest and original
+    position/UI were restored exactly. See Docs/Maps.md.
   - [ ] Real tracking selection/blips and WMO interior minimap tiles.
 - [ ] 7. Group/special windows: party/loot, PvP, dungeon finder and achievements.
   - [ ] Restore NPC portrait captures and friendly NPC unit-frame reactions.

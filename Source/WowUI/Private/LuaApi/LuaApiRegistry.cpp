@@ -37,12 +37,14 @@ void WowLuaApi::RegisterAll(lua_State* L)
     RegisterUnitApi(L);
     RegisterPanelApi(L);
     RegisterMapApi(L);
+    RegisterWorldMapApi(L);
     RegisterReputationApi(L);
     RegisterSettingsApi(L);
     FWowKeyBindings::RegisterApi(L);
     FWowMacros::RegisterApi(L);
     FWowCombatLogUi::RegisterApi(L);
     RegisterFrameApi(L);
+    RegisterQuestMapApi(L);
 #endif
 }
 

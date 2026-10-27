@@ -17,17 +17,6 @@ extern "C" {
 namespace
 {
 void RegisterPanel(lua_State* L,const char* Name,lua_CFunction Fn) { lua_pushcfunction(L,Fn); lua_setglobal(L,Name); }
-const FDbcStore::FWorldMapArea* CurrentMapArea(FWowLuaContext* C)
-{
-    const auto* P=C && C->EntityManager?C->EntityManager->GetLocalPlayer():nullptr; if(!P || !C->ConnectionManager) return nullptr;
-    const auto* Selected=C->SelectedRows.Find(TEXT("mapArea")); const FDbcStore::FWorldMapArea* Found=nullptr; double Smallest=DBL_MAX;
-    for(const auto& A:FDbcStore::Get().WorldMapAreas())
-    {
-        if(Selected && A.Id==uint32(*Selected)) return &A;
-        const auto Position=A.Project(P->Movement.Position); const double Size=FMath::Abs((A.X1-A.X2)*(A.Y1-A.Y2));
-        if(A.MapId==C->ConnectionManager->PacketHandler.CurrentMapId && Position.X>=0 && Position.X<=1 && Position.Y>=0 && Position.Y<=1 && Size<Smallest) { Found=&A; Smallest=Size; }
-    } return Found;
-}
 struct FSkillRow { uint32 Id=0,Rank=0,Max=0; int32 Temporary=0,Permanent=0; FString Name,Description; bool Abandonable=false; };
 TArray<FSkillRow> Skills(FWowLuaContext* C)
 {
@@ -130,11 +119,6 @@ void WowLuaApi::RegisterPanelApi(lua_State* L)
     // The private realm has no Battle.net presence service. A character whisper
     // must follow the normal realm path instead of being treated as a BN whisper.
     RegisterPanel(L,"GetAutoCompletePresenceID",[](lua_State* S)->int { lua_pushnil(S); return 1; });
-    RegisterPanel(L,"GetMapInfo",[](lua_State* S)->int { const auto* A=CurrentMapArea(GetContext(S)); if(A) lua_pushstring(S,TCHAR_TO_UTF8(*A->Name)); else lua_pushnil(S); lua_pushinteger(S,0); return 2; });
-    RegisterPanel(L,"SetMapToCurrentZone",[](lua_State* S)->int { if(auto* C=GetContext(S)) C->SelectedRows.Remove(TEXT("mapArea")); return 0; });
-    RegisterPanel(L,"GetCurrentMapAreaID",[](lua_State* S)->int { const auto* A=CurrentMapArea(GetContext(S)); lua_pushinteger(S,A?A->Id:0); return 1; });
-    RegisterPanel(L,"GetCurrentMapZone",[](lua_State* S)->int { const auto* A=CurrentMapArea(GetContext(S)); lua_pushinteger(S,A?A->AreaId:0); return 1; });
-    RegisterPanel(L,"GetCurrentMapDungeonLevel",[](lua_State* S)->int { lua_pushinteger(S,0); return 1; });
     RegisterPanel(L,"UnitPVPRank",[](lua_State* S)->int { const auto* P=ResolveUnitToken(S); lua_pushinteger(S,P && P->IsPlayer()?P->GetFieldByte(PlayerField::BASE+0x0007,2):0); return 1; });
     RegisterPanel(L,"GetDungeonDifficulty",[](lua_State* S)->int { auto* C=GetContext(S); lua_pushinteger(S,C && C->ConnectionManager?C->ConnectionManager->PacketHandler.DungeonDifficulty+1:1); return 1; });
     RegisterPanel(L,"GetRaidDifficulty",[](lua_State* S)->int { auto* C=GetContext(S); lua_pushinteger(S,C && C->ConnectionManager?C->ConnectionManager->PacketHandler.RaidDifficulty+1:1); return 1; });
@@ -224,7 +208,7 @@ void WowLuaApi::RegisterPanelApi(lua_State* L)
     RegisterPanel(L,"GetNumQuestLogRewardFactions",[](lua_State* S)->int { auto* C=GetContext(S); const auto* Q=QuestData(C,SelectedQuest(C)); int32 Count=0; if(Q) for(uint32 Id:Q->RewardFactionId) Count+=Id!=0; lua_pushinteger(S,Count); return 1; });
     RegisterPanel(L,"GetQuestLogRewardFactionInfo",[](lua_State* S)->int { auto* C=GetContext(S); const auto* Q=QuestData(C,SelectedQuest(C)); const int32 Wanted=luaL_checkinteger(S,1); int32 Row=0; if(Q) for(int32 I=0;I<5;++I) if(Q->RewardFactionId[I] && ++Row==Wanted) { lua_pushinteger(S,Q->RewardFactionId[I]); lua_pushinteger(S,Q->RewardFactionOverride[I]?Q->RewardFactionOverride[I]:100*FDbcStore::Get().QuestReputation(Q->RewardFactionValue[I])); return 2; } lua_pushnil(S); return 1; });
     RegisterPanel(L,"GetQuestLogRequiredMoney",[](lua_State* S)->int { auto* C=GetContext(S); const auto* T=QuestData(C,SelectedQuest(C,luaL_optinteger(S,1,0))); lua_pushinteger(S,T?FMath::Max(-T->Money,0):0); return 1; });
-    RegisterPanel(L,"GetQuestLogCompletionText",[](lua_State* S)->int { auto* C=GetContext(S); const auto* T=QuestData(C,SelectedQuest(C)); lua_pushstring(S,TCHAR_TO_UTF8(*QuestText(C,T?T->CompletedText:FString()))); return 1; });
+    RegisterPanel(L,"GetQuestLogCompletionText",[](lua_State* S)->int { auto* C=GetContext(S); const auto* T=QuestData(C,SelectedQuest(C,luaL_optinteger(S,1,0))); lua_pushstring(S,TCHAR_TO_UTF8(*QuestText(C,T?((T->Flags&0x40000) || T->CompletedText.IsEmpty()?T->Objectives:T->CompletedText):FString()))); return 1; });
     RegisterPanel(L,"GetQuestLogSpecialItemInfo",[](lua_State* S)->int {
         auto* C=GetContext(S); const auto* Q=QuestData(C,SelectedQuest(C,luaL_checkinteger(S,1))); if(!Q || !Q->SourceItemId || !CountItem(C,Q->SourceItemId)) { lua_pushnil(S); return 1; }
         C->ConnectionManager->RequestItemTemplate(Q->SourceItemId); const auto* Item=C->ConnectionManager->PacketHandler.ItemTemplates.Find(Q->SourceItemId); if(!Item || !Item->UseSpellId) { lua_pushnil(S); return 1; }

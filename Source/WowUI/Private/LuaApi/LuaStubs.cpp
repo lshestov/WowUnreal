@@ -3515,6 +3515,10 @@ static FString NormalizeCVarName(const FString& Name)
 static FString GetDefaultCVarValue(const FString& Name)
 {
     static const TMap<FString, FString> ExplicitDefaults = {
+        { TEXT("questpoi"), TEXT("1") },
+        { TEXT("miniworldmap"), TEXT("0") },
+        { TEXT("advancedworldmap"), TEXT("0") },
+        { TEXT("worldmapopacity"), TEXT("0") },
         { TEXT("trackerfilter"), TEXT("7") },
         { TEXT("chatstyle"), TEXT("classic") },
         { TEXT("uiscale"), TEXT("1") },
@@ -6296,7 +6300,7 @@ lua_pushboolean(L2, PLATFORM_MAC);
     });
     lua_register(L, "IdleWowMapCommand", [](lua_State* S) -> int { auto* C=WowLuaApi::GetContext(S); if(C && C->FrameManager && C->FrameManager->OnMapCommand) C->FrameManager->OnMapCommand(luaL_optinteger(S,1,0)); return 0; });
     lua_register(L, "ToggleWorldMap", [](lua_State* S) -> int { auto* C=WowLuaApi::GetContext(S); if(C && C->FrameManager && C->FrameManager->OnMapCommand) C->FrameManager->OnMapCommand(0); return 0; });
-    lua_register(L, "OpenWorldMap", [](lua_State* S) -> int { auto* C=WowLuaApi::GetContext(S); if(C && C->FrameManager && C->FrameManager->OnMapCommand) { const auto H=C->FrameManager->FindFrame(TEXT("IdleWowWorldMapFrame")); if(H<0 || !C->FrameManager->IsFrameHierarchyShown(H)) C->FrameManager->OnMapCommand(0); } return 0; });
+    lua_register(L, "OpenWorldMap", [](lua_State* S) -> int { auto* C=WowLuaApi::GetContext(S); if(C && C->FrameManager && C->FrameManager->OnMapCommand) { const auto H=C->FrameManager->FindFrame(TEXT("WorldMapFrame")); if(H>=0 && !C->FrameManager->IsFrameHierarchyShown(H)) C->FrameManager->OnMapCommand(0); } return 0; });
     lua_register(L, "CloseWorldMap", [](lua_State* S) -> int { auto* C=WowLuaApi::GetContext(S); if(C && C->FrameManager && C->FrameManager->OnMapCommand) C->FrameManager->OnMapCommand(3); return 0; });
     lua_register(L, "GetCoinText", L_GetCoinText);
     // ShowUIPanel(frame) / HideUIPanel(frame) — THE core panel management functions

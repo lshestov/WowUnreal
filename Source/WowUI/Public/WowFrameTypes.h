@@ -148,7 +148,8 @@ enum class EWowFrameType : uint8
 	PlayerModel,
 	DressUpModel,
 	TabardModel,
-	WorldFrame
+	WorldFrame,
+    QuestPOIFrame
 };
 
 /** Complete parsed frame definition */

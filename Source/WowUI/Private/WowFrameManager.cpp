@@ -254,7 +254,7 @@ void FWowFrameManager::SetFrameVisible(int64 Handle, bool bVisible)
 	if(Entry->Def.bHidden==!bVisible) return;
 	TArray<int64> Descendants={Handle};
 	for(int32 I=0; I<Descendants.Num(); ++I)
-		for(const auto& Pair:Frames) if(Pair.Value.ParentHandle==Descendants[I]) Descendants.Add(Pair.Key);
+        Descendants.Append(GetChildHandles(Descendants[I]));
 	TMap<int64,bool> WasDrawn;
 	for(const int64 Child:Descendants) WasDrawn.Add(Child,IsFrameHierarchyShown(Child));
 	Entry->Def.bHidden = !bVisible;
@@ -289,13 +289,15 @@ bool FWowFrameManager::ReparentFrame(int64 Handle,int64 ParentHandle)
     if(!Canvas || !Entry->Widget.IsValid()) return false;
     Entry->Widget->RemoveFromParent(); auto* Slot=Canvas->AddChildToCanvas(Entry->Widget.Get());
     if(Slot) Slot->SetZOrder(int32(Entry->Def.Strata)*1000+Entry->Def.FrameLevel);
+    if(auto* OldParent=Frames.Find(Entry->ParentHandle)) OldParent->Children.Remove(Handle);
+    if(auto* NewParent=Frames.Find(ParentHandle)) NewParent->Children.AddUnique(Handle);
     Entry->ParentHandle=ParentHandle; Entry->Def.Parent=ParentHandle<0?FString():GetFrameName(ParentHandle);
     if(const auto* Parent=Frames.Find(ParentHandle))
     {
         if(Entry->Def.FrameLevel<=Parent->Def.FrameLevel) SetFrameLevel(Handle,Parent->Def.FrameLevel+1);
         if(Entry->Def.Strata<Parent->Def.Strata) SetFrameStrata(Handle,Parent->Def.Strata);
     }
-    FrameRects.Reset(); bLayoutDirty=true; RefreshLayout(); return true;
+    FrameRects.Reset(); bLayoutDirty=true; ApplyAnchors(Entry->Widget.Get(),Entry->Def); return true;
 }
 
 bool FWowFrameManager::ReparentRegion(const FString& Name,int64 ParentHandle)
@@ -414,7 +416,7 @@ void FWowFrameManager::SetFrameAlpha(int64 Handle, float Alpha)
 
 	if (Entry->Widget.IsValid())
 	{
-		Entry->Widget->SetRenderOpacity(Alpha);
+		Entry->Widget->SetRenderOpacity(FMath::Clamp(Alpha,0.f,1.f));
 	}
 }
 
@@ -440,7 +442,7 @@ void FWowFrameManager::SetFrameLevel(int64 Handle, int32 Level)
 	if (!Entry) return;
 	const int32 Delta=Level-Entry->Def.FrameLevel; if(!Delta) return;
 	TArray<int64> Descendants={Handle};
-	for(int32 I=0;I<Descendants.Num();++I) for(const auto& Pair:Frames) if(Pair.Value.ParentHandle==Descendants[I]) Descendants.Add(Pair.Key);
+	for(int32 I=0;I<Descendants.Num();++I) Descendants.Append(GetChildHandles(Descendants[I]));
 	for(const int64 Child:Descendants)
 	{
 		auto& E=Frames[Child]; E.Def.FrameLevel=FMath::Max(0,E.Def.FrameLevel+Delta);
@@ -456,6 +458,7 @@ int64 FWowFrameManager::GetParentHandle(int64 Handle) const
 
 TArray<int64> FWowFrameManager::GetChildHandles(int64 Handle) const
 {
+    if(const auto* E=Frames.Find(Handle)) return E->Children;
 	TArray<int64> Children;
 	for (const auto& Pair : Frames)
 	{
@@ -775,14 +778,7 @@ void FWowFrameManager::InvalidateFrameRectsRecursive(int64 Handle)
 		FrameRects.Remove(Entry->Def.Name);
 	}
 
-	// Invalidate all children
-	for (const auto& Pair : Frames)
-	{
-		if (Pair.Value.ParentHandle == Handle)
-		{
-			InvalidateFrameRectsRecursive(Pair.Key);
-		}
-	}
+    for(int64 Child:Entry->Children) InvalidateFrameRectsRecursive(Child);
 }
 
 UTextBlock* FWowFrameManager::CreateTextBlock(UObject* Outer)
@@ -1601,6 +1597,7 @@ int64 FWowFrameManager::CreateFrame(const FWowFrameDef& Def)
 		// Virtual frames don't get widgets but are stored for reference/inheritance
 		Entry.Widget = nullptr;
 		Frames.Add(Handle, MoveTemp(Entry));
+        if(auto* Parent=Frames.Find(Frames[Handle].ParentHandle)) Parent->Children.Add(Handle);
 
 		if (!Resolved.Name.IsEmpty())
 		{
@@ -1616,6 +1613,7 @@ int64 FWowFrameManager::CreateFrame(const FWowFrameDef& Def)
 	Entry.Widget = CreateWidgetForFrame(Resolved, Handle, Entry.ParentHandle);
 
 	Frames.Add(Handle, MoveTemp(Entry));
+    if(auto* Parent=Frames.Find(Frames[Handle].ParentHandle)) Parent->Children.Add(Handle);
 
 	if (!Resolved.Name.IsEmpty())
 	{
@@ -2595,7 +2593,7 @@ float FWowFrameManager::GetVerticalScrollRange(int64 Handle) const
 {
     const auto* Scroll=Frames.Find(Handle); const int64 Child=GetScrollChild(Handle);
     if(!Scroll || Child<0 || Scroll->Def.Type!=EWowFrameType::ScrollFrame) return 0;
-    auto* Layout=const_cast<FWowFrameManager*>(this); if(bLayoutDirty) Layout->RefreshLayout();
+    auto* Layout=const_cast<FWowFrameManager*>(this); if(bLayoutDirty) Layout->RefreshSubtreeLayout(Child);
     const auto ChildRect=Layout->GetLayoutRect(Child),ScrollRect=Layout->GetLayoutRect(Handle);
     const auto Descendant=[&](int64 Owner) { for(int32 Depth=0;Owner>=0 && Depth<64;++Depth,Owner=GetParentHandle(Owner)) if(Owner==Child) return true; return false; };
     float Bottom=ChildRect.Y+ChildRect.W;

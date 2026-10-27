@@ -492,16 +492,7 @@ void FDbcStore::LoadDeferred(FMpqManager& Mpq)
     if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\SkillLine.dbc"),Parser)) SpellBookDbc.LoadSkills(Parser);
     if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\SpellDuration.dbc"),Parser)) SpellDbc.LoadTimes(Parser,false);
     if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\SpellCastTimes.dbc"),Parser)) SpellDbc.LoadTimes(Parser,true);
-    if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\WorldMapArea.dbc"),Parser) && Parser.GetFieldCount()>=9)
-    {
-        MapAreas.Reset();
-        for(uint32 I=0; I<Parser.GetRecordCount(); ++I)
-        {
-            FWorldMapArea Area; Area.Id=Parser.GetUInt(I,0); Area.MapId=Parser.GetUInt(I,1); Area.AreaId=Parser.GetUInt(I,2); Area.Name=Parser.GetString(I,3);
-            Area.Y1=Parser.GetFloat(I,4); Area.Y2=Parser.GetFloat(I,5); Area.X1=Parser.GetFloat(I,6); Area.X2=Parser.GetFloat(I,7);
-            if(!Area.Name.IsEmpty() && Area.X1!=Area.X2 && Area.Y1!=Area.Y2) MapAreas.Add(MoveTemp(Area));
-        }
-    }
+    MapUiDbc.Load(Mpq);
     if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\SkillLineAbility.dbc"),Parser)) SpellBookDbc.LoadAbilities(Parser);
     if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\SkillRaceClassInfo.dbc"),Parser)) SpellBookDbc.LoadRaceClassInfo(Parser);
     if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\CreatureFamily.dbc"),Parser)) TalentTabDbc.LoadPetFamilies(Parser);
@@ -509,16 +500,6 @@ void FDbcStore::LoadDeferred(FMpqManager& Mpq)
     { GlyphProperties.Reset(); for(uint32 I=0;I<Parser.GetRecordCount();++I) GlyphProperties.Add(Parser.GetUInt(I,0),{Parser.GetUInt(I,1),Parser.GetUInt(I,2),Parser.GetUInt(I,3)}); }
     if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\GlyphSlot.dbc"),Parser) && Parser.GetFieldCount()>=3)
     { GlyphSlots.Reset(); for(uint32 I=0;I<Parser.GetRecordCount();++I) GlyphSlots.Add(Parser.GetUInt(I,0),{Parser.GetUInt(I,1),Parser.GetUInt(I,2)}); }
-    if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\WorldMapOverlay.dbc"),Parser) && Parser.GetFieldCount()>=13)
-    {
-        MapOverlays.Reset();
-        for(uint32 I=0; I<Parser.GetRecordCount(); ++I)
-        {
-            FWorldMapOverlay O; O.MapAreaId=Parser.GetUInt(I,1); for(int32 A=0; A<4; ++A) O.Areas[A]=Parser.GetUInt(I,2+A);
-            O.Name=Parser.GetString(I,8); O.Width=Parser.GetUInt(I,9); O.Height=Parser.GetUInt(I,10); O.X=Parser.GetUInt(I,11); O.Y=Parser.GetUInt(I,12);
-            if(!O.Name.IsEmpty() && O.Width>0 && O.Width<=1024 && O.Height>0 && O.Height<=768) MapOverlays.Add(MoveTemp(O));
-        }
-    }
     for(const TCHAR* Name:{TEXT("gtChanceToMeleeCrit"),TEXT("gtChanceToSpellCrit"),TEXT("gtOCTRegenHP"),TEXT("gtRegenHPPerSpt"),TEXT("gtRegenMPPerSpt"),TEXT("gtCombatRatings"),TEXT("gtOCTClassCombatRatingScalar")})
         if(LoadSingleDbc(Mpq,*(FString(TEXT("DBFilesClient\\"))+Name+TEXT(".dbc")),Parser) && Parser.GetFieldCount()>=2)
         {

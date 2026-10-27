@@ -2,6 +2,7 @@
 #include "WowEntity.h"
 #include "WowUiText.h"
 #include "LuaApiRegistry.h"
+#include "WowMapUi.h"
 #include "Formats/Dbc/DbcStore.h"
 #include "WowEventSystem.h"
 #include "WowFrameManager.h"
@@ -315,6 +316,7 @@ static int LF_IsMouseOver(lua_State* L)
 static EWowFrameType ParseFrameType(const char* TypeStr)
 {
 	if (!TypeStr) return EWowFrameType::Frame;
+    if (FCStringAnsi::Stricmp(TypeStr,"QuestPOIFrame")==0) return EWowFrameType::QuestPOIFrame;
 	if (FCStringAnsi::Stricmp(TypeStr, "Button") == 0) return EWowFrameType::Button;
 	if (FCStringAnsi::Stricmp(TypeStr, "CheckButton") == 0) return EWowFrameType::CheckButton;
 	if (FCStringAnsi::Stricmp(TypeStr, "EditBox") == 0) return EWowFrameType::EditBox;
@@ -410,6 +412,7 @@ static int LF_GetObjectType(lua_State* L)
 			case EWowFrameType::Cooldown: lua_pushstring(L, "Cooldown"); break;
 			case EWowFrameType::GameTooltip: lua_pushstring(L, "GameTooltip"); break;
 			case EWowFrameType::Minimap: lua_pushstring(L, "Minimap"); break;
+            case EWowFrameType::QuestPOIFrame: lua_pushstring(L,"QuestPOIFrame"); break;
 			case EWowFrameType::Model: lua_pushstring(L, "Model"); break;
 			case EWowFrameType::PlayerModel: lua_pushstring(L, "PlayerModel"); break;
 			case EWowFrameType::MessageFrame: lua_pushstring(L, "MessageFrame"); break;
@@ -879,7 +882,7 @@ static int LF_SetAlpha(lua_State* L)
 {
 	if (TableRepresentsRegion(L, 1))
 	{
-		float Alpha = static_cast<float>(luaL_checknumber(L, 2));
+		float Alpha = FMath::Clamp(static_cast<float>(luaL_checknumber(L, 2)),0.f,1.f);
 		if (UImage* Image = GetTextureImage(L, 1))
 		{
 			Image->SetRenderOpacity(Alpha);
@@ -898,7 +901,7 @@ static int LF_SetAlpha(lua_State* L)
 	int64 Handle = GetFrameHandle(L);
 	if (Ctx && Ctx->FrameManager)
 	{
-		float Alpha = static_cast<float>(luaL_checknumber(L, 2));
+		float Alpha = FMath::Clamp(static_cast<float>(luaL_checknumber(L, 2)),0.f,1.f);
 		Ctx->FrameManager->SetFrameAlpha(Handle, Alpha);
 		// Store alpha on frame table for GetAlpha
 		lua_pushnumber(L, Alpha);
@@ -1225,6 +1228,7 @@ static int LF_TextureSetTexture(lua_State* L)
 	luaL_checktype(L, 1, LUA_TTABLE);
 	if (lua_isnumber(L, 2) && lua_isnumber(L, 3) && lua_isnumber(L, 4))
 	{
+        lua_pushnil(L); lua_setfield(L,1,"__texture");
 		if (auto* Image = GetTextureImage(L, 1))
 		{
 			FSlateBrush Brush;
@@ -1270,6 +1274,13 @@ static int LF_TextureSetTexture(lua_State* L)
 	if (Ctx && Ctx->FrameManager)
 	{
 		// First, try to find this texture region by name (from XML Texture name="Foo")
+        const FString Path=UTF8_TO_TCHAR(TexturePath);
+        if(Path.StartsWith(TEXT("Interface\\WorldMap\\"),ESearchCase::IgnoreCase) && !WowMapUi::View(Ctx).ApplyingArt && !Ctx->FrameManager->IsUITextureCached(Path))
+        {
+            lua_getfield(L,1,"__mapArtQueued"); const bool Queued=lua_toboolean(L,-1)!=0; lua_pop(L,1);
+            if(!Queued) {lua_pushboolean(L,1); lua_setfield(L,1,"__mapArtQueued"); lua_pushvalue(L,1); WowMapUi::View(Ctx).PendingArt.Add(luaL_ref(L,LUA_REGISTRYINDEX));}
+            return 0;
+        }
 		lua_getfield(L, 1, "__name");
 		const char* TexName = lua_isstring(L, -1) ? lua_tostring(L, -1) : nullptr;
 		lua_pop(L, 1);
@@ -1279,6 +1290,8 @@ static int LF_TextureSetTexture(lua_State* L)
 		UTexture2D* Texture = Ctx->FrameManager->LoadUITexture(UTF8_TO_TCHAR(TexturePath));
 		if (Texture && NamedImage)
 		{
+            auto* Resource=NamedImage->GetBrush().GetResourceObject(); auto* Material=Cast<UMaterialInstanceDynamic>(Resource);
+            if(Resource==Texture || (Material && Material->K2_GetTextureParameterValue(TEXT("Image"))==Texture)) return 0;
 			FSlateBrush Brush;
 			Brush.SetResourceObject(Texture);
 			Brush.DrawAs = ESlateBrushDrawType::Image;
@@ -1319,7 +1332,7 @@ static int LF_TextureSetTexture(lua_State* L)
             // Stretched canvas slots store edge offsets, not a requested size.
             // Resolve natural dimensions through region layout; changing those
             // offsets here can turn a 37px equipment icon into negative geometry.
-            ApplyTextureStyle(L); Ctx->FrameManager->InvalidateTextLayout(); return 0;
+            ApplyTextureStyle(L); if(!Ctx->Map || !Ctx->Map->ApplyingArt) Ctx->FrameManager->InvalidateTextLayout(); return 0;
 		}
 
 		// Fallback: try parent handle approach (dynamic textures from CreateTexture)
@@ -3246,7 +3259,7 @@ static const luaL_Reg FrameMethods[] =
 
 	// ScrollFrame
 	{"SetScrollChild", LF_SetScrollChild},
-	{"UpdateScrollChildRect", [](lua_State* L)->int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->RefreshLayout(); return 0; }},
+	{"UpdateScrollChildRect", [](lua_State* L)->int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->RefreshSubtreeLayout(C->FrameManager->GetScrollChild(GetFrameHandle(L))); return 0; }},
 	{"GetScrollChild", LF_GetScrollChild},
 	{"SetVerticalScroll", LF_SetVerticalScroll},
 	{"GetVerticalScroll", LF_GetVerticalScroll},
@@ -3607,4 +3620,19 @@ void WowLuaApi::RegisterFrameApi(lua_State* L)
 
 #else
 void WowLuaApi::RegisterFrameApi(lua_State*) {}
+#endif
+
+#if __has_include("lua.h")
+void WowLuaApi::UpdateMapArt(lua_State* L)
+{
+    auto* C=GetContext(L); if(!C || !C->Map || C->Map->PendingArt.IsEmpty()) return;
+    auto& V=*C->Map; const int32 Ref=V.PendingArt[0]; V.PendingArt.RemoveAt(0);
+    const int32 Top=lua_gettop(L); lua_pushcfunction(L,LF_TextureSetTexture); lua_rawgeti(L,LUA_REGISTRYINDEX,Ref); luaL_unref(L,LUA_REGISTRYINDEX,Ref);
+    lua_pushnil(L); lua_setfield(L,-2,"__mapArtQueued"); lua_getfield(L,-1,"__texture");
+    V.ApplyingArt=true;
+    if(lua_pcall(L,2,0,0)!=0) {UE_LOG(LogWowLuaFrame,Error,TEXT("Deferred map texture: %s"),UTF8_TO_TCHAR(lua_tostring(L,-1)));}
+    V.ApplyingArt=false; lua_settop(L,Top);
+}
+#else
+void WowLuaApi::UpdateMapArt(lua_State*) {}
 #endif

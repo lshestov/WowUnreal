@@ -987,6 +987,37 @@ bool FChannelPackets::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMapPoiPackets,"WowUnreal.UI.MapPoiPackets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FMapPoiPackets::RunTest(const FString&)
+{
+    TStrongObjectPtr<UWowConnectionManager> C(NewObject<UWowConnectionManager>()); const auto Socket=WowTestUtils::AttachTestWorldSocket(*C,0); auto& H=C->PacketHandler;
+    const auto Put=[](TArray<uint8>& D,auto Value){D.Append(reinterpret_cast<const uint8*>(&Value),sizeof(Value));};
+    H.QuestLog.Add({783,0,{}}); C->RequestQuestPois(); uint32 Opcode=0; TArray<uint8> Payload;
+    TestTrue(TEXT("Only active quests produce a bounded real query"),WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload) && Opcode==0x1E3 && Payload.Num()==8);
+    C->RequestQuestPois(); TestFalse(TEXT("An in-flight POI query is not duplicated"),WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload));
+    TArray<uint8> Reply; for(uint32 V:{1u,783u,1u,0u,MAX_uint32,0u,30u,0u,2u,4u,3u}) Put(Reply,V);
+    for(const FIntPoint P:{FIntPoint(-8890,-90),FIntPoint(-8880,-90),FIntPoint(-8885,-80)}) {Put(Reply,P.X); Put(Reply,P.Y);}
+    const uint32 Revision=H.QuestPoiRevision;
+    for(int32 I=0;I<Reply.Num();++I) {auto Part=Reply; Part.SetNum(I); H.HandlePacket(0x1E4,Part);}
+    TestTrue(TEXT("Every truncated POI response retains the previous snapshot and pending query"),H.QuestPois.IsEmpty() && H.QuestPoiRequests.Contains(783) && H.QuestPoiRevision==Revision);
+    H.HandlePacket(0x1E4,Reply);
+    TestTrue(TEXT("Complete POIs preserve signed objectives, points, floors and flags"),H.QuestPois.Contains(783) && H.QuestPois[783].Num()==1 && H.QuestPois[783][0].Objective==-1 && H.QuestPois[783][0].Flags==4 && H.QuestPois[783][0].Points[0].X==-8890 && !H.QuestPoiRequests.Contains(783));
+    H.QuestPois.Reset(); H.QuestPoiRequests.Add(783,0); Reply.SetNum(12); FMemory::Memzero(Reply.GetData()+8,4); H.HandlePacket(0x1E4,Reply);
+    TestTrue(TEXT("An empty server answer is cached as a valid answer"),H.QuestPois.Contains(783) && H.QuestPois[783].IsEmpty());
+    C->RequestQuestPois(); TestFalse(TEXT("An empty valid answer is not polled repeatedly"),WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload));
+    TArray<uint8> Poi; Put(Poi,uint32(1)); Put(Poi,float(-8890)); Put(Poi,float(-90)); Put(Poi,uint32(7)); Put(Poi,uint32(0)); Poi.Append({'G','u','a','r','d',0});
+    for(int32 I=0;I<Poi.Num();++I) {auto Part=Poi; Part.SetNum(I); H.HandlePacket(0x224,Part);} TestFalse(TEXT("Truncated gossip POIs cannot replace a marker"),H.GossipPoi.Present);
+    H.HandlePacket(0x224,Poi); TestTrue(TEXT("A real gossip POI retains its map and label"),H.GossipPoi.Present && H.GossipPoi.Name==TEXT("Guard") && H.GossipPoi.MapId==0 && H.GossipPoi.Icon==7);
+    H.CorpseRequested=true; TArray<uint8> Corpse{1}; Put(Corpse,uint32(0)); Put(Corpse,float(-8890)); Put(Corpse,float(-90)); Put(Corpse,float(86)); Put(Corpse,uint32(33)); Put(Corpse,uint32(0));
+    for(int32 I=0;I<Corpse.Num();++I) {auto Part=Corpse; Part.SetNum(I); H.HandlePacket(0x216,Part);} TestFalse(TEXT("Truncated corpse locations remain pending"),H.CorpseKnown);
+    H.HandlePacket(0x216,Corpse); TestTrue(TEXT("Corpse entrance and actual corpse maps remain distinct"),H.CorpseKnown && H.CorpseMarker.Present && H.CorpseMarker.MapId==0 && H.CorpseMarker.CorpseMap==33);
+    H.CorpseRequested=true; H.HandlePacket(0x216,{0}); TestTrue(TEXT("An explicit missing corpse clears the previous marker"),H.CorpseKnown && !H.CorpseMarker.Present);
+    TArray<uint8> Release; Put(Release,uint32(0)); Put(Release,float(-8900)); Put(Release,float(-80)); Put(Release,float(86)); H.HandlePacket(0x378,Release);
+    TestTrue(TEXT("The actual release location is stored separately"),H.ReleaseMarker.Present && H.ReleaseMarker.Position.X==-8900);
+    H.ResetMapState(); TestTrue(TEXT("Disconnect clears all map-specific caches"),H.QuestPois.IsEmpty() && !H.CorpseKnown && !H.ReleaseMarker.Present && !H.GossipPoi.Present);
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTradePackets,"WowUnreal.UI.TradePackets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FTradePackets::RunTest(const FString&)
 {

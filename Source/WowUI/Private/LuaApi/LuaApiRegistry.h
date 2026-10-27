@@ -15,6 +15,7 @@ struct FWowSpellBookView;
 struct FWowCombatLogView;
 struct FWowClassUiView;
 struct FWowChannelUiView;
+struct FWowMapUiView;
 struct FWowItemTemplate;
 struct FWowItemEntity;
 
@@ -29,6 +30,8 @@ struct FWowLuaContext
     TSharedPtr<FWowCombatLogView> CombatLog;
     TSharedPtr<FWowClassUiView> ClassUi;
     TSharedPtr<FWowChannelUiView> Channels;
+    TSharedPtr<FWowMapUiView> Map;
+    TFunction<uint32()> ResolveDungeonFloor;
     TFunction<uint32()> ResolveArea;
     uint32 LastAreaId=0,LastZoneId=0;
     TFunction<AActor*(uint64)> ResolveActor;
@@ -54,6 +57,9 @@ namespace WowLuaApi
     void RegisterTradeApi(lua_State* L);
     void RegisterChannelApi(lua_State* L);
     void RegisterMapApi(lua_State* L);
+    void RegisterWorldMapApi(lua_State* L);
+    void RegisterQuestMapApi(lua_State* L);
+    void UpdateMapArt(lua_State* L);
     void UpdateMapState(lua_State* L);
     uint32 ResolveAreaId(const FWowLuaContext* Context);
     void UpdateChannels(lua_State* L);

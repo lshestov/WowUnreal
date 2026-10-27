@@ -229,6 +229,15 @@ public:
     TMap<uint32, uint32> WorldStates;
     uint32 CurrentMapId=0;
     uint32 ServerAreaMapId=MAX_uint32,ServerZoneId=0,ServerAreaId=0;
+    uint32 WorldStateRevision=0,QuestPoiRevision=0,MapPoiRevision=0;
+    struct FQuestPoi {uint32 Id=0,MapId=0,AreaId=0,Floor=0,Priority=0,Flags=0; int32 Objective=-1; TArray<FIntPoint> Points;};
+    TMap<uint32,TArray<FQuestPoi>> QuestPois;
+    TMap<uint32,double> QuestPoiRequests;
+    struct FGossipPoi {uint32 MapId=0,Flags=0,Icon=0; FVector Position=FVector::ZeroVector; FString Name; bool Present=false;} GossipPoi;
+    struct FDeathMarker {uint32 MapId=0,CorpseMap=0; FVector Position=FVector::ZeroVector; bool Present=false;} CorpseMarker,ReleaseMarker;
+    bool CorpseKnown=false,CorpseRequested=false;
+    double CorpseDeadline=0;
+    void ResetMapState();
     uint32 DungeonDifficulty=0,RaidDifficulty=0;
     struct FSavedInstance { uint32 Map=0,Difficulty=0,Reset=0; uint64 Id=0; bool Locked=false,Extended=false; };
     TArray<FSavedInstance> SavedInstances;
@@ -480,6 +489,10 @@ private:
     // ── Warden / Teleport handlers ──────────────────────────────────────────
     void HandleWardenData(FPacketReader& R);
     void HandleMoveTeleport(FPacketReader& R);
+    void HandleQuestPois(FPacketReader& R);
+    void HandleCorpseQuery(FPacketReader& R);
+    void HandleDeathRelease(FPacketReader& R);
+    void HandleGossipPoi(FPacketReader& R);
     void HandleTransferPending(FPacketReader& R);
     void HandleNewWorld(FPacketReader& R);
 

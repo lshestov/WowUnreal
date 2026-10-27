@@ -64,6 +64,8 @@ public:
     static TArray<uint8> BuildMovementPacket(uint64 Guid,const FWowMovementInfo& Movement,uint32 TimeMilliseconds);
     void SendTeleportAck(uint64 Guid,uint32 OrderCounter,uint32 TimeMilliseconds);
     static TArray<uint8> BuildTeleportAckPacket(uint64 Guid,uint32 OrderCounter,uint32 TimeMilliseconds);
+    void RequestQuestPois();
+    void UpdateCorpseMarkers();
 
     /** Send a chat message */
     UFUNCTION(BlueprintCallable) void SendChatMessage(const FString& Message, int32 Type = 1 /*SAY*/, const FString& Target = TEXT(""), int32 Language = 7 /*Common*/);

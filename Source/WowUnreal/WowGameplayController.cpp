@@ -5323,7 +5323,7 @@ void AWowGameplayController::OnEscapeKey()
 	if(GameUI && GameUI->CloseActiveWindow()) return;
 	if(UIManager && UIManager->GetFrameManager())
 	{
-		const int64 Map=UIManager->GetFrameManager()->FindFrame(TEXT("IdleWowWorldMapFrame"));
+		const int64 Map=UIManager->GetFrameManager()->FindFrame(TEXT("WorldMapFrame"));
 		if(UIManager->GetFrameManager()->IsFrameHierarchyShown(Map)) { UIManager->MapCommand(3); return; }
 	}
 	if (TargetGuid != 0)

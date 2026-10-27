@@ -149,6 +149,7 @@ public:
 	void StopFrameMovement(int64 Handle);
 	bool IsFrameDragging(int64 Handle) const;
 	void RefreshLayout();
+    void RefreshSubtreeLayout(int64 Handle);
 	void UpdateViewportLayout();
 
 	/** Set frame anchors and reposition widget */
@@ -183,6 +184,7 @@ public:
 
 	/** Load a BLP texture from MPQ and cache it */
 	UTexture2D* LoadUITexture(const FString& TexturePath);
+    bool IsUITextureCached(const FString& Path) const {const auto* T=TextureCache.Find(Path); return T && T->IsValid();}
 
 	/** Get the UButton child widget for a frame (nullptr if not found or invalid) */
 	UButton* GetButtonWidget(int64 Handle) const;
@@ -321,6 +323,7 @@ private:
 		FWowFrameDef Def;
 		TWeakObjectPtr<UWidget> Widget;
 		int64 ParentHandle = -1;
+        TArray<int64> Children;
 		bool bMouseEnabled = false;
 		bool bKeyboardEnabled = false;
 		bool bMouseWheelEnabled = false;

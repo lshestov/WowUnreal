@@ -117,6 +117,10 @@ void WowLuaApi::ApplySavedUiSettings(lua_State* L)
 }
 void WowLuaApi::RegisterSettingsApi(lua_State* L)
 {
+    Register(L,"SetupFullscreenScale",[](lua_State* S)->int {
+        auto* C=GetContext(S); luaL_checktype(S,1,LUA_TTABLE); lua_getfield(S,1,"__handle"); const int64 H=lua_tointeger(S,-1); lua_pop(S,1);
+        if(C && C->FrameManager) {const auto R=C->FrameManager->GetLayoutRect(C->FrameManager->FindFrame(TEXT("UIParent"))); C->FrameManager->SetFrameScale(H,R.W>0?FMath::Min(float(R.Z/R.W*.75),1.f):1.f);} return 0;
+    });
     // World playback currently has no cinematic camera mode. Stock modal
     // dialogs still query this gate before displaying their confirmation.
     Register(L,"InCinematic",[](lua_State* S)->int { lua_pushnil(S); return 1; });

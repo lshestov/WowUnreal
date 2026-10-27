@@ -60,7 +60,8 @@ void FWowFrameManager::SetFrameScale(int64 Handle, float Scale)
     auto* Entry = Frames.Find(Handle);
     if (!Entry || !FMath::IsFinite(Scale) || Scale <= 0 || FMath::IsNearlyEqual(Scale, Entry->Def.Scale)) return;
     Entry->Def.Scale = Scale;
-    RefreshLayout();
+    FrameRects.Empty(); bLayoutDirty=true;
+    if(Entry->Widget.IsValid()) ApplyAnchors(Entry->Widget.Get(),Entry->Def);
 }
 
 FWowFrameManager::FFrameRect FWowFrameManager::CalculateFrameRect(const FWowFrameDef& Def)
@@ -201,6 +202,7 @@ void FWowFrameManager::SetRegionSize(const FString& Name,float Width,float Heigh
     UWidget* Widget=GetNamedTexture(Name); if(!Widget) Widget=GetNamedFontString(Name);
     for(auto& Layout:RegionLayouts) if(Layout.Widget.Get()==Widget && Widget)
     {
+        if((Width<0 || FMath::IsNearlyEqual(Layout.Width,Width)) && (Height<0 || FMath::IsNearlyEqual(Layout.Height,Height))) return;
         if(Width>=0) Layout.Width=Width; if(Height>=0) Layout.Height=Height;
         FrameRects.Empty(); bLayoutDirty=true; return;
     }
@@ -211,6 +213,9 @@ void FWowFrameManager::SetRegionPoint(const FString& Name,const FWowAnchor& Anch
     UWidget* Widget=GetNamedTexture(Name); if(!Widget) Widget=GetNamedFontString(Name);
     for(auto& Layout:RegionLayouts) if(Layout.Widget.Get()==Widget && Widget)
     {
+        if(Clear && Layout.bUnanchored && Layout.Anchors.IsEmpty()) return;
+        if(!Clear && !Layout.bAllPoints && !Layout.bUnanchored) if(const auto* A=Layout.Anchors.FindByPredicate([&](const auto& V){return V.Point==Anchor.Point;}))
+            if(A->RelativePoint==Anchor.RelativePoint && A->RelativeTo==Anchor.RelativeTo && FMath::IsNearlyEqual(A->OffsetX,Anchor.OffsetX) && FMath::IsNearlyEqual(A->OffsetY,Anchor.OffsetY)) return;
         Layout.bAllPoints=false;
         Layout.bUnanchored=Clear;
         if(Clear) UnanchoredRegions.Add(Name); else UnanchoredRegions.Remove(Name);
@@ -302,6 +307,25 @@ void FWowFrameManager::ApplyAnchors(UWidget* Widget, const FWowFrameDef& Def)
     FrameRects.Add(Def.Name, Rect);
 }
 
+void FWowFrameManager::RefreshSubtreeLayout(int64 Handle)
+{
+    if(!Frames.Contains(Handle)) return;
+    TArray<int64> Handles{Handle}; for(int32 I=0;I<Handles.Num();++I) Handles.Append(GetChildHandles(Handles[I]));
+    TSet<int64> Members; for(int64 H:Handles) Members.Add(H);
+    for(int32 Pass=0;Pass<2;++Pass)
+    {
+        FrameRects.Empty();
+        for(int64 H:Handles) if(const auto* E=Frames.Find(H); E && E->Widget.IsValid()) ApplyAnchors(E->Widget.Get(),E->Def);
+        for(const auto& S:SliderWidgets) if(Members.Contains(S.Key)) UpdateSliderThumb(S.Key);
+        for(const auto& R:RegionLayouts) if(Members.Contains(FindFrame(R.Owner)) && R.Widget.IsValid())
+        {
+            if(R.bUnanchored) {if(R.Widget->GetVisibility()!=ESlateVisibility::Collapsed) R.Widget->SetVisibility(ESlateVisibility::Hidden); continue;}
+            const auto Owner=GetFrameRect(R.Owner); const float Scale=GetEffectiveFrameScale(FindFrame(R.Owner));
+            ApplyElementAnchors(R.Widget.Get(),nullptr,R.Anchors,R.Width,R.Height,R.bAllPoints,Owner.W/Scale,Owner.H/Scale);
+        }
+    }
+    // Other dirty branches still receive the normal end-of-tick layout pass.
+}
 void FWowFrameManager::RefreshLayout()
 {
     const auto Root = GetFrameRect(TEXT("UIParent"));

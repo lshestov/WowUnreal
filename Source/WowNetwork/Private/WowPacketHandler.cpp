@@ -112,6 +112,10 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(WowOpcode::SMSG_WARDEN_DATA,       &FWowPacketHandler::HandleWardenData);
     Handlers.Add(WowOpcode::MSG_MOVE_TELEPORT,      &FWowPacketHandler::HandleMovement);
     Handlers.Add(WowOpcode::MSG_MOVE_TELEPORT_ACK,  &FWowPacketHandler::HandleMoveTeleport);
+    Handlers.Add(0x1E4,&FWowPacketHandler::HandleQuestPois);
+    Handlers.Add(0x216,&FWowPacketHandler::HandleCorpseQuery);
+    Handlers.Add(0x378,&FWowPacketHandler::HandleDeathRelease);
+    Handlers.Add(0x224,&FWowPacketHandler::HandleGossipPoi);
     Handlers.Add(WowOpcode::SMSG_TRANSFER_PENDING,  &FWowPacketHandler::HandleTransferPending);
     Handlers.Add(WowOpcode::SMSG_NEW_WORLD,         &FWowPacketHandler::HandleNewWorld);
 
@@ -469,7 +473,7 @@ void FWowPacketHandler::ParseUpdateBlock(FPacketReader& R)
 
         if (Flags & UpdateFlag::VEHICLE)
         {
-            R.ReadU32(); // vehicle ID
+            BaseEntity.VehicleId=R.ReadU32();
             R.ReadFloat(); // vehicle aim adjustment
         }
 
@@ -2442,6 +2446,7 @@ void FWowPacketHandler::HandleInitWorldStates(FPacketReader& R)
     }
 
     OnWorldStatesInit.Broadcast(MapId, AreaId, SubAreaId);
+    ++WorldStateRevision;
 }
 
 void FWowPacketHandler::HandleUpdateWorldState(FPacketReader& R)
@@ -2459,6 +2464,7 @@ void FWowPacketHandler::HandleUpdateWorldState(FPacketReader& R)
     uint32 Value = R.ReadU32();
 
     UE_LOG(LogWowPacket, Log, TEXT("UPDATE_WORLD_STATE: Field %u = %u"), Field, Value);
+    if(!WorldStates.Contains(Field) || WorldStates[Field]!=Value) ++WorldStateRevision;
 
     // Update world state
     WorldStates.FindOrAdd(Field) = Value;

@@ -2,6 +2,7 @@
 #include "WowConnectionManager.h"
 #include "WowEventSystem.h"
 #include "Formats/Dbc/DbcStore.h"
+#include "WowMapUi.h"
 
 uint32 WowLuaApi::ResolveAreaId(const FWowLuaContext* C)
 {
@@ -52,6 +53,28 @@ void WowLuaApi::RegisterMapApi(lua_State* L)
 void WowLuaApi::UpdateMapState(lua_State* L)
 {
     auto* C=GetContext(L); if(!C || !C->ConnectionManager || C->ConnectionManager->GetState()!=EWowSessionState::WorldInGame || !C->EventSystem) return;
+    C->ConnectionManager->RequestQuestPois();
+    C->ConnectionManager->UpdateCorpseMarkers();
+    const auto& H=C->ConnectionManager->PacketHandler; auto& V=WowMapUi::View(C);
+    const auto* Player=C->EntityManager?C->EntityManager->GetLocalPlayer():nullptr;
+    uint32 Explored=0,Quests=0;
+    if(Player) {for(int32 I=0;I<128;++I) Explored=HashCombineFast(Explored,Player->GetField(PlayerField::BASE+0x037D+I)); for(int32 I=0;I<125;++I) Quests=HashCombineFast(Quests,Player->GetField(PlayerField::BASE+0x000A+I));}
+    const double Now=FPlatformTime::Seconds();
+    for(const auto& Q:H.QuestLog)
+    {
+        const auto* T=H.QuestTemplates.Find(Q.QuestId); Quests=HashCombineFast(Quests,T?T->Id:0); if(!T) continue;
+        for(uint32 Id:T->CreatureId) if(Id && !(Id&0x80000000))
+        {
+            const auto* Name=H.CreatureNameCache.Find(Id); Quests=HashCombineFast(Quests,Name?GetTypeHash(*Name):0);
+            if(!Name && V.ObjectiveNameRequests.FindRef(Id)<=Now) {V.ObjectiveNameRequests.Add(Id,Now+15); C->ConnectionManager->SendCreatureQuery(Id,0);}
+        }
+        for(uint32 Id:T->ItemId) if(Id) {const auto* Item=H.ItemTemplates.Find(Id); Quests=HashCombineFast(Quests,Item?GetTypeHash(Item->Name):0);}
+    }
+    const bool MapChanged=V.WorldRevision!=H.WorldStateRevision || V.PoiRevision!=H.MapPoiRevision || V.ExplorationHash!=Explored;
+    const bool QuestChanged=V.QuestRevision!=H.QuestPoiRevision || V.QuestHash!=Quests;
+    V.WorldRevision=H.WorldStateRevision; V.PoiRevision=H.MapPoiRevision; V.ExplorationHash=Explored; V.QuestRevision=H.QuestPoiRevision; V.QuestHash=Quests;
+    if(MapChanged) C->EventSystem->FireEvent(TEXT("WORLD_MAP_UPDATE"));
+    if(QuestChanged) C->EventSystem->FireEvent(TEXT("QUEST_POI_UPDATE"));
     const auto* A=Area(L); const auto* Z=Zone(A); if(!A || !Z) return;
     const bool AreaChanged=C->LastAreaId!=A->ID,ZoneChanged=C->LastZoneId!=Z->ID;
     C->LastAreaId=A->ID; C->LastZoneId=Z->ID;

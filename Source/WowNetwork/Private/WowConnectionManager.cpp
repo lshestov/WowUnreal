@@ -128,7 +128,7 @@ void UWowConnectionManager::SelectRealm(int32 I)
             PacketHandler.KnownSpells.Reset(); PacketHandler.ActionButtons.Reset(); PacketHandler.QuestLog.Reset(); PacketHandler.ResetTalentState(); PacketHandler.Reputations.Reset();
             PacketHandler.SpellCooldowns.Reset(); PacketHandler.SpellCooldownInfo.Reset(); PacketHandler.CombatHistory.Reset(); PacketHandler.Casts.Reset(); PacketHandler.LocalCastRequests.Reset(); PacketHandler.HasPendingAttackCast=false;
             PacketHandler.GroupInfo=FWowGroupInfo(); PacketHandler.PetActionBar=FWowPetActionBarState(); PacketHandler.ResetChannels();
-            PacketHandler.ServerAreaMapId=MAX_uint32; PacketHandler.ServerZoneId=PacketHandler.ServerAreaId=0;
+            PacketHandler.ResetMapState();
             PacketHandler.Merchant.Clear(); PacketHandler.CurrentBankerGuid=0; ResetMailState(); ResetTradeState();
             RepairCursor=false; PacketHandler.GuildCanRepair=false; PacketHandler.GuildRepairRequested=false; PacketHandler.GuildRepairId=0; PacketHandler.GuildWithdrawMoney=0; PacketHandler.GuildRoster.Reset(); PacketHandler.GuildRankAccess.Reset(); PacketHandler.GuildInfoText.Empty(); PacketHandler.ItemRefunds.Empty(); PacketHandler.RequestedItemRefunds.Empty(); PacketHandler.TotalPlayedTime=0; PacketHandler.PlayedTimeReceived=0; PacketHandler.PlayedTimeRequested=false;
             PacketHandler.WeaponProficiency=PacketHandler.ArmorProficiency=0; PacketHandler.HasWeaponProficiency=PacketHandler.HasArmorProficiency=false;
@@ -1547,7 +1547,7 @@ void UWowConnectionManager::Disconnect()
 {
     CancelGlyphUse();
     PacketHandler.ResetChannels();
-    PacketHandler.ServerAreaMapId=MAX_uint32; PacketHandler.ServerZoneId=PacketHandler.ServerAreaId=0;
+    PacketHandler.ResetMapState();
     if (WorldSocket.IsValid())
     {
         WorldSocket->Disconnect();
