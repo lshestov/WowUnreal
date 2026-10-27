@@ -132,7 +132,9 @@ Full WoW UI compatibility is **not complete**. In particular:
 - Uncovered macro condition variants and additional combat event families.
   Cast sequences and acknowledged random actions are implemented. See
   [macro support](Macros.md) and [combat-log support](CombatLog.md).
-- LFG and achievement panels/protocol.
+- Multiplayer dungeon-finder role/proposal/transfer controls and achievements.
+  The original dungeon catalog, role selection, rewards, locks and solo queue
+  controls are implemented; see [dungeon finder](DungeonFinder.md).
   Unit relationships and selection colours are implemented separately; see
   [faction/reputation reactions](UnitReactions.md).
 - Legacy options without an engine-side implementation; persisting a CVar

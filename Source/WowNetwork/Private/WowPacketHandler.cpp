@@ -10,6 +10,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogWowPacket, Log, All);
 FWowPacketHandler::FWowPacketHandler()
 {
     RegisterPvpHandlers();
+    RegisterLfgHandlers();
     // Register handlers
     Handlers.Add(0x02A5,&FWowPacketHandler::HandleForcedReactions);
     Handlers.Add(WowOpcode::SMSG_GOSSIP_MESSAGE, &FWowPacketHandler::HandleGossipMessage);

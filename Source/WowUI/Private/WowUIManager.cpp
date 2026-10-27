@@ -469,6 +469,7 @@ void UWowUIManager::TickWorldImages(UWorld* World)
         WowLuaApi::UpdateInspectState(LuaVM->GetState());
         WowLuaApi::UpdateTabardState(LuaVM->GetState());
         WowLuaApi::UpdatePvpState(LuaVM->GetState());
+        WowLuaApi::UpdateLfgState(LuaVM->GetState());
         WowLuaApi::UpdateUnitReactions(LuaVM->GetState());
         WowLuaApi::UpdateMinimapState(LuaVM->GetState());
         WowLuaApi::UpdateMapState(LuaVM->GetState());

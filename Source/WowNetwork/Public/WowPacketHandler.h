@@ -5,6 +5,7 @@
 #include "WowWardenHandler.h"
 #include "WowCombatLog.h"
 #include "WowPvpState.h"
+#include "WowLfgState.h"
 
 DECLARE_DELEGATE_OneParam(FOnWowCombatLog,const FWowCombatEntry&);
 DECLARE_DELEGATE_RetVal_OneParam(uint32,FOnWowCombatFlags,uint64);
@@ -232,6 +233,8 @@ public:
     struct FArenaIdentity {uint32 Id=0,Size=0,Background=0,Emblem=0,EmblemColor=0,Border=0,BorderColor=0; FString Name;};
     TMap<uint32,FArenaIdentity> ArenaIdentities;
     FWowPvpState Pvp;
+    FWowLfgState Lfg;
+    void ResetLfgState();
     void ResetPvpState();
     void ResetInspectState(uint64 Guid=0);
     TArray<FWowGlyphChange> LastGlyphChanges;
@@ -457,6 +460,15 @@ public:
     FOnOpcodeReceived OnOpcodeReceived;
 
 private:
+    void RegisterLfgHandlers();
+    void HandleLfgPlayerInfo(FPacketReader& R);
+    void HandleLfgPartyInfo(FPacketReader& R);
+    void HandleLfgPlayerUpdate(FPacketReader& R);
+    void HandleLfgPartyUpdate(FPacketReader& R);
+    void ParseLfgUpdate(FPacketReader& R,bool Party);
+    void HandleLfgJoinResult(FPacketReader& R);
+    void HandleLfgQueue(FPacketReader& R);
+    void HandleLfgDisabled(FPacketReader& R);
     void RegisterPvpHandlers();
     void HandleBattlefieldStatus(FPacketReader& R);
     void HandleBattlefieldList(FPacketReader& R);

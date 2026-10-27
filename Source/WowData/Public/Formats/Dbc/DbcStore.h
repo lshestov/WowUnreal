@@ -37,6 +37,7 @@
 #include "Formats/Dbc/ItemUiDbc.h"
 #include "Formats/Dbc/MapUiDbc.h"
 #include "Formats/Dbc/PvpUiDbc.h"
+#include "Formats/Dbc/LfgUiDbc.h"
 
 class FMpqManager;
 
@@ -60,6 +61,7 @@ public:
     using FWorldMapOverlay=FMapUiDbc::FOverlay;
     const FMapUiDbc& MapUi() const {return MapUiDbc;}
     const FPvpUiDbc& PvpUi() const {return PvpUiDbc;}
+    const FLfgUiDbc& LfgUi() const {return LfgUiDbc;}
     const TArray<FWorldMapArea>& WorldMapAreas() const {return MapUiDbc.Areas();}
     const TArray<FWorldMapOverlay>& WorldMapOverlays() const {return MapUiDbc.Overlays();}
     struct WOWDATA_API FFaction
@@ -194,6 +196,7 @@ private:
     FCharStartOutfitDbc CharStartOutfitDbc;
     FTaxiNodesDbc TaxiNodesDbc;
     FItemUiDbc ItemUiDbc;
+    FLfgUiDbc LfgUiDbc;
     TMap<uint32,FGlyph> GlyphProperties;
     TMap<uint32,FGlyphSlot> GlyphSlots;
     bool bLoaded = false;

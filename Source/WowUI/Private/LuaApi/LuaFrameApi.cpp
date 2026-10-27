@@ -3548,6 +3548,7 @@ static const luaL_Reg FrameMethods[] =
 	{"GetSpell", LF_TooltipGetSpell},
 	{"GetUnit", LF_TooltipGetUnit},
 	{"SetItem", LF_TooltipSetItem},
+	{"SetLFGDungeonReward", WowLuaApi::SetLfgRewardTooltip},
 	{"GetAnchorType", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); const auto* S=C && C->FrameManager?C->FrameManager->GetTooltipState(GetFrameHandle(L,1)):nullptr; lua_pushstring(L,S?TCHAR_TO_UTF8(*S->AnchorType):"ANCHOR_NONE"); return 1; }},
 	{"SetAnchorType", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->TooltipSetAnchorType(GetFrameHandle(L,1),UTF8_TO_TCHAR(luaL_checkstring(L,2)),luaL_optnumber(L,3,0),luaL_optnumber(L,4,0)); return 0; }},
 	{"FadeOut", LF_Hide},

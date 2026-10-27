@@ -516,18 +516,25 @@ build, automation, native autologin and rendered screenshot verification):
     and 45-step physical tabard routes with 13 validated, inspected captures.
     Disposable accounts/guilds removed, existing characters unchanged.
     See Docs/GuildInspectTabard.md.
-  - [?] Complete PvP/battleground panels and queue/status/scoreboard protocol.
+  - [x] Complete PvP/battleground panels and queue/status/scoreboard protocol.
     - [x] Original browser/honor tabs, NPC arena queue, team roster controls,
       typed queue/score/world-PvP packets and live arena unit events. Verified
       Windows build, focused protocol/UI checks, 40-step BG queue and 47-step
       arena-team routes with 12 validated, inspected captures. See Docs/Pvp.md.
-    - [?] Verify rendered multiplayer matches, invitation entry and final scores.
+    - [x] Verify rendered multiplayer matches, invitation entry and final scores.
       Verified native 107-step four-account skirmish with nine inspected
       captures: physical action/entry/unit/leave buttons, live health bars,
       compact tooltips, frame options, final scores and return to the world.
       - [x] Load the new server map and collision on far transfers; preserve
         quests/inventory, clear old visible objects and acknowledge world entry.
   - [ ] Complete dungeon-finder browsing, role/queue/proposal state and controls.
+    - [?] Load original dungeon/group definitions and authoritative locks/rewards;
+      restore the original browser, roles and queue controls.
+      Verified Windows build, packet/catalog automation and a native 40-step
+      queue/cancel route with six validated and inspected captures. See
+      Docs/DungeonFinder.md.
+    - [ ] Complete role checks, five-player proposals, teleport and group controls;
+      verify native disposable multiplayer routes and rendered screenshots.
   - [ ] Complete achievements, criteria, tracking and comparison state.
 
 - [x] Stock options category placement and text: numeric-offset SetPoint overloads, runtime $parent references, constrained description wrapping, and XML markup rendered without asset paths while Lua keeps original strings. Verified 64 automation tests and native category clicks, character/spellbook windows and rendered screenshots.

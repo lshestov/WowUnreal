@@ -23,6 +23,7 @@ struct FWowGuildUiView;
 struct FWowInspectUiView;
 struct FWowTabardUiView;
 struct FWowPvpUiView;
+struct FWowLfgUiView;
 struct FWowItemTemplate;
 struct FWowItemEntity;
 struct FWowGuildEmblem;
@@ -46,6 +47,7 @@ struct FWowLuaContext
     TSharedPtr<FWowInspectUiView> InspectUi;
     TSharedPtr<FWowTabardUiView> TabardUi;
     TSharedPtr<FWowPvpUiView> PvpUi;
+    TSharedPtr<FWowLfgUiView> LfgUi;
     TArray<uint64> ArenaOpponents;
     TFunction<uint32()> ResolveDungeonFloor;
     TFunction<uint32()> ResolveArea;
@@ -116,6 +118,9 @@ namespace WowLuaApi
     int SetInspectTalentTooltip(lua_State* L);
     void RegisterTabardApi(lua_State* L);
     void RegisterPvpApi(lua_State* L);
+    void RegisterLfgApi(lua_State* L);
+    void UpdateLfgState(lua_State* L);
+    int SetLfgRewardTooltip(lua_State* L);
     void UpdatePvpState(lua_State* L);
     void UpdateTabardState(lua_State* L);
     int TabardModelMethod(lua_State* L,int32 Method);
