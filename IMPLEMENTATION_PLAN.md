@@ -489,7 +489,7 @@ build, automation, native autologin and rendered screenshot verification):
     tests (three existing warning tests), four final focused checks and a
     14-step/three-image native friendly/neutral/ReloadUI route with actual
     name-background colour assertions. See Docs/UnitReactions.md.
-  - [?] Complete original party/raid frames, remote member state and group controls.
+  - [x] Complete original party/raid frames, remote member state and group controls.
     Atomic roster/full/delta stats; remote players/pets and map positions; focus,
     typed ready checks and acknowledged controls. Original template parenting,
     name-label draw order, XML initializers and bounded Lua collection. Windows build, 124-test
