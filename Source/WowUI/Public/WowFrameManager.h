@@ -303,12 +303,13 @@ public:
 	/** Cooldown API */
 	void SetCooldown(int64 Handle, double StartTime, float Duration);
 	void TickCooldowns();
-	struct FMessage { FString Text; FLinearColor Color; int32 Id=0; };
-	struct FMessageState { TArray<FMessage> Lines; TArray<TWeakObjectPtr<UTextBlock>> Widgets; int32 Offset=0,Limit=200; bool Hyperlinks=true; };
+	struct FMessage { FString Text; FLinearColor Color; int32 Id=0; double At=0; };
+	struct FMessageState { TArray<FMessage> Lines; TArray<TWeakObjectPtr<UTextBlock>> Widgets; int32 Offset=0,Limit=200; bool Hyperlinks=true,Fading=false,InsertTop=false; float TimeVisible=120,FadeDuration=3; };
 	TMap<int64,FMessageState> MessageFrames;
 	void AddMessage(int64 Handle,const FString& Text,FLinearColor Color,int32 Id=0);
 	void ScrollMessages(int64 Handle,int32 Offset,bool Absolute=false);
-	void DrawMessages(int64 Handle);
+	void DrawMessages(int64 Handle,double Now=-1);
+    void TickMessages(double Now);
     bool MessageHyperlinkAt(int64 Handle,FVector2D Screen,FString& Data,FString& Text);
     bool MessageHyperlinkPoint(int64 Handle,const FString& Data,FVector2D& Screen);
 	void SetChecked(int64 Handle,bool Checked);

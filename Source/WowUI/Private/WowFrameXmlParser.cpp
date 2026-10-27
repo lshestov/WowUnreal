@@ -768,6 +768,10 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 	Def.Type = FWowFrameXmlParser::ParseFrameType(UTF8_TO_TCHAR(Node.name()));
 	Def.Name = UTF8_TO_TCHAR(Node.attribute("name").as_string());
 	Def.ButtonText = UTF8_TO_TCHAR(Node.attribute("text").as_string());
+    if(Node.attribute("displayDuration")) Def.MessageDuration=FMath::Max(0.f,Node.attribute("displayDuration").as_float());
+    if(Node.attribute("fadeDuration")) Def.MessageFade=FMath::Max(0.f,Node.attribute("fadeDuration").as_float());
+    if(Node.attribute("fading")) Def.MessageFading=Node.attribute("fading").as_bool()?1:0;
+    Def.MessageInsertMode=UTF8_TO_TCHAR(Node.attribute("insertMode").as_string());
 	Def.bMultiLine=Node.attribute("multiLine").as_bool(false);
 	Def.EditBoxLetters=Node.attribute("letters").as_int(0);
 	Def.ParentKey = UTF8_TO_TCHAR(Node.attribute("parentKey").as_string());
@@ -1153,6 +1157,8 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
         {
             Def.EditFont=UTF8_TO_TCHAR(Child.attribute("inherits").as_string());
         }
+        else if(Tag==TEXT("FontString") && (Def.Type==EWowFrameType::MessageFrame || Def.Type==EWowFrameType::ScrollingMessageFrame))
+        {Def.MessageFont=UTF8_TO_TCHAR(Child.attribute("inherits").as_string()); Def.MessageJustifyH=UTF8_TO_TCHAR(Child.attribute("justifyH").as_string());}
 		else if(Tag==TEXT("NormalFont") || Tag==TEXT("HighlightFont") || Tag==TEXT("DisabledFont"))
         {
             const FString Font=UTF8_TO_TCHAR(Child.attribute("style").as_string());
@@ -1203,6 +1209,9 @@ static FWowFrameDef ParseFrameNode(const FXmlNode* Node)
 	Def.Type = FWowFrameXmlParser::ParseFrameType(Node->GetTag());
 	Def.Name = Node->GetAttribute(TEXT("name"));
 	Def.ButtonText = Node->GetAttribute(TEXT("text"));
+    const FString Duration=Node->GetAttribute(TEXT("displayDuration")),Fade=Node->GetAttribute(TEXT("fadeDuration")),Fading=Node->GetAttribute(TEXT("fading"));
+    if(!Duration.IsEmpty()) Def.MessageDuration=FMath::Max(0.f,FCString::Atof(*Duration)); if(!Fade.IsEmpty()) Def.MessageFade=FMath::Max(0.f,FCString::Atof(*Fade));
+    if(!Fading.IsEmpty()) Def.MessageFading=Fading.Equals(TEXT("true"),ESearchCase::IgnoreCase)?1:0; Def.MessageInsertMode=Node->GetAttribute(TEXT("insertMode"));
 	Def.bMultiLine=Node->GetAttribute(TEXT("multiLine")).Equals(TEXT("true"),ESearchCase::IgnoreCase);
 	Def.EditBoxLetters=FCString::Atoi(*Node->GetAttribute(TEXT("letters")));
 	Def.ParentKey = Node->GetAttribute(TEXT("parentKey"));
@@ -1309,6 +1318,8 @@ static FWowFrameDef ParseFrameNode(const FXmlNode* Node)
         {
             Def.EditFont=Child->GetAttribute(TEXT("inherits"));
         }
+        else if(Tag==TEXT("FontString") && (Def.Type==EWowFrameType::MessageFrame || Def.Type==EWowFrameType::ScrollingMessageFrame))
+        {Def.MessageFont=Child->GetAttribute(TEXT("inherits")); Def.MessageJustifyH=Child->GetAttribute(TEXT("justifyH"));}
 		else if(Tag==TEXT("NormalFont") || Tag==TEXT("HighlightFont") || Tag==TEXT("DisabledFont"))
         {
             const FString Font=Child->GetAttribute(TEXT("style"));

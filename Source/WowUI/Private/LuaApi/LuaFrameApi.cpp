@@ -3433,11 +3433,15 @@ static const luaL_Reg FrameMethods[] =
 	// ScrollingMessageFrame methods
 	{"AddMessage", LF_AddMessage},
 	{"SetMaxLines", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->MessageFrames.FindOrAdd(GetFrameHandle(L)).Limit=FMath::Clamp(int32(luaL_checkinteger(L,2)),1,1000); return 0; }},
-	{"SetFading", [](lua_State* L) -> int { return 0; }},
-	{"SetFadeDuration", [](lua_State* L) -> int { return 0; }},
-	{"SetTimeVisible", [](lua_State* L) -> int { return 0; }},
-	{"SetInsertMode", [](lua_State* L) -> int { return 0; }},
-	{"Clear", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) { C->FrameManager->MessageFrames.FindOrAdd(GetFrameHandle(L)).Lines.Reset(); C->FrameManager->DrawMessages(GetFrameHandle(L)); } return 0; }},
+	{"SetFading", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) {const int64 H=GetFrameHandle(L); C->FrameManager->MessageFrames.FindOrAdd(H).Fading=lua_isnumber(L,2)?lua_tonumber(L,2)!=0:lua_toboolean(L,2)!=0; C->FrameManager->DrawMessages(H);} return 0; }},
+	{"GetFading", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); lua_pushboolean(L,C && C->FrameManager && C->FrameManager->MessageFrames.FindOrAdd(GetFrameHandle(L)).Fading); return 1; }},
+	{"SetFadeDuration", [](lua_State* L) -> int { const double V=luaL_checknumber(L,2); if(!FMath::IsFinite(V)) return luaL_argerror(L,2,"finite duration expected"); auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) {const int64 H=GetFrameHandle(L); C->FrameManager->MessageFrames.FindOrAdd(H).FadeDuration=FMath::Clamp(V,0.,86400.); C->FrameManager->DrawMessages(H);} return 0; }},
+	{"GetFadeDuration", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); lua_pushnumber(L,C && C->FrameManager?C->FrameManager->MessageFrames.FindOrAdd(GetFrameHandle(L)).FadeDuration:0); return 1; }},
+	{"SetTimeVisible", [](lua_State* L) -> int { const double V=luaL_checknumber(L,2); if(!FMath::IsFinite(V)) return luaL_argerror(L,2,"finite duration expected"); auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) {const int64 H=GetFrameHandle(L); C->FrameManager->MessageFrames.FindOrAdd(H).TimeVisible=FMath::Clamp(V,0.,86400.); C->FrameManager->DrawMessages(H);} return 0; }},
+	{"GetTimeVisible", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); lua_pushnumber(L,C && C->FrameManager?C->FrameManager->MessageFrames.FindOrAdd(GetFrameHandle(L)).TimeVisible:0); return 1; }},
+	{"SetInsertMode", [](lua_State* L) -> int { const FString Mode=UTF8_TO_TCHAR(luaL_checkstring(L,2)); if(Mode!=TEXT("TOP") && Mode!=TEXT("BOTTOM")) return luaL_argerror(L,2,"TOP or BOTTOM expected"); auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) {const int64 H=GetFrameHandle(L); C->FrameManager->MessageFrames.FindOrAdd(H).InsertTop=Mode==TEXT("TOP"); C->FrameManager->DrawMessages(H);} return 0; }},
+	{"GetInsertMode", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); lua_pushstring(L,C && C->FrameManager && C->FrameManager->MessageFrames.FindOrAdd(GetFrameHandle(L)).InsertTop?"TOP":"BOTTOM"); return 1; }},
+	{"Clear", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) { auto& State=C->FrameManager->MessageFrames.FindOrAdd(GetFrameHandle(L)); State.Lines.Reset(); State.Offset=0; C->FrameManager->DrawMessages(GetFrameHandle(L)); } return 0; }},
 	{"GetVerticalScrollRange", [](lua_State* L) -> int {
 		FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
 		if (!Ctx || !Ctx->FrameManager)

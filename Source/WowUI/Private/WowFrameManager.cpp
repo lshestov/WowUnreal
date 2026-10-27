@@ -613,6 +613,9 @@ void FWowFrameManager::MergeTemplate(FWowFrameDef& Target, const FWowFrameDef& T
     if(Target.ModelScale==1.f) Target.ModelScale=Template.ModelScale;
 	if (Target.Width == 0.f && Template.Width > 0.f) Target.Width = Template.Width;
 	if (Target.Height == 0.f && Template.Height > 0.f) Target.Height = Template.Height;
+    if(Target.MessageDuration<0) Target.MessageDuration=Template.MessageDuration; if(Target.MessageFade<0) Target.MessageFade=Template.MessageFade;
+    if(Target.MessageFading<0) Target.MessageFading=Template.MessageFading; if(Target.MessageInsertMode.IsEmpty()) Target.MessageInsertMode=Template.MessageInsertMode;
+    if(Target.MessageFont.IsEmpty()) Target.MessageFont=Template.MessageFont; if(Target.MessageJustifyH.IsEmpty()) Target.MessageJustifyH=Template.MessageJustifyH;
 
 	// Strata/level — use template if target is at default
 	if (Target.Strata == EWowFrameStrata::MEDIUM && Template.Strata != EWowFrameStrata::MEDIUM)
@@ -1622,6 +1625,12 @@ int64 FWowFrameManager::CreateFrame(const FWowFrameDef& Def)
 	}
 
     if(Resolved.Type==EWowFrameType::Slider) SetSliderValue(Handle,Resolved.DefaultValue);
+    if(Resolved.Type==EWowFrameType::MessageFrame || Resolved.Type==EWowFrameType::ScrollingMessageFrame)
+    {
+        auto& State=MessageFrames.FindOrAdd(Handle); const bool Transient=Resolved.Type==EWowFrameType::MessageFrame;
+        State.TimeVisible=Resolved.MessageDuration>=0?Resolved.MessageDuration:Transient?10:120; State.FadeDuration=Resolved.MessageFade>=0?Resolved.MessageFade:3;
+        State.Fading=Resolved.MessageFading>=0?Resolved.MessageFading!=0:Transient; State.InsertTop=Resolved.MessageInsertMode.Equals(TEXT("TOP"),ESearchCase::IgnoreCase);
+    }
 
 	// Register frame as Lua global FIRST (so children and scripts can find it)
 	UpdateFrameVisibility(Handle);
@@ -1951,9 +1960,9 @@ void FWowFrameManager::AddMessage(int64 Handle,const FString& Text,FLinearColor 
 {
 	if(Text.IsEmpty() || !Frames.Contains(Handle)) return;
 	auto& State=MessageFrames.FindOrAdd(Handle);
-	State.Lines.Add({Text,Color,Id});
+	State.Lines.Add({Text,Color,Id,FPlatformTime::Seconds()});
 	if(State.Lines.Num()>State.Limit) State.Lines.RemoveAt(0,State.Lines.Num()-State.Limit);
-	if(State.Offset>0) ++State.Offset;
+	if(State.Offset>0) State.Offset=FMath::Min(State.Offset+1,State.Lines.Num()-1);
 	DrawMessages(Handle);
 }
 
@@ -1970,31 +1979,50 @@ void FWowFrameManager::ScrollMessages(int64 Handle,int32 Offset,bool Absolute)
 	auto& State=MessageFrames.FindOrAdd(Handle); State.Offset=FMath::Clamp(Absolute?Offset:State.Offset+Offset,0,FMath::Max(State.Lines.Num()-1,0)); DrawMessages(Handle);
 }
 
-void FWowFrameManager::DrawMessages(int64 Handle)
+namespace
 {
+float MessageOpacity(const FWowFrameManager::FMessageState& State,const FWowFrameManager::FMessage& Line,double Now)
+{
+    if(!State.Fading || State.Offset>0) return 1; const double Fade=Now-Line.At-State.TimeVisible; if(Fade<=0) return 1;
+    return State.FadeDuration>0?FMath::Clamp(1.f-float(Fade/State.FadeDuration),0.f,1.f):0;
+}
+}
+void FWowFrameManager::TickMessages(double Now)
+{
+    for(auto& Pair:MessageFrames)
+    {
+        auto& State=Pair.Value; if(!State.Fading || State.Lines.IsEmpty()) continue; const auto* Def=GetFrameDef(Pair.Key);
+        if(Def && Def->Type==EWowFrameType::MessageFrame && State.Lines.RemoveAll([&](const FMessage& Line){return Now-Line.At>=State.TimeVisible+State.FadeDuration;})>0) {DrawMessages(Pair.Key,Now); continue;}
+        for(int32 I=0;I<State.Widgets.Num();++I) if(auto* Text=State.Widgets[I].Get()) {const int32 Index=State.Lines.Num()-1-State.Offset-I; if(State.Lines.IsValidIndex(Index)) Text->SetRenderOpacity(MessageOpacity(State,State.Lines[Index],Now));}
+    }
+}
+void FWowFrameManager::DrawMessages(int64 Handle,double Now)
+{
+	if(Now<0) Now=FPlatformTime::Seconds();
 	auto* Canvas=Cast<UCanvasPanel>(GetWidgetForHandle(Handle)); if(!Canvas) return;
 	auto& State=MessageFrames.FindOrAdd(Handle); const auto R=GetLayoutRect(Handle);
+	const auto* Def=GetFrameDef(Handle);
 	const float Height=FMath::Max(float(R.W),14.f),Width=FMath::Max(float(R.Z),100.f);
 	const int32 Visible=FMath::Clamp(FMath::FloorToInt(Height/16),1,30);
 	Canvas->SetClipping(EWidgetClipping::ClipToBounds);
 	while(State.Widgets.Num()<Visible)
 	{
 		auto* Text=CreateTextBlock(Canvas); Text->SetVisibility(ESlateVisibility::HitTestInvisible);
-		Text->SetJustification(ETextJustify::Left); Text->SetAutoWrapText(true);
-		if(FontManager) Text->SetFont(FontManager->GetDefaultFont(FMath::Max(1,FMath::RoundToInt(12*UIScale))));
+		Text->SetJustification(Def && Def->MessageJustifyH==TEXT("CENTER")?ETextJustify::Center:Def && Def->MessageJustifyH==TEXT("RIGHT")?ETextJustify::Right:ETextJustify::Left); Text->SetAutoWrapText(true);
+		if(FontManager) {const FString Font=Def?Def->MessageFont:FString(); Text->SetFont(Font.IsEmpty()?FontManager->GetDefaultFont(FMath::Max(1,FMath::RoundToInt(12*UIScale))):FontManager->GetFont(Font,FMath::Max(1,FMath::RoundToInt(FontManager->GetFontSize(Font)*UIScale))));}
 		Canvas->AddChildToCanvas(Text); State.Widgets.Add(Text);
 	}
-	float Bottom=Height*UIScale;
+	float Bottom=State.InsertTop?0:Height*UIScale;
 	for(int32 I=0; I<State.Widgets.Num(); ++I) if(auto* Text=State.Widgets[I].Get())
 	{
 		const int32 Index=State.Lines.Num()-1-State.Offset-I;
-		if(I>=Visible || Index<0 || Bottom<=0) { Text->SetVisibility(ESlateVisibility::Collapsed); continue; }
+		if(I>=Visible || Index<0 || (State.InsertTop?Bottom>=Height*UIScale:Bottom<=0)) { Text->SetVisibility(ESlateVisibility::Collapsed); continue; }
 		const auto& Line=State.Lines[Index]; Text->SetText(FText::FromString(Line.Text)); Text->SetColorAndOpacity(Line.Color); Text->SetWrapTextAt(Width*UIScale);
 		Text->TakeWidget(); if(auto* Label=Cast<UWowTextBlock>(Text)) Label->RefreshRichStyle();
 		Text->ForceLayoutPrepass(); const float RowHeight=FMath::Max(16*UIScale,Text->GetDesiredSize().Y);
-		Bottom-=RowHeight;
+		if(!State.InsertTop) Bottom-=RowHeight;
 		if(auto* Slot=Cast<UCanvasPanelSlot>(Text->Slot)) { Slot->SetAnchors(FAnchors(0,0)); Slot->SetAlignment(FVector2D::ZeroVector); Slot->SetPosition(FVector2D(0,Bottom)); Slot->SetSize(FVector2D(Width*UIScale,RowHeight)); Slot->SetZOrder(200); }
-		Text->SetVisibility(ESlateVisibility::HitTestInvisible);
+		Text->SetRenderOpacity(MessageOpacity(State,Line,Now)); Text->SetVisibility(ESlateVisibility::HitTestInvisible); if(State.InsertTop) Bottom+=RowHeight;
 	}
 }
 
@@ -2005,7 +2033,7 @@ bool FWowFrameManager::MessageHyperlinkAt(int64 Handle,FVector2D Screen,FString&
     const FVector2D Point=Screen/FMath::Max(.001f,Scale)-FVector2D(Rect.X,Rect.Y);
     if(Point.X<0 || Point.Y<0 || Point.X>=Rect.Z || Point.Y>=Rect.W) return false;
     const FVector2D Native=Point*UIScale/FMath::Max(.001f,GetEffectiveFrameScale(Handle));
-    for(const auto& Widget:State->Widgets) if(auto* Label=Cast<UWowTextBlock>(Widget.Get()); Label && Label->IsVisible())
+    for(const auto& Widget:State->Widgets) if(auto* Label=Cast<UWowTextBlock>(Widget.Get()); Label && Label->IsVisible() && Label->GetRenderOpacity()>0)
         if(const auto* Slot=Cast<UCanvasPanelSlot>(Label->Slot)) if(const auto Link=Label->HyperlinkAt(Native-Slot->GetPosition()); Link.IsSet()) {Data=Link->Data; Text=Link->Text; return true;}
     return false;
 }
@@ -2013,7 +2041,7 @@ bool FWowFrameManager::MessageHyperlinkPoint(int64 Handle,const FString& Data,FV
 {
     const auto* State=MessageFrames.Find(Handle); if(!State || !State->Hyperlinks || !IsFrameDrawn(Handle)) return false;
     const auto Rect=GetLayoutRect(Handle); const float Scale=GetScreenScale(),Owner=GetEffectiveFrameScale(Handle);
-    for(const auto& Widget:State->Widgets) if(auto* Label=Cast<UWowTextBlock>(Widget.Get()); Label && Label->IsVisible())
+    for(const auto& Widget:State->Widgets) if(auto* Label=Cast<UWowTextBlock>(Widget.Get()); Label && Label->IsVisible() && Label->GetRenderOpacity()>0)
     {
         Label->ForceLayoutPrepass(); const auto* Slot=Cast<UCanvasPanelSlot>(Label->Slot); if(!Slot) continue;
         for(const auto& Hit:Label->HyperlinkRects()) if(Hit.Link.Data==Data)
@@ -2186,6 +2214,7 @@ bool FWowFrameManager::IsMouseOverFrame(int64 Handle, float TopOffset, float Bot
 
 void FWowFrameManager::TickWidgetEvents()
 {
+    TickMessages(FPlatformTime::Seconds());
     if(EventSystem && FPlatformTime::Seconds()>=NextScrollRangeCheck)
     {
         NextScrollRangeCheck=FPlatformTime::Seconds()+.1;

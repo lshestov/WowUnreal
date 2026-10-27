@@ -125,6 +125,11 @@ may use NullRHI; visual checks require a rendered client.
 
 ## Remaining compatibility work
 
+Stock notifications now honor their XML font, alignment, display time and
+fading; scrolling chat preserves its history. Character stats initialize from
+the selected server identity before player-object fields arrive. See
+[message frames and bootstrap identity](MessageFrames.md).
+
 Full WoW UI compatibility is **not complete**. In particular:
 
 - Specialized legacy frame/region methods and broader addon compatibility. Visible panels and

@@ -932,20 +932,11 @@ static const char* WowClassTokens[] = {
 static int L_UnitClass(lua_State* L)
 {
     FWowEntity* Entity = ResolveUnit(L);
-    if (Entity)
-    {
-        FWowUnitEntity* Unit = static_cast<FWowUnitEntity*>(Entity);
-        if (Entity->IsUnit())
-        {
-            uint8 ClassId = Unit->GetClassId();
-            if (ClassId>0 && ClassId!=10 && ClassId < UE_ARRAY_COUNT(WowClassNames))
-            {
-                lua_pushstring(L, WowClassNames[ClassId]);
-                lua_pushstring(L, WowClassTokens[ClassId]);
-                return 2;
-            }
-        }
-    }
+    uint8 ClassId=Entity && Entity->IsUnit()?static_cast<FWowUnitEntity*>(Entity)->GetClassId():0;
+    const auto* C=WowLuaApi::GetContext(L);
+    if(!ClassId && C && C->ConnectionManager && FCStringAnsi::Stricmp(luaL_optstring(L,1,""),"player")==0)
+        for(const auto& Character:C->ConnectionManager->GetCachedCharacters()) if(uint64(Character.Guid)==C->ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid) {ClassId=Character.Class; break;}
+    if(ClassId>0 && ClassId!=10 && ClassId<UE_ARRAY_COUNT(WowClassNames)) {lua_pushstring(L,WowClassNames[ClassId]); lua_pushstring(L,WowClassTokens[ClassId]); return 2;}
     lua_pushnil(L);
     lua_pushnil(L);
     return 2;

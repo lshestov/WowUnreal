@@ -206,6 +206,8 @@ struct WOWUI_API FWowFrameDef
     float ValueStep=.001f;
     uint8 SliderProperties=0; // Explicit XML min/max/default/step attributes.
 	FString Orientation; // HORIZONTAL, VERTICAL (for Slider/StatusBar)
+    float MessageDuration=-1,MessageFade=-1; int8 MessageFading=-1;
+    FString MessageInsertMode,MessageFont,MessageJustifyH;
 };
 
 /** Directive from XML parsing */
