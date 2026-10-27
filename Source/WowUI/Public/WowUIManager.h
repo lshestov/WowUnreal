@@ -62,6 +62,7 @@ public:
 	/** Update inventory from player entity */
 	void UpdateInventory();
 	void SetActorResolver(TFunction<AActor*(uint64)> Resolver);
+    void SetAreaResolver(TFunction<uint32()> Resolver);
 	void TickWorldImages(UWorld* World);
 	void MapCommand(int32 Command);
 	void ProcessPendingReload();

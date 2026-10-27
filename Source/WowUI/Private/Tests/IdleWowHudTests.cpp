@@ -29,6 +29,7 @@
 #include "Formats/Dbc/DbcStore.h"
 #include "WowAssetCache.h"
 #include "UObject/StrongObjectPtr.h"
+#include "Coord/WowCoordinate.h"
 
 #if WITH_DEV_AUTOMATION_TESTS && __has_include("lua.h")
 namespace
@@ -535,6 +536,38 @@ bool FHudTextureTemplates::RunTest(const FString&)
     TestTrue(TEXT("Updated normal caption color is visible"),Text && FMath::IsNearlyEqual(Text->GetColorAndOpacity().GetSpecifiedColor().G,.8f));
     return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudAreaZones,"WowUnreal.Hud.AreaZones",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudAreaZones::RunTest(const FString&)
+{
+    TestEqual(TEXT("World-state counters do not invent zone changes"),FWowEventSystem::OpcodeToEvent(0x2C3),FString(TEXT("UPDATE_WORLD_STATES")));
+    FString Path; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false; FMpqManager Mpq; if(!Mpq.Initialize(Path)) return false;
+    auto& Dbc=FDbcStore::Get(); if(!Dbc.IsLoaded()) Dbc.LoadAll(Mpq); if(!Dbc.IsDeferredLoaded()) Dbc.LoadDeferred(Mpq);
+    for(const auto Tile:{FIntPoint(10,9),FIntPoint(32,32),FIntPoint(31,48)}) for(int32 X:{0,5,15}) for(int32 Y:{0,11,15})
+    {
+        const auto Position=FWowCoordinate::AdtToUE(Tile.X*FWowCoordinate::TILE_SIZE+(X+.5f)*FWowCoordinate::CHUNK_SIZE,0,Tile.Y*FWowCoordinate::TILE_SIZE+(Y+.5f)*FWowCoordinate::CHUNK_SIZE);
+        TestEqual(TEXT("Centered coordinates preserve the actual east/west chunk"),FWowCoordinate::WorldToChunk(Position).X,X);
+        TestEqual(TEXT("Centered coordinates preserve the actual north/south chunk"),FWowCoordinate::WorldToChunk(Position).Y,Y);
+    }
+    FHudFixture F; TStrongObjectPtr<UWowConnectionManager> C(NewObject<UWowConnectionManager>()); auto& H=C->PacketHandler;
+    F.Context.ConnectionManager=C.Get(); F.Context.EntityManager=&H.EntityManager; H.EntityManager.LocalPlayerGuid=1;
+    auto& Player=H.EntityManager.PromoteToTyped(1,WowTypeMask::PLAYER|WowTypeMask::UNIT); Player.SetField(UnitField::BYTES_0,1|(1<<8));
+    H.ServerAreaMapId=H.CurrentMapId=0; H.ServerZoneId=12; H.ServerAreaId=9;
+    TestTrue(TEXT("Server area initializes the real Northshire subzone before terrain"),F.Lua.ExecuteString(TEXT("assert(GetZoneText()=='Elwynn Forest' and GetRealZoneText()=='Elwynn Forest' and GetSubZoneText()=='Northshire Valley' and GetMinimapZoneText()=='Northshire Valley' and not IsFlyableArea())")));
+    uint32 Area=1519; F.Context.ResolveArea=[&]{return Area;};
+    TestTrue(TEXT("Loaded terrain replaces the fallback with the actual city"),F.Lua.ExecuteString(TEXT("assert(GetZoneText()=='Stormwind City' and GetSubZoneText()=='' and GetMinimapZoneText()=='Stormwind City')")));
+    Area=14;
+    TestTrue(TEXT("An area from a different map cannot override current server state"),F.Lua.ExecuteString(TEXT("assert(GetMinimapZoneText()=='Northshire Valley')")));
+    H.CurrentMapId=1;
+    TestTrue(TEXT("Actual map changes select the correct zone rather than Elwynn"),F.Lua.ExecuteString(TEXT("assert(GetZoneText()=='Durotar' and GetSubZoneText()=='')")));
+    H.CurrentMapId=530;
+    TestTrue(TEXT("Unknown positions do not invent a zone"),F.Lua.ExecuteString(TEXT("assert(GetZoneText()=='' and GetMinimapZoneText()=='' and not IsFlyableArea())")));
+    Area=3483;
+    TestTrue(TEXT("Real Outland areas enable flight conditions"),F.Lua.ExecuteString(TEXT("assert(GetZoneText()=='Hellfire Peninsula' and IsFlyableArea())")));
+    H.CurrentMapId=571; Area=4395;
+    TestTrue(TEXT("Dalaran respects its actual no-fly area flag"),F.Lua.ExecuteString(TEXT("assert(GetZoneText()=='Dalaran' and not IsFlyableArea())")));
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudChannels,"WowUnreal.Hud.ChannelApi",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FHudChannels::RunTest(const FString&)
 {

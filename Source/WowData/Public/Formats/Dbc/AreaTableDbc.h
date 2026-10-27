@@ -14,7 +14,7 @@ struct FAreaTableDbcEntry
     uint32 IntroMusicID = 0;// 9  — ZoneIntroMusicTable.dbc ID
     int32  AreaLevel;       // 10
     FString Name;           // 11 (localized, enUS)
-    uint32 Team;            // 28 (0=neutral, 67=Horde, 469=Alliance)
+    uint32 Team;            // 28: faction group mask (2=Alliance, 4=Horde)
 };
 
 class WOWDATA_API FAreaTableDbc

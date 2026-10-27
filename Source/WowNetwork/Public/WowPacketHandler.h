@@ -228,6 +228,7 @@ public:
     /** World states (field -> value) */
     TMap<uint32, uint32> WorldStates;
     uint32 CurrentMapId=0;
+    uint32 ServerAreaMapId=MAX_uint32,ServerZoneId=0,ServerAreaId=0;
     uint32 DungeonDifficulty=0,RaidDifficulty=0;
     struct FSavedInstance { uint32 Map=0,Difficulty=0,Reset=0; uint64 Id=0; bool Locked=false,Extended=false; };
     TArray<FSavedInstance> SavedInstances;

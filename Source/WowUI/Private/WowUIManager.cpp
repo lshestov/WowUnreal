@@ -449,6 +449,7 @@ void UWowUIManager::SetActorResolver(TFunction<AActor*(uint64)> Resolver)
 {
     if(UIContext) UIContext->ResolveActor=MoveTemp(Resolver);
 }
+void UWowUIManager::SetAreaResolver(TFunction<uint32()> Resolver) {if(UIContext) UIContext->ResolveArea=MoveTemp(Resolver);}
 
 void UWowUIManager::TickWorldImages(UWorld* World)
 {
@@ -459,6 +460,7 @@ void UWowUIManager::TickWorldImages(UWorld* World)
     if(bUILoaded && LuaVM && Now>=NextItemComparisonUpdate)
     {
         NextItemComparisonUpdate=Now+.2; LuaVM->BeginCallback();
+        WowLuaApi::UpdateMapState(LuaVM->GetState());
         WowLuaApi::UpdateItemComparisons(LuaVM->GetState());
         WowLuaApi::UpdateMerchant(LuaVM->GetState());
         WowLuaApi::UpdateBank(LuaVM->GetState());
@@ -480,6 +482,7 @@ void UWowUIManager::ProcessPendingReload()
     // Recreate the VM only after its active callback has returned to the game loop.
     FWowSavedVariables::SaveAll(LuaVM->GetState());
     auto Resolver=UIContext->ResolveActor;
+    auto AreaResolver=UIContext->ResolveArea;
     auto Rows=UIContext->SelectedRows;
     auto Action=FrameManager->OnSecureActionDispatch;
     auto Spell=FrameManager->OnSecureSpellDispatch;
@@ -491,6 +494,7 @@ void UWowUIManager::ProcessPendingReload()
     bUILoaded=false;
     InitializeCore();
     UIContext->ResolveActor=MoveTemp(Resolver); UIContext->SelectedRows=MoveTemp(Rows);
+    UIContext->ResolveArea=MoveTemp(AreaResolver);
     FrameManager->OnSecureActionDispatch=Action; FrameManager->OnSecureSpellDispatch=Spell;
     FrameManager->Initialize(RootCanvas);
     SetConnectionManager(ConnectionManager);

@@ -30,6 +30,7 @@ struct FWowLuaContext
     TSharedPtr<FWowClassUiView> ClassUi;
     TSharedPtr<FWowChannelUiView> Channels;
     TFunction<uint32()> ResolveArea;
+    uint32 LastAreaId=0,LastZoneId=0;
     TFunction<AActor*(uint64)> ResolveActor;
     TFunction<void()> ReloadUI;
     TMap<FName,int32> SelectedRows;
@@ -52,6 +53,9 @@ namespace WowLuaApi
     void UpdateMail(lua_State* L);
     void RegisterTradeApi(lua_State* L);
     void RegisterChannelApi(lua_State* L);
+    void RegisterMapApi(lua_State* L);
+    void UpdateMapState(lua_State* L);
+    uint32 ResolveAreaId(const FWowLuaContext* Context);
     void UpdateChannels(lua_State* L);
     void UpdateTrade(lua_State* L);
     int SetTradePlayerItemTooltip(lua_State* L);

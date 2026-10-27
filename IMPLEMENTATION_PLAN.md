@@ -432,15 +432,25 @@ build, automation, native autologin and rendered screenshot verification):
     checks and a native 35-step/five-image round trip with exact fixture cleanup.
     See Docs/Macros.md.
 - [ ] 6. Maps: points of interest, tracking, interior minimaps and original map bootstrap.
-  - [ ] Resolve actual zone/subzone from streamed terrain areas and join/replace
+  - [?] Resolve actual zone/subzone from streamed terrain areas and join/replace
     built-in zone channels using their real DBC definitions and server replies.
-  - [?] Server near teleports: actual 12340 MSG_MOVE_TELEPORT_ACK request and
+    Centre-offset chunk coordinates, player-position resolver retained on reload,
+    complete server-area fallback, real territory/flight flags and actual zone
+    events. Preserve channel identities/ordinals across normalized names and
+    replacements; respect explicit leaves and city-only Trade eligibility.
+    Verified Windows build, 108 regression tests (two existing warnings) and a
+    native 16-step/three-image roster/leave/rejoin/reload run with exact fixture
+    restoration. See Docs/Areas.md and Docs/Channels.md.
+  - [x] Server near teleports: actual 12340 MSG_MOVE_TELEPORT_ACK request and
     packed acknowledgement, atomic complete MovementInfo, shared actor/network
     position, capsule feet placement and inverse login/movement facing. Observer
     notifications remain distinct. Verified Windows build, 107 regression tests
     (two existing warnings), optional/truncated/invalid packet checks and a native
     two-metre server round trip with two rendered captures and exact position
     restoration. See Docs/Movement.md.
+  - [ ] Restore original world-map bootstrap, region selection/projection,
+    overlays, player arrows, landmarks and quest POIs/blobs.
+  - [ ] Real tracking selection/blips and WMO interior minimap tiles.
 - [ ] 7. Group/special windows: party/loot, PvP, dungeon finder and achievements.
   - [ ] Restore NPC portrait captures and friendly NPC unit-frame reactions.
 

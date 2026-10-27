@@ -2426,6 +2426,9 @@ void FWowPacketHandler::HandleInitWorldStates(FPacketReader& R)
 
     UE_LOG(LogWowPacket, Log, TEXT("INIT_WORLD_STATES: Map %u, Area %u, SubArea %u, %u states"), MapId, AreaId, SubAreaId, Count);
 
+    if(R.Remaining()!=int64(Count)*8) return;
+    ServerAreaMapId=MapId; ServerZoneId=AreaId; ServerAreaId=SubAreaId?SubAreaId:AreaId;
+
     // Clear existing world states
     WorldStates.Empty();
 

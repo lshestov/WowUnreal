@@ -54,6 +54,14 @@ struct WOWDATA_API FWowCoordinate
         return FIntPoint(TX, TY);
     }
 
+    static FIntPoint WorldToChunk(const FVector& UEPos)
+    {
+        const auto Tile=WorldToTile(UEPos);
+        const double X=UEPos.Y/SCALE+ADT_CENTER_X-Tile.X*TILE_SIZE;
+        const double Y=-UEPos.X/SCALE+ADT_CENTER_Z-Tile.Y*TILE_SIZE;
+        return {FMath::Clamp(FMath::FloorToInt32(X/CHUNK_SIZE),0,15),FMath::Clamp(FMath::FloorToInt32(Y/CHUNK_SIZE),0,15)};
+    }
+
     /** Convert WoW world coords (centered map space used by movement/login packets) to UE coords */
     static FVector WowToUE(float X, float Y, float Z)
     {

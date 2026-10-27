@@ -1466,6 +1466,15 @@ void AWowWorldManager::SpawnLod1Tile(int32 TX, int32 TY)
     UE_LOG(LogWowWorld, Log, TEXT("Spawned LOD 1 tile %d,%d (%d chunks, %d materials)"), TX, TY, TotalChunks, SectionMaterials.Num());
 }
 
+uint32 AWowWorldManager::GetAreaAt(const FVector& Position) const
+{
+    const auto Tile=FWowCoordinate::WorldToTile(Position),Chunk=FWowCoordinate::WorldToChunk(Position);
+    const auto* Found=LoadedTiles.Find(TileKey(Tile.X,Tile.Y));
+    if(!Found || !IsValid(*Found)) return 0;
+    const int32 Index=Chunk.Y*16+Chunk.X;
+    return (*Found)->ChunkAreaIds.IsValidIndex(Index)?(*Found)->ChunkAreaIds[Index]:0;
+}
+
 void AWowWorldManager::UpdateZoneAudio()
 {
     APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
@@ -1475,26 +1484,7 @@ void AWowWorldManager::UpdateZoneAudio()
     FRotator CamRot;
     PC->GetPlayerViewPoint(CamLoc, CamRot);
 
-    // Determine which tile and chunk the camera is over
-    FIntPoint CameraTile = FWowCoordinate::WorldToTile(CamLoc);
-    int64 Key = TileKey(CameraTile.X, CameraTile.Y);
-
-    TObjectPtr<AWowTerrainTile>* TilePtr = LoadedTiles.Find(Key);
-    if (!TilePtr || !*TilePtr) return;
-
-    AWowTerrainTile* Tile = *TilePtr;
-    if (Tile->ChunkAreaIds.Num() != 256) return;
-
-    // Calculate which chunk within the tile (0-15 in each axis)
-    float NgX = CamLoc.Y / FWowCoordinate::SCALE;
-    float NgZ = -CamLoc.X / FWowCoordinate::SCALE;
-    float LocalX = NgX - CameraTile.X * FWowCoordinate::TILE_SIZE;
-    float LocalZ = NgZ - CameraTile.Y * FWowCoordinate::TILE_SIZE;
-
-    int32 ChunkX = FMath::Clamp(FMath::FloorToInt32(LocalX / FWowCoordinate::CHUNK_SIZE), 0, 15);
-    int32 ChunkY = FMath::Clamp(FMath::FloorToInt32(LocalZ / FWowCoordinate::CHUNK_SIZE), 0, 15);
-
-    uint32 AreaId = Tile->ChunkAreaIds[ChunkY * 16 + ChunkX];
+    const uint32 AreaId=GetAreaAt(StreamingPosition(CamLoc));
     if (AreaId == 0 || AreaId == CurrentAudioAreaId) return;
 
     CurrentAudioAreaId = AreaId;

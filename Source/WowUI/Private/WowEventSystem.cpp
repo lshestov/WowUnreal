@@ -1722,10 +1722,8 @@ FString FWowEventSystem::OpcodeToEvent(uint16 Opcode)
 	case 0x019B: return TEXT("QUEST_LOG_UPDATE");                // SMSG_QUESTLOG_FULL_UPDATE
 	case 0x019C: return TEXT("QUEST_FINISHED");
 
-	// Zone / map
-	case 0x02C2: return TEXT("ZONE_CHANGED_NEW_AREA");           // SMSG_ZONE_UNDER_ATTACK / area update
-	case 0x02C3: return TEXT("ZONE_CHANGED");
-	case 0x02C4: return TEXT("ZONE_CHANGED_INDOORS");
+	// Zone transitions come from resolved position, not world-state counters.
+	case 0x02C2: case 0x02C3: return TEXT("UPDATE_WORLD_STATES");
 
 	// Group / raid
 	case 0x007D: return TEXT("GROUP_ROSTER_UPDATE");             // SMSG_GROUP_LIST
@@ -1781,7 +1779,6 @@ FString FWowEventSystem::OpcodeToEvent(uint16 Opcode)
 
 	// Weather/Environment
 	case 0x02F4: return TEXT("WEATHER_CHANGED");                 // SMSG_WEATHER
-	// Note: 0x02C3 already mapped to ZONE_CHANGED above — UPDATE_WORLD_STATE fires programmatically
 
 	// Death / resurrection
 	case 0x02E7: return TEXT("PLAYER_DEAD");

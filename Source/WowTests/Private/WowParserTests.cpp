@@ -975,6 +975,15 @@ bool FChannelPackets::RunTest(const FString&)
     TArray<uint8> Left; Put(Left,uint8(3)); Text(Left,TEXT("QaChannel")); Put(Left,uint32(0)); Put(Left,uint8(0)); H.HandlePacket(0x0099,Left);
     TestTrue(TEXT("A matching leave clears the actual channel"),H.Channels.IsEmpty() && H.ChannelNotices.Last().Number==4);
     TestTrue(TEXT("Invalid names and oversized passwords are rejected without a request"),!C->JoinChannel(TEXT("4bad")) && !C->JoinChannel(TEXT("bad|link")) && !C->JoinChannel(TEXT("QaChannel"),FString::ChrN(32,'x')) && !WowTestUtils::DequeueClientPacket(*Socket,Opcode,Data));
+    TestTrue(TEXT("A built-in join reserves its actual ordinal"),C->JoinChannel(TEXT("General - Client Zone"),{},1,1) && WowTestUtils::DequeueClientPacket(*Socket,Opcode,Data));
+    Joined.Reset(); Put(Joined,uint8(2)); Text(Joined,TEXT("General - Server Zone")); Put(Joined,uint8(0x18)); Put(Joined,uint32(1)); Put(Joined,uint32(0)); H.HandlePacket(0x99,Joined);
+    TestTrue(TEXT("A server-normalized name consumes the join by DBC identity"),H.ChannelJoins.IsEmpty() && H.Channels.Num()==1 && H.Channels[0].Id==1 && H.Channels[0].Number==1 && H.Channels[0].Name==TEXT("General - Server Zone"));
+    H.Channels[0].Members.Add({1,3}); H.Channels[0].RosterKnown=true;
+    Joined.Reset(); Put(Joined,uint8(2)); Text(Joined,TEXT("General - Next Zone")); Put(Joined,uint8(0x18)); Put(Joined,uint32(1)); Put(Joined,uint32(0)); H.HandlePacket(0x99,Joined);
+    TestTrue(TEXT("Server zone replacement retains the ordinal and clears stale members"),H.Channels.Num()==1 && H.Channels[0].Number==1 && H.Channels[0].Name==TEXT("General - Next Zone") && H.Channels[0].Members.IsEmpty() && !H.Channels[0].RosterKnown);
+    TArray<uint8> States; Put(States,uint32(0)); Put(States,uint32(12)); Put(States,uint32(9)); Put(States,uint16(1)); Put(States,uint32(10)); Put(States,uint32(20)); H.HandlePacket(WowOpcode::SMSG_INIT_WORLD_STATES,States);
+    States.Pop(); H.HandlePacket(WowOpcode::SMSG_INIT_WORLD_STATES,States);
+    TestTrue(TEXT("Incomplete world states cannot replace valid area and state snapshots"),H.ServerAreaId==9 && H.ServerZoneId==12 && H.ServerAreaMapId==0 && H.WorldStates.FindRef(10)==20);
     return true;
 }
 

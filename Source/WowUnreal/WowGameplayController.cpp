@@ -178,6 +178,12 @@ void AWowGameplayController::BeginPlay()
 	if (UGameInstance* GI = GetGameInstance())
 	{
 		UIManager = GI->GetSubsystem<UWowUIManager>();
+        if(UIManager) UIManager->SetAreaResolver([WeakThis=TWeakObjectPtr<AWowGameplayController>(this),Manager=TWeakObjectPtr<AWowWorldManager>()]() mutable ->uint32
+        {
+            if(!WeakThis.IsValid() || !WeakThis->GetPawn()) return 0;
+            if(!Manager.IsValid()) Manager=Cast<AWowWorldManager>(UGameplayStatics::GetActorOfClass(WeakThis->GetWorld(),AWowWorldManager::StaticClass()));
+            return Manager.IsValid()?Manager->GetAreaAt(WeakThis->GetPawn()->GetActorLocation()):0;
+        });
 		if(UIManager) UIManager->SetActorResolver([WeakThis=TWeakObjectPtr<AWowGameplayController>(this)](uint64 Guid)->AActor*
 		{
 			if(!WeakThis.IsValid() || !WeakThis->ConnectionManager) return nullptr;

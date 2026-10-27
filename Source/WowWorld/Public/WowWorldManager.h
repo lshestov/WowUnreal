@@ -62,6 +62,7 @@ public:
     int32 GetActiveDoodadCount() const { return ActiveDoodadCount; }
     int32 GetActiveWmoGroupCount() const { return ActiveWmoGroupCount; }
     const FString& GetMapName() const { return MapName; }
+    uint32 GetAreaAt(const FVector& Position) const;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW")
     FString MapName = TEXT("Azeroth");

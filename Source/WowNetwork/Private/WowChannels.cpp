@@ -74,14 +74,18 @@ void FWowPacketHandler::HandleChannelNotify(FPacketReader& R)
     case 18: case 20: case 21: if(!Guid(Notice.Target) || !Guid(Notice.Actor)) return; break;
     }
     if(R.Remaining()) return;
-    const FString Key=Notice.Channel.ToLower(); auto* Row=FindChannel(Notice.Channel);
-    if(const auto* Pending=ChannelJoins.Find(Key)) {Notice.Number=Pending->Number; Notice.Window=Pending->Window; Notice.Id=Pending->Id;}
+    const FString Key=Notice.Channel.ToLower(); FString JoinKey=Key; auto* Row=FindChannel(Notice.Channel);
+    if(Notice.Type==2 && Notice.Id && !ChannelJoins.Contains(Key))
+        for(const auto& Pair:ChannelJoins) if(Pair.Value.Id==Notice.Id) {JoinKey=Pair.Key; break;}
+    if(const auto* Pending=ChannelJoins.Find(JoinKey)) {Notice.Number=Pending->Number; Notice.Window=Pending->Window; Notice.Id=Pending->Id;}
     if(Notice.Type==2)
     {
-        const auto* Pending=ChannelJoins.Find(Key); Notice.Number=Pending?Pending->Number:(Row?Row->Number:FreeNumber(*this)); Notice.Window=Pending?Pending->Window:1;
+        if(!Row && Notice.Id) Row=Channels.FindByPredicate([&](const FWowChannel& C){return C.Id==Notice.Id;});
+        const auto* Pending=ChannelJoins.Find(JoinKey); Notice.Number=Pending?Pending->Number:(Row?Row->Number:Notice.Id==1?1:Notice.Id==2?2:Notice.Id==22?3:FreeNumber(*this)); Notice.Window=Pending?Pending->Window:1;
         if(!Notice.Number) return;
         if(!Row) {FWowChannel New; New.Name=Notice.Channel; New.Number=Notice.Number; Channels.Add(MoveTemp(New)); Row=&Channels.Last();}
-        Row->Id=Notice.Id; Row->Flags=Notice.Flags; Row->Leaving=false; ChannelJoins.Remove(Key);
+        if(!Row->Name.Equals(Notice.Channel,ESearchCase::IgnoreCase)) {Row->Name=Notice.Channel; Row->Members.Reset(); Row->RosterKnown=Row->RosterPending=false; Row->Count=0;}
+        Row->Id=Notice.Id; Row->Number=Notice.Number; Row->Flags=Notice.Flags; Row->Leaving=false; ChannelJoins.Remove(JoinKey);
     }
     if(Row)
     {

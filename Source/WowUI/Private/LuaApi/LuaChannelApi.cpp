@@ -7,7 +7,8 @@
 struct FWowChannelUiView
 {
     FString Selected,Membership;
-    uint32 Revision=0,Area=0;
+    uint32 Revision=0,Zone=0;
+    double ZoneChangedAt=0;
     int32 Names=-1,GroupCount=-1;
     TSet<uint64> RequestedNames;
 };
@@ -86,7 +87,7 @@ TArray<FWowChannelMember> Members(lua_State* L,const FDisplay& Display)
 }
 const FAreaTableDbcEntry* Zone(lua_State* L)
 {
-    const auto* C=WowLuaApi::GetContext(L); const uint32 Area=C && C->ResolveArea?C->ResolveArea():0;
+    const auto* C=WowLuaApi::GetContext(L); const uint32 Area=WowLuaApi::ResolveAreaId(C);
     const auto* Row=FDbcStore::Get().AreaTable().GetById(Area); for(int32 Depth=0;Row && Row->ParentAreaID && Depth<8;++Depth) Row=FDbcStore::Get().AreaTable().GetById(Row->ParentAreaID); return Row;
 }
 int Join(lua_State* L)
@@ -96,9 +97,11 @@ int Join(lua_State* L)
     if(const auto* D=Definition(Name))
     {
         const auto* Area=Zone(L); if(!Area) return 0;
-        Id=D->Id; Name=D->Pattern; Name.ReplaceInline(TEXT("%s"),*Area->Name); Number=Id==1?1:Id==2?2:Id==22?3:0;
+        if((D->Flags&0x10) && !(Area->Flags&8)) return 0;
+        Id=D->Id; Name=D->Pattern; Name.ReplaceInline(TEXT("%s"),(D->Flags&0x10)?TEXT("City"):*Area->Name); Number=Id==1?1:Id==2?2:Id==22?3:0;
     }
     if(!N->JoinChannel(Name,Password,Id,Number,Window)) return 0;
+    if(Id==1 || Id==2 || Id==22) WowLuaApi::SetUiPreference(L,FString::Printf(TEXT("builtinChannelEnabled%u"),Id),1);
     lua_pushinteger(L,Id); lua_pushstring(L,TCHAR_TO_UTF8(*Name)); return 2;
 }
 int ConfigureWindow(lua_State* L,bool Add)
@@ -110,11 +113,29 @@ int Moderation(lua_State* L,uint32 Opcode)
 {
     auto* N=Connection(L); auto* C=Resolve(L); if(N && C) N->ChannelCommand(Opcode,C->Name,UTF8_TO_TCHAR(luaL_optstring(L,2,""))); return 0;
 }
+void UpdateBuiltin(lua_State* L)
+{
+    auto* N=Connection(L); if(!N || N->GetState()!=EWowSessionState::WorldInGame) return;
+    const auto* Area=Zone(L); if(!Area) return;
+    auto& V=View(L); const double Now=FPlatformTime::Seconds();
+    if(V.Zone!=Area->ID) {V.Zone=Area->ID; V.ZoneChangedAt=Now;}
+    // Allow the server's automatic zone-channel replacement to arrive first.
+    if(Now-V.ZoneChangedAt<.5) return;
+    for(uint32 Id:{1u,2u,22u})
+    {
+        const auto* D=Definition(Id); if(!D) continue;
+        auto* Row=N->PacketHandler.Channels.FindByPredicate([&](const FWowChannel& C){return C.Id==Id;});
+        const bool Allowed=WowLuaApi::GetUiPreference(L,FString::Printf(TEXT("builtinChannelEnabled%u"),Id),1) && !(Area->Flags&0x10000) && (!(D->Flags&0x10) || (Area->Flags&8));
+        FString Name=D->Pattern; Name.ReplaceInline(TEXT("%s"),(D->Flags&0x10)?TEXT("City"):*Area->Name);
+        if(Row) {if(!Allowed || !Row->Name.Equals(Name,ESearchCase::IgnoreCase)) N->LeaveChannel(Row->Name); continue;}
+        if(Allowed) N->JoinChannel(Name,{},Id,Id==1?1:Id==2?2:3,1);
+    }
+}
 }
 void WowLuaApi::RegisterChannelApi(lua_State* L)
 {
     Register(L,"JoinChannelByName",Join); Register(L,"JoinTemporaryChannel",Join); Register(L,"JoinPermanentChannel",Join);
-    Register(L,"LeaveChannelByName",[](lua_State* S)->int {if(auto* N=Connection(S)) if(const auto* C=Resolve(S)) N->LeaveChannel(C->Name); return 0;});
+    Register(L,"LeaveChannelByName",[](lua_State* S)->int {if(auto* N=Connection(S)) if(const auto* C=Resolve(S)) {if(C->Id==1 || C->Id==2 || C->Id==22) SetUiPreference(S,FString::Printf(TEXT("builtinChannelEnabled%u"),C->Id),0); N->LeaveChannel(C->Name);} return 0;});
     Register(L,"GetChannelList",[](lua_State* S)->int {const auto* N=Connection(S); if(!N) return 0; TArray<FWowChannel> All=N->PacketHandler.Channels; All.Sort([](const FWowChannel& A,const FWowChannel& B){return A.Number<B.Number;}); for(const auto& C:All) {lua_pushinteger(S,C.Number); lua_pushstring(S,TCHAR_TO_UTF8(*Short(C)));} return All.Num()*2;});
     Register(L,"GetChannelName",[](lua_State* S)->int {const auto* C=Resolve(S); lua_pushinteger(S,C?C->Number:0); lua_pushstring(S,C?TCHAR_TO_UTF8(*C->Name):nullptr); lua_pushinteger(S,0); return 3;});
     Register(L,"GetChatWindowChannels",[](lua_State* S)->int {const auto* N=Connection(S); const int32 Window=luaL_checkinteger(S,1); if(!N || Window<1 || Window>10) return 0; int32 Count=0; for(const auto& C:N->PacketHandler.Channels) if(Included(S,Window,C)) {lua_pushstring(S,TCHAR_TO_UTF8(*Short(C))); lua_pushinteger(S,C.Id); Count+=2;} return Count;});
@@ -158,6 +179,7 @@ void WowLuaApi::UpdateChannels(lua_State* L)
     auto& H=N->PacketHandler; auto& V=View(L); const double Now=FPlatformTime::Seconds();
     for(auto It=H.ChannelJoins.CreateIterator();It;++It) if(Now>It.Value().Deadline) {It.RemoveCurrent(); ++H.ChannelRevision;}
     for(auto& Channel:H.Channels) if((Channel.RosterPending || Channel.Leaving) && Now-Channel.RequestAt>15) {Channel.RosterPending=Channel.Leaving=false; ++H.ChannelRevision;}
+    UpdateBuiltin(L);
     if(V.Revision==H.ChannelRevision && V.Names==H.PlayerNameCache.Num() && V.GroupCount==H.GroupInfo.MemberCount && H.ChannelNotices.IsEmpty()) return;
     V.Revision=H.ChannelRevision; V.Names=H.PlayerNameCache.Num(); V.GroupCount=H.GroupInfo.MemberCount;
     FString Membership; for(const auto& Channel:H.Channels) Membership+=FString::Printf(TEXT("%d:%s;"),Channel.Number,*Channel.Name);
