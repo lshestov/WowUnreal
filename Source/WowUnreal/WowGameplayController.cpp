@@ -11,6 +11,7 @@
 #include "WowGameUI.h"
 #include "WowEventSystem.h"
 #include "WowWorldManager.h"
+#include "WowLoginController.h"
 #include "WowAudioManager.h"
 #include "WowCharacterBuilder.h"
 #include "WowAnimationController.h"
@@ -1974,34 +1975,14 @@ void AWowGameplayController::OnMapTransfer(uint32 MapId, float X, float Y, float
 	UE_LOG(LogWowGameplay, Log, TEXT("Map transfer to: map=%u pos=(%.1f,%.1f,%.1f) orient=%.2f"),
 		MapId, X, Y, Z, Orientation);
 
-	// For basic implementation, treat this like a teleport to new position
-	FVector Position(X, Y, Z);
-	FVector UEPosition = FWowCoordinate::WowToUE(Position);
-
-	// Teleport the local pawn
-	APawn* LocalPawn = GetPawn();
-	if (LocalPawn)
-	{
-		LocalPawn->SetActorLocation(UEPosition, false, nullptr, ETeleportType::TeleportPhysics);
-		LocalPawn->SetActorRotation(FRotator(0.0f, FMath::RadiansToDegrees(Orientation), 0.0f));
-
-		if (APlayerController* PC = Cast<APlayerController>(LocalPawn->GetController()))
-		{
-			PC->SetControlRotation(FRotator(0.0f, FMath::RadiansToDegrees(Orientation), 0.0f));
-		}
-
-		// Update server position tracking
-		bHasServerPosition = true;
-		LastServerPosition = UEPosition;
-	}
-
-	// Send worldport acknowledgment
-	SendWorldportAck();
-
-	// TODO: In a full implementation, this would:
-	// 1. Clear all existing entities
-	// 2. Load the new map's terrain and doodads
-	// 3. Wait for SMSG_LOGIN_VERIFY_WORLD for the new map
+    auto* Lifecycle=Cast<AWowLoginController>(UGameplayStatics::GetActorOfClass(this,AWowLoginController::StaticClass()));
+    if(!Lifecycle || !Lifecycle->BeginMapTransfer(MapId,FVector(X,Y,Z),Orientation))
+    {
+        UE_LOG(LogWowGameplay,Error,TEXT("Cannot load server map transfer %u"),MapId);
+        if(ConnectionManager) ConnectionManager->Disconnect();
+        return;
+    }
+    SendWorldportAck();
 }
 
 void AWowGameplayController::SendWorldportAck()

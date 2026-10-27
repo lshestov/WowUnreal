@@ -39,6 +39,7 @@ UCLASS()
 class WOWWORLD_API AWowWorldManager : public AActor
 {
     friend class FIdleWowLargeWmo;
+    friend class FIdleWowServerMapSelection;
     GENERATED_BODY()
 public:
     AWowWorldManager();

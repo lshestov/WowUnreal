@@ -579,7 +579,12 @@ bool AWowWorldManager::SelectMap(uint32 MapId)
     // Old MPQ reads can finish in the background; their generation prevents
     // them from being finalized into this map without blocking the game thread.
     PendingTileKeys.Reset(); InitialTileKeys.Reset(); InitialTilesQueued=InitialTilesLoaded=InitialObjectTiles=0; PendingWmoLoads.Reset(); WmoGroupCounts.Reset(); PendingObjectGroups=0;
-    for(auto& Pair:LoadedTiles) if(IsValid(Pair.Value)) Pair.Value->Destroy(); LoadedTiles.Reset();
+    for(auto& Pair:LoadedTiles) if(IsValid(Pair.Value))
+    {
+        for(auto& Wmo:Pair.Value->SpawnedWmos) if(IsValid(Wmo.Value)) Wmo.Value->Destroy();
+        Pair.Value->SpawnedWmos.Reset(); Pair.Value->Destroy();
+    }
+    LoadedTiles.Reset();
     for(auto& Pair:WdlTiles) if(IsValid(Pair.Value)) Pair.Value->Destroy(); WdlTiles.Reset();
     for(auto& Pair:Lod1Tiles) if(IsValid(Pair.Value)) Pair.Value->Destroy(); Lod1Tiles.Reset();
     SpawnedWmoIds.Reset(); SpawnedDoodadIds.Reset(); ActiveDoodadCount=ActiveWmoGroupCount=0;

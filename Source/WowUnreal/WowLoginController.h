@@ -28,6 +28,8 @@ public:
     virtual void Tick(float DeltaTime) override;
 
     void StartLoginFlow();
+    /** Reuse loading/collision gating for a server-confirmed far teleport. */
+    bool BeginMapTransfer(uint32 MapId,const FVector& Position,float Orientation);
 
     UPROPERTY()
     TObjectPtr<UWowConnectionManager> ConnectionManager;

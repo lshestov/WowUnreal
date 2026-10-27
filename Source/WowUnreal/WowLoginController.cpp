@@ -10,6 +10,7 @@
 #include "WowGameplayController.h"
 #include "WowPlayerCharacter.h"
 #include "WowWorldCollision.h"
+#include "Coord/WowCoordinate.h"
 #include "WowM2AnimInstance.h"
 // removed: now using SWowLoadingScreen.h
 #include "GameFramework/CharacterMovementComponent.h"
@@ -455,6 +456,22 @@ void AWowLoginController::InitializeWorldSystems()
 
     // Slate chat/combat log disabled — using Lua FrameXML UI instead.
     // The WoW FrameXML handles chat windows, combat log, etc.
+}
+
+bool AWowLoginController::BeginMapTransfer(uint32 MapId,const FVector& Position,float Orientation)
+{
+    auto* Gameplay=Cast<AWowGameplayController>(UGameplayStatics::GetPlayerController(this,0));
+    if(!Gameplay || Gameplay->ConnectionManager!=ConnectionManager || !WorldManager || !WorldManager->SelectMap(MapId)) return false;
+    Gameplay->StopAutoAttack(); Gameplay->PrepareCharacterSelect();
+    if(auto* UI=GetGameInstance()->GetSubsystem<UWowUIManager>()) UI->GetEventSystem()->FireEvent(TEXT("PLAYER_LEAVING_WORLD"));
+    bWorldEntryComplete=false; bHasPendingSpawn=false; bPendingGroundSnap=false;
+    Gameplay->bDeferSpawnTeleport=true;
+    Gameplay->DeferredSpawnPos=FWowCoordinate::WowToUE(Position);
+    Gameplay->DeferredSpawnOrientation=Orientation; Gameplay->bHasDeferredSpawn=true;
+    if(APawn* Pawn=Gameplay->GetPawn()) {Pawn->SetActorHiddenInGame(true); SuspendPawnUntilGroundReady(Pawn);}
+    WorldManager->EnableTerrainStreaming();
+    ShowLoadingScreen(MapId);
+    return true;
 }
 
 void AWowLoginController::HandleLoginSubmit(const FString& Server, int32 Port, const FString& User, const FString& Pass)

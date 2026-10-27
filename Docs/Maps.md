@@ -131,3 +131,16 @@ The real Stormwind root contains 286 groups. The large-WMO test checks its bound
 unique nearest-first scheduling, initial-collision loading gate and cancellation.
 Native verification enters Rebecca Laughlin's shop at the server height, talks
 to the vendor, edits and saves a tabard, and captures the loaded interior.
+
+Far transfers use the same collision-gated loading path as initial entry. A
+validated NEW_WORLD packet selects the server map before notifying consumers;
+old visible creatures, world states, terrain and separately spawned building
+actors are removed. Player items, containers and quests remain available. The
+client acknowledges entry, suspends the pawn until the destination is ready,
+then restores its normal coordinate conversion, facing, capsule and movement.
+The UI is retained and receives the normal leaving/entering world events.
+
+Transfer regression tests reject every truncated packet prefix, trailing bytes
+and nonfinite coordinates without modifying state. Native verification makes
+an Azeroth/Kalimdor round trip, checks real floor collision and map selection,
+and compares inventory, equipment, quests, health and money at both destinations.

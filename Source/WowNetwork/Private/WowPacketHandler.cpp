@@ -1909,9 +1909,9 @@ void FWowPacketHandler::HandleNewWorld(FPacketReader& R)
     // SMSG_NEW_WORLD
     // uint32 mapId + float x + float y + float z + float orientation
 
-    if (!R.CanRead(20)) // 4 + 4*4
+    if (R.Remaining()!=20) // 4 + 4*4
     {
-        UE_LOG(LogWowPacket, Error, TEXT("NEW_WORLD packet too short"));
+        UE_LOG(LogWowPacket, Verbose, TEXT("NEW_WORLD packet has invalid length"));
         return;
     }
 
@@ -1921,15 +1921,25 @@ void FWowPacketHandler::HandleNewWorld(FPacketReader& R)
     float Z = R.ReadFloat();
     float Orientation = R.ReadFloat();
 
+    if(!FMath::IsFinite(X) || !FMath::IsFinite(Y) || !FMath::IsFinite(Z) || !FMath::IsFinite(Orientation)
+        || FMath::Abs(X)>100000 || FMath::Abs(Y)>100000 || FMath::Abs(Z)>100000) return;
+
     UE_LOG(LogWowPacket, Log, TEXT("NEW_WORLD: map=%u pos=(%.1f,%.1f,%.1f) orient=%.2f"),
            MapId, X, Y, Z, Orientation);
 
-    // Clear quest log on map transfer
-    QuestLog.Empty();
-
-    // Broadcast map transfer
-    OnMapTransfer.Broadcast(MapId, X, Y, Z, Orientation);
     CurrentMapId=MapId;
+    ServerAreaMapId=MapId; ServerZoneId=ServerAreaId=0; WorldStates.Reset(); ++WorldStateRevision;
+    // A far teleport replaces visible world objects, while the player,
+    // inventory, quest log and remote group roster retain their identities.
+    TArray<uint64> Remove;
+    for(const auto& Pair:EntityManager.GetAll()) if(Pair.Key!=EntityManager.LocalPlayerGuid && !Pair.Value->IsItem()) Remove.Add(Pair.Key);
+    for(const auto Guid:Remove) EntityManager.Remove(Guid);
+    if(auto* Player=EntityManager.GetLocalPlayer())
+    {
+        auto& Move=Player->Movement; Move.Position=FVector(X,Y,Z); Move.Orientation=Orientation;
+        Move.MoveFlags=0; Move.MoveFlags2=0; Move.FallTime=0; Move.TransportGuid=0; Move.bHasActiveSpline=false; Move.SplineWaypoints.Reset();
+    }
+    OnMapTransfer.Broadcast(MapId, X, Y, Z, Orientation);
 }
 
 // ── SMSG_NAME_QUERY_RESPONSE ─────────────────────────────────────────────────

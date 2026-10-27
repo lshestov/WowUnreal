@@ -7,6 +7,8 @@
 #include "WowLuaVM.h"
 #include "WowFrameManager.h"
 #include "WowWorldCollision.h"
+#include "WowWorldManager.h"
+#include "Formats/Dbc/DbcStore.h"
 #include "WowSkyManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/App.h"
@@ -257,7 +259,12 @@ struct FWowGameplayProbe
         {
             for(const auto& Character:Connection->GetCachedCharacters()) if(Character.Name==Spec->GetStringField(TEXT("character"))) { Connection->EnterWorld(Character.Guid); Done=true; break; }
         }
-        else if(Op==TEXT("wait_world")) Done=Connection->GetState()==EWowSessionState::WorldInGame && Connection->PacketHandler.EntityManager.GetLocalPlayer()!=nullptr;
+        else if(Op==TEXT("wait_world"))
+        {
+            const auto* Manager=Cast<AWowWorldManager>(UGameplayStatics::GetActorOfClass(&C,AWowWorldManager::StaticClass()));
+            Done=Connection->GetState()==EWowSessionState::WorldInGame && Handler.EntityManager.GetLocalPlayer()
+                && Manager && Manager->IsInitialLoadComplete() && !C.bDeferSpawnTeleport && !C.bHasDeferredSpawn;
+        }
         else if (Op==TEXT("time"))
         {
             if (auto* Sky=Cast<AWowSkyManager>(UGameplayStatics::GetActorOfClass(C.GetWorld(),AWowSkyManager::StaticClass())))
@@ -356,6 +363,7 @@ struct FWowGameplayProbe
         else if (Op==TEXT("release_jump")) { if (auto* Character=Cast<ACharacter>(C.GetPawn())) { Character->StopJumping(); Done=true; } }
         else if (Op==TEXT("wait_landed")) { const auto* Character=Cast<ACharacter>(C.GetPawn()); Done=bJumpObserved && Character && Character->GetCharacterMovement()->IsMovingOnGround() && Now-StepStarted>.5; if(Done)bJumpRequested=false; }
         else if(Op==TEXT("wait_floor")) { const auto* Character=Cast<ACharacter>(C.GetPawn()); Done=Character && Character->GetCharacterMovement()->IsMovingOnGround() && Character->GetCharacterMovement()->CurrentFloor.IsWalkableFloor(); }
+        else if(Op==TEXT("assert_map")) {const auto* Manager=Cast<AWowWorldManager>(UGameplayStatics::GetActorOfClass(&C,AWowWorldManager::StaticClass())); const uint32 Id=Step->GetIntegerField(TEXT("id")); const auto* Map=FDbcStore::Get().Maps().GetById(Id); if(!Manager || !Map || Handler.CurrentMapId!=Id || Manager->GetMapName()!=Map->InternalName || !Manager->IsInitialLoadComplete()) {Failure=TEXT("Rendered terrain does not match the server map"); Finish(C,false); return;} Done=true;}
         else if (Op==TEXT("wait_menu")) Done=(Handler.GossipMenu.Guid==C.TargetGuid && (Handler.GossipMenu.Quests.Num() || Handler.GossipMenu.Options.Num())) || (Handler.QuestDetails.QuestGiverGuid==C.TargetGuid && C.GameUI->GetShownQuestId()!=0);
         else if(Op==TEXT("gossip_option"))
         {

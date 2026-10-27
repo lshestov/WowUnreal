@@ -11,6 +11,7 @@
 #include "Coord/WowCoordinate.h"
 #include "TimerManager.h"
 #include "WowWmoRenderer.h"
+#include "WowTerrainTile.h"
 #include "Formats/WmoParser.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -41,7 +42,11 @@ bool FIdleWowServerMapSelection::RunTest(const FString&)
     TestTrue(TEXT("A Kalimdor login selects the server's map instead of the default Azeroth terrain"),Manager->SelectMap(1) && Manager->GetMapName()==TEXT("Kalimdor"));
     Manager->bStreamingEnabled=true;
     TestTrue(TEXT("An identical map keeps its existing stream"),Manager->SelectMap(1) && Manager->bStreamingEnabled);
+    auto* Tile=World->SpawnActor<AWowTerrainTile>(); auto* Building=World->SpawnActor<AActor>();
+    if(!Tile || !Building) {World->DestroyWorld(false); GEngine->DestroyWorldContext(World); return false;}
+    Tile->SpawnedWmos.Add(123,Building); Manager->LoadedTiles.Add(Manager->TileKey(30,30),Tile);
     TestTrue(TEXT("Another continent resets streaming before new tiles are queued"),Manager->SelectMap(0) && Manager->GetMapName()==TEXT("Azeroth") && !Manager->bStreamingEnabled && Manager->GetInitialTilesQueued()==0);
+    TestTrue(TEXT("Switching maps destroys the old tile's separately spawned WMO actors"),Building->IsActorBeingDestroyed() && Tile->IsActorBeingDestroyed() && Manager->LoadedTiles.IsEmpty());
     TestTrue(TEXT("Unknown map IDs cannot replace the current terrain"),!Manager->SelectMap(MAX_uint32) && Manager->GetMapName()==TEXT("Azeroth"));
     Manager->Destroy(); World->DestroyWorld(false); GEngine->DestroyWorldContext(World); return true;
 }
