@@ -431,7 +431,7 @@ build, automation, native autologin and rendered screenshot verification):
     build, 106-test regression (two existing warnings), focused request/reset
     checks and a native 35-step/five-image round trip with exact fixture cleanup.
     See Docs/Macros.md.
-- [?] 6. Maps: points of interest, tracking, interior minimaps and original map bootstrap.
+- [x] 6. Maps: points of interest, tracking, interior minimaps and original map bootstrap.
   - [x] Resolve actual zone/subzone from streamed terrain areas and join/replace
     built-in zone channels using their real DBC definitions and server replies.
     Centre-offset chunk coordinates, player-position resolver retained on reload,
@@ -467,7 +467,7 @@ build, automation, native autologin and rendered screenshot verification):
     regression tests (two existing warning tests), focused tooltip/API checks
     and a final 31-step/six-image native menu/selection/zoom/ping/rotation/reload
     route; all images validated and inspected. See Docs/Minimap.md.
-  - [?] WMO interior maps: actual root/name-set/group identities and room portal
+  - [x] WMO interior maps: actual root/name-set/group identities and room portal
     graph, collision-owned location, WMO area/room names, geographical zone
     retention, DungeonMapChunk floor resolution and current-zone auto selection.
     Original half-yard tiles and borders, portal eligibility/depth and room
@@ -478,7 +478,11 @@ build, automation, native autologin and rendered screenshot verification):
     restores original position/UI and verifies unchanged health, inventory,
     money, level, XP and exploration. See Docs/IndoorMinimap.md.
 - [ ] 7. Group/special windows: party/loot, PvP, dungeon finder and achievements.
-  - [ ] Restore NPC portrait captures and friendly NPC unit-frame reactions.
+  - [?] Restore NPC/player portrait captures with authored M2 cameras and the
+    runtime head-socket cache. Verified Windows build, 117 regression tests
+    (three existing warning tests), corrected fixture and final two-test check,
+    and an 11-step/three-image NPC/animal/ReloadUI route; see Docs/Portraits.md.
+  - [ ] Correct unit-frame reactions from faction templates, reputation and PvP.
 
 - [x] Stock options category placement and text: numeric-offset SetPoint overloads, runtime $parent references, constrained description wrapping, and XML markup rendered without asset paths while Lua keeps original strings. Verified 64 automation tests and native category clicks, character/spellbook windows and rendered screenshots.
 - [x] Stock FrameXML visibility: preserve hidden branches during parent Show/layout, respect explicit hidden=false, remove frame-name and Flash overrides. Verified 63 automation tests, native action-bar options/window clicks and rendered screenshots at 1280x720 and 1920x1080.

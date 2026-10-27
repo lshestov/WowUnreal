@@ -1,4 +1,5 @@
 #include "WowSkeletalMeshBuilder.h"
+#include "WowPortraitCameraData.h"
 #include "Formats/M2Types.h"
 #include "Formats/BlpParser.h"
 #include "Formats/BlpTypes.h"
@@ -337,6 +338,16 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 		auto* Socket=NewObject<USkeletalMeshSocket>(SkelMesh);
 		Socket->SocketName=TEXT("WowPortraitHead"); Socket->BoneName=GetBoneName(I);
 		SkelMesh->GetMeshOnlySocketList().Add(Socket); break;
+	}
+	// Runtime construction does not run PostLoad/editor socket-cache rebuilding.
+	// Component socket lookups use this map, not the mesh-only socket array.
+	SkelMesh->RebuildSocketMap();
+	for(const auto& View:Data.Cameras) if(View.Type==0)
+	{
+		auto* Portrait=NewObject<UWowPortraitCameraData>(SkelMesh);
+		Portrait->Position=FVector(View.Position.Y,View.Position.X,View.Position.Z)*FWowCoordinate::SCALE;
+		Portrait->Target=FVector(View.Target.Y,View.Target.X,View.Target.Z)*FWowCoordinate::SCALE;
+		Portrait->Fov=FMath::RadiansToDegrees(View.Fov); SkelMesh->AddAssetUserData(Portrait); break;
 	}
 
 	const FReferenceSkeleton& RefSkel = Skeleton->GetReferenceSkeleton();

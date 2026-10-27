@@ -2,15 +2,47 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/SkeletalMeshSocket.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "WowPlayerCharacter.h"
 #include "WowSkeletalMeshBuilder.h"
 #include "WowAnimationController.h"
 #include "WowM2AnimInstance.h"
+#include "WowPortraitCameraData.h"
+#include "Formats/M2Parser.h"
 #include "Formats/M2Types.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIdleWowPortraitCameraParser,"WowUnreal.Rendering.PortraitCameraParser",
+    EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FIdleWowPortraitCameraParser::RunTest(const FString&)
+{
+    // 12340 MD20 header, two 100-byte records and one spline-array/key pair.
+    TArray<uint8> Bytes; Bytes.SetNumZeroed(548);
+    TArray<uint8> Skin; Skin.SetNumZeroed(48); const uint32 SkinMagic=0x4E494B53; FMemory::Memcpy(Skin.GetData(),&SkinMagic,4);
+    const auto U32=[&](int32 At,uint32 V) {FMemory::Memcpy(Bytes.GetData()+At,&V,4);};
+    const auto F32=[&](int32 At,float V) {FMemory::Memcpy(Bytes.GetData()+At,&V,4);};
+    U32(0,0x3032444D); U32(4,264); U32(272,2); U32(276,304);
+    U32(304,1); F32(308,.7f); F32(340,4);
+    U32(404,0); F32(408,PI/4); F32(440,.6f); F32(448,1.9f); F32(472,.1f); F32(480,1.8f);
+    U32(432,1); U32(436,504); U32(504,1); U32(508,512); F32(512,.2f);
+    const auto Parsed=FM2Parser::Parse(Bytes,Skin);
+    TestTrue(TEXT("Camera-only fixture parses"),Parsed.bIsValid);
+    if(TestEqual(TEXT("Camera stride is exactly 100 bytes"),Parsed.Cameras.Num(),2))
+    {
+        TestEqual(TEXT("Portrait type follows the preceding character camera"),Parsed.Cameras[1].Type,0);
+        TestTrue(TEXT("First spline value is added to its base pivot"),Parsed.Cameras[1].Position.Equals(FVector(.8,0,1.9),.0001));
+        TestTrue(TEXT("Target pivot has its own track"),Parsed.Cameras[1].Target.Equals(FVector(.1,0,1.8),.0001));
+    }
+    U32(436,MAX_uint32);
+    const auto BrokenTrack=FM2Parser::Parse(Bytes,Skin);
+    TestTrue(TEXT("Out-of-file optional spline keeps the finite base camera"),BrokenTrack.Cameras.Num()==2 && BrokenTrack.Cameras[1].Position.Equals(FVector(.6,0,1.9),.0001));
+    U32(276,MAX_uint32);
+    TestEqual(TEXT("Out-of-file camera array is rejected without allocation"),FM2Parser::Parse(Bytes,Skin).Cameras.Num(),0);
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIdleWowRuntimeAnimations, "WowUnreal.Animation.RuntimePlayback",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FIdleWowRuntimeAnimations::RunTest(const FString& Parameters)
@@ -21,6 +53,7 @@ bool FIdleWowRuntimeAnimations::RunTest(const FString& Parameters)
     // Original bone order intentionally differs from UE's parent-first order.
     Data->Bones.SetNum(3);
     Data->Bones[0].ParentBone = 2;
+    Data->Bones[0].KeyBoneId = 6;
     Data->Bones[0].PivotPoint = FVector(1, 0, 0);
     Data->Bones[1].ParentBone = 0;
     Data->Bones[2].ParentBone = -1;
@@ -30,6 +63,8 @@ bool FIdleWowRuntimeAnimations::RunTest(const FString& Parameters)
     for (auto& V : Data->Vertices) { V.BoneWeights[0] = 255; V.Normal = FVector(0, 1, 0); }
     Data->Indices = {0, 1, 2};
     Data->BoundingBox = FBox(FVector::ZeroVector, FVector(1, 1, 1));
+    Data->Cameras.Add({1,.6f,FVector(10,0,2),FVector(0,0,2)});
+    Data->Cameras.Add({0,PI/4,FVector(.6,-.4,1.9),FVector(.06,.03,1.86)});
     for (int32 Id : {0, 4, 5, 25, 37, 38, 39, 40, 16, 109})
     {
         FM2AnimationData Clip;
@@ -46,8 +81,20 @@ bool FIdleWowRuntimeAnimations::RunTest(const FString& Parameters)
     }
     auto* Skeleton = FWowSkeletalMeshBuilder::CreateSkeleton(*Data, TEXT("AnimationTest"));
     auto* Mesh = FWowSkeletalMeshBuilder::CreateSkeletalMesh(*Data, Skeleton, TEXT("AnimationTest"), nullptr, nullptr, nullptr, nullptr, true);
+    const auto* Portrait=Cast<UWowPortraitCameraData>(Mesh->GetAssetUserDataOfClass(UWowPortraitCameraData::StaticClass()));
+    if(TestNotNull(TEXT("Runtime skeletal asset retains the portrait camera rather than the character-info camera"),Portrait))
+    {
+        TestTrue(TEXT("Authored camera changes model axes and metres exactly once"),Portrait->Position.Equals(FVector(-40,60,190),.001));
+        TestTrue(TEXT("Authored portrait target retains its independent pivot"),Portrait->Target.Equals(FVector(3,6,186),.001));
+        TestTrue(TEXT("M2 radians become UE degrees"),FMath::IsNearlyEqual(Portrait->Fov,45.f));
+    }
     auto* Player = World->SpawnActor<AWowPlayerCharacter>();
     Player->GetMesh()->SetSkeletalMesh(Mesh);
+    TestTrue(TEXT("Runtime portrait head socket is discoverable through the component socket cache"),
+        Player->GetMesh()->DoesSocketExist(TEXT("WowPortraitHead")));
+    if(const auto* Socket=Mesh->FindSocket(TEXT("WowPortraitHead")))
+        TestEqual(TEXT("Portrait socket retains the original M2 bone name after parent-first remapping"),
+            Socket->BoneName, FWowSkeletalMeshBuilder::GetBoneName(0));
     auto* Controller = NewObject<UWowAnimationController>(Player);
     Controller->InitializeRuntime(Player->GetMesh(), Data);
     auto* Instance = Controller->GetRuntimeInstance();

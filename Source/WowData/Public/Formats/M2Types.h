@@ -137,6 +137,8 @@ struct WOWDATA_API FM2Submesh
 
 struct WOWDATA_API FM2Data
 {
+    struct FCamera {int32 Type=-1; float Fov=0; FVector Position=FVector::ZeroVector,Target=FVector::ZeroVector;};
+    TArray<FCamera> Cameras;
     TArray<FVector> CollisionVertices;
     TArray<uint16> CollisionIndices;
     TArray<FM2Vertex> Vertices;

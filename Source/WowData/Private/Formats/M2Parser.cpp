@@ -193,6 +193,18 @@ struct FM2AttachmentRaw
     uint8 EnabledBlock[20]; // AnimBlock — ignored
 };
 
+struct FM2CameraRaw
+{
+    int32 Type;
+    float Fov,FarClip,NearClip;
+    uint8 PositionTrack[20];
+    float Position[3];
+    uint8 TargetTrack[20];
+    float Target[3];
+    uint8 RollTrack[20];
+};
+static_assert(sizeof(FM2CameraRaw)==100);
+
 struct FM2ParticleEmitterRaw
 {
     uint32 Id;
@@ -292,6 +304,28 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
     );
     Result.BoundingSphereRadius = Header.BoundingSphereRadius;
     Result.NumBones = Header.nBones;
+
+    // Portraits use the model's authored camera at the beginning of Stand.
+    // Camera spline values are offsets from the two pivots, not world positions.
+    const auto CameraOffset=[&](const uint8* Track)
+    {
+        uint32 Count=0,Offset=0; FMemory::Memcpy(&Count,Track+12,4); FMemory::Memcpy(&Offset,Track+16,4);
+        const uint32* Arrays=nullptr; const float* Key=nullptr;
+        if(!Count || Count>4096 || !SafeRead(M2Base,M2Size,Offset,Count*2,Arrays) || !Arrays[0] ||
+            !SafeRead(M2Base,M2Size,Arrays[1],9,Key)) return FVector::ZeroVector;
+        const FVector Value(Key[0],Key[1],Key[2]); return Value.ContainsNaN()?FVector::ZeroVector:Value;
+    };
+    const FM2CameraRaw* Cameras=nullptr;
+    if(Header.nCameras<=64 && SafeRead(M2Base,M2Size,Header.ofsCameras,Header.nCameras,Cameras))
+        for(uint32 I=0;I<Header.nCameras;++I)
+        {
+            const auto& Raw=Cameras[I]; FM2Data::FCamera View;
+            View.Type=Raw.Type; View.Fov=Raw.Fov;
+            View.Position=FVector(Raw.Position[0],Raw.Position[1],Raw.Position[2])+CameraOffset(Raw.PositionTrack);
+            View.Target=FVector(Raw.Target[0],Raw.Target[1],Raw.Target[2])+CameraOffset(Raw.TargetTrack);
+            if(FMath::IsFinite(View.Fov) && View.Fov>0 && View.Fov<PI && !View.Position.ContainsNaN() &&
+                !View.Target.ContainsNaN() && FVector::DistSquared(View.Position,View.Target)>SMALL_NUMBER) Result.Cameras.Add(View);
+        }
 
     // Dedicated simplified collision data, not the visible leaves/cloth mesh.
     const float* CollisionPositions = nullptr;

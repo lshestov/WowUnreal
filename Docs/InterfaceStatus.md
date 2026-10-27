@@ -7,7 +7,8 @@ compatibility work.
 
 ## Implemented core
 
-- Player and target health, resource, auras and live model portraits; action
+- Player and target health, resource, auras and live model portraits with
+  authored M2 cameras and runtime head sockets; see [portraits](Portraits.md). Action
   textures, item counts, cooldown swipes and spell/item tooltips.
 - Known spellbook tabs and ranks, character attributes and combat statistics,
   skills, reputations, watched faction and character equipment preview.
@@ -95,7 +96,7 @@ The Windows Editor and packaged Development client are built from the same
 source tree. `WowUnreal.Hud`, `WowUnreal.UI`, `WowUnreal.Gameplay` and the related
 player, collision, equipment, lighting, rendering, traversal and performance
 suites cover both isolated controls and live protocol state. The interface
-regression set contains 115 tests. Existing optional character texture-layout
+regression set, including runtime animation, contains 117 tests. Existing optional character texture-layout
 DBC and test-fixture size warnings remain.
 
 Native gameplay probes exercise live server state and rendered UI at 1280x720

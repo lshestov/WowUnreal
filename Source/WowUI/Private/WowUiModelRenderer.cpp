@@ -1,5 +1,6 @@
 #include "WowUiModelRenderer.h"
 #include "WowUiDressUpPreview.h"
+#include "WowPortraitCameraData.h"
 #include "WowEntityManager.h"
 #include "WowFrameManager.h"
 #include "LuaApi/LuaApiRegistry.h"
@@ -81,7 +82,7 @@ void FWowUiModelRenderer::Configure(const FString& Key,UImage* Image,uint64 Guid
     Brush.SetResourceObject(Slot.Material.IsValid()?static_cast<UObject*>(Slot.Material.Get()):static_cast<UObject*>(Slot.Target.Get()));
     Brush.ImageSize=FVector2D(Portrait?128:256,Portrait?128:384);
     Image->SetBrush(Brush); Image->SetRenderOpacity(1); Image->SetColorAndOpacity(FLinearColor::White);
-    if(Owned->Guid!=Guid) { Owned->Guid=Guid; Owned->NextCapture=0; }
+    if(Owned->Guid!=Guid) { Owned->Guid=Guid; Owned->NextCapture=0; Owned->bLogged=false; }
     Image->SetVisibility(Guid?ESlateVisibility::HitTestInvisible:ESlateVisibility::Collapsed);
 }
 
@@ -190,7 +191,6 @@ void FWowUiModelRenderer::Tick(UWorld* World)
             if(S.Target->SizeX!=Width) S.Target->ResizeTarget(Width,384);
         }
         const auto Bounds=Body->Bounds;
-        if(!S.bLogged) { UE_LOG(LogTemp,Log,TEXT("UiModel: %s guid=%llu actor=%s mesh=%s origin=%s half=%s"),*Pair.Key,S.Guid,*Actor->GetName(),*GetNameSafe(Body),*Bounds.Origin.ToString(),*Bounds.BoxExtent.ToString()); S.bLogged=true; }
         // Animated M2 culling bounds cover every pose and are much larger than
         // a standing character. Frame its physical body instead of that box.
         const auto* Capsule=Actor->FindComponentByClass<UCapsuleComponent>();
@@ -231,7 +231,19 @@ void FWowUiModelRenderer::Tick(UWorld* World)
         if(!S.bPortrait) Distance=FMath::Max(40.f,Distance*S.BaseModelScale/FMath::Max(S.ModelScale,.05f)-S.Position.X*100);
         const FVector Direction=Actor->GetActorForwardVector().RotateAngleAxis(S.Yaw,FVector::UpVector);
         if(!S.bPortrait) Focus-=FVector::CrossProduct(FVector::UpVector,Direction)*S.Position.Y*100+FVector::UpVector*S.Position.Z*100;
-        const FVector Position=Focus+Direction*Distance;
+        FVector Position=Focus+Direction*Distance;
+        if(S.bPortrait) if(const auto* View=Cast<UWowPortraitCameraData>(Body->GetSkeletalMeshAsset()->GetAssetUserDataOfClass(UWowPortraitCameraData::StaticClass())))
+        {
+            Focus=Body->GetComponentTransform().TransformPosition(View->Target);
+            Position=Body->GetComponentTransform().TransformPosition(View->Position);
+            Capture->FOVAngle=View->Fov;
+        }
+        if(!S.bLogged)
+        {
+            UE_LOG(LogTemp,Log,TEXT("UiModel: %s guid=%llu camera=%s target=%s fov=%.1f headSocket=%d"),
+                *Pair.Key,S.Guid,*Position.ToString(),*Focus.ToString(),Capture->FOVAngle,Body->DoesSocketExist(TEXT("WowPortraitHead")));
+            S.bLogged=true;
+        }
         Capture->SetWorldLocationAndRotation(Position,(Focus-Position).Rotation());
         Capture->CaptureScene(); S.NextCapture=Now+.1;
     }
