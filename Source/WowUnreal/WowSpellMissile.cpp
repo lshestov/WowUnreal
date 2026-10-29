@@ -86,10 +86,10 @@ void AWowSpellMissile::Initialize(const FVector& StartLocation, const FVector& T
     SphereMesh->SetMaterial(0, MissileMat);
 #else
     // Fallback for runtime without editor - use basic material with dynamic instance
-    static ConstructorHelpers::FObjectFinder<UMaterial> UnlitMaterial(TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
-    if (UnlitMaterial.Succeeded())
+    UMaterial* FallbackMaterial = LoadObject<UMaterial>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
+    if (FallbackMaterial)
     {
-        DynamicMaterial = UMaterialInstanceDynamic::Create(UnlitMaterial.Object.Get(), this);
+        DynamicMaterial = UMaterialInstanceDynamic::Create(FallbackMaterial, this);
         if (DynamicMaterial)
         {
             DynamicMaterial->SetVectorParameterValue(FName("Color"), SpellColor);
