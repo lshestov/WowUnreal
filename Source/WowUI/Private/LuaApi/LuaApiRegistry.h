@@ -1,5 +1,6 @@
 #pragma once
 #include "CoreMinimal.h"
+#include "InputCoreTypes.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogWowLuaFrame, Log, All);
 
@@ -58,6 +59,7 @@ struct FWowLuaContext
     uint32 LastAreaId=0,LastZoneId=0;
     uint32 LastWmoHash=0;
     TFunction<AActor*(uint64)> ResolveActor;
+    TFunction<bool(const FKey&)> KeyDown;
     TFunction<void()> ReloadUI;
     TFunction<void(int64,const FWowGuildEmblem&,uint32)> TabardPreview;
     TMap<FName,int32> SelectedRows;

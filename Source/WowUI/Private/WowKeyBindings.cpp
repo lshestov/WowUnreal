@@ -2,6 +2,7 @@
 #include "LuaApi/LuaApiRegistry.h"
 #include "WowEventSystem.h"
 #include "WowSavedVariables.h"
+#include "WowModifiedClicks.h"
 
 #if __has_include("lua.h")
 extern "C" {
@@ -54,9 +55,24 @@ TArray<FString> Keys(lua_State* L,const FString& Action)
 }
 void Register(lua_State* L,const char* Name,lua_CFunction Fn) { lua_pushcfunction(L,Fn); lua_setglobal(L,Name); }
 }
-FString FWowKeyBindings::Action(lua_State* L,const FString& Key) { return L?Bindings(L).FindRef(Key.ToUpper()):FString(); }
+FString FWowKeyBindings::Action(lua_State* L,const FString& Key,bool AllowModifierFallback)
+{
+    if(!L) return {};
+    const auto Values=Bindings(L); FString Name=Key.ToUpper();
+    // An exact assignment, including an explicitly unbound chord, takes priority.
+    if(const auto* Exact=Values.Find(Name)) return *Exact;
+    if(!AllowModifierFallback) return {};
+    for(bool Removed=true; Removed;)
+    {
+        Removed=false;
+        for(const TCHAR* Prefix:{TEXT("ALT-"),TEXT("CTRL-"),TEXT("SHIFT-"),TEXT("LALT-"),TEXT("RALT-"),TEXT("LCTRL-"),TEXT("RCTRL-"),TEXT("LSHIFT-"),TEXT("RSHIFT-")})
+            if(Name.StartsWith(Prefix)) {Name.RightChopInline(FCString::Strlen(Prefix)); Removed=true; break;}
+    }
+    return Values.FindRef(Name);
+}
 void FWowKeyBindings::RegisterApi(lua_State* L)
 {
+    WowModifiedClicks::RegisterApi(L);
     Register(L,"GetNumBindings",[](lua_State* S)->int { lua_pushinteger(S,Defaults().Num()); return 1; });
     Register(L,"GetBinding",[](lua_State* S)->int { const int32 I=luaL_checkinteger(S,1)-1; if(!Defaults().IsValidIndex(I)) { lua_pushnil(S); return 1; } const auto& D=Defaults()[I]; lua_pushstring(S,D.Action); const auto Bound=Keys(S,UTF8_TO_TCHAR(D.Action)); for(int32 N=0;N<2;++N) { if(Bound.IsValidIndex(N)) lua_pushstring(S,TCHAR_TO_UTF8(*Bound[N])); else lua_pushnil(S); } return 3; });
     Register(L,"GetBindingKey",[](lua_State* S)->int { const auto Bound=Keys(S,UTF8_TO_TCHAR(luaL_checkstring(S,1))); for(const auto& Key:Bound) lua_pushstring(S,TCHAR_TO_UTF8(*Key)); return Bound.Num(); });
@@ -73,13 +89,13 @@ void FWowKeyBindings::RegisterApi(lua_State* L)
     Register(L,"SaveBindings",[](lua_State* S)->int {
         Preferences(S); lua_newtable(S); lua_pushnil(S);
         while(lua_next(S,-3)) { lua_pushvalue(S,-2); lua_pushvalue(S,-2); lua_settable(S,-5); lua_pop(S,1); }
-        lua_setfield(S,LUA_REGISTRYINDEX,"IdleWowBindingsSaved"); lua_pop(S,1); FWowSavedVariables::SaveAll(S); return 0;
+        lua_setfield(S,LUA_REGISTRYINDEX,"IdleWowBindingsSaved"); lua_pop(S,1); WowModifiedClicks::Save(S); FWowSavedVariables::SaveAll(S); return 0;
     });
     Register(L,"GetCurrentBindingSet",[](lua_State* S)->int { lua_pushinteger(S,2); return 1; });
     Register(L,"LoadBindings",[](lua_State* S)->int {
         const bool Reset=luaL_optinteger(S,1,0)==0; Preferences(S); lua_pop(S,1); lua_getglobal(S,"IdleWowUIState"); lua_newtable(S);
         if(!Reset) { lua_getfield(S,LUA_REGISTRYINDEX,"IdleWowBindingsSaved"); lua_pushnil(S); while(lua_next(S,-2)) { lua_pushvalue(S,-2); lua_pushvalue(S,-2); lua_settable(S,-6); lua_pop(S,1); } lua_pop(S,1); }
-        lua_setfield(S,-2,"bindings"); lua_pop(S,1); if(auto* C=WowLuaApi::GetContext(S); C && C->EventSystem) C->EventSystem->FireEvent(TEXT("UPDATE_BINDINGS")); return 0;
+        lua_setfield(S,-2,"bindings"); lua_pop(S,1); WowModifiedClicks::Load(S,Reset); if(auto* C=WowLuaApi::GetContext(S); C && C->EventSystem) C->EventSystem->FireEvent(TEXT("UPDATE_BINDINGS")); return 0;
     });
 }
 #else

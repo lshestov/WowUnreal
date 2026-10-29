@@ -37,3 +37,8 @@ original action button, verify server acknowledgements, then remove all owned
 test state. The root test wrapper restores the exact character macro file and
 checks inventory, health and money even when a scenario fails. The account UID
 allocator stays monotonic.
+
+Unqualified casts use the configured self/focus modified-click assignments;
+explicit unit arguments retain their target. Original modifier defaults,
+preferences, mouse-button restrictions and runtime hotkey fallback are described
+in [modified clicks](ModifiedClicks.md).

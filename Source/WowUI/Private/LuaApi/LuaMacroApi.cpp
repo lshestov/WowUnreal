@@ -1,4 +1,5 @@
 #include "WowMacros.h"
+#include "../WowModifiedClicks.h"
 #include "WowMacroRuntime.h"
 #include "LuaApiRegistry.h"
 #include "WowSavedVariables.h"
@@ -132,14 +133,15 @@ void FWowMacros::RegisterApi(lua_State* L)
     Register(L,"IsFlyableArea",[](lua_State* S)->int {auto* C=WowLuaApi::GetContext(S); const uint32 Map=C && C->ConnectionManager?C->ConnectionManager->PacketHandler.CurrentMapId:0; const auto* Area=FDbcStore::Get().AreaTable().GetById(WowLuaApi::ResolveAreaId(C)); lua_pushboolean(S,(Map==530 || Map==571) && Area && !(Area->Flags&0x20000000u)); return 1;});
     Register(L,"_IdleWowMacroVisualChanged",[](lua_State* S)->int {if(auto* C=WowLuaApi::GetContext(S); C && C->EventSystem) {C->EventSystem->FireEvent(TEXT("ACTIONBAR_SLOT_CHANGED"),{TEXT("0")}); C->EventSystem->FireEvent(TEXT("ACTIONBAR_UPDATE_STATE")); C->EventSystem->FireEvent(TEXT("ACTIONBAR_UPDATE_COOLDOWN"));} return 0;});
     Register(L,"_IdleWowMacroButton",[](lua_State* S)->int {const auto* C=WowLuaApi::GetContext(S); lua_pushstring(S,C && C->FrameManager?TCHAR_TO_UTF8(*C->FrameManager->CurrentMouseButton):"LeftButton"); return 1;});
-    Register(L,"CastSpellByName",[](lua_State* S)->int {
+    const lua_CFunction CastSpell=[](lua_State* S)->int {
         auto* C=WowLuaApi::GetContext(S); const uint32 Id=ResolveSpell(S); if(!C || !C->ConnectionManager || (Id!=6603 && !C->ConnectionManager->PacketHandler.KnownSpells.Contains(Id))) return 0;
-        bool Valid; uint64 Target=ExplicitTarget(S,2,Valid); if(!Valid) return 0; if(!lua_isstring(S,2)) Target=C->ConnectionManager->GetTargetGuid();
+        bool Valid; uint64 Target=ExplicitTarget(S,2,Valid); if(!Valid) return 0; if(!lua_isstring(S,2)) Target=WowModifiedClicks::ActionTarget(S,C->ConnectionManager->GetTargetGuid());
         if(Id==6603) { if(Target) C->ConnectionManager->SendAttackSwing(Target); } else C->ConnectionManager->SendCastSpell(Id,Target); return 0;
-    });
+    };
+    Register(L,"CastSpellByName",CastSpell); Register(L,"CastSpellByID",CastSpell);
     Register(L,"UseItemByName",[](lua_State* S)->int {
         auto* C=WowLuaApi::GetContext(S); const auto Item=ResolveItem(S); if(!C || !C->ConnectionManager || !Item.Id) return 0;
-        bool Valid; const uint64 Target=ExplicitTarget(S,2,Valid); if(!Valid) return 0;
+        bool Valid; uint64 Target=ExplicitTarget(S,2,Valid); if(!Valid) return 0; if(!lua_isstring(S,2)) Target=WowModifiedClicks::ActionTarget(S,Target);
         if(const auto* T=C->ConnectionManager->PacketHandler.ItemTemplates.Find(Item.Id))
         { if(T->UseSpellId) C->ConnectionManager->SendUseItem(Item.Bag,Item.Slot,Item.Guid,T->UseSpellId,Target); else if(T->InventoryType && (Item.Bag!=255 || Item.Slot>=19)) C->ConnectionManager->SendAutoEquipItem(Item.Bag,Item.Slot); }
         return 0;

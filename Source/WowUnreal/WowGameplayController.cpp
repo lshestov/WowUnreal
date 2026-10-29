@@ -185,6 +185,15 @@ void AWowGameplayController::BeginPlay()
             if(!Manager.IsValid()) Manager=Cast<AWowWorldManager>(UGameplayStatics::GetActorOfClass(WeakThis->GetWorld(),AWowWorldManager::StaticClass()));
             return Manager.IsValid()?Manager->GetAreaAt(WeakThis->GetPawn()->GetActorLocation()):0;
         });
+        if(UIManager) UIManager->SetKeyResolver([WeakThis=TWeakObjectPtr<AWowGameplayController>(this)](const FKey& Key)->bool
+        {
+            if(WeakThis.IsValid() && WeakThis->IsInputKeyDown(Key)) return true;
+            if(!FSlateApplication::IsInitialized()) return false;
+            const auto M=FSlateApplication::Get().GetModifierKeys();
+            return (Key==EKeys::LeftShift && M.IsLeftShiftDown()) || (Key==EKeys::RightShift && M.IsRightShiftDown()) ||
+                (Key==EKeys::LeftControl && M.IsLeftControlDown()) || (Key==EKeys::RightControl && M.IsRightControlDown()) ||
+                (Key==EKeys::LeftAlt && M.IsLeftAltDown()) || (Key==EKeys::RightAlt && M.IsRightAltDown());
+        });
 		if(UIManager) UIManager->SetActorResolver([WeakThis=TWeakObjectPtr<AWowGameplayController>(this)](uint64 Guid)->AActor*
 		{
 			if(!WeakThis.IsValid() || !WeakThis->ConnectionManager) return nullptr;
@@ -1377,7 +1386,7 @@ bool AWowGameplayController::InputKey(const FInputKeyEventArgs& Params)
 				if(Modifiers.IsControlDown()) Chord=TEXT("CTRL-")+Chord;
 				if(Modifiers.IsAltDown()) Chord=TEXT("ALT-")+Chord;
 			}
-			const FKey Virtual=FWowKeyBindings::GameplayKey(FWowKeyBindings::Action(UIManager->GetLuaVM()->GetState(),Chord));
+			const FKey Virtual=FWowKeyBindings::GameplayKey(FWowKeyBindings::Action(UIManager->GetLuaVM()->GetState(),Chord,true));
 			if(Virtual.IsValid()) { auto Routed=Params; Routed.Key=Virtual; if(Params.Event==IE_Pressed) HeldBindingKeys.Add(Params.Key,Virtual); return Super::InputKey(Routed); }
 			if(FWowKeyBindings::IsDefaultGameplayKey(Params.Key)) return true;
 		}

@@ -1,4 +1,5 @@
 #include "LuaApiRegistry.h"
+#include "../WowModifiedClicks.h"
 #include "WowConnectionManager.h"
 #include "WowEntityManager.h"
 #include "WowFrameManager.h"
@@ -196,7 +197,7 @@ void WowLuaApi::RegisterSpellApi(lua_State* L)
     RegisterSpell(L,"GetSpellBookItemInfo",[](lua_State* S)->int { const uint32 Id=Resolve(S); if(!Id) { lua_pushnil(S); return 1; } lua_pushstring(S,"SPELL"); lua_pushinteger(S,Id); return 2; });
     RegisterSpell(L,"IsPassiveSpell",[](lua_State* S)->int { const auto* Spell=FDbcStore::Get().Spells().GetById(Resolve(S)); lua_pushboolean(S,Spell && (Spell->Attributes&0x40)); return 1; });
     RegisterSpell(L,"PickupSpell",[](lua_State* S)->int { auto* C=GetContext(S); const uint32 Id=Resolve(S); if(C && C->ConnectionManager && Id) C->ConnectionManager->PickupSpellCursor(Id); return 0; });
-    RegisterSpell(L,"CastSpell",[](lua_State* S)->int { auto* C=GetContext(S); const uint32 Id=Resolve(S); if(C && C->ConnectionManager && Id) C->ConnectionManager->SendCastSpell(Id,C->ConnectionManager->GetTargetGuid()); return 0; });
+    RegisterSpell(L,"CastSpell",[](lua_State* S)->int { auto* C=GetContext(S); const uint32 Id=Resolve(S); if(C && C->ConnectionManager && Id) C->ConnectionManager->SendCastSpell(Id,WowModifiedClicks::ActionTarget(S,C->ConnectionManager->GetTargetGuid())); return 0; });
     RegisterSpell(L,"GetNumShapeshiftForms",[](lua_State* S)->int { lua_pushinteger(S,Forms(GetContext(S)).Num()); return 1; });
     RegisterSpell(L,"GetShapeshiftFormInfo",[](lua_State* S)->int {
         auto* C=GetContext(S); const uint32 Id=Form(S); const auto* Spell=FDbcStore::Get().Spells().GetById(Id); if(!Spell) { lua_pushnil(S); return 1; }

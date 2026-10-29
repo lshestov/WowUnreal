@@ -822,7 +822,7 @@ bool UWowConnectionManager::UseActionSlot(int32 SlotIndex)
     }
 
     const FWowActionInvocation Invocation =
-        ResolveActionInvocation(PacketHandler.ActionButtons[SlotIndex], GetTargetGuid());
+        ResolveActionInvocation(PacketHandler.ActionButtons[SlotIndex], OnResolveActionTarget.IsBound()?OnResolveActionTarget.Execute(GetTargetGuid()):GetTargetGuid());
     if (!Invocation.IsValid())
     {
         return false;
@@ -854,7 +854,7 @@ bool UWowConnectionManager::UseActionSlot(int32 SlotIndex)
         {
             const auto* Item=PacketHandler.EntityManager.FindItem(Guid);
             if(!Item || Item->Entry!=Invocation.ActionId) return false;
-            if(T->UseSpellId) { SendUseItem(Bag,Slot,Guid,T->UseSpellId); return true; }
+            if(T->UseSpellId) { SendUseItem(Bag,Slot,Guid,T->UseSpellId,Invocation.TargetGuid); return true; }
             if(T->InventoryType) { SendAutoEquipItem(Bag,Slot); return true; }
             return false;
         };

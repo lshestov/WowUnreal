@@ -7,6 +7,7 @@
 #include "WowEntityManager.h"
 #include "WowConnectionManager.h"
 #include "WowMacros.h"
+#include "WowKeyBindings.h"
 #include "WowCombatLogUi.h"
 #include "WowMultiLineEditBox.h"
 #include "WowBackdropWidget.h"
@@ -15,6 +16,8 @@
 #include "WowAddonLoader.h"
 #include "../WowUiCursorRenderer.h"
 #include "../WowUiModelRenderer.h"
+#include "../WowModifiedClicks.h"
+#include "Internationalization/Regex.h"
 #include "ReferenceSkeleton.h"
 #include "../WowMapUi.h"
 #include "../WowMinimapUi.h"
@@ -40,6 +43,10 @@
 #include "HAL/IConsoleManager.h"
 
 #if WITH_DEV_AUTOMATION_TESTS && __has_include("lua.h")
+extern "C" {
+#include "lua.h"
+#include "lauxlib.h"
+}
 namespace
 {
 struct FHudFixture
@@ -1920,6 +1927,70 @@ bool FHudPortraitTracking::RunTest(const FString&)
     Position=AuthoredPosition; Target=AuthoredTarget;
     TestTrue(TEXT("Models without a head retain their authored camera"),!FWowUiModelRenderer::TrackPortraitHead(Skeleton,TEXT("absent"),FTransform::Identity,Position,Target) && Position.Equals(AuthoredPosition) && Target.Equals(AuthoredTarget));
     return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudModifiedClicks,"WowUnreal.Hud.ModifiedClicks",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudModifiedClicks::RunTest(const FString&)
+{
+    FString Path; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false;
+    FMpqManager Mpq; if(!Mpq.Initialize(Path)) return false;
+    TArray<uint8> Bytes; if(!Mpq.ReadFile(TEXT("Interface\\FrameXML\\Bindings.xml"),Bytes)) return false; Bytes.Add(0);
+    const FString Xml=UTF8_TO_TCHAR(reinterpret_cast<const char*>(Bytes.GetData()));
+    FHudFixture F; TSet<FKey> Keys; F.Context.KeyDown=[&](const FKey& Key){return Keys.Contains(Key);};
+    FWowEntityManager Entities; Entities.LocalPlayerGuid=1; F.Context.EntityManager=&Entities; F.Context.FocusGuid=2;
+    const auto Check=[&](const TCHAR* Name,const TCHAR* Code){return TestTrue(Name,F.Lua.ExecuteString(Code));};
+    FRegexMatcher Match(FRegexPattern(TEXT("<ModifiedClick\\s+action=\"([^\"]+)\"\\s+default=\"([^\"]+)\"")),Xml);
+    int32 Count=0; auto* L=F.Lua.GetState();
+    while(Match.FindNext())
+    {
+        ++Count; const FString Name=Match.GetCaptureGroup(1),Default=Match.GetCaptureGroup(2);
+        lua_getglobal(L,"GetModifiedClick"); lua_pushstring(L,TCHAR_TO_UTF8(*Name));
+        if(lua_pcall(L,1,1,0)) return false;
+        TestEqual(TEXT("Each action uses the original MPQ default"),FString(UTF8_TO_TCHAR(lua_tostring(L,-1))),Default); lua_pop(L,1);
+        lua_getglobal(L,"GetModifiedClickAction"); lua_pushinteger(L,Count); if(lua_pcall(L,1,1,0)) return false;
+        TestEqual(TEXT("Original action enumeration order is retained"),FString(UTF8_TO_TCHAR(lua_tostring(L,-1))),Name); lua_pop(L,1);
+    }
+    TestEqual(TEXT("All sixteen original definitions were checked"),Count,16);
+    Check(TEXT("Real enumeration and unknown-action contracts"),TEXT("assert(GetNumModifiedClickActions()==16 and GetModifiedClickAction(0)==nil and GetModifiedClickAction(17)==nil and GetModifiedClick('unknown')==nil and IsModifiedClick('unknown')==nil and IsModifiedClick('FOCUSCAST')==nil)"));
+    Check(TEXT("Canonical modifiers and invalid requests"),TEXT("SetModifiedClick('chatlink','shift-ctrl-lalt-button2'); assert(GetModifiedClick('CHATLINK')=='LALT-CTRL-SHIFT-BUTTON2'); assert(not pcall(SetModifiedClick,'unknown','ALT') and not pcall(SetModifiedClick,'CHATLINK','SHIFT-BUTTON9') and not pcall(SetModifiedClick,'CHATLINK','CTRL--SHIFT')); SetModifiedClick('CHATLINK','SHIFT-BUTTON1')"));
+    Keys.Add(EKeys::LeftShift); F.Frames.CurrentMouseButton=TEXT("LeftButton");
+    Check(TEXT("A named click requires its modifier and matching event button"),TEXT("assert(IsModifiedClick('CHATLINK')==1 and IsModifiedClick('SHIFT')==1 and IsModifiedClick()==1 and IsModifiedClick('DRESSUP')==nil)"));
+    F.Frames.CurrentMouseButton=TEXT("RightButton");
+    Check(TEXT("Mouse-button restrictions distinguish chat links and sockets"),TEXT("assert(IsModifiedClick('CHATLINK')==nil and IsModifiedClick('SOCKETITEM')==1); SetModifiedClick('AUTOLOOTTOGGLE','RSHIFT'); assert(IsModifiedClick('AUTOLOOTTOGGLE')==nil)"));
+    Keys.Reset(); Keys.Add(EKeys::RightShift);
+    Check(TEXT("Right-specific and general modifiers use routed key state"),TEXT("assert(IsModifiedClick('AUTOLOOTTOGGLE')==1 and IsModifiedClick('SHIFT')==1 and IsModifiedClick('LSHIFT')==nil); SetModifiedClick('SELFCAST','CTRL'); SetModifiedClick('FOCUSCAST','SHIFT')"));
+    TestEqual(TEXT("Focus assignment changes the actual action target"),WowModifiedClicks::ActionTarget(L,3),uint64(2));
+    Keys.Add(EKeys::LeftControl);
+    TestEqual(TEXT("Self-cast takes priority when both assignments are active"),WowModifiedClicks::ActionTarget(L,3),uint64(1));
+    Check(TEXT("Direct modifier queries require each requested family"),TEXT("assert(IsModifiedClick('CTRL-SHIFT')==1 and IsModifiedClick('ALT-SHIFT')==nil)"));
+    Keys.Reset(); TestEqual(TEXT("Unmodified actions retain the selected target"),WowModifiedClicks::ActionTarget(L,3),uint64(3));
+    WowModifiedClicks::Save(L);
+    Check(TEXT("Changed assignments remain editable before restoring the saved set"),TEXT("SetModifiedClick('SELFCAST','ALT'); SetModifiedClick('AUTOLOOTTOGGLE','NONE'); assert(GetModifiedClick('SELFCAST')=='ALT')"));
+    WowModifiedClicks::Load(L,false);
+    Check(TEXT("Saved assignments are restored independently of later edits"),TEXT("assert(GetModifiedClick('SELFCAST')=='CTRL' and GetModifiedClick('AUTOLOOTTOGGLE')=='RSHIFT'); LoadBindings(0); assert(GetModifiedClick('FOCUSCAST')=='NONE' and GetModifiedClick('SELFCAST')=='ALT'); LoadBindings(2); assert(GetModifiedClick('SELFCAST')=='CTRL')"));
+    Check(TEXT("Corrupt old preferences fall back to original definitions"),TEXT("IdleWowUIState.modifiedClicks.SELFCAST='not-a-binding'; assert(GetModifiedClick('SELFCAST')=='ALT'); SetModifiedClick('SELFCAST'); assert(GetModifiedClick('SELFCAST')=='NONE' and IsModifiedClick('SELFCAST')==nil)"));
+    TestEqual(TEXT("Unassigned modified hotkeys retain their base action"),FWowKeyBindings::Action(L,TEXT("ALT-CTRL-2"),true),FString(TEXT("ACTIONBUTTON2")));
+    Check(TEXT("Binding queries still report only actual assignments"),TEXT("assert(GetBindingAction('ALT-CTRL-2')==''); SetBinding('CTRL-2','TOGGLEBACKPACK'); SetBinding('ALT-2')"));
+    TestEqual(TEXT("Explicit chords take priority over base actions"),FWowKeyBindings::Action(L,TEXT("CTRL-2"),true),FString(TEXT("TOGGLEBACKPACK")));
+    TestTrue(TEXT("An explicitly unbound chord cannot fall through"),FWowKeyBindings::Action(L,TEXT("ALT-2"),true).IsEmpty());
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudSingleLineInsert,"WowUnreal.Hud.SingleLineInsert",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudSingleLineInsert::RunTest(const FString&)
+{
+    FHudFixture F;
+    FWowFrameDef Def; Def.Name=TEXT("SingleInput"); Def.Parent=TEXT("UIParent"); Def.Type=EWowFrameType::EditBox; Def.Width=240; Def.Height=30;
+    F.Frames.CreateFrame(Def);
+    return TestTrue(TEXT("Single-line insertion retains caret, replaces selection and cannot submit on newline"),F.Lua.ExecuteString(TEXT(R"LUA(
+        assert(not SingleInput:IsMultiLine()); SingleInput:SetText('abcd'); SingleInput:SetCursorPosition(2); SingleInput:Insert('X'); assert(SingleInput:GetText()=='abXcd')
+        SingleInput:Insert('YZ'); assert(SingleInput:GetText()=='abXYZcd')
+        SingleInput:HighlightText(2,5); SingleInput:Insert('!'); assert(SingleInput:GetText()=='ab!cd')
+        SingleInput:HighlightText(); SingleInput:Insert('Hello\r\nworld'); assert(SingleInput:GetText()=='Helloworld')
+        SingleInput:SetText(''); SingleInput:Insert('|cffffffff|Hitem:123:0:0|h[Sample item]|h|r'); assert(SingleInput:GetText()=='|cffffffff|Hitem:123:0:0|h[Sample item]|h|r')
+        SingleInput:SetText(''); SingleInput:Insert('Привет'); assert(SingleInput:GetText()=='Привет')
+        assert(not pcall(function() UIParent:Insert('invalid') end))
+    )LUA")));
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudMacroFlow,"WowUnreal.Hud.MacroFlow",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)

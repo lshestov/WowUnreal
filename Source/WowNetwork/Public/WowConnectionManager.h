@@ -17,6 +17,7 @@ DECLARE_MULTICAST_DELEGATE(FOnLogoutComplete);
 DECLARE_MULTICAST_DELEGATE(FOnWowCursorChanged);
 DECLARE_DELEGATE_RetVal_OneParam(bool,FOnWowMacroUse,uint32);
 DECLARE_DELEGATE_TwoParams(FOnWowLocalCastSent,uint32,uint8);
+DECLARE_DELEGATE_RetVal_OneParam(uint64,FOnWowActionTarget,uint64);
 
 enum class EWowActionInvocationKind : uint8
 {
@@ -93,6 +94,7 @@ public:
     void PickupMacroCursor(uint32 Id);
     FOnWowMacroUse OnMacroUse;
     FOnWowLocalCastSent OnLocalCastSent;
+    FOnWowActionTarget OnResolveActionTarget;
     void PickupActionCursor(int32 SlotIndex);
     void PickupBagItemCursor(uint8 SourceBag, uint8 SourceSlot, int32 ItemId, const FString& ItemLink = TEXT(""), uint32 SplitCount = 0);
     void PickupInventoryItemCursor(uint8 InventorySlot, int32 ItemId, const FString& ItemLink = TEXT(""));

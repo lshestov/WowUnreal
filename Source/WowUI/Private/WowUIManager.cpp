@@ -7,6 +7,7 @@
 #include "WowUiModelRenderer.h"
 #include "WowUiMapRenderer.h"
 #include "WowUiCursorRenderer.h"
+#include "WowModifiedClicks.h"
 #include "WowAddonLoader.h"
 #include "LuaApi/LuaApiRegistry.h"
 #include "Mpq/MpqManager.h"
@@ -225,6 +226,8 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 	});
 	if(ConnectionManager) ConnectionManager->OnLocalCastSent.BindWeakLambda(this,[this](uint32 Spell,uint8 Counter)
 	{if(LuaVM) FWowMacros::CastSent(LuaVM->GetState(),Spell,Counter);});
+    if(ConnectionManager) ConnectionManager->OnResolveActionTarget.BindWeakLambda(this,[this](uint64 Selected)->uint64
+    {return LuaVM?WowModifiedClicks::ActionTarget(LuaVM->GetState(),Selected):Selected;});
 	if(ConnectionManager) ConnectionManager->PacketHandler.OnCastResult.BindWeakLambda(this,[this](uint64 Caster,uint32 Spell,uint8 Counter,bool Success,uint8 Reason)
 	{if(LuaVM && ConnectionManager && Caster==ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid) {LuaVM->BeginCallback(); FWowMacros::CastResult(LuaVM->GetState(),Spell,Counter,Success,Reason);}});
 	if(ConnectionManager) ConnectionManager->PacketHandler.OnCastState.BindWeakLambda(this,[this](uint64 Caster,uint32 Spell,uint8 Kind,uint8 Counter)
@@ -452,6 +455,7 @@ void UWowUIManager::SetActorResolver(TFunction<AActor*(uint64)> Resolver)
     if(UIContext) UIContext->ResolveActor=MoveTemp(Resolver);
 }
 void UWowUIManager::SetAreaResolver(TFunction<uint32()> Resolver) {if(UIContext) UIContext->ResolveArea=MoveTemp(Resolver);}
+void UWowUIManager::SetKeyResolver(TFunction<bool(const FKey&)> Resolver) {if(UIContext) UIContext->KeyDown=MoveTemp(Resolver);}
 
 void UWowUIManager::TickWorldImages(UWorld* World)
 {
@@ -505,6 +509,7 @@ void UWowUIManager::ProcessPendingReload()
     FWowSavedVariables::SaveAll(LuaVM->GetState());
     auto Resolver=UIContext->ResolveActor;
     auto AreaResolver=UIContext->ResolveArea;
+    auto KeyResolver=UIContext->KeyDown;
     auto FloorResolver=UIContext->ResolveDungeonFloor;
     auto Rows=UIContext->SelectedRows;
     auto Action=FrameManager->OnSecureActionDispatch;
@@ -518,6 +523,7 @@ void UWowUIManager::ProcessPendingReload()
     InitializeCore();
     UIContext->ResolveActor=MoveTemp(Resolver); UIContext->SelectedRows=MoveTemp(Rows);
     UIContext->ResolveArea=MoveTemp(AreaResolver);
+    UIContext->KeyDown=MoveTemp(KeyResolver);
     UIContext->ResolveDungeonFloor=MoveTemp(FloorResolver);
     FrameManager->OnSecureActionDispatch=Action; FrameManager->OnSecureSpellDispatch=Spell;
     FrameManager->Initialize(RootCanvas);

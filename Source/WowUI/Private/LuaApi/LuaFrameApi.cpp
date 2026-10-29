@@ -19,6 +19,8 @@
 #include "Slate/WidgetTransform.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Widgets/Input/SEditableTextBox.h"
+#include "Widgets/Input/SEditableText.h"
+#include "Layout/Children.h"
 #include "Framework/Text/TextLayout.h"
 #include "Engine/Texture2D.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -209,6 +211,34 @@ static UTextBlock* GetTextBlockWidgetForTable(lua_State* L, int Idx = 1)
 static UWowMultiLineEditBox* GetMultiLineEditor(lua_State* L,int32 Index=1)
 {
     auto* C=WowLuaApi::GetContext(L); return C && C->FrameManager?C->FrameManager->GetMultiLineEditBoxWidget(GetOptionalFrameHandle(L,Index)):nullptr;
+}
+
+static TSharedPtr<SEditableText> GetSingleLineEditor(lua_State* L)
+{
+    auto* Edit=GetEditBoxWidgetForTable(L); if(!Edit) return nullptr;
+    TArray<TSharedRef<SWidget>> Widgets; Widgets.Add(Edit->TakeWidget());
+    for(int32 I=0;I<Widgets.Num() && I<64;++I)
+    {
+        const auto Widget=Widgets[I];
+        if(Widget->GetType()==TEXT("SEditableText")) return StaticCastSharedRef<SEditableText>(Widget);
+        if(auto* Children=Widget->GetChildren()) for(int32 J=0;J<Children->Num() && Widgets.Num()<64;++J) Widgets.Add(Children->GetChildAt(J));
+    }
+    return nullptr;
+}
+
+static FORCENOINLINE bool InsertEditorText(lua_State* L,const char* Utf8)
+{
+    const FString Text=UTF8_TO_TCHAR(Utf8);
+    if(auto* Edit=GetMultiLineEditor(L)) {Edit->InsertAtCursor(Text); return true;}
+    if(auto Edit=GetSingleLineEditor(L))
+    {
+        TSharedRef<SWidget> Widget=Edit.ToSharedRef();
+        // Use Slate's normal edit transaction so insertion replaces the actual
+        // selection and retains the caret. Newlines must not submit a chat line.
+        for(TCHAR Ch:Text) if(Ch!='\r' && Ch!='\n') Widget->OnKeyChar(Widget->GetCachedGeometry(),FCharacterEvent(Ch,FModifierKeysState(),uint32(0),false));
+        return true;
+    }
+    return false;
 }
 
 static bool TableRepresentsRegion(lua_State* L, int Idx = 1)
@@ -2522,7 +2552,16 @@ static int LF_HasFocus(lua_State* L)
 {
     auto* C=WowLuaApi::GetContext(L); lua_pushboolean(L,C && C->FrameManager && C->FrameManager->HasEditFocus(GetFrameHandle(L,1))); return 1;
 }
-static int LF_HighlightText(lua_State* L) { return 0; }
+static int LF_HighlightText(lua_State* L)
+{
+    const int32 Begin=luaL_optinteger(L,2,0),End=luaL_optinteger(L,3,-1);
+    if(auto Edit=GetSingleLineEditor(L))
+    {
+        const int32 Length=Edit->GetText().ToString().Len();
+        Edit->SelectText(FTextLocation(0,FMath::Clamp(Begin,0,Length)),FTextLocation(0,End<0?Length:FMath::Clamp(End,0,Length)));
+    }
+    return 0;
+}
 static int LF_SetCursorPosition(lua_State* L)
 {
     if(auto* Edit=GetMultiLineEditor(L)) Edit->SetCursorOffset(luaL_checkinteger(L,2));
@@ -3286,7 +3325,7 @@ static const luaL_Reg FrameMethods[] =
 	{"HighlightText", LF_HighlightText},
 	{"SetCursorPosition", LF_SetCursorPosition},
 	{"GetCursorPosition", [](lua_State* L)->int { if(auto* Edit=GetMultiLineEditor(L)) { lua_pushinteger(L,Edit->CursorOffset()); return 1; } return luaL_error(L,"Cursor queries are not supported by this input widget"); }},
-	{"Insert", [](lua_State* L)->int { if(auto* Edit=GetMultiLineEditor(L)) { Edit->InsertAtCursor(UTF8_TO_TCHAR(luaL_checkstring(L,2))); return 0; } return luaL_error(L,"Cursor insertion is not supported by this input widget"); }},
+	{"Insert", [](lua_State* L)->int {luaL_checktype(L,1,LUA_TTABLE); const char* Text=luaL_checkstring(L,2); if(InsertEditorText(L,Text)) return 0; return luaL_error(L,"Cursor insertion requires an edit box"); }},
 	{"GetNumLetters", [](lua_State* L)->int { LF_GetText(L); const FString Text=UTF8_TO_TCHAR(lua_tostring(L,-1)); lua_pushinteger(L,Text.Len()); return 1; }},
 	{"IsMultiLine", [](lua_State* L)->int { lua_pushboolean(L,GetMultiLineEditor(L)!=nullptr); return 1; }},
 	{"SetTextInsets", LF_SetTextInsets},
