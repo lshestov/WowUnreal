@@ -121,7 +121,7 @@ The Windows Editor and packaged Development client are built from the same
 source tree. `WowUnreal.Hud`, `WowUnreal.UI`, `WowUnreal.Gameplay` and the related
 player, collision, equipment, lighting, rendering, traversal and performance
 suites cover both isolated controls and live protocol state. The interface
-regression set, including runtime animation and world parsers, contains 146 tests. Existing optional character texture-layout
+regression set, including runtime animation and world parsers, contains 147 tests. Existing optional character texture-layout
 DBC and test-fixture size warnings remain.
 
 Native gameplay probes exercise live server state and rendered UI at 1280x720
@@ -138,6 +138,10 @@ fading; scrolling chat preserves its history. Character stats initialize from
 the selected server identity before player-object fields arrive. See
 [message frames and bootstrap identity](MessageFrames.md).
 
+Replacement matchmaking cancellation is fixed in the paired server fork:
+it preserves the ongoing dungeon and selected random dungeon. See
+[dungeon finder](DungeonFinder.md).
+
 Full WoW UI compatibility is **not complete**. In particular:
 
 - Specialized legacy frame/region methods and broader addon compatibility. Visible panels and
@@ -145,14 +149,13 @@ Full WoW UI compatibility is **not complete**. In particular:
 - Uncovered macro condition variants and additional combat event families.
   Cast sequences and acknowledged random actions are implemented. See
   [macro support](Macros.md) and [combat-log support](CombatLog.md).
-- A server-side cancellation case in replacement matchmaking: AzerothCore
-  clears the player's selected random dungeon when a replacement queue is
-  cancelled. Its later random completion reward can then be lost. The native
-  completion route fills the replacement slot; the server limitation is
-  documented in [dungeon finder](DungeonFinder.md).
 - Legacy options without an engine-side implementation; persisting a CVar
   does not imply that its associated rendering or gameplay feature exists.
 - MP3 music decoding. WAV playback and finite UI-sound lifetime are supported.
 
 Some unimplemented panels still log missing Lua APIs at bootstrap. They must
 not be advertised as working features or replaced by fabricated game data.
+
+The original Wrath nonvisual animation countdown now initializes and completes
+before and after `ReloadUI`; XML comments no longer create invalid animations.
+See [UI animations](UiAnimations.md) for the verified API subset.

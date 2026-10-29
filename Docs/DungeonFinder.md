@@ -72,12 +72,14 @@ paths, packet truncation/atomicity, queue freshness and original Lua contracts.
 The complete 142-check regression also passes (138 clean checks and the same
 four previously recorded optional-data/fixture warning cases).
 
-The current server clears a player's selected random dungeon when a replacement
-queue is cancelled (LFGMgr::LeaveLfg sets player state to NONE). This can prevent
-its later random-completion reward. The client sends the original cancellation
-packet; the successful reward route fills the replacement instead. This is a
-server behavior, not a client-side reward substitute. Achievement presentation
-remains a separate pending task.
+The paired AzerothCore fork fixes cancellation of a replacement queue while a
+dungeon is in progress: `LFGMgr::LeaveLfg` restores the group/player dungeon state
+and preserves the selected random dungeon and remaining kick budget. Ordinary
+queue cancellation still clears its queue state. The fix was deployed from
+server revision `418de0f9e858a537880a1d7c09eb884a15069bf9`, with six focused LFG
+regressions and the full server unit suite passing. Client cancellation packets
+and reward display continue to use the original protocol. Achievement
+presentation has also been completed; see [interface status](InterfaceStatus.md).
 
 ## Original raid browser
 

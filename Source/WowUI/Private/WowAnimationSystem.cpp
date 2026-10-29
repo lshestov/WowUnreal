@@ -22,7 +22,7 @@ function common:GetName() return self.__name end
 function common:GetParent() return self.parent end
 function common:GetRegionParent() return self.kind=='AnimationGroup' and self.parent or self.parent.parent end
 function common:GetObjectType() return self.kind end
-function common:IsObjectType(t) return t==self.kind or t=='Animation' end
+function common:IsObjectType(t) return t==self.kind or (self.kind~='AnimationGroup' and t=='Animation') end
 function common:SetScript(event,f) self.scripts[event]=f end
 function common:GetScript(event) return self.scripts[event] end
 function common:HookScript(event,f)
@@ -46,7 +46,7 @@ function anim:GetSmoothing() return self.smoothing end
 function anim:Play() self.parent:Play() end
 function anim:Stop() self.parent:Stop() end
 function anim:Pause() self.parent:Pause() end
-function anim:IsPlaying() return self.parent:IsPlaying() and (self.progress or 0)<1 end
+function anim:IsPlaying() return self.parent:IsPlaying() and self.started==true and not self.finished end
 function anim:IsStopped() return self.parent:IsStopped() end
 function anim:IsPaused() return self.parent:IsPaused() end
 function anim:GetProgress() return self.progress or 0 end
@@ -68,7 +68,8 @@ local function reset(g)
     end
 end
 function group:CreateAnimation(kind,name,template,order)
-    assert(kind=='Alpha' or kind=='Translation','Unsupported animation type: '..tostring(kind))
+    kind=kind or 'Animation'
+    assert(kind=='Animation' or kind=='Alpha' or kind=='Translation','Unsupported animation type: '..tostring(kind))
     local a=setmetatable({kind=kind,duration=0,startDelay=0,endDelay=0,order=order or 1,
         change=0,x=0,y=0,smoothing='NONE',scripts={}},anim)
     named(a,self,name); self.children[#self.children+1]=a; return a
@@ -76,33 +77,46 @@ end
 function group:GetAnimations() return unpack(self.children) end
 function group:SetLooping(v) self.looping=v end
 function group:GetLooping() return self.looping end
-function group:GetDuration() return self.duration or 0 end
+local function schedule(g)
+    local orders,offset,keys={},{},{}
+    for _,a in ipairs(g.children) do orders[a.order]=math.max(orders[a.order] or 0,a.startDelay+a.duration+a.endDelay) end
+    for k in pairs(orders) do keys[#keys+1]=k end; table.sort(keys)
+    local duration=0
+    for _,k in ipairs(keys) do offset[k]=duration; duration=duration+orders[k] end
+    return duration,offset
+end
+function group:GetDuration() return (schedule(self)) end
 function group:IsPlaying() return self.playing==true end
 function group:IsStopped() return not self.playing and not self.paused end
 function group:IsPaused() return self.paused==true end
 function group:Pause()
-    if self.playing then self.playing=false; self.paused=true; active[self]=nil; callback(self,'OnPause') end
+    if self.playing then
+        self.playing=false; self.paused=true; active[self]=nil; self.version=(self.version or 0)+1
+        for _,a in ipairs(self.children) do if a.started and not a.finished then callback(a,'OnPause') end end
+        callback(self,'OnPause')
+    end
 end
 function group:Stop()
     local was=self.playing or self.paused; self.playing=false; self.paused=false; active[self]=nil
+    self.version=(self.version or 0)+1
     reset(self); if was then for _,a in ipairs(self.children) do if a.started and not a.finished then callback(a,'OnStop') end end; callback(self,'OnStop') end
 end
 function group:Play()
     if self.playing then return end
+    self.version=(self.version or 0)+1
     if self.paused then self.paused=false; self.playing=true; active[self]=true; return end
     local p=self.parent; self.baseAlpha=p:GetAlpha(); self.points={}
     for i=1,p:GetNumPoints() do self.points[i]={p:GetPoint(i)} end
-    local orders={}; self.duration=0
+    local offset; self.duration,offset=schedule(self)
     for _,a in ipairs(self.children) do
-        orders[a.order]=math.max(orders[a.order] or 0,a.startDelay+a.duration+a.endDelay)
         a.progress=0; a.started=false; a.finished=false
     end
-    local keys={}; for k in pairs(orders) do keys[#keys+1]=k end; table.sort(keys)
-    local offset={}; for _,k in ipairs(keys) do offset[k]=self.duration; self.duration=self.duration+orders[k] end
     for _,a in ipairs(self.children) do a.offset=offset[a.order]+a.startDelay end
     self.elapsed=0; self.reverse=false; self.playing=true; active[self]=true; callback(self,'OnPlay')
 end
 local function update(g,delta)
+    local version=g.version
+    local function interrupted() return not g.playing or g.version~=version end
     g.elapsed=g.elapsed+math.max(0,delta)
     local done=g.elapsed>=g.duration
     local time=math.min(g.elapsed,g.duration); if g.reverse then time=g.duration-time end
@@ -116,8 +130,11 @@ local function update(g,delta)
         if a.kind=='Alpha' then alpha=alpha+a.change*v; hasAlpha=true
         elseif a.kind=='Translation' then x=x+a.x*v; y=y+a.y*v; hasTranslation=true end
         if t>=0 and not a.started then a.started=true; callback(a,'OnPlay') end
-        if t>=0 then callback(a,'OnUpdate',delta) end
+        if interrupted() then return end
+        if t>=0 and not a.finished then callback(a,'OnUpdate',delta) end
+        if interrupted() then return end
         if v>=1 and not a.finished then a.finished=true; callback(a,'OnFinished') end
+        if interrupted() then return end
     end
     if hasAlpha then g.parent:SetAlpha(math.max(0,math.min(1,g.baseAlpha+alpha))) end
     if hasTranslation and #g.points>0 then
@@ -125,6 +142,7 @@ local function update(g,delta)
         for _,p in ipairs(g.points) do g.parent:SetPoint(p[1],p[2],p[3],p[4]+x,p[5]+y) end
     end
     callback(g,'OnUpdate',delta)
+    if interrupted() then return end
     if done and g.playing then
         if g.looping=='REPEAT' or g.looping=='BOUNCE' then
             g.elapsed=g.duration>0 and g.elapsed%g.duration or 0
@@ -174,6 +192,13 @@ void PopulateAnimation(lua_State* L,const FWowAnimationDef& Def)
         }
         else { UE_LOG(LogTemp,Warning,TEXT("Animation creation error: %s"),UTF8_TO_TCHAR(lua_tostring(L,-1))); lua_pop(L,1); }
     }
+    lua_getfield(L,Object,"scripts"); lua_getfield(L,-1,"OnLoad"); lua_remove(L,-2);
+    if(lua_isfunction(L,-1))
+    {
+        lua_pushvalue(L,Object);
+        if(lua_pcall(L,1,0,0)!=0) { UE_LOG(LogTemp,Warning,TEXT("Animation OnLoad error: %s"),UTF8_TO_TCHAR(lua_tostring(L,-1))); lua_pop(L,1); }
+    }
+    else lua_pop(L,1);
 }
 }
 #endif

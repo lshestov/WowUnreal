@@ -2221,6 +2221,63 @@ bool FHudTextureAnimations::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudAnimationTimers,"WowUnreal.Hud.AnimationTimers",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudAnimationTimers::RunTest(const FString&)
+{
+    FHudFixture F;
+    const char* Xml=R"XML(<Ui><Frame name="TimerOwner"><Animations>
+      <!-- Wrath uses commented generic animations as nonvisual timers. -->
+      <AnimationGroup name="$parentCountdown" parentKey="countdown">
+       <!-- A comment must never become an animation object. -->
+       <Animation name="$parentDelay" parentKey="delay" duration="0.5" startDelay="0.25" endDelay="0.25">
+        <Scripts><!-- Handler comment --><OnLoad>self.loaded=true;</OnLoad>
+         <OnPlay>self.starts=(self.starts or 0)+1;</OnPlay><OnPause>self.pauses=(self.pauses or 0)+1;</OnPause>
+         <OnFinished>self.finishes=(self.finishes or 0)+1;</OnFinished></Scripts>
+       </Animation>
+       <Scripts><OnLoad>assert(self.delay.loaded and self:GetDuration()==1); self:Play();</OnLoad>
+        <OnFinished>self.finishes=(self.finishes or 0)+1;</OnFinished></Scripts>
+      </AnimationGroup></Animations></Frame></Ui>)XML";
+    TArray<uint8> Bytes; Bytes.Append(reinterpret_cast<const uint8*>(Xml),FCStringAnsi::Strlen(Xml));
+    const auto Parsed=FWowFrameXmlParser::ParseXml(Bytes,TEXT("AnimationTimers"));
+    if(!TestEqual(TEXT("Only the owner frame is parsed"),Parsed.Num(),1)) return false;
+    const auto& Def=Parsed[0].FrameDef;
+    if(!TestEqual(TEXT("Comments do not create animation groups"),Def.Animations.Num(),1)) return false;
+    TestEqual(TEXT("Comments do not create animation children"),Def.Animations[0].Children.Num(),1);
+    F.Frames.CreateFrame(Def);
+    TestTrue(TEXT("XML timer OnLoad starts the complete group exactly once"),F.Lua.ExecuteString(TEXT(R"LUA(
+        assert(TimerOwner.countdown==TimerOwnerCountdown and TimerOwner.countdown:IsPlaying())
+        assert(TimerOwner.countdown.delay==TimerOwnerCountdownDelay)
+        assert(TimerOwner.countdown:IsObjectType('AnimationGroup') and not TimerOwner.countdown:IsObjectType('Animation'))
+        assert(TimerOwner.countdown.delay:IsObjectType('Animation') and not TimerOwner.countdown.delay:IsObjectType('AnimationGroup'))
+    )LUA")));
+    F.Events.TickOnUpdate(.125f);
+    TestTrue(TEXT("Start delay does not fire child handlers early"),F.Lua.ExecuteString(TEXT("assert(not TimerOwner.countdown.delay.starts and TimerOwner.countdown.delay:GetProgress()==0)")));
+    F.Events.TickOnUpdate(.375f);
+    TestTrue(TEXT("Nonvisual timers advance and pause like visual animations"),F.Lua.ExecuteString(TEXT("local g=TimerOwner.countdown; assert(g.delay.starts==1 and g.delay:GetProgress()==.5); g:Pause(); assert(g:IsPaused() and g.delay.pauses==1)")));
+    F.Events.TickOnUpdate(1.f);
+    TestTrue(TEXT("Paused timer progress is retained on resume"),F.Lua.ExecuteString(TEXT("assert(TimerOwner.countdown.delay:GetProgress()==.5); TimerOwner.countdown:Play()")));
+    F.Events.TickOnUpdate(.25f);
+    TestTrue(TEXT("Child completion happens before its end delay expires"),F.Lua.ExecuteString(TEXT("local g=TimerOwner.countdown; assert(g:IsPlaying() and g.delay.finishes==1 and not g.finishes)")));
+    F.Events.TickOnUpdate(.25f);
+    TestTrue(TEXT("The group completes once after its end delay"),F.Lua.ExecuteString(TEXT(R"LUA(
+        local g=TimerOwner.countdown; assert(g:IsStopped() and g.finishes==1 and g.delay.finishes==1)
+        Ordered=TimerOwner:CreateAnimationGroup(); local a=Ordered:CreateAnimation(); a:SetDuration(.25); a:SetOrder(1)
+        local b=Ordered:CreateAnimation('Animation'); b:SetDuration(.5); b:SetOrder(3); b:SetStartDelay(.25)
+        assert(a:GetObjectType()=='Animation' and Ordered:GetDuration()==1); b:SetDuration(1); assert(Ordered:GetDuration()==1.5)
+        Reentrant=TimerOwner:CreateAnimationGroup(); local r=Reentrant:CreateAnimation(); r:SetDuration(.125)
+        r:SetScript('OnFinished',function(self) self.calls=(self.calls or 0)+1; if self.calls==1 then self:GetParent():Stop(); self:GetParent():Play() end end)
+        Reentrant:Play()
+        Stopped=TimerOwner:CreateAnimationGroup(); local first=Stopped:CreateAnimation(); first:SetDuration(1)
+        local second=Stopped:CreateAnimation(); second:SetDuration(1); second:SetScript('OnPlay',function() error('Stopped group advanced another child') end)
+        first:SetScript('OnPlay',function(self) self:GetParent():Stop() end); Stopped:Play()
+    )LUA")));
+    F.Events.TickOnUpdate(.125f);
+    TestTrue(TEXT("Callbacks can stop or restart without stale updates completing the new play"),F.Lua.ExecuteString(TEXT("assert(Stopped:IsStopped() and Reentrant:IsPlaying() and Reentrant:GetAnimations().calls==1)")));
+    F.Events.TickOnUpdate(.125f);
+    TestTrue(TEXT("Restarted timers finish on their own timeline"),F.Lua.ExecuteString(TEXT("assert(Reentrant:IsStopped() and Reentrant:GetAnimations().calls==2 and TimerOwner.countdown.finishes==1)")));
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudGlyphSockets,"WowUnreal.Hud.GlyphSockets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FHudGlyphSockets::RunTest(const FString&)
 {

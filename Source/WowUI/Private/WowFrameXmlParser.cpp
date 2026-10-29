@@ -468,7 +468,8 @@ static FWowAnimationDef ParseAnimationNode(const pugi::xml_node& Node)
     D.Change=Node.attribute("change").as_float(); D.Order=Node.attribute("order").as_int(1); D.X=Node.attribute("offsetX").as_float(); D.Y=Node.attribute("offsetY").as_float();
     for(auto C:Node.children())
     {
-        if(FCStringAnsi::Strcmp(C.name(),"Scripts")==0) for(auto H:C.children()) D.Scripts.Add(UTF8_TO_TCHAR(H.name()),UTF8_TO_TCHAR(H.child_value()));
+        if(C.type()!=pugi::node_element) continue;
+        if(FCStringAnsi::Strcmp(C.name(),"Scripts")==0) { for(auto H:C.children()) if(H.type()==pugi::node_element) D.Scripts.Add(UTF8_TO_TCHAR(H.name()),UTF8_TO_TCHAR(H.child_value())); }
         else D.Children.Add(ParseAnimationNode(C));
     }
     return D;
@@ -967,7 +968,7 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 								TexColor.attribute("a").as_float(1.0f));
 						}
 
-						if(const auto Anim=Tex.child("Animations")) for(auto C:Anim.children()) T.Animations.Add(ParseAnimationNode(C));
+						if(const auto Anim=Tex.child("Animations")) for(auto C:Anim.children()) if(C.type()==pugi::node_element) T.Animations.Add(ParseAnimationNode(C));
 						T.bXmlDefaults=true;
 						L.Textures.Add(T);
 					}
