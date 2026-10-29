@@ -107,7 +107,7 @@ namespace WowLuaApi
     int SetMerchantItemTooltip(lua_State* L);
     int SetBuybackItemTooltip(lua_State* L);
     void RegisterSpellApi(lua_State* L);
-    void NotifyCastState(lua_State* L,uint64 Caster,uint32 Spell,uint8 Kind,bool HasRequest=true);
+    void NotifyCastState(lua_State* L,uint64 Caster,uint32 Spell,uint8 Kind,bool HasRequest=true,uint8 Counter=0);
     void RegisterClassApi(lua_State* L);
     void RegisterGlyphApi(lua_State* L);
     int SetGlyphTooltip(lua_State* L);

@@ -212,17 +212,17 @@ void WowLuaApi::RegisterSpellApi(lua_State* L)
     RegisterSpell(L,"GetShapeshiftFormCooldown",[](lua_State* S)->int { return PushSpellCooldown(S,Form(S)); });
     RegisterSpell(L,"CastShapeshiftForm",[](lua_State* S)->int { auto* C=GetContext(S); const uint32 Id=Form(S); if(C && C->ConnectionManager && Id) C->ConnectionManager->SendCastSpell(Id,C->EntityManager->LocalPlayerGuid); return 0; });
 }
-void WowLuaApi::NotifyCastState(lua_State* L,uint64 Caster,uint32 Spell,uint8 Kind,bool HasRequest)
+void WowLuaApi::NotifyCastState(lua_State* L,uint64 Caster,uint32 Spell,uint8 Kind,bool HasRequest,uint8 Counter)
 {
-    auto* C=GetContext(L); if(!C || !C->EventSystem || Kind>6) return;
-    static const TCHAR* Events[]={TEXT("UNIT_SPELLCAST_START"),TEXT("UNIT_SPELLCAST_SUCCEEDED"),TEXT("UNIT_SPELLCAST_FAILED"),TEXT("UNIT_SPELLCAST_CHANNEL_START"),TEXT("UNIT_SPELLCAST_CHANNEL_UPDATE"),TEXT("UNIT_SPELLCAST_CHANNEL_STOP"),TEXT("UNIT_SPELLCAST_SENT")};
+    auto* C=GetContext(L); if(!C || !C->EventSystem || Kind>8) return;
+    static const TCHAR* Events[]={TEXT("UNIT_SPELLCAST_START"),TEXT("UNIT_SPELLCAST_SUCCEEDED"),TEXT("UNIT_SPELLCAST_FAILED"),TEXT("UNIT_SPELLCAST_CHANNEL_START"),TEXT("UNIT_SPELLCAST_CHANNEL_UPDATE"),TEXT("UNIT_SPELLCAST_CHANNEL_STOP"),TEXT("UNIT_SPELLCAST_SENT"),TEXT("UNIT_SPELLCAST_INTERRUPTED"),TEXT("UNIT_SPELLCAST_STOP")};
     const auto* S=FDbcStore::Get().Spells().GetById(Spell); const int32 Top=lua_gettop(L);
     TArray<FString> Units={TEXT("player"),TEXT("target"),TEXT("focus"),TEXT("pet"),TEXT("vehicle")};
     for(int32 I=1;I<=4;++I) Units.Add(FString::Printf(TEXT("party%d"),I)); for(int32 I=1;I<=40;++I) Units.Add(FString::Printf(TEXT("raid%d"),I));
     for(const auto& Name:Units)
     {
         lua_pushstring(L,TCHAR_TO_UTF8(*Name)); const auto* Unit=ResolveUnitToken(L,Top+1); const bool Match=Unit && Unit->Guid==Caster; lua_settop(L,Top); if(!Match) continue;
-        C->EventSystem->FireEventTyped(Events[Kind],[&](lua_State* VM){lua_pushstring(VM,TCHAR_TO_UTF8(*Name)); lua_pushstring(VM,S && HasRequest?TCHAR_TO_UTF8(*S->SpellName):nullptr); lua_pushstring(VM,S?TCHAR_TO_UTF8(*S->Rank):""); lua_pushinteger(VM,0); lua_pushinteger(VM,Spell); return 5;});
+        C->EventSystem->FireEventTyped(Events[Kind],[&](lua_State* VM){lua_pushstring(VM,TCHAR_TO_UTF8(*Name)); lua_pushstring(VM,S && HasRequest?TCHAR_TO_UTF8(*S->SpellName):nullptr); lua_pushstring(VM,S?TCHAR_TO_UTF8(*S->Rank):""); lua_pushinteger(VM,Counter); lua_pushinteger(VM,Spell); return 5;});
     }
 }
 #else
@@ -230,5 +230,5 @@ void WowLuaApi::RegisterSpellApi(lua_State*) {}
 int WowLuaApi::SetSpellTooltip(lua_State*) { return 0; }
 int WowLuaApi::SetAuraTooltip(lua_State*) { return 0; }
 int WowLuaApi::PushSpellCooldown(lua_State*,uint32) { return 0; }
-void WowLuaApi::NotifyCastState(lua_State*,uint64,uint32,uint8,bool) {}
+void WowLuaApi::NotifyCastState(lua_State*,uint64,uint32,uint8,bool,uint8) {}
 #endif

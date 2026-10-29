@@ -2452,6 +2452,15 @@ static int LF_SetStatusBarColor(lua_State* L)
 
 	return 0;
 }
+static int LF_GetStatusBarColor(lua_State* L)
+{
+    luaL_checktype(L,1,LUA_TTABLE);
+    FLinearColor Color=FLinearColor::White;
+    if(auto* C=WowLuaApi::GetContext(L); C && C->FrameManager)
+        if(const auto* Bar=C->FrameManager->GetStatusBarWidget(GetFrameHandle(L))) Color=Bar->GetFillColorAndOpacity();
+    lua_pushnumber(L,Color.R); lua_pushnumber(L,Color.G); lua_pushnumber(L,Color.B); lua_pushnumber(L,Color.A);
+    return 4;
+}
 static int LF_SetOrientation(lua_State* L)
 {
     const FString Orientation=UTF8_TO_TCHAR(luaL_checkstring(L,2)); const bool Vertical=Orientation.Equals(TEXT("VERTICAL"),ESearchCase::IgnoreCase);
@@ -3259,6 +3268,7 @@ static const luaL_Reg FrameMethods[] =
 	{"GetValue", LF_GetValue},
 	{"SetStatusBarTexture", LF_SetStatusBarTexture},
 	{"SetStatusBarColor", LF_SetStatusBarColor},
+	{"GetStatusBarColor", LF_GetStatusBarColor},
 	{"SetOrientation", LF_SetOrientation},
 
 	// EditBox

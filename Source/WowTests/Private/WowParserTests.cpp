@@ -922,7 +922,7 @@ bool FMacroCastPackets::RunTest(const FString&)
 {
     TStrongObjectPtr<UWowConnectionManager> C(NewObject<UWowConnectionManager>()); auto Socket=WowTestUtils::AttachTestWorldSocket(*C,2); auto& H=C->PacketHandler; H.EntityManager.LocalPlayerGuid=1;
     TArray<TPair<uint32,uint8>> Sent; struct FResult {uint64 Caster; uint32 Spell; uint8 Counter; bool Success;}; TArray<FResult> Results;
-    C->OnLocalCastSent.BindLambda([&](uint32 Spell,uint8 Count){Sent.Add({Spell,Count});}); H.OnCastResult.BindLambda([&](uint64 Caster,uint32 Spell,uint8 Count,bool Success){Results.Add({Caster,Spell,Count,Success});});
+    C->OnLocalCastSent.BindLambda([&](uint32 Spell,uint8 Count){Sent.Add({Spell,Count});}); H.OnCastResult.BindLambda([&](uint64 Caster,uint32 Spell,uint8 Count,bool Success,uint8 Reason){Results.Add({Caster,Spell,Count,Success});});
     uint32 Opcode=0; TArray<uint8> Payload;
     C->SendCastSpell(78,2); TestTrue(TEXT("Cast request exposes the exact serialized counter"),WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload) && Opcode==WowOpcode::CMSG_CAST_SPELL && Payload[0]==0 && Sent.Num()==1 && Sent[0].Key==78 && Sent[0].Value==0);
     C->SendUseItem(255,23,0x400000000000000aULL,8690,1); TestTrue(TEXT("Item use shares the session counter and retains full item identity"),WowTestUtils::DequeueClientPacket(*Socket,Opcode,Payload) && Opcode==WowOpcode::CMSG_USE_ITEM && Payload[2]==1 && Sent.Num()==2 && Sent[1].Key==8690 && Sent[1].Value==1);

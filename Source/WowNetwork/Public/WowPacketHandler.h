@@ -10,8 +10,8 @@
 
 DECLARE_DELEGATE_OneParam(FOnWowCombatLog,const FWowCombatEntry&);
 DECLARE_DELEGATE_RetVal_OneParam(uint32,FOnWowCombatFlags,uint64);
-DECLARE_DELEGATE_FourParams(FOnWowCastResult,uint64,uint32,uint8,bool);
-DECLARE_DELEGATE_ThreeParams(FOnWowCastState,uint64,uint32,uint8);
+DECLARE_DELEGATE_FiveParams(FOnWowCastResult,uint64,uint32,uint8,bool,uint8);
+DECLARE_DELEGATE_FourParams(FOnWowCastState,uint64,uint32,uint8,uint8);
 
 DECLARE_MULTICAST_DELEGATE_FiveParams(FOnLoginVerifyWorld, uint32 /*MapId*/, float /*X*/, float /*Y*/, float /*Z*/, float /*Orientation*/);
 DECLARE_MULTICAST_DELEGATE_SevenParams(FOnChatMessage, uint8 /*Type*/, uint32 /*Language*/, uint64 /*SenderGuid*/, const FString& /*SenderName*/, const FString& /*Message*/, const FString& /*Channel*/, uint32 /*Achievement*/);
@@ -168,6 +168,9 @@ public:
     FOnWowCastState OnCastState;
     struct FCast {uint32 Spell=0; uint8 Counter=0; double Started=0,Ends=0; bool Channel=false;};
     TMap<uint64,FCast> Casts;
+    // Wrath reports a local rejection privately and then broadcasts the same cast.
+    struct FCastFailure {uint32 Spell=0; uint8 Counter=0; bool Private=false;};
+    TMap<uint64,FCastFailure> CastFailures;
     TMap<uint8,uint32> LocalCastRequests;
     uint8 PendingAttackCounter=0;
     bool HasPendingAttackCast=false;
@@ -545,6 +548,7 @@ private:
     void HandleCombatPacket(uint32 Opcode,FPacketReader& R);
     void RecordSpellCombat(FWowCombatEntry Entry);
     void RecordCastFailure(uint64 Caster,uint32 Spell,uint8 Reason);
+    void HandleCastFailure(uint64 Caster,uint32 Spell,uint8 Counter,uint8 Reason,bool Private);
     void RecordUnitDeath(uint64 Guid);
     void RecordAuraChanges(uint64 Guid,const TArray<FAuraInfo>& Previous,bool Initial);
     void HandleAttackStart(FPacketReader& R);

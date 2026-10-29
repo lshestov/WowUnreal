@@ -31,7 +31,32 @@ while the character window remains open; zero spell bonuses and actual mana
 regeneration survive ReloadUI. The legacy white cast overlay is absent during
 both cancelled and completed Fireball casts.
 
-Remaining feedback issue: cancellation currently produces duplicate
-Interrupted notifications, and the stock bar's failure presentation needs a
-separate packet/event-contract check. The full spell-effects renderer is also
-still pending.
+## Cast feedback
+
+Wrath sends SMSG_CAST_FAILED privately and SMSG_SPELL_FAILURE to nearby players
+for the same local cancellation. The client pairs those complementary packets
+by caster, spell and request counter. It records one combat failure, publishes
+one UI error and completes the request once. A new start or outgoing local
+request clears the pair; consecutive attempts and counter wrap remain valid.
+No timer suppresses later errors. Failure reason 40 publishes
+UNIT_SPELLCAST_INTERRUPTED; other rejections publish UNIT_SPELLCAST_FAILED.
+
+The actual byte counter now reaches start, result and stop events, matching
+UnitCastingInfo and the stock bar's castID. A late failure cannot clear a newer
+cast of the same spell. Successful timed casts publish UNIT_SPELLCAST_SUCCEEDED
+for the original macro managers, followed by UNIT_SPELLCAST_STOP for the stock
+green flash/fade. Channel updates retain their existing counter. The missing
+GetStatusBarColor method returns the rendered UProgressBar's RGBA values.
+
+The regression loads the original CastingBarFrame.lua from MPQ and exercises
+nonzero IDs, complementary packets in either arrival order, private rejection
+followed by generic broadcast failure, stale results, server completion and
+255-to-0 wraparound. A 28-step rendered disposable-account route verifies one
+red Interrupted notification/bar, hold/fade, ReloadUI, a subsequent timed cast,
+server-confirmed green completion and final disappearance. Its four captures
+were validated and inspected; existing characters and inventory are unchanged.
+
+The full original spell-effects renderer is still pending.
+
+This cast-feedback revision passes all 152 regression checks (148 clean and
+four pre-existing warning cases), including the original macro sequence suite.

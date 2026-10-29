@@ -1840,6 +1840,55 @@ bool FHudMacroSequence::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudCastingFeedback,"WowUnreal.Hud.CastingFeedback",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudCastingFeedback::RunTest(const FString&)
+{
+    FString Path; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false;
+    FMpqManager Mpq; if(!Mpq.Initialize(Path)) return false;
+    auto& Dbc=FDbcStore::Get(); if(!Dbc.IsLoaded()) Dbc.LoadAll(Mpq); if(!Dbc.IsDeferredLoaded()) Dbc.LoadDeferred(Mpq);
+    FHudFixture F; TStrongObjectPtr<UWowConnectionManager> C(NewObject<UWowConnectionManager>()); auto& H=C->PacketHandler;
+    F.Context.ConnectionManager=C.Get(); F.Context.EntityManager=&H.EntityManager;
+    H.EntityManager.LocalPlayerGuid=1; H.EntityManager.PromoteToTyped(1,WowTypeMask::PLAYER|WowTypeMask::UNIT);
+    H.OnCastResult.BindLambda([&](uint64 Caster,uint32 Spell,uint8 Counter,bool Success,uint8 Reason){if(Caster==1) FWowMacros::CastResult(F.Lua.GetState(),Spell,Counter,Success,Reason);});
+    H.OnCastState.BindLambda([&](uint64 Caster,uint32 Spell,uint8 Kind,uint8 Counter){if(Caster!=1 || (Kind!=1 && Kind!=2 && Kind!=7)) WowLuaApi::NotifyCastState(F.Lua.GetState(),Caster,Spell,Kind,true,Counter);});
+    H.OnCombatLog.BindLambda([&](const FWowCombatEntry& E){FWowCombatLogUi::Dispatch(F.Lua.GetState(),E);});
+    const auto Check=[&](const TCHAR* Name,const TCHAR* Code){return TestTrue(Name,F.Lua.ExecuteString(Code));};
+    FWowFrameDef Bar; Bar.Name=TEXT("CastProbe"); Bar.Parent=TEXT("UIParent"); Bar.Type=EWowFrameType::StatusBar; Bar.Width=200; Bar.Height=20; FWowLayer Layer; FWowFontStringElement Label; Label.Name=TEXT("CastProbeText"); Layer.FontStrings.Add(Label); Bar.Layers.Add(Layer); F.Frames.CreateFrame(Bar);
+    TArray<uint8> Bytes; if(!Mpq.ReadFile(TEXT("Interface\\FrameXML\\CastingBarFrame.lua"),Bytes)) return false;
+    Bytes.Add(0); if(!TestTrue(TEXT("Load original Wrath casting-bar handlers"),F.Lua.ExecuteString(UTF8_TO_TCHAR(reinterpret_cast<const char*>(Bytes.GetData()))))) return false;
+    if(!Check(TEXT("Create a real status bar and typed observers"),TEXT(R"LUA(
+        INTERRUPTED='Interrupted'; FAILED='Failed'; SPELL_FAILED_INTERRUPTED='Interrupted'; SPELL_FAILED_MOVING='Moving'
+        CastingBarFrame_OnLoad(CastProbe,'player',true,false); CastProbe:SetScript('OnEvent',CastingBarFrame_OnEvent)
+        CastRows={}; CastErrors=0; CastWatch=CreateFrame('Frame')
+        CastActionWatch=CreateFrame('Frame'); CastActionWatch:RegisterEvent('ACTIONBAR_SLOT_CHANGED'); CastActionWatch:RegisterEvent('ACTIONBAR_UPDATE_STATE')
+        for _,e in ipairs({'UNIT_SPELLCAST_START','UNIT_SPELLCAST_SUCCEEDED','UNIT_SPELLCAST_FAILED','UNIT_SPELLCAST_INTERRUPTED','UNIT_SPELLCAST_STOP','UI_ERROR_MESSAGE'}) do CastWatch:RegisterEvent(e) end
+        CastWatch:SetScript('OnEvent',function(self,e,...) if e=='UI_ERROR_MESSAGE' then CastErrors=CastErrors+1 else table.insert(CastRows,{e,...}) end end)
+    )LUA"))) return false;
+    TArray<uint8> P;
+    const auto U32=[&](uint32 V){P.Append(reinterpret_cast<const uint8*>(&V),4);};
+    const auto Guid=[&](uint64 V){uint8 Mask=0; TArray<uint8> Values; for(int32 I=0;I<8;++I) if(uint8 B=V>>(8*I)) {Mask|=1<<I; Values.Add(B);} P.Add(Mask); P.Append(Values);};
+    const auto Start=[&](uint8 Counter){P.Reset(); Guid(1); Guid(1); P.Add(Counter); U32(133); U32(0); U32(2000); U32(0); H.LocalCastRequests.Add(Counter,133); H.HandlePacket(WowOpcode::SMSG_SPELL_START,P);};
+    const auto Fail=[&](uint8 Counter,uint8 Reason,bool Private){P.Reset(); if(!Private) Guid(1); P.Add(Counter); U32(133); P.Add(Reason); H.HandlePacket(Private?0x130:WowOpcode::SMSG_SPELL_FAILURE,P);};
+    Start(10);
+    Check(TEXT("Start event and UnitCastingInfo share nonzero cast identity"),TEXT("assert(#CastRows==1 and CastRows[1][1]=='UNIT_SPELLCAST_START' and CastRows[1][5]==10 and select(8,UnitCastingInfo('player'))==10 and CastProbe.castID==10 and CastProbe.casting)"));
+    Fail(10,40,true); Fail(10,40,false);
+    Check(TEXT("Complementary failure packets produce one interruption and one error"),TEXT("assert(#CastRows==2 and CastRows[2][1]=='UNIT_SPELLCAST_INTERRUPTED' and CastRows[2][5]==10 and CastErrors==1 and UnitCastingInfo('player')==nil); local r,g,b=CastProbe:GetStatusBarColor(); assert(r==1 and g==0 and b==0 and CastProbeText:GetText()==INTERRUPTED and not CastProbe.casting and CastProbe.fadeOut and CastProbe.holdTime>GetTime())"));
+    TestEqual(TEXT("Cancellation has exactly one combat-log failure"),H.CombatHistory.Num(),2); // Start plus failure.
+    Start(11); Fail(11,40,false); Fail(11,40,true);
+    Check(TEXT("Reverse arrival order still completes exactly one cast"),TEXT("assert(#CastRows==4 and CastRows[4][1]=='UNIT_SPELLCAST_INTERRUPTED' and CastRows[4][5]==11 and CastErrors==2)"));
+    Start(12); Fail(12,51,true); Fail(12,0,false);
+    Check(TEXT("Private rejection wins over the broadcast's generic zero reason"),TEXT("assert(#CastRows==6 and CastRows[6][1]=='UNIT_SPELLCAST_FAILED' and CastRows[6][5]==12 and CastErrors==3 and CastProbeText:GetText()==FAILED)"));
+    Start(13); Fail(12,40,false);
+    TestTrue(TEXT("A late failure cannot clear a newer cast of the same spell"),H.Casts.Contains(1) && H.Casts[1].Counter==13);
+    Check(TEXT("Stock bar ignores failure for an older cast ID"),TEXT("assert(CastProbe.casting and CastProbe.castID==13 and CastProbeText:GetText()==GetSpellInfo(133))"));
+    // A successful cast emits SUCCEEDED for macros and STOP for the stock flash/fade.
+    P.Reset(); Guid(1); Guid(1); P.Add(13); U32(133); U32(0); U32(0); P.Add(0); P.Add(0); U32(0); H.HandlePacket(WowOpcode::SMSG_SPELL_GO,P);
+    Check(TEXT("Server completion stops the matching stock bar and preserves typed identity"),TEXT("assert(CastRows[#CastRows-1][1]=='UNIT_SPELLCAST_SUCCEEDED' and CastRows[#CastRows][1]=='UNIT_SPELLCAST_STOP' and CastRows[#CastRows][5]==13 and not CastProbe.casting and CastProbe.flash and CastProbe.fadeOut); local r,g,b=CastProbe:GetStatusBarColor(); assert(r==0 and g==1 and b==0)"));
+    Start(255); Fail(255,40,true); Fail(255,40,false); Start(0); Fail(0,40,true); Fail(0,40,false);
+    Check(TEXT("A wrapped counter zero remains a valid new cancellation"),TEXT("assert(CastRows[#CastRows][1]=='UNIT_SPELLCAST_INTERRUPTED' and CastRows[#CastRows][5]==0 and CastProbeText:GetText()==INTERRUPTED and UnitCastingInfo('player')==nil)"));
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudMacroFlow,"WowUnreal.Hud.MacroFlow",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FHudMacroFlow::RunTest(const FString&)
 {

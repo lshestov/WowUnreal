@@ -1013,7 +1013,7 @@ void FWowPacketHandler::HandleAttackStart(FPacketReader& R)
     uint64 AttackerGuid = R.ReadU64();
     uint64 VictimGuid = R.ReadU64();
     UE_LOG(LogWowPacket, Log, TEXT("SMSG_ATTACKSTART: attacker=%llu victim=%llu"), AttackerGuid, VictimGuid);
-    if(AttackerGuid==EntityManager.LocalPlayerGuid && HasPendingAttackCast) {HasPendingAttackCast=false; OnCastResult.ExecuteIfBound(AttackerGuid,6603,PendingAttackCounter,true);}
+    if(AttackerGuid==EntityManager.LocalPlayerGuid && HasPendingAttackCast) {HasPendingAttackCast=false; OnCastResult.ExecuteIfBound(AttackerGuid,6603,PendingAttackCounter,true,0);}
     OnAttackStart.Broadcast(AttackerGuid, VictimGuid);
 }
 
@@ -1024,7 +1024,7 @@ void FWowPacketHandler::HandleAttackStop(FPacketReader& R)
     uint64 VictimGuid = R.ReadPackedGuid();
     if(!R.CanRead(4)) return; R.ReadU32(); if(R.Remaining()) return;
     UE_LOG(LogWowPacket, Log, TEXT("SMSG_ATTACKSTOP: attacker=%llu victim=%llu"), AttackerGuid, VictimGuid);
-    if(AttackerGuid==EntityManager.LocalPlayerGuid && HasPendingAttackCast) {HasPendingAttackCast=false; OnCastResult.ExecuteIfBound(AttackerGuid,6603,PendingAttackCounter,false);}
+    if(AttackerGuid==EntityManager.LocalPlayerGuid && HasPendingAttackCast) {HasPendingAttackCast=false; OnCastResult.ExecuteIfBound(AttackerGuid,6603,PendingAttackCounter,false,0);}
     OnAttackStop.Broadcast(AttackerGuid, VictimGuid);
 }
 

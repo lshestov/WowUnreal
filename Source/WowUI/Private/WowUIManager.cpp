@@ -225,10 +225,10 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 	});
 	if(ConnectionManager) ConnectionManager->OnLocalCastSent.BindWeakLambda(this,[this](uint32 Spell,uint8 Counter)
 	{if(LuaVM) FWowMacros::CastSent(LuaVM->GetState(),Spell,Counter);});
-	if(ConnectionManager) ConnectionManager->PacketHandler.OnCastResult.BindWeakLambda(this,[this](uint64 Caster,uint32 Spell,uint8 Counter,bool Success)
-	{if(LuaVM && ConnectionManager && Caster==ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid) {LuaVM->BeginCallback(); FWowMacros::CastResult(LuaVM->GetState(),Spell,Counter,Success);}});
-	if(ConnectionManager) ConnectionManager->PacketHandler.OnCastState.BindWeakLambda(this,[this](uint64 Caster,uint32 Spell,uint8 Kind)
-	{if(LuaVM && ConnectionManager && (Caster!=ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid || (Kind!=1 && Kind!=2))) {LuaVM->BeginCallback(); WowLuaApi::NotifyCastState(LuaVM->GetState(),Caster,Spell,Kind);}});
+	if(ConnectionManager) ConnectionManager->PacketHandler.OnCastResult.BindWeakLambda(this,[this](uint64 Caster,uint32 Spell,uint8 Counter,bool Success,uint8 Reason)
+	{if(LuaVM && ConnectionManager && Caster==ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid) {LuaVM->BeginCallback(); FWowMacros::CastResult(LuaVM->GetState(),Spell,Counter,Success,Reason);}});
+	if(ConnectionManager) ConnectionManager->PacketHandler.OnCastState.BindWeakLambda(this,[this](uint64 Caster,uint32 Spell,uint8 Kind,uint8 Counter)
+	{if(LuaVM && ConnectionManager && (Caster!=ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid || (Kind!=1 && Kind!=2 && Kind!=7))) {LuaVM->BeginCallback(); WowLuaApi::NotifyCastState(LuaVM->GetState(),Caster,Spell,Kind,true,Counter);}});
 
 	// 1. Load FrameXML (Interface/FrameXML/FrameXML.toc) — the core UI system
 	TArray<FWowXmlDirective> FrameXmlDirectives = FWowFrameXmlParser::LoadFrameXml(Mpq);

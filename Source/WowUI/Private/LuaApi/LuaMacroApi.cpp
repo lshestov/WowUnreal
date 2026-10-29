@@ -194,14 +194,14 @@ bool FWowMacros::SetActionTooltip(lua_State* L,int64 Handle,uint32 Id)
 }
 void FWowMacros::CastSent(lua_State* L,uint32 Spell,uint8 Counter)
 {
-    const auto* C=WowLuaApi::GetContext(L); if(C && C->EntityManager) WowLuaApi::NotifyCastState(L,C->EntityManager->LocalPlayerGuid,Spell,6);
+    const auto* C=WowLuaApi::GetContext(L); if(C && C->EntityManager) WowLuaApi::NotifyCastState(L,C->EntityManager->LocalPlayerGuid,Spell,6,true,Counter);
 }
-void FWowMacros::CastResult(lua_State* L,uint32 Spell,uint8 Counter,bool Success)
+void FWowMacros::CastResult(lua_State* L,uint32 Spell,uint8 Counter,bool Success,uint8 Reason)
 {
     auto* C=WowLuaApi::GetContext(L); if(!C || !C->ConnectionManager || !C->EntityManager) return;
     auto& Requests=C->ConnectionManager->PacketHandler.LocalCastRequests; const auto* Requested=Requests.Find(Counter); const bool Match=Requested && *Requested==Spell;
     if(Match) Requests.Remove(Counter);
-    WowLuaApi::NotifyCastState(L,C->EntityManager->LocalPlayerGuid,Spell,Success?1:2,Match);
+    WowLuaApi::NotifyCastState(L,C->EntityManager->LocalPlayerGuid,Spell,Success?1:Reason==40?7:2,Match,Counter);
     const int32 Top=lua_gettop(L); lua_getglobal(L,"_IdleWowMacroVisualChanged"); if(lua_isfunction(L,-1) && lua_pcall(L,0,0,0)) UE_LOG(LogTemp,Warning,TEXT("Macro icon update: %hs"),lua_tostring(L,-1)); lua_settop(L,Top);
 }
 #else
@@ -210,5 +210,5 @@ void FWowMacros::LoadSavedVariables(lua_State*) {}
 bool FWowMacros::RunWireMacro(lua_State*,uint32) { return false; }
 bool FWowMacros::SetActionTooltip(lua_State*,int64,uint32) { return false; }
 void FWowMacros::CastSent(lua_State*,uint32,uint8) {}
-void FWowMacros::CastResult(lua_State*,uint32,uint8,bool) {}
+void FWowMacros::CastResult(lua_State*,uint32,uint8,bool,uint8) {}
 #endif

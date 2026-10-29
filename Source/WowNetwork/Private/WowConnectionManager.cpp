@@ -127,7 +127,7 @@ void UWowConnectionManager::SelectRealm(int32 I)
             for(uint64 Guid:Guids) PacketHandler.EntityManager.Remove(Guid);
             PacketHandler.EntityManager.LocalPlayerGuid=0; TargetGuid=0; CursorPayload=FCursorPayloadState();
             PacketHandler.KnownSpells.Reset(); PacketHandler.ActionButtons.Reset(); PacketHandler.QuestLog.Reset(); PacketHandler.ResetTalentState(); PacketHandler.Reputations.Reset(); PacketHandler.ForcedReactions.Reset();
-            PacketHandler.SpellCooldowns.Reset(); PacketHandler.SpellCooldownInfo.Reset(); PacketHandler.CombatHistory.Reset(); PacketHandler.Casts.Reset(); PacketHandler.LocalCastRequests.Reset(); PacketHandler.HasPendingAttackCast=false;
+            PacketHandler.SpellCooldowns.Reset(); PacketHandler.SpellCooldownInfo.Reset(); PacketHandler.CombatHistory.Reset(); PacketHandler.Casts.Reset(); PacketHandler.CastFailures.Reset(); PacketHandler.LocalCastRequests.Reset(); PacketHandler.HasPendingAttackCast=false;
             PacketHandler.ResetGroupState(); PacketHandler.PetActionBar=FWowPetActionBarState(); PacketHandler.ResetChannels();
             PacketHandler.ResetMapState();
             PacketHandler.Merchant.Clear(); PacketHandler.CurrentBankerGuid=0; ResetMailState(); ResetTradeState();
@@ -391,7 +391,7 @@ void UWowConnectionManager::SendCastSpell(int32 SpellId, int64 InTargetGuid)
         Data.Append(GuidBytes, GuidByteCount);
     }
 
-    PacketHandler.LocalCastRequests.Add(CastCounter,Spell); OnLocalCastSent.ExecuteIfBound(Spell,CastCounter);
+    PacketHandler.CastFailures.Remove(PacketHandler.EntityManager.LocalPlayerGuid); PacketHandler.LocalCastRequests.Add(CastCounter,Spell); OnLocalCastSent.ExecuteIfBound(Spell,CastCounter);
     WorldSocket->SendPacket(WowOpcode::CMSG_CAST_SPELL, Data);
     UE_LOG(LogWowNet, Log, TEXT("Cast spell %d on target %lld"), SpellId, ResolvedTargetGuid);
 }
@@ -901,7 +901,7 @@ void UWowConnectionManager::SendAttackSwing(int64 InTargetGuid)
     uint64 G = static_cast<uint64>(InTargetGuid);
     FMemory::Memcpy(Data.GetData(), &G, 8);
 
-    PacketHandler.PendingAttackCounter=NextSpellCastCount++; PacketHandler.HasPendingAttackCast=true; PacketHandler.LocalCastRequests.Add(PacketHandler.PendingAttackCounter,6603); OnLocalCastSent.ExecuteIfBound(6603,PacketHandler.PendingAttackCounter);
+    PacketHandler.PendingAttackCounter=NextSpellCastCount++; PacketHandler.HasPendingAttackCast=true; PacketHandler.CastFailures.Remove(PacketHandler.EntityManager.LocalPlayerGuid); PacketHandler.LocalCastRequests.Add(PacketHandler.PendingAttackCounter,6603); OnLocalCastSent.ExecuteIfBound(6603,PacketHandler.PendingAttackCounter);
     WorldSocket->SendPacket(WowOpcode::CMSG_ATTACKSWING, Data);
     UE_LOG(LogWowNet, Log, TEXT("Attack swing on target %lld"), InTargetGuid);
 }
@@ -1035,7 +1035,7 @@ void UWowConnectionManager::SendUseItem(uint8 Bag,uint8 Slot,uint64 ItemGuid,uin
     if(GlyphSocket<0 && BeginItemSpell(SpellId,ItemGuid,Bag,Slot)) return;
     if(GlyphSocket<0) if(const auto* Spell=FDbcStore::Get().Spells().GetById(SpellId)) for(const uint32 Effect:Spell->Effect) if(Effect==74) { BeginGlyphUse(Bag,Slot,ItemGuid,SpellId); return; }
     if(GlyphSocket>=6) return;
-    const uint8 Count=NextSpellCastCount++; PacketHandler.LocalCastRequests.Add(Count,SpellId); OnLocalCastSent.ExecuteIfBound(SpellId,Count);
+    const uint8 Count=NextSpellCastCount++; PacketHandler.CastFailures.Remove(PacketHandler.EntityManager.LocalPlayerGuid); PacketHandler.LocalCastRequests.Add(Count,SpellId); OnLocalCastSent.ExecuteIfBound(SpellId,Count);
     WorldSocket->SendPacket(WowOpcode::CMSG_USE_ITEM,BuildUseItemPacket(Bag,Slot,ItemGuid,SpellId,ExplicitTargetGuid,GlyphSocket<0?0:GlyphSocket,Count));
 }
 
@@ -1569,7 +1569,7 @@ void UWowConnectionManager::Disconnect()
             PacketHandler.Merchant.Clear(); PacketHandler.CurrentBankerGuid=0; ResetMailState(); ResetTradeState();
     RepairCursor=false; PacketHandler.GuildCanRepair=false; PacketHandler.GuildRepairRequested=false; PacketHandler.GuildRepairId=0; PacketHandler.GuildWithdrawMoney=0; PacketHandler.ResetGuildState(); PacketHandler.ResetInspectState(); PacketHandler.ArenaIdentities.Reset(); PacketHandler.ResetPvpState(); PacketHandler.ResetLfgState(); PacketHandler.ResetAchievementState(); PacketHandler.ItemRefunds.Empty(); PacketHandler.RequestedItemRefunds.Empty(); PacketHandler.TotalPlayedTime=0; PacketHandler.PlayedTimeReceived=0; PacketHandler.PlayedTimeRequested=false;
     PacketHandler.WeaponProficiency=PacketHandler.ArmorProficiency=0; PacketHandler.HasWeaponProficiency=PacketHandler.HasArmorProficiency=false;
-    PacketHandler.CombatHistory.Reset(); PacketHandler.Casts.Reset(); PacketHandler.LocalCastRequests.Reset(); PacketHandler.HasPendingAttackCast=false;
+    PacketHandler.CombatHistory.Reset(); PacketHandler.Casts.Reset(); PacketHandler.CastFailures.Reset(); PacketHandler.LocalCastRequests.Reset(); PacketHandler.HasPendingAttackCast=false;
     PacketHandler.OnLoginVerifyWorld.Clear();
     PacketHandler.OnSendPacket.Unbind();
 
