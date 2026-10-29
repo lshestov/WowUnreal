@@ -663,7 +663,17 @@ struct FWowGameplayProbe
         {
             const FKey Key(*Step->GetStringField(TEXT("name"))); if(!Key.IsValid()) { Failure=TEXT("Invalid native input key"); Finish(C,false); return; }
             TGuardValue<bool> Synthetic(C.bProbeSyntheticKeyboard,true);
-            C.InputKey(FInputKeyEventArgs::CreateSimulated(Key,Step->GetStringField(TEXT("event"))==TEXT("release")?IE_Released:IE_Pressed,1.f)); Done=true;
+            bool Slate=false; Step->TryGetBoolField(TEXT("slate"),Slate);
+            const bool Release=Step->GetStringField(TEXT("event"))==TEXT("release");
+            if(Slate)
+            {
+                const auto Focused=FSlateApplication::IsInitialized()?FSlateApplication::Get().GetKeyboardFocusedWidget():nullptr;
+                if(!Focused || !Focused->GetType().ToString().Contains(TEXT("EditableText"))) {Failure=TEXT("Slate input requires a focused editor"); Finish(C,false); return;}
+                TGuardValue<bool> AllowText(InputGuard->SyntheticText,true);
+                const FKeyEvent Event(Key,FModifierKeysState(),0,false,0,0);
+                if(Release) FSlateApplication::Get().ProcessKeyUpEvent(Event); else FSlateApplication::Get().ProcessKeyDownEvent(Event);
+            }
+            else C.InputKey(FInputKeyEventArgs::CreateSimulated(Key,Release?IE_Released:IE_Pressed,1.f)); Done=true;
         }
         else if(Op==TEXT("key"))
         {

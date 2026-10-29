@@ -35,8 +35,8 @@ int Link(lua_State* L,bool Target)
     const auto* R=Row(L,Target); if(!R) {lua_pushnil(L); return 1;}
     FString Value=WowLuaApi::ItemLinkForUi(WowLuaApi::GetContext(L),R->ItemId);
     const auto Gem=[](uint32 Id){const auto* Enchant=FDbcStore::Get().ItemUi().Enchant(Id); return Enchant?Enchant->Gem:0;};
-    const FString Empty=FString::Printf(TEXT("item:%u:0:0:0:0:0:0:0:0:0"),R->ItemId);
-    Value.ReplaceInline(*Empty,*FString::Printf(TEXT("item:%u:%u:%u:%u:%u:0:%d:%u:0:0"),R->ItemId,R->PermanentEnchantId,Gem(R->GemEnchantId1),Gem(R->GemEnchantId2),Gem(R->GemEnchantId3),R->RandomPropertyId,R->SuffixFactor));
+    const FString Empty=FString::Printf(TEXT("item:%u:0:0:0:0:0:0:0:0"),R->ItemId);
+    Value.ReplaceInline(*Empty,*FString::Printf(TEXT("item:%u:%u:%u:%u:%u:0:%d:%u:0"),R->ItemId,R->PermanentEnchantId,Gem(R->GemEnchantId1),Gem(R->GemEnchantId2),Gem(R->GemEnchantId3),R->RandomPropertyId,R->SuffixFactor));
     lua_pushstring(L,TCHAR_TO_UTF8(*Value)); return 1;
 }
 int TargetTrade(lua_State* L,bool Confirm)

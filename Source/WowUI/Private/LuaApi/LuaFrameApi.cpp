@@ -2185,7 +2185,15 @@ static int LF_SetText(lua_State* L)
 	}
 
 	// Update UMG widget for other frame types
-	if(auto* Edit=GetMultiLineEditor(L)) { Edit->SetText(FText::FromString(UTF8_TO_TCHAR(Text))); return 0; }
+	if(auto* Edit=GetMultiLineEditor(L))
+    {
+        Edit->SetLuaText(UTF8_TO_TCHAR(Text));
+        if(Edit->IsChatEditor()) if(auto* C=WowLuaApi::GetContext(L); C && C->FrameManager)
+        {
+            C->FrameManager->NotifyEditorTextChanged(GetFrameHandle(L),Edit->LuaText(),false);
+        }
+        return 0;
+    }
 	if (UTextBlock* TextBlock = GetTextBlockWidgetForTable(L, 1))
 	{
 		FText TextContent = FText::FromString(UTF8_TO_TCHAR(Text));
@@ -2555,6 +2563,7 @@ static int LF_HasFocus(lua_State* L)
 static int LF_HighlightText(lua_State* L)
 {
     const int32 Begin=luaL_optinteger(L,2,0),End=luaL_optinteger(L,3,-1);
+    if(auto* Multi=GetMultiLineEditor(L); Multi && Multi->IsChatEditor()) {Multi->Highlight(Begin,End); return 0;}
     if(auto Edit=GetSingleLineEditor(L))
     {
         const int32 Length=Edit->GetText().ToString().Len();
@@ -2568,7 +2577,15 @@ static int LF_SetCursorPosition(lua_State* L)
     else if(auto* Single=GetEditBoxWidgetForTable(L)) StaticCastSharedRef<SEditableTextBox>(Single->TakeWidget())->GoTo(FTextLocation(0,FMath::Clamp(int32(luaL_checkinteger(L,2)),0,Single->GetText().ToString().Len())));
     return 0;
 }
-static int LF_SetTextInsets(lua_State* L) { return 0; }
+static int LF_SetTextInsets(lua_State* L)
+{
+    const float Left=luaL_checknumber(L,2),Right=luaL_checknumber(L,3),Top=luaL_checknumber(L,4),Bottom=luaL_checknumber(L,5);
+    const auto* C=WowLuaApi::GetContext(L); const float Scale=C && C->FrameManager?C->FrameManager->GetUIScale():1.f;
+    const FMargin Insets(Left*Scale,Top*Scale,Right*Scale,Bottom*Scale);
+    if(auto* Multi=GetMultiLineEditor(L)) Multi->SetEditorInsets(Insets);
+    else if(auto* Single=GetEditBoxWidgetForTable(L)) {auto Style=Single->GetWidgetStyle(); Style.SetPadding(Insets); Single->SetWidgetStyle(Style);}
+    return 0;
+}
 static int LF_SetMultiLine(lua_State* L) { return 0; }
 static int LF_SetFontObject(lua_State* L)
 {
@@ -3327,7 +3344,7 @@ static const luaL_Reg FrameMethods[] =
 	{"GetCursorPosition", [](lua_State* L)->int { if(auto* Edit=GetMultiLineEditor(L)) { lua_pushinteger(L,Edit->CursorOffset()); return 1; } return luaL_error(L,"Cursor queries are not supported by this input widget"); }},
 	{"Insert", [](lua_State* L)->int {luaL_checktype(L,1,LUA_TTABLE); const char* Text=luaL_checkstring(L,2); if(InsertEditorText(L,Text)) return 0; return luaL_error(L,"Cursor insertion requires an edit box"); }},
 	{"GetNumLetters", [](lua_State* L)->int { LF_GetText(L); const FString Text=UTF8_TO_TCHAR(lua_tostring(L,-1)); lua_pushinteger(L,Text.Len()); return 1; }},
-	{"IsMultiLine", [](lua_State* L)->int { lua_pushboolean(L,GetMultiLineEditor(L)!=nullptr); return 1; }},
+	{"IsMultiLine", [](lua_State* L)->int { const auto* Edit=GetMultiLineEditor(L); lua_pushboolean(L,Edit && !Edit->IsChatEditor()); return 1; }},
 	{"SetTextInsets", LF_SetTextInsets},
 	{"SetMultiLine", LF_SetMultiLine},
 	{"SetFontObject", LF_SetFontObject},

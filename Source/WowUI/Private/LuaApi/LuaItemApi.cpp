@@ -65,15 +65,23 @@ int CurrencyInfo(lua_State* L,uint32 Id,bool Backpack)
     lua_pushinteger(L,CurrencyCount(C,Id)); lua_pushinteger(L,Id==43307?1:Id==43308?2:0); lua_pushstring(L,TCHAR_TO_UTF8(*Icon(T))); lua_pushinteger(L,Id);
     return Backpack?5:9;
 }
+FColor QualityBytes(uint32 Value)
+{
+    // These bytes are part of the hyperlink protocol: approximating the RGB
+    // floats makes strict server validation reject even a genuine item link.
+    static const uint32 Colors[]={0xff9d9d9d,0xffffffff,0xff1eff00,0xff0070dd,0xffa335ee,0xffff8000,0xffe6cc80,0xffe6cc80};
+    const uint32 C=Colors[FMath::Min<uint32>(Value,UE_ARRAY_COUNT(Colors)-1)];
+    return FColor((C>>16)&255,(C>>8)&255,C&255,255);
+}
 FLinearColor Quality(uint32 Value)
 {
-    static const FLinearColor Colors[]={FLinearColor(.62f,.62f,.62f),FLinearColor::White,FLinearColor(.12f,1,0),FLinearColor(0,.44f,.87f),FLinearColor(.64f,.21f,.93f),FLinearColor(1,.5f,0),FLinearColor(.9f,.8f,.5f),FLinearColor(.9f,.8f,.5f)};
-    return Colors[FMath::Min<uint32>(Value,UE_ARRAY_COUNT(Colors)-1)];
+    const FColor C=QualityBytes(Value);
+    return FLinearColor(C.R/255.f,C.G/255.f,C.B/255.f,1.f);
 }
 FString Link(const FWowItemTemplate* T,uint32 Id)
 {
-    const FColor Color=Quality(T?T->Quality:1).ToFColor(false);
-    return FString::Printf(TEXT("|cff%02x%02x%02x|Hitem:%u:0:0:0:0:0:0:0:0:0|h[%s]|h|r"),Color.R,Color.G,Color.B,Id,T?*T->Name:*FString::Printf(TEXT("Item %u"),Id));
+    const FColor Color=QualityBytes(T?T->Quality:1);
+    return FString::Printf(TEXT("|cff%02x%02x%02x|Hitem:%u:0:0:0:0:0:0:0:0|h[%s]|h|r"),Color.R,Color.G,Color.B,Id,T?*T->Name:*FString::Printf(TEXT("Item %u"),Id));
 }
 const TCHAR* EquipType(uint32 Id)
 {
@@ -175,9 +183,9 @@ int InventoryLink(lua_State* L)
     auto* C=WowLuaApi::GetContext(L); auto* Item=UnitEquipped(L,1,luaL_checkinteger(L,lua_gettop(L)>=2?2:1));
     if(Item)
     {
-        uint32 Gems[4]={}; for(int32 I=0;I<4;++I) if(const auto* E=FDbcStore::Get().ItemUi().Enchant(Item->GetField(ItemField::ENCHANTMENT_1_1+(I+2)*3))) Gems[I]=E->Gem;
-        const FString Fields=FString::Printf(TEXT(":%u:%u:%u:%u:%u:%d:%u:0:0|h"),Item->GetField(ItemField::ENCHANTMENT_1_1),Gems[0],Gems[1],Gems[2],Gems[3],int32(Item->GetField(ItemField::RANDOM_PROPERTIES_ID)),Item->GetField(ItemField::PROPERTY_SEED));
-        const FString Value=Link(Template(C,Item->Entry),Item->Entry).Replace(TEXT(":0:0:0:0:0:0:0:0:0|h"),*Fields); lua_pushstring(L,TCHAR_TO_UTF8(*Value));
+        uint32 Gems[3]={}; for(int32 I=0;I<3;++I) if(const auto* E=FDbcStore::Get().ItemUi().Enchant(Item->GetField(ItemField::ENCHANTMENT_1_1+(I+2)*3))) Gems[I]=E->Gem;
+        const FString Fields=FString::Printf(TEXT(":%u:%u:%u:%u:0:%d:%u:0|h"),Item->GetField(ItemField::ENCHANTMENT_1_1),Gems[0],Gems[1],Gems[2],int32(Item->GetField(ItemField::RANDOM_PROPERTIES_ID)),Item->GetField(ItemField::PROPERTY_SEED));
+        const FString Value=Link(Template(C,Item->Entry),Item->Entry).Replace(TEXT(":0:0:0:0:0:0:0:0|h"),*Fields); lua_pushstring(L,TCHAR_TO_UTF8(*Value));
     }
     else lua_pushnil(L); return 1;
 }
@@ -644,7 +652,7 @@ void WowLuaApi::RegisterItemApi(lua_State* L)
     RegisterItem(L,"GetInventoryItemQuality",[](lua_State* S)->int { auto* C=GetContext(S); auto* Item=UnitEquipped(S,1,luaL_checkinteger(S,2)); const auto* T=Item?Template(C,Item->Entry):nullptr; if(T) lua_pushinteger(S,T->Quality); else lua_pushnil(S); return 1; });
     RegisterItem(L,"GetInventoryItemBroken",[](lua_State* S)->int { auto* Item=UnitEquipped(S,1,luaL_checkinteger(S,2)); lua_pushboolean(S,Item && Item->GetField(ItemField::MAX_DURABILITY)>0 && Item->GetField(ItemField::DURABILITY)==0); return 1; });
     RegisterItem(L,"GetItemIcon",[](lua_State* S)->int { lua_pushstring(S,TCHAR_TO_UTF8(*Icon(Template(GetContext(S),ItemId(S,1))))); return 1; });
-    RegisterItem(L,"GetItemQualityColor",[](lua_State* S)->int { const auto C=Quality(luaL_checkinteger(S,1)); const FColor Byte=C.ToFColor(false); lua_pushnumber(S,C.R); lua_pushnumber(S,C.G); lua_pushnumber(S,C.B); lua_pushstring(S,TCHAR_TO_UTF8(*FString::Printf(TEXT("ff%02x%02x%02x"),Byte.R,Byte.G,Byte.B))); return 4; });
+    RegisterItem(L,"GetItemQualityColor",[](lua_State* S)->int { const uint32 Q=luaL_checkinteger(S,1); const auto C=Quality(Q); const FColor Byte=QualityBytes(Q); lua_pushnumber(S,C.R); lua_pushnumber(S,C.G); lua_pushnumber(S,C.B); lua_pushstring(S,TCHAR_TO_UTF8(*FString::Printf(TEXT("ff%02x%02x%02x"),Byte.R,Byte.G,Byte.B))); return 4; });
 }
 #else
 void WowLuaApi::RegisterItemApi(lua_State*) {}

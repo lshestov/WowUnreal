@@ -29,7 +29,9 @@ compatibility work.
   focus. A native round-trip test uses an otherwise empty local realm.
   Native hyperlink areas open original item/spell references and player whisper
   editors, including wrapped links and background mouse passthrough. See
-  [chat hyperlinks](ChatLinks.md).
+  [chat hyperlinks](ChatLinks.md). The single-line input displays hyperlink labels
+  and quality colours while preserving wire identity and UTF-8 cursor positions;
+  see [rich chat editing](ChatEditor.md).
 - Outdoor minimap and zone/continent map textures, player position and zoom.
   Original POIs, tracking and WMO room/floor handling are described in
   [maps](Maps.md), [minimap tracking](Minimap.md) and [indoor maps](IndoorMinimap.md).
@@ -121,7 +123,7 @@ The Windows Editor and packaged Development client are built from the same
 source tree. `WowUnreal.Hud`, `WowUnreal.UI`, `WowUnreal.Gameplay` and the related
 player, collision, equipment, lighting, rendering, traversal and performance
 suites cover both isolated controls and live protocol state. The interface
-regression set, including runtime animation and world parsers, contains 155 tests. Existing optional character texture-layout
+regression set, including runtime animation and world parsers, contains 158 tests. Existing optional character texture-layout
 DBC and test-fixture size warnings remain.
 
 Native gameplay probes exercise live server state and rendered UI at 1280x720
@@ -182,6 +184,8 @@ including sided modifiers and mouse restrictions. The original Controls/Combat
 dropdowns save/cancel changes, and preferences survive ReloadUI. Runtime hotkeys
 retain unmodified actions unless a specific chord is assigned or unbound.
 Single-line editor insertion and selection support real Shift-item links. See
-[modified clicks](ModifiedClicks.md). Chat input still displays link/colour
-markup literally, and the client focus identity still needs preservation across
-ReloadUI; neither is included in this verified scope.
+[modified clicks](ModifiedClicks.md). Rich input displays link labels and supports
+atomic link editing. Item hyperlinks use exact protocol colours and field counts
+instead of the previous rounded RGB values and extra field; see
+[chat editing](ChatEditor.md). The client focus identity still needs preservation
+across ReloadUI.

@@ -1291,12 +1291,19 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 				}
 			}
 		}
-		else if (Def.Type == EWowFrameType::EditBox && Def.bMultiLine)
+		else if (Def.Type == EWowFrameType::EditBox && (Def.bMultiLine || (Def.Name.Contains(TEXT("ChatFrame")) && Def.Name.EndsWith(TEXT("EditBox")))))
 		{
 			auto* Edit=NewObject<UWowMultiLineEditBox>(ContainerWidget);
+			const bool Chat=!Def.bMultiLine;
+            if(Chat)
+            {
+                Edit->EnableChatMarkup();
+                Edit->ChatCommand=[this,Handle](const FString& Event,const FString& Arg)
+                {if(EventSystem) EventSystem->RunFrameScript(Handle,Event,Arg.IsEmpty()?TArray<FString>():TArray<FString>{Arg});};
+            }
 			FTextBlockStyle Style=Edit->WidgetStyle; Style.SetColorAndOpacity(FLinearColor::White);
 			if(FontManager) Style.SetFont(FontManager->GetDefaultFont(FMath::RoundToInt(12.f*UIScale)));
-			Edit->SetWidgetStyle(Style); Edit->SetAutoWrapText(true); Edit->SetSelectAllTextWhenFocused(false);
+			Edit->SetWidgetStyle(Style); Edit->SetAutoWrapText(!Chat); Edit->SetSelectAllTextWhenFocused(false);
 			Edit->SetClearKeyboardFocusOnCommit(false); Edit->SetRevertTextOnEscape(false);
 			AddFillChild(Edit,50,ESlateVisibility::Visible); MultiLineEditBoxWidgets.Add(Handle,Edit);
 			EditBoxMinimumHeight.Add(Handle,Def.Height);
@@ -2281,7 +2288,7 @@ void FWowFrameManager::TickWidgetEvents()
 		{
 			const float Scale=FMath::Max(UIScale,.001f); Cursor/=Scale;
 			const auto Rect=GetLayoutRect(Handle); const float LocalScale=GetEffectiveFrameScale(Handle);
-			SetFrameSize(Handle,Rect.Z/LocalScale,FMath::Max(EditBoxMinimumHeight.FindRef(Handle),TextHeight/Scale));
+			if(!Edit->IsChatEditor()) SetFrameSize(Handle,Rect.Z/LocalScale,FMath::Max(EditBoxMinimumHeight.FindRef(Handle),TextHeight/Scale));
 			if(Changed || !EditBoxLastCursor.Contains(Handle) || !EditBoxLastCursor[Handle].Equals(Cursor,.1f))
 			{
 				EditBoxLastCursor.Add(Handle,Cursor);
@@ -2315,7 +2322,8 @@ void FWowFrameManager::TickWidgetEvents()
 
 bool FWowFrameManager::DispatchEditBoxEnterPressed()
 {
-	for(const auto& Pair:MultiLineEditBoxWidgets) if(Pair.Value.IsValid() && IsFrameHierarchyShown(Pair.Key) && Pair.Value->HasEditFocus()) return true;
+	for(const auto& Pair:MultiLineEditBoxWidgets) if(Pair.Value.IsValid() && IsFrameHierarchyShown(Pair.Key) && Pair.Value->HasEditFocus())
+    {if(Pair.Value->IsChatEditor()) Pair.Value->ChatKey(EKeys::Enter); return true;}
 	for (const auto& Pair : EditBoxWidgets)
 	{
 		if (!Pair.Value.IsValid()) continue;

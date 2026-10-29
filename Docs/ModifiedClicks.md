@@ -42,9 +42,8 @@ cannot submit chat. Regression checks cover middle insertion, consecutive
 inserts, selection replacement, whole-field selection, hyperlinks, Cyrillic
 text and invalid non-editor calls. Multiline editors retain their existing path.
 
-Remaining presentation issue: the plain chat edit widget displays WoW hyperlink
-and colour markup literally even though the stored link is correct for sending.
-Rich chat-editor rendering and cursor-to-raw-text mapping are a separate task.
+Chat fields now use the [rich chat editor](ChatEditor.md) to display labels and
+colours while preserving wire identity and mapped cursor/selection positions.
 
 Rendered verification covers 77 steps and seven validated, inspected engine
 captures using a disposable non-GM mage. It changes the original Controls and

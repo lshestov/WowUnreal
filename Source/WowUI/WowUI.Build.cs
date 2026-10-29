@@ -8,6 +8,7 @@ public class WowUI : ModuleRules
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
         PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "UMG", "Slate", "SlateCore", "WowData", "WowAssets", "WowNetwork", "XmlParser", "InputCore" });
         PrivateDependencyModuleNames.Add("WowWorld");
+        PrivateDependencyModuleNames.Add("ApplicationCore");
         string ThirdParty = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "ThirdParty"));
         PublicIncludePaths.Add(Path.Combine(ThirdParty, "pugixml"));
         PrivateDefinitions.Add("HAS_PUGIXML=1");

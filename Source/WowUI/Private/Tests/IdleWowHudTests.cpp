@@ -17,6 +17,7 @@
 #include "../WowUiCursorRenderer.h"
 #include "../WowUiModelRenderer.h"
 #include "../WowModifiedClicks.h"
+#include "../WowChatEditMarshaller.h"
 #include "Internationalization/Regex.h"
 #include "ReferenceSkeleton.h"
 #include "../WowMapUi.h"
@@ -442,7 +443,7 @@ bool FHudLootState::RunTest(const FString&)
         assert(GetNumLootItems()==3 and LootSlotIsCoin(1) and LootSlotIsItem(2) and GetLootSlotType(1)==2)
         local icon,name,count,quality,locked=GetLootSlotInfo(2); assert(name=='Moss Agate' and count==3 and quality==2 and not locked)
         assert(select(5,GetLootSlotInfo(3)) and GetLootSlotInfo(4)==nil)
-        assert(GetLootSlotLink(2):find(':-9:33:0:0|h',1,true))
+        assert(GetLootSlotLink(2):find(':-9:33:0|h',1,true))
         LootEvents={}; LootObserver=CreateFrame('Frame'); for _,event in ipairs({'LOOT_OPENED','LOOT_SLOT_CLEARED','LOOT_SLOT_CHANGED','LOOT_CLOSED','START_LOOT_ROLL','CANCEL_LOOT_ROLL'}) do LootObserver:RegisterEvent(event) end
         LootObserver:SetScript('OnEvent',function(self,event,a,b) LootEvents[#LootEvents+1]={event,a,b} end)
     )LUA")));
@@ -1991,6 +1992,87 @@ bool FHudSingleLineInsert::RunTest(const FString&)
         SingleInput:SetText(''); SingleInput:Insert('Привет'); assert(SingleInput:GetText()=='Привет')
         assert(not pcall(function() UIParent:Insert('invalid') end))
     )LUA")));
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudChatEditCodec,"WowUnreal.Hud.ChatEditCodec",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudChatEditCodec::RunTest(const FString&)
+{
+    const FString Link=TEXT("|cffa335ee|Hitem:123:5:6:7:8:9:10:11|h[Sample item]|h|r");
+    const auto D=FWowChatEditDocument::Parse(TEXT("Buy ")+Link+TEXT(" now"));
+    TestEqual(TEXT("Wire IDs, label and quality colour survive parsing"),D.Raw,TEXT("Buy ")+Link+TEXT(" now"));
+    TestEqual(TEXT("Only the label is displayed"),D.Display,FString(TEXT("Buy [Sample item] now")));
+    TestEqual(TEXT("An entire hyperlink occupies one editable character"),D.Model.Len(),9);
+    TestTrue(TEXT("The link is an atomic run with its actual quality colour"),D.Spans.Num()==3 && D.Spans[1].Atomic() && D.Spans[1].Color==TEXT("ffa335ee"));
+    TestEqual(TEXT("The caret before a link precedes its hidden formatting"),D.RawOffset(4),4);
+    TestEqual(TEXT("The caret after a link follows all its hidden formatting"),D.RawOffset(5),4+Link.Len());
+    TestEqual(TEXT("Raw offsets inside a link snap to its end"),D.ModelOffset(16),5);
+    TestEqual(TEXT("Raw cursor positions round trip outside atomic interiors"),D.ModelOffset(D.RawOffset(7)),7);
+    const auto Escaped=FWowChatEditDocument::Parse(TEXT("a||b"));
+    TestTrue(TEXT("Escaped pipes retain both wire identity and one visible character"),Escaped.Raw==TEXT("a||b") && Escaped.Display==TEXT("a|b") && Escaped.Model.Len()==3);
+    const FString Broken=TEXT("hello |Hitem:123 incomplete");
+    TestTrue(TEXT("Incomplete link syntax remains editable literal text"),FWowChatEditDocument::Parse(Broken).Display==Broken);
+    const auto Color=FWowChatEditDocument::Parse(TEXT("|cff11aa55hello|r world"));
+    TestTrue(TEXT("Ordinary colour spans retain their text and wire markup"),Color.Display==TEXT("hello world") && Color.Raw==TEXT("|cff11aa55hello|r world"));
+    TestEqual(TEXT("Single-line input cannot acquire a carriage return"),FWowChatEditDocument::Parse(TEXT("a\r\nb")).Display,FString(TEXT("ab")));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudItemLinkColors,"WowUnreal.Hud.ItemLinkColors",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudItemLinkColors::RunTest(const FString&)
+{
+    FHudFixture F;
+    TStrongObjectPtr<UWowConnectionManager> Connection(NewObject<UWowConnectionManager>());
+    F.Context.ConnectionManager=Connection.Get();
+    for(uint32 Q=0;Q<8;++Q)
+    {
+        FWowItemTemplate Item; Item.Id=90000+Q; Item.Name=TEXT("Quality fixture"); Item.Quality=Q;
+        Connection->PacketHandler.ItemTemplates.Add(Item.Id,Item);
+    }
+    return TestTrue(TEXT("All item links and quality APIs use the exact build-12340 wire colours"),F.Lua.ExecuteString(TEXT(R"LUA(
+        local colors={'ff9d9d9d','ffffffff','ff1eff00','ff0070dd','ffa335ee','ffff8000','ffe6cc80','ffe6cc80'}
+        for q=0,7 do
+            local _,link=GetItemInfo(90000+q)
+            local r,g,b,hex=GetItemQualityColor(q)
+            assert(hex==colors[q+1] and link:sub(1,10)=='|c'..hex, 'quality '..q..': '..tostring(link))
+            assert(link:match('|H(item:[^|]+)|h')=='item:'..(90000+q)..':0:0:0:0:0:0:0:0')
+            assert(math.abs(r-tonumber(hex:sub(3,4),16)/255)<0.00001)
+            assert(math.abs(g-tonumber(hex:sub(5,6),16)/255)<0.00001)
+            assert(math.abs(b-tonumber(hex:sub(7,8),16)/255)<0.00001)
+        end
+    )LUA")));
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudRichChatEditing,"WowUnreal.Hud.RichChatEditing",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudRichChatEditing::RunTest(const FString&)
+{
+    FHudFixture F; FWowFrameDef Def; Def.Name=TEXT("ChatFrameProbeEditBox"); Def.Parent=TEXT("UIParent"); Def.Type=EWowFrameType::EditBox; Def.Width=400; Def.Height=24;
+    const auto Handle=F.Frames.CreateFrame(Def); auto* Edit=F.Frames.GetMultiLineEditBoxWidget(Handle);
+    if(!TestTrue(TEXT("Only the chat field opts into the rich editor"),Edit && Edit->IsChatEditor())) return false;
+    const auto Check=[&](const TCHAR* Name,const TCHAR* Code){return TestTrue(Name,F.Lua.ExecuteString(Code));};
+    Check(TEXT("Chat remains a single-line Lua edit box with raw link data"),TEXT(R"LUA(
+        Link='|cffa335ee|Hitem:123:5:6:7:8:9:10:11|h[Sample item]|h|r'; Edit=ChatFrameProbeEditBox
+        assert(not Edit:IsMultiLine()); EditChanges={}; Edit:SetScript('OnTextChanged',function(self,user) table.insert(EditChanges,user) end)
+        Edit:SetText('Buy '..Link..' now'); assert(Edit:GetText()=='Buy '..Link..' now' and EditChanges[1]==false)
+        Edit:SetCursorPosition(4); Edit:Insert('rare '); assert(Edit:GetText()=='Buy rare '..Link..' now' and Edit:GetCursorPosition()==9)
+    )LUA"));
+    TestEqual(TEXT("Actual editable layout displays the link label, not its code"),Edit->DisplayText(),FString(TEXT("Buy rare [Sample item] now")));
+    Check(TEXT("Chat text insets reach the actual editor"),TEXT("Edit:SetTextInsets(40,10,0,0)"));
+    TestTrue(TEXT("Header spacing and right padding use the UI scale"),FMath::IsNearlyEqual(Edit->EditorMargin().Left,40*F.Frames.GetUIScale()) && FMath::IsNearlyEqual(Edit->EditorMargin().Right,10*F.Frames.GetUIScale()));
+
+    Check(TEXT("Selecting raw link boundaries replaces the complete link"),TEXT("Edit:HighlightText(9,9+#Link); Edit:Insert('a robe'); assert(Edit:GetText()=='Buy rare a robe now'); Edit:SetText(Link); Edit:SetCursorPosition(#Link)"));
+    const auto Widget=Edit->TakeWidget();
+    Widget->OnKeyDown(Widget->GetCachedGeometry(),FKeyEvent(EKeys::BackSpace,FModifierKeysState(),0,false,0,0));
+    Check(TEXT("A single backspace removes the complete hyperlink"),TEXT("assert(Edit:GetText()=='', 'after backspace: '..Edit:GetText())"));
+    Check(TEXT("Insert preserves a typed prefix and suffix"),TEXT("Edit:SetText('ab'); Edit:SetCursorPosition(1); Edit:Insert(Link); assert(Edit:GetText()=='a'..Link..'b'); assert(Edit:GetCursorPosition()==1+#Link)"));
+    TestEqual(TEXT("Mixed raw text and link have the expected visible label"),Edit->DisplayText(),FString(TEXT("a[Sample item]b")));
+    Check(TEXT("UTF-8 cursor positions stay correct with Cyrillic prefixes"),TEXT("Edit:SetText('До '..Link..' после'); Edit:SetCursorPosition(#'До '); Edit:Insert('X'); assert(Edit:GetText()=='До X'..Link..' после' and Edit:GetCursorPosition()==#'До X'); Edit:HighlightText(#'До X',#'До X'+#Link)"));
+    TestEqual(TEXT("Copying an atomic selection retains the full wire link"),Edit->SelectedRawText(),FString(TEXT("|cffa335ee|Hitem:123:5:6:7:8:9:10:11|h[Sample item]|h|r")));
+
+    Check(TEXT("Enter and Escape use original frame handlers"),TEXT("Enters=0; Escapes=0; Edit:SetScript('OnEnterPressed',function() Enters=Enters+1 end); Edit:SetScript('OnEscapePressed',function() Escapes=Escapes+1 end); Edit:Insert('x\\ny'); assert(Enters==0, 'unexpected enter '..tostring(Enters)..' text '..Edit:GetText())"));
+    Widget->OnKeyDown(Widget->GetCachedGeometry(),FKeyEvent(EKeys::Enter,FModifierKeysState(),0,false,0,0));
+    Widget->OnKeyDown(Widget->GetCachedGeometry(),FKeyEvent(EKeys::Escape,FModifierKeysState(),0,false,0,0));
+    Check(TEXT("Single-line control keys dispatch once rather than insert newlines"),TEXT("assert(Enters==1 and Escapes==1, tostring(Enters)..'/'..tostring(Escapes))"));
+    return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudMacroFlow,"WowUnreal.Hud.MacroFlow",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)

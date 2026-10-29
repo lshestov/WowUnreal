@@ -2536,7 +2536,7 @@ static int L_GetItemInfo(lua_State* L)
 
 static FString BuildItemLink(uint32 ItemEntry)
 {
-    return FString::Printf(TEXT("|cffffffff|Hitem:%u:0:0:0:0:0:0:0:0:0|h[Item %u]|h|r"), ItemEntry, ItemEntry);
+    return FString::Printf(TEXT("|cffffffff|Hitem:%u:0:0:0:0:0:0:0:0|h[Item %u]|h|r"), ItemEntry, ItemEntry);
 }
 
 static int32 NormalizeEquipmentInventorySlot(int32 SlotId)

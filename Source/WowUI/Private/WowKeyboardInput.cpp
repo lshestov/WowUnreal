@@ -40,6 +40,13 @@ void FWowFrameManager::SetEditFocus(int64 Handle,bool Focus)
     SyncEditFocus();
 }
 
+void FWowFrameManager::NotifyEditorTextChanged(int64 Handle,const FString& Value,bool FromUser)
+{
+    const auto* Previous=EditBoxLastText.Find(Handle); const bool Changed=!Previous || *Previous!=Value;
+    EditBoxLastText.Add(Handle,Value);
+    if(Changed && EventSystem) EventSystem->RunFrameScript(Handle,TEXT("OnTextChanged"),{FromUser?TEXT("1"):TEXT("0")});
+}
+
 int64 FWowFrameManager::GetCharacterCaptureFrame() const
 {
     if(!EventSystem) return -1;

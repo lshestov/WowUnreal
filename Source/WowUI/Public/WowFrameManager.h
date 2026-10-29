@@ -285,6 +285,7 @@ public:
 	void TickWidgetEvents();
     bool HasEditFocus(int64 Handle) const;
     void SetEditFocus(int64 Handle,bool Focus);
+    void NotifyEditorTextChanged(int64 Handle,const FString& Value,bool FromUser);
     void SyncEditFocus();
     void NotifyEditFocus(int64 Handle);
 

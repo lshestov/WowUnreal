@@ -43,7 +43,7 @@ FString Global(lua_State* L,const char* Key)
 FString Link(FWowLuaContext* C,uint32 Item,int32 Property,uint32 Suffix)
 {
     if(!WowLuaApi::QueryItemTemplate(C,Item)) return FString();
-    return WowLuaApi::ItemLinkForUi(C,Item).Replace(TEXT(":0:0:0:0:0:0:0:0:0|h"),*FString::Printf(TEXT(":0:0:0:0:0:%d:%u:0:0|h"),Property,Suffix));
+    return WowLuaApi::ItemLinkForUi(C,Item).Replace(TEXT(":0:0:0:0:0:0:0:0|h"),*FString::Printf(TEXT(":0:0:0:0:0:%d:%u:0|h"),Property,Suffix));
 }
 FString Name(FWowLuaContext* C,uint64 Guid)
 {
