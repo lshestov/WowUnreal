@@ -14,6 +14,8 @@
 #include "WowSavedVariables.h"
 #include "WowAddonLoader.h"
 #include "../WowUiCursorRenderer.h"
+#include "../WowUiModelRenderer.h"
+#include "ReferenceSkeleton.h"
 #include "../WowMapUi.h"
 #include "../WowMinimapUi.h"
 #include "Formats/DbcParser.h"
@@ -1886,6 +1888,37 @@ bool FHudCastingFeedback::RunTest(const FString&)
     Check(TEXT("Server completion stops the matching stock bar and preserves typed identity"),TEXT("assert(CastRows[#CastRows-1][1]=='UNIT_SPELLCAST_SUCCEEDED' and CastRows[#CastRows][1]=='UNIT_SPELLCAST_STOP' and CastRows[#CastRows][5]==13 and not CastProbe.casting and CastProbe.flash and CastProbe.fadeOut); local r,g,b=CastProbe:GetStatusBarColor(); assert(r==0 and g==1 and b==0)"));
     Start(255); Fail(255,40,true); Fail(255,40,false); Start(0); Fail(0,40,true); Fail(0,40,false);
     Check(TEXT("A wrapped counter zero remains a valid new cancellation"),TEXT("assert(CastRows[#CastRows][1]=='UNIT_SPELLCAST_INTERRUPTED' and CastRows[#CastRows][5]==0 and CastProbeText:GetText()==INTERRUPTED and UnitCastingInfo('player')==nil)"));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudPortraitTracking,"WowUnreal.Hud.PortraitTracking",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudPortraitTracking::RunTest(const FString&)
+{
+    FReferenceSkeleton Skeleton;
+    {
+        FReferenceSkeletonModifier Modifier(Skeleton,nullptr);
+        Modifier.Add(FMeshBoneInfo(TEXT("root"),TEXT("root"),INDEX_NONE),FTransform(FVector(10,20,0)));
+        Modifier.Add(FMeshBoneInfo(TEXT("neck"),TEXT("neck"),0),FTransform(FVector(0,0,120)));
+        Modifier.Add(FMeshBoneInfo(TEXT("head"),TEXT("head"),1),FTransform(FVector(0,0,50)));
+    }
+    const FVector AuthoredPosition(90,20,175),AuthoredTarget(10,20,175);
+    FVector Position=AuthoredPosition,Target=AuthoredTarget;
+    TestTrue(TEXT("A resting head retains the authored portrait view"),FWowUiModelRenderer::TrackPortraitHead(Skeleton,TEXT("head"),FTransform(FVector(10,20,170)),Position,Target) && Position.Equals(AuthoredPosition) && Target.Equals(AuthoredTarget));
+    Position=AuthoredPosition; Target=AuthoredTarget;
+    const FTransform Bow(FRotator(0,90,0),FVector(-35,45,90),FVector(2));
+    FWowUiModelRenderer::TrackPortraitHead(Skeleton,TEXT("head"),Bow,Position,Target);
+    TestTrue(TEXT("The camera follows head translation, rotation and scale through its parent hierarchy"),Position.Equals(FVector(-35,205,100),.001) && Target.Equals(FVector(-35,45,100),.001));
+    TestTrue(TEXT("The original framing distance scales with the head"),FMath::IsNearlyEqual(FVector::Distance(Position,Target),160.,.001));
+    for(const FRotator Pose:{FRotator(65,25,0),FRotator(-30,100,90),FRotator(0,-90,180)})
+    {
+        Position=AuthoredPosition; Target=AuthoredTarget;
+        const FTransform Head(Pose,FVector(80,-20,60));
+        FWowUiModelRenderer::TrackPortraitHead(Skeleton,TEXT("head"),Head,Position,Target);
+        const FVector Forward=(Target-Position).GetSafeNormal();
+        TestTrue(TEXT("Casting and falling heads stay centred with unchanged portrait distance"),FMath::IsNearlyEqual(FVector::Distance(Position,Target),80.,.001) && FVector::DotProduct(Forward,(Head.GetTranslation()-Position).GetSafeNormal())>.99);
+    }
+    Position=AuthoredPosition; Target=AuthoredTarget;
+    TestTrue(TEXT("Models without a head retain their authored camera"),!FWowUiModelRenderer::TrackPortraitHead(Skeleton,TEXT("absent"),FTransform::Identity,Position,Target) && Position.Equals(AuthoredPosition) && Target.Equals(AuthoredTarget));
     return true;
 }
 

@@ -5,6 +5,7 @@ class FWowFrameManager;
 struct FWowLuaContext;
 class UWorld;
 struct FWowGuildEmblem;
+struct FReferenceSkeleton;
 
 /** Independent UI character models and camera views of live unit portraits. */
 class FWowUiModelRenderer
@@ -22,6 +23,8 @@ public:
     void Tabard(int64 Handle,const FWowGuildEmblem& Value,uint32 Display);
     void SetAssets(class FMpqManager* InMpq,class FWowAssetCache* InCache) { Mpq=InMpq; Cache=InCache; }
     void Tick(UWorld* World);
+    /** Move an authored model-space portrait view with its animated head. */
+    static bool TrackPortraitHead(const FReferenceSkeleton& Skeleton,FName Bone,const FTransform& AnimatedHead,FVector& Position,FVector& Target);
 private:
     struct FSlot;
     FWowFrameManager& Frames;

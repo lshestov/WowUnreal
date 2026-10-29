@@ -155,6 +155,18 @@ void FWowUiModelRenderer::Dress(int64 Handle,bool Dressed)
     }
 }
 
+bool FWowUiModelRenderer::TrackPortraitHead(const FReferenceSkeleton& Skeleton,FName Bone,const FTransform& AnimatedHead,FVector& Position,FVector& Target)
+{
+    const int32 Index=Skeleton.FindBoneIndex(Bone);
+    if(Index==INDEX_NONE) return false;
+    const auto& Poses=Skeleton.GetRefBonePose();
+    FTransform Reference=Poses[Index];
+    for(int32 Parent=Skeleton.GetParentIndex(Index); Parent!=INDEX_NONE; Parent=Skeleton.GetParentIndex(Parent)) Reference*=Poses[Parent];
+    Position=AnimatedHead.TransformPosition(Reference.InverseTransformPosition(Position));
+    Target=AnimatedHead.TransformPosition(Reference.InverseTransformPosition(Target));
+    return true;
+}
+
 void FWowUiModelRenderer::Tick(UWorld* World)
 {
     if(!World || !Context.ResolveActor) return;
@@ -263,8 +275,11 @@ void FWowUiModelRenderer::Tick(UWorld* World)
         FVector Position=Focus+Direction*Distance;
         if(S.bPortrait) if(const auto* View=Cast<UWowPortraitCameraData>(Body->GetSkeletalMeshAsset()->GetAssetUserDataOfClass(UWowPortraitCameraData::StaticClass())))
         {
-            Focus=Body->GetComponentTransform().TransformPosition(View->Target);
-            Position=Body->GetComponentTransform().TransformPosition(View->Position);
+            FVector LocalPosition=View->Position,LocalTarget=View->Target;
+            if(Body->DoesSocketExist(TEXT("WowPortraitHead")))
+                TrackPortraitHead(Body->GetSkeletalMeshAsset()->GetRefSkeleton(),Body->GetSocketBoneName(TEXT("WowPortraitHead")),Body->GetSocketTransform(TEXT("WowPortraitHead"),RTS_Component),LocalPosition,LocalTarget);
+            Focus=Body->GetComponentTransform().TransformPosition(LocalTarget);
+            Position=Body->GetComponentTransform().TransformPosition(LocalPosition);
             Capture->FOVAngle=View->Fov;
         }
         if(!S.bLogged)

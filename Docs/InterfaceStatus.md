@@ -121,7 +121,7 @@ The Windows Editor and packaged Development client are built from the same
 source tree. `WowUnreal.Hud`, `WowUnreal.UI`, `WowUnreal.Gameplay` and the related
 player, collision, equipment, lighting, rendering, traversal and performance
 suites cover both isolated controls and live protocol state. The interface
-regression set, including runtime animation and world parsers, contains 152 tests. Existing optional character texture-layout
+regression set, including runtime animation and world parsers, contains 153 tests. Existing optional character texture-layout
 DBC and test-fixture size warnings remain.
 
 Native gameplay probes exercise live server state and rendered UI at 1280x720
@@ -172,3 +172,7 @@ cast overlay is hidden when the stock CastingBarFrame exists. See
 [combat interface](CombatInterface.md) for authoritative values and the verified cancellation/completion contract.
 Cast IDs reach the original FrameXML, complementary failure packets produce one
 notification, and the stock red/green hold and fade follow the server result.
+
+Animated portrait cameras follow the head bone while retaining their original
+M2 view and field of view; casting no longer moves the player face below the
+portrait circle. See [unit portraits](Portraits.md).
