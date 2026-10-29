@@ -247,7 +247,8 @@ Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 - [ ] WMO interior lighting from Light.dbc
 - [ ] Spell visuals (SpellVisual → SpellVisualKit → effect attachment chain)
   - [x] Correct build-12340 DBC layouts and real spell/kit/effect references. Verified: 150 regression checks and a 16-step rendered Fireball route with three inspected captures. Also repaired a packaged projectile material lookup crash. Published cdb9b92 and installed binary verified without local patches. See [spell visuals](Docs/SpellVisuals.md).
-  - [?] Preserve server launch target/counter/timestamp and hit/miss lists; route unit missiles independently of current selection and use original spell speed/caster reach and elapsed time since launch for flight time. Verified: 161 regression checks and 18 native steps/three inspected captures, including changing selection before Fireball release and actual server damage to the retained wolf. See [spell visuals](Docs/SpellVisuals.md).
+  - [x] Preserve server launch target/counter/timestamp and hit/miss lists; route unit missiles independently of current selection and use original spell speed/caster reach and elapsed time since launch for flight time. Verified: 161 regression checks and 18 native steps/three inspected captures, including changing selection before Fireball release and actual server damage to the retained wolf. Published revision and installed binary verified without local patches. See [spell visuals](Docs/SpellVisuals.md).
+  - [?] Read actual 476-byte build-12340 M2 emitter records, scalar animation/global tracks and lifetime colour/alpha/scale/atlas curves; safely load emitter-only M2 files without a skin. Verified: 163 regression checks and 18 native steps/three inspected captures. See [M2 particle data](Docs/M2Particles.md).
 - [ ] Custom terrain shader (reduce 256 draw calls/tile)
 - [ ] Shadow flickering fix on WMOs
 

@@ -205,43 +205,26 @@ struct FM2CameraRaw
 };
 static_assert(sizeof(FM2CameraRaw)==100);
 
+struct FM2ArrayRaw {uint32 Count,Offset;};
+struct FM2ParticleTrackRaw {uint16 Interpolation; int16 GlobalSequence; FM2ArrayRaw Times,Values;};
+struct FM2ParticleCurveRaw {FM2ArrayRaw Times,Values;};
 struct FM2ParticleEmitterRaw
 {
-    uint32 Id;
-    uint32 Flags;
-    float Position[3];
-    int16 Bone;
-    uint16 Texture;
-    uint8 BlendingType[10]; // Model name for blending
-    uint8 EmitterType;      // 1=plane, 2=sphere, 3=spline
-    uint8 ParticleType;     // 0=regular, 1=chunky, 2=both
-    uint8 HeadorTail;       // 0=head, 1=tail, 2=both
-    int16 TailLength;
-    float MiddleTime;
-    uint32 ColorValues[3];   // AnimBlock for colors — we'll read the base values
-    uint8 AlphaValues[3];    // AnimBlock for alpha — we'll read the base values
-    uint32 ScaleValues[3];   // AnimBlock for scale — we'll read the base values
-    uint8 ScaleVary[2];      // Scale variation
-    uint32 HeadLife[2];      // AnimBlock for head lifetime
-    uint32 HeadDecay[2];     // AnimBlock for head decay
-    uint32 TailLife[2];      // AnimBlock for tail lifetime
-    uint32 TailDecay[2];     // AnimBlock for tail decay
-    uint8 Unknown[4];
-    float Ref;
-    uint32 Rows;
-    uint32 Cols;
-    uint32 EmissionRate[2];  // AnimBlock for emission rate
-    uint32 SpeedVariation[2]; // AnimBlock for speed variation
-    uint32 VerticalRange[2]; // AnimBlock for vertical range
-    uint32 HorizontalRange[2]; // AnimBlock for horizontal range
-    float Gravity;
-    float Lifespan;
-    uint32 Unknown2;
-    uint32 EmissionRate2[2];
-    uint32 EmissionAreaLength[2];
-    uint32 EmissionAreaWidth[2];
-    uint32 Gravity2[2];
+    uint32 Id,Flags; float Position[3]; int16 Bone; uint16 Texture;
+    FM2ArrayRaw GeometryModel,RecursionModel;
+    uint8 BlendMode,EmitterType; uint16 ColorIndex,Unknown; int16 Priority; uint16 Rows,Cols;
+    FM2ParticleTrackRaw Speed,Variation,Latitude,Longitude,Gravity,Life;
+    float LifeVariation; FM2ParticleTrackRaw Rate; float RateVariation;
+    FM2ParticleTrackRaw Width,Length,ZSource;
+    FM2ParticleCurveRaw Color,Alpha,Scale; float ScaleVariation[2];
+    FM2ParticleCurveRaw HeadCell,TailCell;
+    float TailLength,TwinkleFps,TwinkleOnOff,TwinkleRange[2],InitialVelocity,Drag,InitialSpin,InitialSpinVariation,Spin,SpinVariation;
+    float Tumble[6],Wind[3],WindTime,Follow[4];
+    FM2ArrayRaw Spline; FM2ParticleTrackRaw Visibility;
 };
+static_assert(sizeof(FM2ParticleTrackRaw)==20 && sizeof(FM2ParticleCurveRaw)==16);
+static_assert(sizeof(FM2ParticleEmitterRaw)==476);
+static_assert(STRUCT_OFFSET(FM2ParticleEmitterRaw,Speed)==52 && STRUCT_OFFSET(FM2ParticleEmitterRaw,Color)==260 && STRUCT_OFFSET(FM2ParticleEmitterRaw,Visibility)==456);
 
 #pragma pack(pop)
 
@@ -258,6 +241,54 @@ static bool SafeRead(const uint8* Base, int32 TotalSize, uint32 Offset, uint32 C
     }
     OutPtr = reinterpret_cast<const T*>(Base + Offset);
     return true;
+}
+
+template<typename T> static bool ReadParticleScalarTrack(const uint8* Base,int32 Size,const FM2ParticleTrackRaw& Src,FM2ParticleFloatTrack& Out,int64& Budget)
+{
+    if(Src.Interpolation>1 || Src.Times.Count!=Src.Values.Count || Src.Times.Count>256) return false;
+    const FM2ArrayRaw *Times=nullptr,*Values=nullptr;
+    if(!SafeRead(Base,Size,Src.Times.Offset,Src.Times.Count,Times) || !SafeRead(Base,Size,Src.Values.Offset,Src.Values.Count,Values)) return false;
+    const int64 HeaderCost=int64(Src.Times.Count)*sizeof(TM2ParticleCurve<float>); if(HeaderCost>Budget) return false; Budget-=HeaderCost;
+    FM2ParticleFloatTrack Parsed; Parsed.Interpolation=Src.Interpolation; Parsed.GlobalSequence=Src.GlobalSequence; Parsed.Sequences.SetNum(Src.Times.Count);
+    for(uint32 I=0;I<Src.Times.Count;++I)
+    {
+        if(Values[I].Count>4096 || (Times[I].Count!=Values[I].Count && !(Times[I].Count==0 && Values[I].Count==1))) return false;
+        const int64 Cost=int64(Values[I].Count)*(sizeof(float)+sizeof(float)); if(Cost>Budget) return false; Budget-=Cost;
+        const uint32* Timestamps=nullptr; const T* Keys=nullptr;
+        if(!SafeRead(Base,Size,Times[I].Offset,Times[I].Count,Timestamps) || !SafeRead(Base,Size,Values[I].Offset,Values[I].Count,Keys)) return false;
+        auto& Sequence=Parsed.Sequences[I];
+        for(uint32 J=0;J<Values[I].Count;++J)
+        {
+            const float Time=Times[I].Count?float(Timestamps[J]):0,Value=float(Keys[J]);
+            if(!FMath::IsFinite(Value) || (J && Time<Sequence.Times.Last())) return false;
+            Sequence.Times.Add(Time); Sequence.Values.Add(Value);
+        }
+    }
+    Out=MoveTemp(Parsed); return true;
+}
+static FString M2String(const uint8* Base,int32 Size,uint32 Offset,uint32 Count)
+{
+    const ANSICHAR* Chars=nullptr;
+    if(!Count || Count>1024*1024 || !SafeRead(Base,Size,Offset,Count,Chars)) return FString();
+    uint32 Length=0; while(Length<Count && Chars[Length]) ++Length;
+    const FUTF8ToTCHAR Text(Chars,Length); return FString(Text.Length(),Text.Get());
+}
+template<typename T> static bool ParticleValueFinite(const T& Value) {return !Value.ContainsNaN();}
+template<> bool ParticleValueFinite(const float& Value) {return FMath::IsFinite(Value);}
+template<typename Raw,typename Value,typename Convert> static bool ReadParticleCurve(const uint8* Base,int32 Size,const FM2ParticleCurveRaw& Src,TM2ParticleCurve<Value>& Out,int64& Budget,Convert MakeValue)
+{
+    if(Src.Times.Count!=Src.Values.Count || Src.Times.Count>4096) return false;
+    const int64 Cost=int64(Src.Values.Count)*(sizeof(Value)+sizeof(float)); if(Cost>Budget) return false; Budget-=Cost;
+    const int16* Times=nullptr; const Raw* Values=nullptr;
+    if(!SafeRead(Base,Size,Src.Times.Offset,Src.Times.Count,Times) || !SafeRead(Base,Size,Src.Values.Offset,Src.Values.Count,Values)) return false;
+    TM2ParticleCurve<Value> Parsed;
+    for(uint32 I=0;I<Src.Values.Count;++I)
+    {
+        const float Time=FMath::Clamp(float(Times[I])/32767.f,0.f,1.f); const auto Key=MakeValue(Values[I]);
+        if(!ParticleValueFinite(Key) || (I && Time<Parsed.Times.Last())) return false;
+        Parsed.Times.Add(Time); Parsed.Values.Add(Key);
+    }
+    Out=MoveTemp(Parsed); return true;
 }
 
 // ── Implementation ──────────────────────────────────────────────────────────
@@ -288,11 +319,7 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
         Header.Version, Header.nVertices, Header.nTextures, Header.nBones);
 
     // ── Read model name ─────────────────────────────────────────────────
-    FString ModelName;
-    if (Header.NameLength > 0 && Header.NameOffset + Header.NameLength <= static_cast<uint32>(M2Size))
-    {
-        ModelName = FString(UTF8_TO_TCHAR(reinterpret_cast<const char*>(M2Base + Header.NameOffset)));
-    }
+    const FString ModelName=M2String(M2Base,M2Size,Header.NameOffset,Header.NameLength);
 
     // ── Bounding box ────────────────────────────────────────────────────
     // WoW coordinate system: Z-up, Y-north. Convert to UE: X-forward, Z-up.
@@ -586,12 +613,10 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
         {
             const FM2TextureEntry& Tex = TexEntries[i];
             Result.TextureTypes[i] = Tex.Type;
-            if (Tex.Type == 0 && Tex.NameLength > 1 &&
-                Tex.NameOffset + Tex.NameLength <= static_cast<uint32>(M2Size))
+            if (Tex.Type == 0 && Tex.NameLength > 1)
             {
                 // Type 0 = filename-based texture
-                FString Path = FString(UTF8_TO_TCHAR(
-                    reinterpret_cast<const char*>(M2Base + Tex.NameOffset)));
+                FString Path=M2String(M2Base,M2Size,Tex.NameOffset,Tex.NameLength);
                 // Normalise path separators
                 Path.ReplaceInline(TEXT("\\"), TEXT("/"));
                 Result.TexturePaths[i] = Path;
@@ -628,6 +653,9 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
         FMemory::Memcpy(TexLookup.GetData(), TexLookupPtr, Header.nTexLookup * sizeof(uint16));
     }
 
+    // Emitter-only effects have no geometry and legitimately have no skin.
+    if(Header.nVertices>0)
+    {
     // ── Parse skin file ─────────────────────────────────────────────────
     if (SkinData.Num() < static_cast<int32>(sizeof(FM2SkinHeader)))
     {
@@ -723,6 +751,8 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
         }
     }
 
+    }
+
     // ── Parse attachments ────────────────────────────────────────────────
     const FM2AttachmentRaw* RawAttachments = nullptr;
     if (Header.nAttachments > 0 && SafeRead(M2Base, M2Size, Header.ofsAttachments, Header.nAttachments, RawAttachments))
@@ -747,9 +777,13 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
         FMemory::Memcpy(Result.AttachmentLookup.GetData(), RawAttachLookup, Header.nAttachmentLookup * sizeof(int16));
     }
 
-    // ── Parse particle emitters ─────────────────────────────────────────
+    // ── Parse build-12340 particle emitters (476-byte records) ───────────
+    const uint32* GlobalDurations=nullptr;
+    if(Header.nGlobalSequences<=4096 && SafeRead(M2Base,M2Size,Header.ofsGlobalSequences,Header.nGlobalSequences,GlobalDurations))
+        Result.GlobalSequenceDurations.Append(GlobalDurations,Header.nGlobalSequences);
     const FM2ParticleEmitterRaw* RawParticleEmitters = nullptr;
-    if (Header.nParticleEmitters > 0 && SafeRead(M2Base, M2Size, Header.ofsParticleEmitters, Header.nParticleEmitters, RawParticleEmitters))
+    int64 ParticleBudget=8*1024*1024;
+    if (Header.Version==264 && Header.nParticleEmitters>0 && Header.nParticleEmitters<=256 && SafeRead(M2Base, M2Size, Header.ofsParticleEmitters, Header.nParticleEmitters, RawParticleEmitters))
     {
         Result.ParticleEmitters.SetNum(Header.nParticleEmitters);
         for (uint32 i = 0; i < Header.nParticleEmitters; i++)
@@ -762,43 +796,31 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
             Dst.Position = FVector(Src.Position[0], Src.Position[1], Src.Position[2]);
             Dst.Bone = Src.Bone;
             Dst.Texture = Src.Texture;
-            Dst.BlendingType = FString(UTF8_TO_TCHAR(reinterpret_cast<const char*>(Src.BlendingType)));
+            Dst.BlendMode=Src.BlendMode; Dst.BlendingType=FString::FromInt(Src.BlendMode);
             Dst.EmitterType = Src.EmitterType;
-            Dst.ParticleType = Src.ParticleType;
-            Dst.HeadorTail = Src.HeadorTail;
-            Dst.TailLength = Src.TailLength;
-            Dst.MiddleTime = Src.MiddleTime;
-
-            // Extract basic color values (ignoring animation blocks for simplicity)
-            // In a real implementation, you'd want to parse the animation blocks
-            // For now, we'll use reasonable defaults and try to extract base values
-            Dst.ColorStart[0] = 255; Dst.ColorStart[1] = 128; Dst.ColorStart[2] = 64;  // Orange-ish default
-            Dst.ColorMiddle[0] = 255; Dst.ColorMiddle[1] = 255; Dst.ColorMiddle[2] = 128; // Yellow-ish
-            Dst.ColorEnd[0] = 128; Dst.ColorEnd[1] = 64; Dst.ColorEnd[2] = 32;   // Darker red
-
-            Dst.AlphaStart = 255;
-            Dst.AlphaMiddle = 192;
-            Dst.AlphaEnd = 64;
-
-            Dst.ScaleStart = 1.0f;
-            Dst.ScaleMiddle = 1.5f;
-            Dst.ScaleEnd = 2.0f;
-            Dst.ScaleVariation = 0.5f;
-
-            Dst.HeadLifeStart = 1000.0f; // 1 second default
-            Dst.HeadLifeEnd = 2000.0f;   // 2 second default
-            Dst.HeadLifeRepeat = 0.0f;
-            Dst.HeadDecay = 0.1f;
-
-            Dst.TailLifeStart = 500.0f;
-            Dst.TailLifeEnd = 1000.0f;
-            Dst.TailLifeRepeat = 0.0f;
-            Dst.TailDecay = 0.2f;
-
-            Dst.EmissionRate = 10.0f;      // 10 particles per second default
-            Dst.EmissionAreaLength = 10.0f;
-            Dst.EmissionAreaWidth = 10.0f;
-            Dst.Gravity = Src.Gravity != 0.0f ? Src.Gravity : -9.8f;
+            Dst.Rows=Src.Rows; Dst.Cols=Src.Cols; Dst.Priority=Src.Priority; Dst.ColorIndex=Src.ColorIndex;
+            const auto Track=[&](const FM2ParticleTrackRaw& From,FM2ParticleFloatTrack& To){ReadParticleScalarTrack<float>(M2Base,M2Size,From,To,ParticleBudget);};
+            Track(Src.Speed,Dst.SpeedTrack); Track(Src.Variation,Dst.VariationTrack); Track(Src.Latitude,Dst.LatitudeTrack); Track(Src.Longitude,Dst.LongitudeTrack);
+            Track(Src.Gravity,Dst.GravityTrack); Track(Src.Life,Dst.LifeTrack); Track(Src.Rate,Dst.RateTrack); Track(Src.Width,Dst.WidthTrack); Track(Src.Length,Dst.LengthTrack); Track(Src.ZSource,Dst.ZSourceTrack);
+            ReadParticleScalarTrack<uint8>(M2Base,M2Size,Src.Visibility,Dst.VisibilityTrack,ParticleBudget);
+            ReadParticleCurve<FVector3f>(M2Base,M2Size,Src.Color,Dst.ColorCurve,ParticleBudget,[](const FVector3f& V){return V/255.f;});
+            ReadParticleCurve<int16>(M2Base,M2Size,Src.Alpha,Dst.AlphaCurve,ParticleBudget,[](int16 V){return FMath::Clamp(float(V)/32767.f,0.f,1.f);});
+            ReadParticleCurve<FVector2f>(M2Base,M2Size,Src.Scale,Dst.ScaleCurve,ParticleBudget,[](const FVector2f& V){return V;});
+            ReadParticleCurve<uint16>(M2Base,M2Size,Src.HeadCell,Dst.HeadCellCurve,ParticleBudget,[](uint16 V){return float(V);});
+            ReadParticleCurve<uint16>(M2Base,M2Size,Src.TailCell,Dst.TailCellCurve,ParticleBudget,[](uint16 V){return float(V);});
+            const auto Finite=[](float V){return FMath::IsFinite(V)?V:0.f;};
+            Dst.ScaleVariance=FVector2f(Finite(Src.ScaleVariation[0]),Finite(Src.ScaleVariation[1])); Dst.Wind=FVector3f(Finite(Src.Wind[0]),Finite(Src.Wind[1]),Finite(Src.Wind[2]));
+            Dst.LifeVariation=Finite(Src.LifeVariation); Dst.RateVariation=Finite(Src.RateVariation); Dst.Drag=Finite(Src.Drag);
+            Dst.InitialSpin=Finite(Src.InitialSpin); Dst.InitialSpinVariation=Finite(Src.InitialSpinVariation); Dst.Spin=Finite(Src.Spin); Dst.SpinVariation=Finite(Src.SpinVariation); Dst.TailLengthUnits=Finite(Src.TailLength);
+            // Keep the old approximation's public fields derived from authored
+            // values until the general particle renderer replaces that path.
+            const auto Color=[&](float Age,uint32* Out){const auto V=Dst.ColorCurve.Sample(Age,FVector3f(1)); Out[0]=FMath::Clamp(FMath::RoundToInt(V.X*255),0,255); Out[1]=FMath::Clamp(FMath::RoundToInt(V.Y*255),0,255); Out[2]=FMath::Clamp(FMath::RoundToInt(V.Z*255),0,255);};
+            Color(0,Dst.ColorStart); Color(.5f,Dst.ColorMiddle); Color(1,Dst.ColorEnd);
+            Dst.AlphaStart=FMath::RoundToInt(Dst.AlphaCurve.Sample(0,1.f)*255); Dst.AlphaMiddle=FMath::RoundToInt(Dst.AlphaCurve.Sample(.5f,1.f)*255); Dst.AlphaEnd=FMath::RoundToInt(Dst.AlphaCurve.Sample(1,1.f)*255);
+            Dst.ScaleStart=Dst.ScaleCurve.Sample(0,FVector2f(1)).X; Dst.ScaleMiddle=Dst.ScaleCurve.Sample(.5f,FVector2f(1)).X; Dst.ScaleEnd=Dst.ScaleCurve.Sample(1,FVector2f(1)).X; Dst.ScaleVariation=Dst.ScaleVariance.X;
+            Dst.HeadLifeStart=Dst.HeadLifeEnd=Dst.LifeTrack.Sample(0,0,Result.GlobalSequenceDurations,1)*1000;
+            Dst.TailLifeStart=Dst.TailLifeEnd=Dst.HeadLifeStart; Dst.MiddleTime=.5f;
+            Dst.EmissionRate=Dst.RateTrack.Sample(0,0,Result.GlobalSequenceDurations); Dst.EmissionAreaWidth=Dst.WidthTrack.Sample(0,0,Result.GlobalSequenceDurations); Dst.EmissionAreaLength=Dst.LengthTrack.Sample(0,0,Result.GlobalSequenceDurations); Dst.Gravity=Dst.GravityTrack.Sample(0,0,Result.GlobalSequenceDurations);
         }
         UE_LOG(LogM2, Verbose, TEXT("  Parsed %d particle emitters"), Result.ParticleEmitters.Num());
     }

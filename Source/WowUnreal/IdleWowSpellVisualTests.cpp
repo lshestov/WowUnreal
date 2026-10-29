@@ -6,11 +6,46 @@
 #include "Mpq/MpqManager.h"
 #include "WowPacketHandler.h"
 #include "WowSpellMissile.h"
+#include "WowDoodadManager.h"
+#include "Formats/M2Parser.h"
+#include "Formats/M2Types.h"
 #include <limits>
 
 #if WITH_DEV_AUTOMATION_TESTS
 namespace
 {
+struct FParticleFixture
+{
+    TArray<uint8> Bytes;
+    uint32 SpeedKeys=0;
+    template<typename T> uint32 Append(const T* Values,int32 Count) {while(Bytes.Num()%4) Bytes.Add(0); const uint32 At=Bytes.Num(); Bytes.Append(reinterpret_cast<const uint8*>(Values),Count*sizeof(T)); return At;}
+    template<typename T> void Put(uint32 At,T Value) {FMemory::Memcpy(Bytes.GetData()+At,&Value,sizeof(T));}
+    void Track(uint32 At,const TArray<float>& Values,int16 Global=-1)
+    {
+        const uint32 Times[]={0,1000}; const uint32 TimeOffset=Append(Times,2),ValueOffset=Append(Values.GetData(),Values.Num());
+        const uint32 TimeArray[]={2,TimeOffset},ValueArray[]={uint32(Values.Num()),ValueOffset};
+        const uint32 TimeArrays=Append(TimeArray,2),ValueArrays=Append(ValueArray,2);
+        Put<uint16>(At,1); Put<int16>(At+2,Global); Put<uint32>(At+4,1); Put(At+8,TimeArrays); Put<uint32>(At+12,1); Put(At+16,ValueArrays);
+        if(At==304+52) SpeedKeys=ValueOffset;
+    }
+    template<typename T> void Curve(uint32 At,const TArray<T>& Values)
+    {
+        const int16 Times[]={0,16384,32767}; const uint32 TimeOffset=Append(Times,Values.Num()),ValueOffset=Append(Values.GetData(),Values.Num());
+        Put<uint32>(At,Values.Num()); Put(At+4,TimeOffset); Put<uint32>(At+8,Values.Num()); Put(At+12,ValueOffset);
+    }
+    FParticleFixture()
+    {
+        Bytes.SetNumZeroed(304+476*2); Put<uint32>(0,0x3032444d); Put<uint32>(4,264); Put<uint32>(296,2); Put<uint32>(300,304);
+        const uint32 Duration=1000,DurationAt=Append(&Duration,1); Put<uint32>(20,1); Put(24,DurationAt);
+        const uint32 P=304; Put<uint32>(P,101); Put<uint32>(P+4,0x20429); Put<float>(P+8,1); Put<float>(P+12,2); Put<float>(P+16,3);
+        Put<int16>(P+20,-1); Put<uint16>(P+22,1); Put<uint8>(P+40,4); Put<uint8>(P+41,1); Put<uint16>(P+42,17); Put<int16>(P+46,-2); Put<uint16>(P+48,4); Put<uint16>(P+50,8);
+        Track(P+52,{2,4},0); Track(P+132,{3,6}); Track(P+152,{1,2}); Track(P+176,{10,20}); Track(P+200,{.1f,.2f}); Track(P+220,{.3f,.4f});
+        Curve<FVector3f>(P+260,{FVector3f(255,0,0),FVector3f(0,255,0),FVector3f(0,0,255)});
+        Curve<int16>(P+276,{32767,16384,0}); Curve<FVector2f>(P+292,{FVector2f(.2f,.3f),FVector2f(.4f,.5f),FVector2f(.8f,.9f)});
+        Curve<uint16>(P+316,{0,4,15}); Put<float>(P+308,.125f); Put<float>(P+312,.25f); Put<float>(P+348,.75f); Put<float>(P+372,.5f); Put<float>(P+376,.2f);
+        const uint32 Q=P+476; Put<uint32>(Q,202); Put<uint8>(Q+40,2); Put<uint8>(Q+41,2); Put<uint16>(Q+22,2);
+    }
+};
 TArray<uint8> LaunchPacket(uint64 Explicit,const TArray<uint64>& Hits,const TArray<FWowSpellMissTarget>& Misses)
 {
     TArray<uint8> P;
@@ -35,6 +70,45 @@ TArray<uint8> VisualTable(const TArray<uint32>& Columns,const TArray<uint8>& Str
     Bytes.Append(reinterpret_cast<const uint8*>(Columns.GetData()),Columns.Num()*4);
     Bytes.Append(Strings); return Bytes;
 }
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FM2ParticleLayout,"WowUnreal.Gameplay.M2ParticleLayout",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FM2ParticleLayout::RunTest(const FString&)
+{
+    FParticleFixture F; const auto Data=FM2Parser::Parse(F.Bytes,{});
+    if(!TestTrue(TEXT("Emitter-only MD20 parses two real-size records"),Data.bIsValid && Data.ParticleEmitters.Num()==2 && Data.Vertices.IsEmpty())) return false;
+    const auto& P=Data.ParticleEmitters[0]; const auto& Q=Data.ParticleEmitters[1];
+    if(!TestTrue(TEXT("All lifetime curves are present before sampling"),P.ColorCurve.Values.Num()==3 && P.AlphaCurve.Values.Num()==3 && P.ScaleCurve.Values.Num()==3 && P.HeadCellCurve.Values.Num()==3)) return false;
+    TestTrue(TEXT("Blend, emitter, atlas, texture and signed fields use their actual offsets"),P.Id==101 && P.Flags==0x20429 && P.Position==FVector(1,2,3) && P.Bone==-1 && P.Texture==1 && P.BlendMode==4 && P.EmitterType==1 && P.Rows==4 && P.Cols==8 && P.ColorIndex==17 && P.Priority==-2 && Q.Id==202 && Q.BlendMode==2 && Q.EmitterType==2 && Q.Texture==2);
+    TestEqual(TEXT("Global scalar tracks wrap in their authored duration"),P.SpeedTrack.Sample(0,1500,Data.GlobalSequenceDurations),3.f);
+    TestEqual(TEXT("Non-global scalar tracks clamp independently"),P.RateTrack.Sample(0,1500,Data.GlobalSequenceDurations),20.f);
+    TestTrue(TEXT("Colour, alpha and non-uniform size retain their lifetime keys"),P.ColorCurve.Values[1].Equals(FVector3f(0,1,0)) && FMath::IsNearlyEqual(P.AlphaCurve.Sample(1,1.f),0.f) && P.ScaleCurve.Values[2].Equals(FVector2f(.8f,.9f)));
+    TestTrue(TEXT("Atlas cells, scale variance, drag and spin are distinct fields"),P.HeadCellCurve.Values.Last()==15 && P.ScaleVariance.Equals(FVector2f(.125f,.25f)) && P.Drag==.5f && P.InitialSpin==.2f && P.TailLengthUnits==.75f);
+    TestTrue(TEXT("The compatibility view comes from authored values, not orange defaults"),P.ColorEnd[0]==0 && P.ColorEnd[2]==255 && P.AlphaEnd==0 && P.HeadLifeStart==1000 && P.EmissionRate==10 && P.Gravity==3);
+    auto Bad=F; Bad.Put<uint32>(304+260+12,0xfffffff0u); const auto BadCurve=FM2Parser::Parse(Bad.Bytes,{});
+    TestTrue(TEXT("Out-of-range lifetime arrays are rejected without corrupting other emitters"),BadCurve.bIsValid && BadCurve.ParticleEmitters[0].ColorCurve.Values.IsEmpty() && BadCurve.ParticleEmitters[1].Id==202);
+    Bad=F; Bad.Put<float>(Bad.SpeedKeys,std::numeric_limits<float>::quiet_NaN());
+    TestTrue(TEXT("A nonfinite scalar track is not published"),FM2Parser::Parse(Bad.Bytes,{}).ParticleEmitters[0].SpeedTrack.Sequences.IsEmpty());
+    Bad=F; Bad.Put<uint32>(296,257); TestTrue(TEXT("Emitter allocation count is bounded"),FM2Parser::Parse(Bad.Bytes,{}).ParticleEmitters.IsEmpty());
+    Bad=F; Bad.Put<uint32>(300,0xfffffff0u); TestTrue(TEXT("Record offset arithmetic cannot wrap"),FM2Parser::Parse(Bad.Bytes,{}).ParticleEmitters.IsEmpty());
+    Bad=F; Bad.Put<uint32>(8,8); Bad.Put<uint32>(12,0xfffffffcu); TestTrue(TEXT("Model string offset arithmetic cannot wrap or scan past its bounds"),FM2Parser::Parse(Bad.Bytes,{}).bIsValid);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FM2ParticleMpq,"WowUnreal.Gameplay.M2ParticleMpq",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FM2ParticleMpq::RunTest(const FString&)
+{
+    FString Path; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false;
+    FMpqManager Mpq; if(!Mpq.Initialize(Path)) return false;
+    const auto Model=FWowDoodadManager::GetOrParseM2(TEXT("Spells\\Fire_Cast_Hand.m2"),&Mpq);
+    if(!TestTrue(TEXT("An original emitter-only spell model loads without an invented skin"),Model && Model->bIsValid && Model->Vertices.IsEmpty() && Model->ParticleEmitters.Num()==3)) return false;
+    const auto& P=Model->ParticleEmitters[0];
+    TestTrue(TEXT("Real fire uses its actual blend mode, emitter type and texture"),P.BlendMode==4 && P.EmitterType==1 && P.Texture==0 && Model->TexturePaths.Num()==3);
+    TestTrue(TEXT("Real fire colour keys are normalized from its authored RGB values"),P.ColorCurve.Values.Num()==3 && P.ColorCurve.Values[0].Equals(FVector3f(1,234/255.f,0),.0001f) && P.ColorCurve.Values.Last().Equals(FVector3f(1,0,0),.0001f));
+    TestTrue(TEXT("Real fire alpha fades to zero and grows in two dimensions"),P.AlphaCurve.Values.Num()==3 && P.AlphaCurve.Values[0]==1 && P.AlphaCurve.Values.Last()==0 && P.ScaleCurve.Values.Num()==3 && FMath::IsNearlyEqual(P.ScaleCurve.Values[0].X,.225f,.0001f) && P.ScaleCurve.Values.Last().X>.67f);
+    TestTrue(TEXT("Actual life and rate tracks are finite and nonempty"),!P.LifeTrack.Sequences.IsEmpty() && !P.RateTrack.Sequences.IsEmpty() && FMath::IsFinite(P.LifeTrack.Sample(0,0,Model->GlobalSequenceDurations)));
+    for(const auto& Texture:Model->TexturePaths) TestTrue(TEXT("Every particle texture resolves in the user's MPQs"),!Texture.IsEmpty() && Mpq.FileExists(Texture));
+    return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSpellLaunchTargets,"WowUnreal.Gameplay.SpellLaunchTargets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)

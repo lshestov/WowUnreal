@@ -71,15 +71,11 @@ TSharedPtr<FM2Data> FWowDoodadManager::GetOrParseM2(const FString& M2Path, FMpqM
     // Read skin file
     FString SkinPath = GetSkinPath(M2Path);
     TArray<uint8> SkinRaw;
-    if (!Mpq->ReadFile(SkinPath, SkinRaw))
-    {
-        UE_LOG(LogWowDoodad, Verbose, TEXT("Failed to read skin: %s"), *SkinPath);
-        return nullptr;
-    }
+    const bool HasSkin=Mpq->FileExists(SkinPath) && Mpq->ReadFile(SkinPath,SkinRaw);
 
     // Parse
     TSharedPtr<FM2Data> Data = MakeShared<FM2Data>(FM2Parser::Parse(M2Raw, SkinRaw));
-    if (!Data->bIsValid)
+    if (!Data->bIsValid || (!HasSkin && Data->Vertices.Num()>0))
     {
         UE_LOG(LogWowDoodad, Verbose, TEXT("Failed to parse M2: %s"), *M2Path);
         return nullptr;

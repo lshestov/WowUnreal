@@ -33,6 +33,8 @@ This is the data foundation and crash repair. Rendering original M2 cast kits,
 projectiles, impacts, healing and state/auras; actual attachment transforms;
 concurrent caster ownership; and event timing remain in the spell visual task.
 The legacy school-colored sphere/glow renderer does not establish visual parity.
+The original M2 emitter record/track data is decoded separately; see
+[M2 particle data](M2Particles.md).
 
 ## Unit-projectile launch identity
 

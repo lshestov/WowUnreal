@@ -1,5 +1,17 @@
 #include "Formats/M2Types.h"
 
+float FM2ParticleFloatTrack::Sample(int32 Animation,float TimeMs,const TArray<uint32>& GlobalDurations,float Default) const
+{
+    if(Sequences.IsEmpty()) return Default;
+    if(GlobalSequence>=0)
+    {
+        Animation=0;
+        if(GlobalDurations.IsValidIndex(GlobalSequence) && GlobalDurations[GlobalSequence]) TimeMs=FMath::Fmod(TimeMs,float(GlobalDurations[GlobalSequence]));
+    }
+    if(!Sequences.IsValidIndex(Animation)) Animation=0;
+    return Sequences[Animation].Sample(TimeMs,Default,Interpolation==0);
+}
+
 bool FM2ParticleEmitter::IsFireEmitter() const
 {
     // Fire emitters typically have warm colors (red/orange/yellow) and high emission rates

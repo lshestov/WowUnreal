@@ -82,6 +82,32 @@ struct WOWDATA_API FM2Attachment
     FVector Position = FVector::ZeroVector; // Position relative to the bone
 };
 
+template<typename T> struct TM2ParticleCurve
+{
+    TArray<float> Times;
+    TArray<T> Values;
+    T Sample(float Time,const T& Default,bool Step=false) const
+    {
+        const int32 N=FMath::Min(Times.Num(),Values.Num());
+        if(!N || !FMath::IsFinite(Time)) return Default;
+        if(N==1 || Time<=Times[0]) return Values[0];
+        if(Time>=Times[N-1]) return Values[N-1];
+        int32 Low=0,High=N-1;
+        while(High-Low>1) {const int32 Mid=(Low+High)/2; if(Times[Mid]<=Time) Low=Mid; else High=Mid;}
+        if(Step) return Values[Low];
+        const float Range=Times[High]-Times[Low];
+        return Range>SMALL_NUMBER?FMath::Lerp(Values[Low],Values[High],(Time-Times[Low])/Range):Values[High];
+    }
+};
+
+struct WOWDATA_API FM2ParticleFloatTrack
+{
+    uint16 Interpolation=0;
+    int16 GlobalSequence=-1;
+    TArray<TM2ParticleCurve<float>> Sequences;
+    float Sample(int32 Animation,float TimeMs,const TArray<uint32>& GlobalDurations,float Default=0) const;
+};
+
 struct WOWDATA_API FM2ParticleEmitter
 {
     uint32 Id = 0;                          // Particle emitter ID
@@ -117,6 +143,18 @@ struct WOWDATA_API FM2ParticleEmitter
     float EmissionAreaLength = 0.0f;        // Length of emission area
     float EmissionAreaWidth = 0.0f;         // Width of emission area
     float Gravity = -9.8f;                  // Gravity affecting particles
+    // Actual build-12340 fields. Scalar tracks use milliseconds; lifetime
+    // curves use normalized age and preserve their authored key values.
+    uint8 BlendMode=0;
+    uint16 Rows=1,Cols=1,ColorIndex=0;
+    int16 Priority=0;
+    FM2ParticleFloatTrack SpeedTrack,VariationTrack,LatitudeTrack,LongitudeTrack,GravityTrack,LifeTrack,RateTrack,WidthTrack,LengthTrack,ZSourceTrack,VisibilityTrack;
+    TM2ParticleCurve<FVector3f> ColorCurve;
+    TM2ParticleCurve<float> AlphaCurve,HeadCellCurve,TailCellCurve;
+    TM2ParticleCurve<FVector2f> ScaleCurve;
+    FVector2f ScaleVariance=FVector2f::ZeroVector;
+    FVector3f Wind=FVector3f::ZeroVector;
+    float LifeVariation=0,RateVariation=0,Drag=0,InitialSpin=0,InitialSpinVariation=0,Spin=0,SpinVariation=0,TailLengthUnits=0;
 
     // Helper functions
     bool IsFireEmitter() const;             // Check if this is a fire emitter
@@ -153,6 +191,7 @@ struct WOWDATA_API FM2Data
     TArray<FM2AnimationData> AnimationTracks; // parsed keyframe data per animation
     TArray<FM2Attachment> Attachments;
     TArray<FM2ParticleEmitter> ParticleEmitters; // particle emitter data
+    TArray<uint32> GlobalSequenceDurations;
     TArray<FM2Submesh> Submeshes;          // geoset info from skin file
     TArray<int16> AttachmentLookup;        // attachment ID → index in Attachments
     uint32 NumBones = 0;
