@@ -799,6 +799,7 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 
 	Def.FrameLevel = Node.attribute("frameLevel").as_int(0);
 	Def.FrameID = Node.attribute("id").as_int(0);
+	Def.Orientation = UTF8_TO_TCHAR(Node.attribute("orientation").as_string());
 	Def.MinValue = Node.attribute("minValue").as_float(0.0f);
 	Def.MaxValue = Node.attribute("maxValue").as_float(100.0f);
 	Def.DefaultValue = Node.attribute("defaultValue").as_float(0.0f);

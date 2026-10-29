@@ -12,6 +12,7 @@
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
 #include "UnrealClient.h"
+#include "HAL/IConsoleManager.h"
 
 #if __has_include("lua.h")
 extern "C" {
@@ -27,6 +28,54 @@ UWorld* World(lua_State* L)
     const auto* Actor=C->ResolveActor(C->ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid); return Actor?Actor->GetWorld():nullptr;
 }
 AWowAudioManager* ResolveAudioManager(lua_State* L) { auto* W=World(L); return W?Cast<AWowAudioManager>(UGameplayStatics::GetActorOfClass(W,AWowAudioManager::StaticClass())):nullptr; }
+bool Preference(lua_State* L,const FString& Name,FString& Value);
+struct FEffectOption { const TCHAR* Name; const TCHAR* Default; float Minimum,Maximum; };
+const FEffectOption EffectOptions[]={
+    {TEXT("farclip"),TEXT("350"),177,1277}, {TEXT("terrainmip"),TEXT("0"),0,1},
+    {TEXT("particledensity"),TEXT("1"),.1f,1}, {TEXT("environmentdetail"),TEXT("1"),.5f,1.5f},
+    {TEXT("groundeffectdensity"),TEXT("16"),16,64}, {TEXT("groundeffectdist"),TEXT("70"),70,140},
+    {TEXT("basemip"),TEXT("0"),0,1}, {TEXT("extshadowquality"),TEXT("3"),0,4},
+    {TEXT("texturefilteringmode"),TEXT("1"),0,5}, {TEXT("weatherdensity"),TEXT("2"),0,3},
+    // The character renderer currently builds the 512x512 (2^9) Wrath atlas.
+    {TEXT("componenttexturelevel"),TEXT("9"),8,9}, {TEXT("specular"),TEXT("0"),0,1},
+    {TEXT("ffxglow"),TEXT("1"),0,1}, {TEXT("ffxdeath"),TEXT("1"),0,1},
+    {TEXT("projectedtextures"),TEXT("0"),0,1}
+};
+const FEffectOption* EffectOption(const FString& Name)
+{
+    for(const auto& Option:EffectOptions) if(Name==Option.Name) return &Option;
+    return nullptr;
+}
+FString SettingValue(const FString& Name,const FString& Value)
+{
+    if(const auto* Option=EffectOption(Name))
+    {
+        if(!Value.IsNumeric()) return Option->Default;
+        const float Number=FCString::Atof(*Value);
+        return FMath::IsFinite(Number)?FString::Printf(TEXT("%.6g"),double(FMath::Clamp(Number,Option->Minimum,Option->Maximum))):Option->Default;
+    }
+    return Value;
+}
+void SetGlow(const FString& Value)
+{
+    if(auto* Bloom=IConsoleManager::Get().FindConsoleVariable(TEXT("r.BloomQuality")))
+        Bloom->Set(Value.ToBool() || FCString::Atof(*Value)!=0?5:0,ECVF_SetByScalability);
+}
+int CvarLimit(lua_State* L,bool Maximum)
+{
+    const FString Name=FString(UTF8_TO_TCHAR(luaL_checkstring(L,1))).ToLower();
+    float Low=0,High=1;
+    if(Name==TEXT("extshadowquality")) High=4;
+    else if(Name==TEXT("maxfps")) High=360;
+    else if(Name==TEXT("gamma")) { Low=.5f; High=1.5f; }
+    else if(Name!=TEXT("terrainmip") && Name!=TEXT("ffxglow"))
+    {
+        // Unbounded/unknown CVars must leave the original FrameXML range intact.
+        // A generic 0..1 range truncates every effects and interface slider.
+        lua_pushnil(L); return 1;
+    }
+    lua_pushnumber(L,Maximum?High:Low); return 1;
+}
 bool NativeValue(lua_State* L,const FString& Name,FString& Value)
 {
     if(Name==TEXT("uiscale"))
@@ -39,6 +88,13 @@ bool NativeValue(lua_State* L,const FString& Name,FString& Value)
     const auto* Settings=UGameUserSettings::GetGameUserSettings();
     if(Name.StartsWith(TEXT("sound_"))) if(auto* Manager=ResolveAudioManager(L); Manager && Manager->GetUiOption(Name,Value)) return true;
     if(Name==TEXT("gamma")) Value=FString::SanitizeFloat(GEngine?GEngine->DisplayGamma/2.2f:1.f);
+    else if(Name==TEXT("extshadowquality") && Settings) Value=FString::FromInt(FMath::Clamp(Settings->GetShadowQuality(),0,4));
+    else if(Name==TEXT("ffxglow"))
+    {
+        const auto* Bloom=IConsoleManager::Get().FindConsoleVariable(TEXT("r.BloomQuality"));
+        if(!Bloom) return false;
+        Value=Bloom->GetInt()>0?TEXT("1"):TEXT("0");
+    }
     else if(Name==TEXT("terrainmip") && Settings) Value=FString::FromInt(FMath::Clamp(3-Settings->GetTextureQuality(),0,2));
     else if(Name==TEXT("gxwindow") && Settings) Value=(GEngine && GEngine->GameViewport && GEngine->GameViewport->Viewport?GEngine->GameViewport->Viewport->GetWindowMode():Settings->GetFullscreenMode())!=EWindowMode::Fullscreen?TEXT("1"):TEXT("0");
     else if(Name==TEXT("gxmaximize") && Settings) Value=(GEngine && GEngine->GameViewport && GEngine->GameViewport->Viewport?GEngine->GameViewport->Viewport->GetWindowMode():Settings->GetFullscreenMode())==EWindowMode::WindowedFullscreen?TEXT("1"):TEXT("0");
@@ -56,7 +112,13 @@ void ApplyNative(lua_State* L,const FString& Name,const FString& Value)
     const bool Enabled=Value.ToBool() || FCString::Atof(*Value)!=0;
     bool Resolution=false;
     if(Name==TEXT("gamma")) { if(GEngine) GEngine->DisplayGamma=2.2f*FMath::Clamp(FCString::Atof(*Value),.5f,1.5f); return; }
+    if(Name==TEXT("ffxglow"))
+    {
+        SetGlow(Value);
+        return;
+    }
     if(Name==TEXT("terrainmip")) Settings->SetTextureQuality(FMath::Clamp(3-FCString::Atoi(*Value),0,3));
+    else if(Name==TEXT("extshadowquality")) Settings->SetShadowQuality(FMath::Clamp(FCString::Atoi(*Value),0,4));
     else if(Name==TEXT("gxwindow")) { Settings->SetFullscreenMode(Enabled?EWindowMode::Windowed:EWindowMode::Fullscreen); Resolution=true; }
     else if(Name==TEXT("gxmaximize")) { Settings->SetFullscreenMode(Enabled?EWindowMode::WindowedFullscreen:EWindowMode::Windowed); Resolution=true; }
     else if(Name==TEXT("gxresolution"))
@@ -69,6 +131,9 @@ void ApplyNative(lua_State* L,const FString& Name,const FString& Value)
     else if(Name==TEXT("maxfps")) Settings->SetFrameRateLimit(FMath::Clamp(FCString::Atof(*Value),0.f,360.f));
     else return;
     if(Resolution) Settings->ApplyResolutionSettings(false); else Settings->ApplyNonResolutionSettings();
+    // Scalability also writes bloom. Reapply the independent stock checkbox
+    // at the same priority, avoiding ignored-CVar warnings on quality changes.
+    FString Glow; if(Preference(L,TEXT("ffxglow"),Glow)) SetGlow(Glow);
     Settings->SaveSettings();
 }
 bool Preference(lua_State* L,const FString& Name,FString& Value)
@@ -79,13 +144,14 @@ bool Preference(lua_State* L,const FString& Name,FString& Value)
 int GetCvar(lua_State* L)
 {
     const FString Name=FString(UTF8_TO_TCHAR(luaL_checkstring(L,1))).ToLower(); FString Value;
-    if(NativeValue(L,Name,Value) || Preference(L,Name,Value)) { if(Name==TEXT("lasttalkedtogm") && Value==TEXT("0")) Value.Reset(); lua_pushstring(L,TCHAR_TO_UTF8(*Value)); return 1; }
+    if(NativeValue(L,Name,Value) || Preference(L,Name,Value)) { Value=SettingValue(Name,Value); if(Name==TEXT("lasttalkedtogm") && Value==TEXT("0")) Value.Reset(); lua_pushstring(L,TCHAR_TO_UTF8(*Value)); return 1; }
+    if(const auto* Option=EffectOption(Name)) { lua_pushstring(L,TCHAR_TO_UTF8(Option->Default)); return 1; }
     lua_pushvalue(L,lua_upvalueindex(1)); lua_pushvalue(L,1); lua_call(L,1,1); return 1;
 }
 int SetCvar(lua_State* L)
 {
     const FString Name=FString(UTF8_TO_TCHAR(luaL_checkstring(L,1))).ToLower();
-    const FString Value=lua_isboolean(L,2)?lua_toboolean(L,2)?TEXT("1"):TEXT("0"):UTF8_TO_TCHAR(luaL_checkstring(L,2));
+    const FString Value=SettingValue(Name,lua_isboolean(L,2)?lua_toboolean(L,2)?TEXT("1"):TEXT("0"):UTF8_TO_TCHAR(luaL_checkstring(L,2)));
     lua_getglobal(L,"GetCVar"); lua_pushvalue(L,1); lua_call(L,1,1); const FString Old=UTF8_TO_TCHAR(lua_tostring(L,-1)); lua_pop(L,1);
     const bool Changed=Old!=Value && !(Old.IsNumeric() && Value.IsNumeric() && FMath::IsNearlyEqual(FCString::Atod(*Old),FCString::Atod(*Value),1.e-6));
     lua_getglobal(L,"IdleWowUIState"); if(!lua_istable(L,-1)) { lua_pop(L,1); lua_newtable(L); lua_pushvalue(L,-1); lua_setglobal(L,"IdleWowUIState"); }
@@ -131,7 +197,21 @@ void WowLuaApi::RegisterSettingsApi(lua_State* L)
     Register(L,"ShowCloak",[](lua_State* S)->int { auto* C=GetContext(S); if(C && C->ConnectionManager) C->ConnectionManager->SendRawPacket(0x2BA,{uint8(lua_toboolean(S,1)!=0)}); return 0; });
     lua_getglobal(L,"GetCVar"); lua_pushcclosure(L,GetCvar,1); lua_setglobal(L,"GetCVar");
     lua_getglobal(L,"SetCVar"); lua_pushcclosure(L,SetCvar,1); lua_setglobal(L,"SetCVar");
-    lua_getglobal(L,"GetCVarDefault"); lua_pushcclosure(L,[](lua_State* S)->int { const FString Name=FString(UTF8_TO_TCHAR(luaL_checkstring(S,1))).ToLower(); if(Name==TEXT("gamma") || Name==TEXT("gxwindow")) { lua_pushstring(S,"1"); return 1; } lua_pushvalue(S,lua_upvalueindex(1)); lua_pushvalue(S,1); lua_call(S,1,1); return 1; },1); lua_setglobal(L,"GetCVarDefault");
+    lua_getglobal(L,"GetCVarDefault"); lua_pushcclosure(L,[](lua_State* S)->int {
+        const FString Name=FString(UTF8_TO_TCHAR(luaL_checkstring(S,1))).ToLower();
+        if(Name==TEXT("gamma") || Name==TEXT("gxwindow")) { lua_pushstring(S,"1"); return 1; }
+        if(const auto* Option=EffectOption(Name)) { lua_pushstring(S,TCHAR_TO_UTF8(Option->Default)); return 1; }
+        lua_pushvalue(S,lua_upvalueindex(1)); lua_pushvalue(S,1); lua_call(S,1,1); return 1;
+    },1); lua_setglobal(L,"GetCVarDefault");
+    Register(L,"GetCVarMin",[](lua_State* S)->int { return CvarLimit(S,false); });
+    Register(L,"GetCVarMax",[](lua_State* S)->int { return CvarLimit(S,true); });
+    Register(L,"RestoreVideoEffectsDefaults",[](lua_State* S)->int {
+        for(const auto& Option:EffectOptions)
+        {
+            lua_getglobal(S,"SetCVar"); lua_pushstring(S,TCHAR_TO_UTF8(Option.Name)); lua_pushstring(S,TCHAR_TO_UTF8(Option.Default)); lua_call(S,2,0);
+        }
+        return 0;
+    });
     Register(L,"GetCVarBool",[](lua_State* S)->int { lua_getglobal(S,"GetCVar"); lua_pushvalue(S,1); lua_call(S,1,1); const FString Value=UTF8_TO_TCHAR(lua_tostring(S,-1)); lua_pushboolean(S,Value.ToBool() || FCString::Atof(*Value)!=0); return 1; });
     // FrameXML uses a signed brightness offset (-0.5..0.5), while the CVar
     // and engine bridge store a multiplier with neutral value 1.

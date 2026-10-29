@@ -32,6 +32,10 @@
 #include "WowAssetCache.h"
 #include "UObject/StrongObjectPtr.h"
 #include "Coord/WowCoordinate.h"
+#include "Engine/World.h"
+#include "Engine/Engine.h"
+#include "GameFramework/GameUserSettings.h"
+#include "HAL/IConsoleManager.h"
 
 #if WITH_DEV_AUTOMATION_TESTS && __has_include("lua.h")
 namespace
@@ -2221,6 +2225,38 @@ bool FHudTextureAnimations::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudRenderSettings,"WowUnreal.Hud.RenderSettings",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudRenderSettings::RunTest(const FString&)
+{
+    FHudFixture F;
+    auto* Settings=UGameUserSettings::GetGameUserSettings();
+    auto* Bloom=IConsoleManager::Get().FindConsoleVariable(TEXT("r.BloomQuality"));
+    auto* Shadow=IConsoleManager::Get().FindConsoleVariable(TEXT("r.ShadowQuality"));
+    if(!Settings || !Bloom || !Shadow) { AddError(TEXT("Native render settings unavailable")); return false; }
+    const int32 PreviousShadow=Settings->GetShadowQuality(),PreviousBloom=Bloom->GetInt();
+    auto* World=UWorld::CreateWorld(EWorldType::Game,false);
+    GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+    auto* Actor=World->SpawnActor<AActor>();
+    TStrongObjectPtr<UWowConnectionManager> Connection(NewObject<UWowConnectionManager>());
+    F.Context.ConnectionManager=Connection.Get(); F.Context.ResolveActor=[Actor](uint64) { return Actor; };
+    TestTrue(TEXT("Native ranges and original XML fallback do not truncate sliders"),F.Lua.ExecuteString(TEXT("assert(tonumber(GetCVarMin('extShadowQuality'))==0 and tonumber(GetCVarMax('extShadowQuality'))==4); assert(GetCVarMin('farclip')==nil and GetCVarMax('farclip')==nil and GetCVarMax('unknownAddonCvar')==nil)")));
+    TestTrue(TEXT("Effect defaults and legacy out-of-range preferences stay inside the original XML ranges"),F.Lua.ExecuteString(TEXT("assert(GetCVarDefault('componentTextureLevel')=='9' and tonumber(GetCVar('farclip'))>=177); SetCVar('componentTextureLevel',0); SetCVar('groundEffectDensity',0); assert(GetCVar('componentTextureLevel')=='8' and GetCVar('groundEffectDensity')=='16')")));
+    TestTrue(TEXT("Original shadow/glow CVars apply to a live renderer"),F.Lua.ExecuteString(TEXT("SetCVar('extShadowQuality',0); SetCVar('ffxGlow',0); assert(GetCVar('extShadowQuality')=='0' and GetCVar('ffxGlow')=='0')")));
+    TestEqual(TEXT("Disabling shadows reaches the engine setting"),Settings->GetShadowQuality(),0);
+    TestEqual(TEXT("Disabling shadows reaches the actual render CVar"),Shadow->GetInt(),0);
+    TestEqual(TEXT("Disabling glow reaches the actual render CVar"),Bloom->GetInt(),0);
+    TestTrue(TEXT("Inputs clamp and original defaults remain available"),F.Lua.ExecuteString(TEXT("SetCVar('extShadowQuality',99); SetCVar('ffxGlow',true); assert(GetCVar('extShadowQuality')=='4' and GetCVarBool('ffxGlow')); assert(GetCVarDefault('extShadowQuality')=='3' and GetCVarDefault('ffxGlow')=='1')")));
+    TestEqual(TEXT("Maximum shadow quality reaches scalability"),Settings->GetShadowQuality(),4);
+    TestTrue(TEXT("Enabled shadows and glow reach the renderer"),Shadow->GetInt()>0 && Bloom->GetInt()>0);
+    TestTrue(TEXT("Applying scalability does not undo the independent glow switch"),F.Lua.ExecuteString(TEXT("SetCVar('ffxGlow',0); SetCVar('extShadowQuality',2); assert(GetCVar('ffxGlow')=='0')")));
+    TestEqual(TEXT("Glow remains disabled after a quality change"),Bloom->GetInt(),0);
+    TestTrue(TEXT("Stock defaults restore the implemented effect settings"),F.Lua.ExecuteString(TEXT("RestoreVideoEffectsDefaults(); assert(GetCVar('extShadowQuality')=='3' and GetCVar('ffxGlow')=='1')")));
+    Settings->SetShadowQuality(PreviousShadow); Settings->ApplyNonResolutionSettings(); Settings->SaveSettings();
+    Bloom->Set(PreviousBloom,ECVF_SetByScalability);
+    World->DestroyWorld(false); GEngine->DestroyWorldContext(World);
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudAnimationTimers,"WowUnreal.Hud.AnimationTimers",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FHudAnimationTimers::RunTest(const FString&)
 {
@@ -2402,6 +2438,22 @@ bool FHudSliderControls::RunTest(const FString&)
     TestTrue(TEXT("A dynamically created thumb can be restored after removal"),F.Lua.ExecuteString(TEXT("RangeSlider:SetThumbTexture(1,.5,0,1); RangeSlider:GetThumbTexture():SetSize(18,30)")));
     F.Frames.RefreshLayout(); const auto* Dynamic=F.Frames.GetNamedTexture(F.Frames.SliderThumbRegions.FindRef(Handle));
     TestTrue(TEXT("Anchoring a dynamic thumb restores its painted visibility"),Dynamic && Dynamic->GetVisibility()!=ESlateVisibility::Hidden && Dynamic->GetVisibility()!=ESlateVisibility::Collapsed);
+    const char* HorizontalXml=R"XML(<Ui>
+      <Slider name="HorizontalOptionTemplate" virtual="true" orientation="HORIZONTAL" minValue="0" maxValue="4" valueStep="1">
+       <Size x="112" y="17"/><ThumbTexture name="$parentThumb"><Size x="32" y="32"/><Color/></ThumbTexture>
+      </Slider>
+      <Slider name="InheritedHorizontalOption" inherits="HorizontalOptionTemplate"><Anchors><Anchor point="CENTER"/></Anchors></Slider>
+      <Slider name="OverriddenVerticalOption" inherits="HorizontalOptionTemplate" orientation="VERTICAL"><Size x="17" y="112"/></Slider>
+      </Ui>)XML";
+    Bytes.Reset(); Bytes.Append(reinterpret_cast<const uint8*>(HorizontalXml),FCStringAnsi::Strlen(HorizontalXml));
+    const auto Options=FWowFrameXmlParser::ParseXml(Bytes,TEXT("InheritedOptionSliders"));
+    for(const auto& D:Options) F.Frames.CreateFrame(D.FrameDef);
+    const auto Horizontal=F.Frames.FindFrame(TEXT("InheritedHorizontalOption"));
+    TestTrue(TEXT("The original XML horizontal orientation survives template inheritance"),F.Lua.ExecuteString(TEXT("assert(InheritedHorizontalOption:GetOrientation()=='HORIZONTAL' and OverriddenVerticalOption:GetOrientation()=='VERTICAL')")));
+    F.Frames.RefreshLayout(); const auto OptionRect=F.Frames.GetLayoutRect(Horizontal);
+    F.Frames.UpdateMouseHover((OptionRect.X+16)*Scale,(OptionRect.Y+OptionRect.W*.5f)*Scale); F.Frames.DispatchMouseDown(Horizontal,TEXT("LeftButton"));
+    F.Frames.UpdateMouseHover((OptionRect.X+OptionRect.Z-16)*Scale,(OptionRect.Y+OptionRect.W*.5f)*Scale); F.Frames.DispatchMouseUp(Horizontal,TEXT("LeftButton"));
+    TestEqual(TEXT("A real horizontal options template reaches its maximum with horizontal pointer movement"),F.Frames.GetSliderValue(Horizontal),4.f);
     return true;
 }
 
