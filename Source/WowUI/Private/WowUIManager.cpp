@@ -512,6 +512,9 @@ void UWowUIManager::ProcessPendingReload()
     auto KeyResolver=UIContext->KeyDown;
     auto FloorResolver=UIContext->ResolveDungeonFloor;
     auto Rows=UIContext->SelectedRows;
+    // Focus belongs to the world session, not the Lua VM. The replacement
+    // FrameXML must see it during OnLoad to rebuild its unit frame correctly.
+    const uint64 FocusGuid=UIContext->FocusGuid;
     auto Action=FrameManager->OnSecureActionDispatch;
     auto Spell=FrameManager->OnSecureSpellDispatch;
     ModelRenderer.Reset(); MapRenderer.Reset(); CursorRenderer.Reset();
@@ -525,6 +528,7 @@ void UWowUIManager::ProcessPendingReload()
     UIContext->ResolveArea=MoveTemp(AreaResolver);
     UIContext->KeyDown=MoveTemp(KeyResolver);
     UIContext->ResolveDungeonFloor=MoveTemp(FloorResolver);
+    UIContext->FocusGuid=FocusGuid;
     FrameManager->OnSecureActionDispatch=Action; FrameManager->OnSecureSpellDispatch=Spell;
     FrameManager->Initialize(RootCanvas);
     SetConnectionManager(ConnectionManager);

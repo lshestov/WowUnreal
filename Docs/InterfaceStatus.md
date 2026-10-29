@@ -187,5 +187,6 @@ Single-line editor insertion and selection support real Shift-item links. See
 [modified clicks](ModifiedClicks.md). Rich input displays link labels and supports
 atomic link editing. Item hyperlinks use exact protocol colours and field counts
 instead of the previous rounded RGB values and extra field; see
-[chat editing](ChatEditor.md). The client focus identity still needs preservation
-across ReloadUI.
+[chat editing](ChatEditor.md). ReloadUI now retains the session's focus identity
+before FrameXML loads, rebuilding its original unit frame and retaining actual
+focus-cast routing; see [focus reload](FocusReload.md).
