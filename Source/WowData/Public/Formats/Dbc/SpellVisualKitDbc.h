@@ -6,9 +6,8 @@
 struct FSpellVisualKitDbcEntry
 {
 	uint32 ID;
-	uint32 StartAnimID;
-	uint32 AnimID;
-	uint32 AnimKitID;
+	int32 StartAnimID;
+	int32 AnimID;
 	uint32 HeadEffectID;
 	uint32 ChestEffectID;
 	uint32 BaseEffectID;
@@ -17,8 +16,11 @@ struct FSpellVisualKitDbcEntry
 	uint32 BreathEffectID;
 	uint32 LeftWeaponEffectID;
 	uint32 RightWeaponEffectID;
+	uint32 SpecialEffectIDs[3];
+	uint32 WorldEffectID;
 	uint32 SoundID;
 	uint32 ShakeID;
+	uint32 Flags;
 };
 
 class WOWDATA_API FSpellVisualKitDbc

@@ -4,7 +4,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogSpellVisualEffectNameDbc, Log, All);
 
 bool FSpellVisualEffectNameDbc::Load(const FDbcParser& Parser)
 {
-	if (!Parser.IsValid())
+	if (!Parser.IsValid() || Parser.GetFieldCount()!=7)
 	{
 		return false;
 	}
@@ -21,13 +21,15 @@ bool FSpellVisualEffectNameDbc::Load(const FDbcParser& Parser)
 		E.FilePath = Parser.GetString(i, 2);
 		E.AreaEffectSize = Parser.GetFloat(i, 3);
 		E.Scale = Parser.GetFloat(i, 4);
+		E.MinAllowedScale = Parser.GetFloat(i, 5);
+		E.MaxAllowedScale = Parser.GetFloat(i, 6);
 
 		// Convert .mdl/.mdx extensions to .m2 for compatibility
 		if (E.Name.EndsWith(TEXT(".mdl")) || E.Name.EndsWith(TEXT(".mdx")))
 		{
 			E.Name = E.Name.LeftChop(4) + TEXT(".m2");
 		}
-		if (E.FilePath.EndsWith(TEXT(".mdl")) || E.FilePath.EndsWith(TEXT(".mdx")))
+		if (E.FilePath.EndsWith(TEXT(".mdl"),ESearchCase::IgnoreCase) || E.FilePath.EndsWith(TEXT(".mdx"),ESearchCase::IgnoreCase))
 		{
 			E.FilePath = E.FilePath.LeftChop(4) + TEXT(".m2");
 		}

@@ -10,6 +10,8 @@ struct FSpellVisualEffectNameDbcEntry
 	FString FilePath;
 	float AreaEffectSize;
 	float Scale;
+	float MinAllowedScale;
+	float MaxAllowedScale;
 };
 
 class WOWDATA_API FSpellVisualEffectNameDbc
