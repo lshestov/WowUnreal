@@ -4,10 +4,25 @@
 #include "Formats/Dbc/SpellVisualKitDbc.h"
 #include "Formats/Dbc/SpellVisualEffectNameDbc.h"
 #include "Mpq/MpqManager.h"
+#include "WowPacketHandler.h"
+#include "WowSpellMissile.h"
+#include <limits>
 
 #if WITH_DEV_AUTOMATION_TESTS
 namespace
 {
+TArray<uint8> LaunchPacket(uint64 Explicit,const TArray<uint64>& Hits,const TArray<FWowSpellMissTarget>& Misses)
+{
+    TArray<uint8> P;
+    const auto U32=[&](uint32 V){P.Append(reinterpret_cast<const uint8*>(&V),4);};
+    const auto U64=[&](uint64 V){P.Append(reinterpret_cast<const uint8*>(&V),8);};
+    const auto Guid=[&](uint64 V){uint8 Mask=0; TArray<uint8> B; for(int32 I=0;I<8;++I) if(uint8 X=V>>(8*I)) {Mask|=1<<I; B.Add(X);} P.Add(Mask); P.Append(B);};
+    Guid(0x4000000000000001ULL); Guid(1); P.Add(9); U32(133); U32(0); U32(0xfffffff0u);
+    P.Add(Hits.Num()); for(uint64 V:Hits) U64(V);
+    P.Add(Misses.Num()); for(const auto& M:Misses) {U64(M.Guid); P.Add(M.Reason); if(M.Reason==11) P.Add(M.ReflectReason);}
+    U32(Explicit?2:0); if(Explicit) Guid(Explicit);
+    return P;
+}
 uint32 VisualFloat(float Value)
 {
     uint32 Bits=0; FMemory::Memcpy(&Bits,&Value,sizeof(Bits)); return Bits;
@@ -20,6 +35,41 @@ TArray<uint8> VisualTable(const TArray<uint32>& Columns,const TArray<uint8>& Str
     Bytes.Append(reinterpret_cast<const uint8*>(Columns.GetData()),Columns.Num()*4);
     Bytes.Append(Strings); return Bytes;
 }
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSpellLaunchTargets,"WowUnreal.Gameplay.SpellLaunchTargets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FSpellLaunchTargets::RunTest(const FString&)
+{
+    FWowPacketHandler H; int32 Events=0; FWowSpellLaunch Last;
+    H.OnSpellLaunch.AddLambda([&](const FWowSpellLaunch& E){++Events; Last=E;});
+    const auto Packet=LaunchPacket(4,{2,3},{{5,2,0},{6,11,1}});
+    H.HandlePacket(WowOpcode::SMSG_SPELL_GO,Packet);
+    TestEqual(TEXT("A complete server launch publishes once"),Events,1);
+    TestTrue(TEXT("Object, caster, spell, counter and wrapping server timestamp survive"),Last.CastObjectGuid==0x4000000000000001ULL && Last.CasterGuid==1 && Last.SpellId==133 && Last.Counter==9 && Last.ServerTimeMs==0xfffffff0u);
+    TestTrue(TEXT("Explicit target has priority without losing other hits or reflected misses"),Last.PrimaryTarget()==4 && Last.HitTargets==TArray<uint64>{2,3} && Last.MissedTargets.Num()==2 && Last.MissedTargets[1].Guid==6 && Last.MissedTargets[1].Reason==11 && Last.MissedTargets[1].ReflectReason==1);
+    auto& Caster=H.EntityManager.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT); Caster.SetField(UnitField::TARGET,99); Caster.SetField(UnitField::TARGET+1,0);
+    TestEqual(TEXT("Changing the selected unit cannot change the launch's target"),Last.PrimaryTarget(),uint64(4));
+    for(const int32 Cut:{1,2,8,16}) {auto Short=Packet; Short.SetNum(Packet.Num()-Cut); H.HandlePacket(WowOpcode::SMSG_SPELL_GO,Short);}
+    TestEqual(TEXT("Partial hit/miss/explicit-target data never publishes a launch"),Events,1);
+    H.HandlePacket(WowOpcode::SMSG_SPELL_GO,LaunchPacket(0,{7,8},{}));
+    TestEqual(TEXT("Implicit unit spells use their first server hit"),Last.PrimaryTarget(),uint64(7));
+    H.HandlePacket(WowOpcode::SMSG_SPELL_GO,LaunchPacket(0,{},{{9,1,0}}));
+    TestEqual(TEXT("A missed projectile retains its actual target"),Last.PrimaryTarget(),uint64(9));
+    H.HandlePacket(WowOpcode::SMSG_SPELL_GO,LaunchPacket(0,{},{}));
+    TestEqual(TEXT("No target stays absent instead of inheriting the selection"),Last.PrimaryTarget(),uint64(0));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSpellFlightTiming,"WowUnreal.Gameplay.SpellFlightTiming",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FSpellFlightTiming::RunTest(const FString&)
+{
+    TestEqual(TEXT("Close targets use the server's five-yard floor"),AWowSpellMissile::TravelMilliseconds(4,1.5f,24),uint32(208));
+    TestEqual(TEXT("Caster combat reach is subtracted before integer milliseconds"),AWowSpellMissile::TravelMilliseconds(30,1.5f,24),uint32(1187));
+    TestEqual(TEXT("A faster DBC projectile has a shorter duration"),AWowSpellMissile::TravelMilliseconds(30,1.5f,48),uint32(593));
+    TestEqual(TEXT("Instant spells do not invent a one-second projectile"),AWowSpellMissile::TravelMilliseconds(30,1.5f,0),uint32(0));
+    TestEqual(TEXT("Invalid numeric data cannot retain an immortal actor"),AWowSpellMissile::TravelMilliseconds(std::numeric_limits<float>::quiet_NaN(),0,24),uint32(0));
+    TestEqual(TEXT("Renderer lifetime is bounded for extreme data"),AWowSpellMissile::TravelMilliseconds(10000,0,1),uint32(60000));
+    return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSpellVisualLayouts,"WowUnreal.Gameplay.SpellVisualLayouts",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)

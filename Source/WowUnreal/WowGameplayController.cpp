@@ -357,7 +357,7 @@ void AWowGameplayController::BindEntityEvents()
 	// Bind combat log events
 	ConnectionManager->PacketHandler.OnSpellStart.AddUObject(
 		this, &AWowGameplayController::OnSpellStart);
-	ConnectionManager->PacketHandler.OnSpellGo.AddUObject(
+	ConnectionManager->PacketHandler.OnSpellLaunch.AddUObject(
 		this, &AWowGameplayController::OnSpellGo);
 	ConnectionManager->PacketHandler.OnSpellFailure.AddUObject(
 		this, &AWowGameplayController::OnSpellFailure);
@@ -2393,9 +2393,10 @@ void AWowGameplayController::OnSpellStart(uint64 CasterGuid, uint32 SpellId, uin
 	}
 }
 
-void AWowGameplayController::OnSpellGo(uint64 CasterGuid, uint32 SpellId, uint32 CastFlags)
+void AWowGameplayController::OnSpellGo(const FWowSpellLaunch& Launch)
 {
 	if (!ConnectionManager) return;
+	const uint64 CasterGuid=Launch.CasterGuid; const uint32 SpellId=Launch.SpellId;
 
 	const uint64 LocalGuid = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
 
@@ -2455,8 +2456,7 @@ void AWowGameplayController::OnSpellGo(uint64 CasterGuid, uint32 SpellId, uint32
 	}
 
 	// Check if spell should spawn a missile
-	uint64 SpellTargetGuid = 0; // Will be resolved in SpawnSpellMissile
-	SpawnSpellMissile(CasterGuid, SpellTargetGuid, SpellId);
+	SpawnSpellMissile(Launch);
 }
 
 void AWowGameplayController::InitializeManagers()
@@ -4914,8 +4914,10 @@ void AWowGameplayController::SpawnSpellVisualEffect(uint64 CasterGuid, uint64 Sp
 	}
 }
 
-void AWowGameplayController::SpawnSpellMissile(uint64 CasterGuid, uint64 SpellTargetGuid, uint32 SpellId)
+void AWowGameplayController::SpawnSpellMissile(const FWowSpellLaunch& Launch)
 {
+	const uint64 CasterGuid=Launch.CasterGuid,SpellTargetGuid=Launch.PrimaryTarget(); const uint32 SpellId=Launch.SpellId;
+	if(!SpellTargetGuid || SpellTargetGuid==CasterGuid) return;
 	// Check if deferred DBCs are loaded
 	const FDbcStore& DbcStore = FDbcStore::Get();
 	if (!DbcStore.IsDeferredLoaded())
@@ -4938,7 +4940,7 @@ void AWowGameplayController::SpawnSpellMissile(uint64 CasterGuid, uint64 SpellTa
 	}
 
 	const auto* SpellVisualEntry = DbcStore.SpellVisuals().GetById(SpellVisualId);
-	if (!SpellVisualEntry || !SpellVisualEntry->HasMissile)
+	if (!SpellVisualEntry || !SpellVisualEntry->HasMissile || !FMath::IsFinite(SpellEntry->Speed) || SpellEntry->Speed<=0)
 	{
 		// No missile for this spell
 		return;
@@ -4983,20 +4985,9 @@ void AWowGameplayController::SpawnSpellMissile(uint64 CasterGuid, uint64 SpellTa
 	}
 
 	// Get target position
-	FVector TargetLocation = CasterLocation + FVector(300.0f, 0.0f, 0.0f); // Default forward target
+	FVector TargetLocation = FVector::ZeroVector;
+	AActor* TargetActor=nullptr;
 	bool bFoundTargetLocation = false;
-
-	// Try to get target GUID from caster entity's target field
-	if (SpellTargetGuid == 0)
-	{
-		// Try to resolve target from entity manager
-		auto& EntityManager = ConnectionManager->PacketHandler.EntityManager;
-		if (const FWowEntity* CasterEntity = EntityManager.Find(CasterGuid))
-		{
-			// Try to get the target field from the entity
-			SpellTargetGuid = CasterEntity->GetField64(UnitField::TARGET);
-		}
-	}
 
 	// Get target location
 	if (SpellTargetGuid != 0)
@@ -5006,6 +4997,7 @@ void AWowGameplayController::SpawnSpellMissile(uint64 CasterGuid, uint64 SpellTa
 			// Target is local player
 			if (APawn* LocalPawn = GetPawn())
 			{
+				TargetActor=LocalPawn;
 				TargetLocation = LocalPawn->GetActorLocation();
 				bFoundTargetLocation = true;
 			}
@@ -5015,7 +5007,7 @@ void AWowGameplayController::SpawnSpellMissile(uint64 CasterGuid, uint64 SpellTa
 			// Target is another entity
 			if (TObjectPtr<AActor>* FoundActor = SpawnedEntityActors.Find(SpellTargetGuid))
 			{
-				if (AActor* TargetActor = FoundActor->Get())
+				if ((TargetActor = FoundActor->Get()))
 				{
 					TargetLocation = TargetActor->GetActorLocation();
 					bFoundTargetLocation = true;
@@ -5026,8 +5018,15 @@ void AWowGameplayController::SpawnSpellMissile(uint64 CasterGuid, uint64 SpellTa
 
 	if (!bFoundTargetLocation)
 	{
-		UE_LOG(LogWowGameplay, Log, TEXT("SpawnSpellMissile: No specific target found for spell %u, using forward direction"), SpellId);
+		UE_LOG(LogWowGameplay, Verbose, TEXT("SpawnSpellMissile: Packet target %llu for spell %u has no rendered actor"),SpellTargetGuid,SpellId);
+		return;
 	}
+	const auto& Entities=ConnectionManager->PacketHandler.EntityManager;
+	const auto* CasterEntity=Entities.Find(CasterGuid); const auto* TargetEntity=Entities.Find(SpellTargetGuid);
+	const float Distance=CasterEntity && TargetEntity?FVector::Distance(CasterEntity->Movement.Position,TargetEntity->Movement.Position):FVector::Distance(CasterLocation,TargetLocation)/100.f;
+	const float Reach=CasterEntity?FMath::Max(0.f,CasterEntity->GetFieldFloat(UnitField::COMBATREACH)):0.f;
+	const uint32 FlightMs=AWowSpellMissile::TravelMilliseconds(Distance,Reach,SpellEntry->Speed);
+	if(!FlightMs) return;
 
 	// Determine spell school color
 	FLinearColor SpellColor = GetSpellSchoolColor(SpellEntry->SchoolMask);
@@ -5042,9 +5041,10 @@ void AWowGameplayController::SpawnSpellMissile(uint64 CasterGuid, uint64 SpellTa
 		AWowSpellMissile* Missile = World->SpawnActor<AWowSpellMissile>();
 		if (Missile)
 		{
-			Missile->Initialize(MissileStartLocation, MissileTargetLocation, SpellColor, 1.0f);
-			UE_LOG(LogWowGameplay, Log, TEXT("Spawned spell missile for spell %u (%s) from caster %llu to target %llu"),
-				SpellId, *SpellEntry->SpellName, CasterGuid, SpellTargetGuid);
+			Missile->Initialize(MissileStartLocation, MissileTargetLocation, SpellColor, FlightMs/1000.f);
+			Missile->BindTarget(SpellId,CasterGuid,SpellTargetGuid,TargetActor,FVector(0,0,100));
+			UE_LOG(LogWowGameplay, Log, TEXT("Spawned spell missile spell=%u caster=%llu target=%llu counter=%u serverTime=%u flightMs=%u speed=%.3f"),
+				SpellId,CasterGuid,SpellTargetGuid,Launch.Counter,Launch.ServerTimeMs,FlightMs,SpellEntry->Speed);
 		}
 	}
 }

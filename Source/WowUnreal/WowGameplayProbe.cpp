@@ -10,6 +10,10 @@
 #include "WowWorldManager.h"
 #include "Formats/Dbc/DbcStore.h"
 #include "WowSkyManager.h"
+#include "WowSpellMissile.h"
+#include "WowPlayerCharacter.h"
+#include "GameFramework/SpringArmComponent.h"
+#include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/App.h"
 #include "RenderTimer.h"
@@ -429,6 +433,26 @@ struct FWowGameplayProbe
             Done=FFileHelper::SaveStringToFile(Text,*(Output/(Step->GetStringField(TEXT("name"))+TEXT(".json"))));
         }
         else if (Op==TEXT("interact")) { C.InteractWithTarget(); Done=true; }
+        else if(Op==TEXT("frame_camera_target"))
+        {
+            auto* Pawn=Cast<AWowPlayerCharacter>(C.GetPawn()); const auto* Actor=C.SpawnedEntityActors.Find(C.TargetGuid);
+            if(!Pawn || !Pawn->CameraBoom || !Actor || !IsValid(*Actor)) {Failure=TEXT("Camera framing requires a rendered target and player"); Finish(C,false); return;}
+            const auto Direction=(*Actor)->GetActorLocation()-Pawn->GetActorLocation();
+            C.SetControlRotation(FRotator(-15,Direction.Rotation().Yaw,0)); Pawn->CameraBoom->TargetArmLength=1000; Done=true;
+        }
+        else if(Op==TEXT("wait_spell_missile"))
+        {
+            const uint32 Spell=Step->GetIntegerField(TEXT("spell")),Entry=Step->GetIntegerField(TEXT("targetEntry"));
+            for(TActorIterator<AWowSpellMissile> It(C.GetWorld());It;++It)
+            {
+                auto* Missile=*It; const auto* Target=Handler.EntityManager.Find(Missile->GetTargetGuid());
+                if(Missile->GetSpellId()!=Spell || Missile->GetCasterGuid()!=Handler.EntityManager.LocalPlayerGuid || !Target || Target->Entry!=Entry) continue;
+                if(C.TargetGuid==Missile->GetTargetGuid()) {Failure=TEXT("Projectile probe requires selection to have changed"); Finish(C,false); return;}
+                const auto State=MakeShared<FJsonObject>(); State->SetStringField(TEXT("targetGuid"),FString::Printf(TEXT("%llu"),Missile->GetTargetGuid()));
+                State->SetStringField(TEXT("selectedGuid"),FString::Printf(TEXT("%llu"),C.TargetGuid)); State->SetNumberField(TEXT("spell"),Spell);
+                State->SetNumberField(TEXT("travelSeconds"),Missile->GetTravelTime()); Inspections->SetObjectField(TEXT("spellMissile"),State); Done=true; break;
+            }
+        }
         else if (Op==TEXT("jump")) { if (auto* Character=Cast<ACharacter>(C.GetPawn())) { bJumpRequested=true; bJumpObserved=false; Character->Jump(); Done=true; } }
         else if (Op==TEXT("release_jump")) { if (auto* Character=Cast<ACharacter>(C.GetPawn())) { Character->StopJumping(); Done=true; } }
         else if (Op==TEXT("wait_landed")) { const auto* Character=Cast<ACharacter>(C.GetPawn()); Done=bJumpObserved && Character && Character->GetCharacterMovement()->IsMovingOnGround() && Now-StepStarted>.5; if(Done)bJumpRequested=false; }

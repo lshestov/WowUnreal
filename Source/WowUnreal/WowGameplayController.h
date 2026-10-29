@@ -18,6 +18,7 @@ class FWowAssetCache;
 class SWowCombatLog;
 class SWowChatWindow;
 struct FWowEntity;
+struct FWowSpellLaunch;
 struct FWowPetActionBarState;
 class SWowActionBar;
 class SWowCastBar;
@@ -361,7 +362,7 @@ private:
 
     // Combat log event handlers
     void OnSpellStart(uint64 CasterGuid, uint32 SpellId, uint32 CastFlags, int32 CastTime);
-    void OnSpellGo(uint64 CasterGuid, uint32 SpellId, uint32 CastFlags);
+    void OnSpellGo(const FWowSpellLaunch& Launch);
     void OnSpellFailure(uint64 CasterGuid, uint32 SpellId, uint8 FailureReason);
     void OnAttackerStateUpdate(uint64 AttackerGuid, uint64 VictimGuid, uint32 HitInfo, uint32 Damage);
     void OnServerAttackStart(uint64 AttackerGuid, uint64 VictimGuid);
@@ -484,7 +485,7 @@ private:
 
     // Spell visual effects
     void SpawnSpellVisualEffect(uint64 CasterGuid, uint64 SpellTargetGuid, uint32 SpellId, bool bIsMissile);
-    void SpawnSpellMissile(uint64 CasterGuid, uint64 SpellTargetGuid, uint32 SpellId);
+    void SpawnSpellMissile(const FWowSpellLaunch& Launch);
 
     // Active spell cast effects (destroyed when cast completes)
     UPROPERTY()

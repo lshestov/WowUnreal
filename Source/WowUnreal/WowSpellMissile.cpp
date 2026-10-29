@@ -49,9 +49,10 @@ void AWowSpellMissile::Initialize(const FVector& StartLocation, const FVector& T
 {
     StartPos = StartLocation;
     EndPos = TargetLocation;
-    TotalTravelTime = FMath::Max(0.1f, TravelTime); // Minimum 0.1 second travel time
+    TotalTravelTime = FMath::IsFinite(TravelTime)?FMath::Max(.001f,TravelTime):.001f;
     CurrentTime = 0.0f;
     bIsInitialized = true;
+    FlightStartedAt=FPlatformTime::Seconds();
 
     // Set initial position
     SetActorLocation(StartPos);
@@ -104,6 +105,18 @@ void AWowSpellMissile::BeginPlay()
     Super::BeginPlay();
 }
 
+uint32 AWowSpellMissile::TravelMilliseconds(float Distance,float CasterReach,float Speed)
+{
+    if(!FMath::IsFinite(Distance) || !FMath::IsFinite(CasterReach) || !FMath::IsFinite(Speed) || Distance<0 || Speed<=0) return 0;
+    // AzerothCore uses distance from the caster's combat reach, with a five
+    // yard lower bound, then truncates to whole milliseconds.
+    return uint32(FMath::Clamp(FMath::FloorToDouble(FMath::Max(5.f,Distance-FMath::Max(0.f,CasterReach))/double(Speed)*1000.),0.,60000.));
+}
+void AWowSpellMissile::BindTarget(uint32 Spell,uint64 Caster,uint64 Target,AActor* Actor,const FVector& Offset)
+{
+    SpellId=Spell; CasterGuid=Caster; TargetGuid=Target; TargetActor=Actor; TargetOffset=Offset;
+}
+
 void AWowSpellMissile::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
@@ -113,7 +126,10 @@ void AWowSpellMissile::Tick(float DeltaTime)
         return;
     }
 
-    CurrentTime += DeltaTime;
+    if(TargetActor.IsValid()) EndPos=TargetActor->GetActorLocation()+TargetOffset;
+    // A newly spawned actor can tick with a delta that began before launch.
+    // Measure from the packet-driven spawn instead of charging that old time.
+    CurrentTime=FMath::Max(0.f,float(FPlatformTime::Seconds()-FlightStartedAt));
 
     if (CurrentTime >= TotalTravelTime)
     {
@@ -144,8 +160,8 @@ void AWowSpellMissile::UpdatePosition()
 
 void AWowSpellMissile::OnReachedTarget()
 {
-    // Could add impact effect here in the future
-    UE_LOG(LogTemp, Log, TEXT("Spell missile reached target"));
+    UpdatePosition();
+    UE_LOG(LogTemp, Log, TEXT("Spell missile reached target spell=%u caster=%llu target=%llu time=%.3f elapsed=%.3f"),SpellId,CasterGuid,TargetGuid,TotalTravelTime,CurrentTime);
 
     // Destroy the missile
     Destroy();

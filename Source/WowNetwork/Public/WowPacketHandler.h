@@ -7,6 +7,7 @@
 #include "WowPvpState.h"
 #include "WowLfgState.h"
 #include "WowAchievementState.h"
+#include "WowSpellLaunch.h"
 
 DECLARE_DELEGATE_OneParam(FOnWowCombatLog,const FWowCombatEntry&);
 DECLARE_DELEGATE_RetVal_OneParam(uint32,FOnWowCombatFlags,uint64);
@@ -17,6 +18,7 @@ DECLARE_MULTICAST_DELEGATE_FiveParams(FOnLoginVerifyWorld, uint32 /*MapId*/, flo
 DECLARE_MULTICAST_DELEGATE_SevenParams(FOnChatMessage, uint8 /*Type*/, uint32 /*Language*/, uint64 /*SenderGuid*/, const FString& /*SenderName*/, const FString& /*Message*/, const FString& /*Channel*/, uint32 /*Achievement*/);
 DECLARE_MULTICAST_DELEGATE_FourParams(FOnSpellStart, uint64 /*CasterGuid*/, uint32 /*SpellId*/, uint32 /*CastFlags*/, int32 /*CastTime*/);
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnSpellGo, uint64 /*CasterGuid*/, uint32 /*SpellId*/, uint32 /*CastFlags*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnSpellLaunch,const FWowSpellLaunch&);
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnSpellFailure, uint64 /*CasterGuid*/, uint32 /*SpellId*/, uint8 /*FailureReason*/);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnSpellCooldown, uint32 /*SpellId*/, float /*Duration*/);
 DECLARE_MULTICAST_DELEGATE_FourParams(FOnAttackerStateUpdate, uint64 /*AttackerGuid*/, uint64 /*TargetGuid*/, uint32 /*HitInfo*/, uint32 /*Damage*/);
@@ -382,6 +384,7 @@ public:
     FOnChatMessage OnChatMessage;
     FOnSpellStart OnSpellStart;
     FOnSpellGo OnSpellGo;
+    FOnSpellLaunch OnSpellLaunch;
     FOnSpellFailure OnSpellFailure;
     FOnSpellCooldown OnSpellCooldown;
     FOnAttackerStateUpdate OnAttackerStateUpdate;

@@ -84,18 +84,21 @@ void FWowPacketHandler::HandleSpellGo(FPacketReader& R)
 {
     uint64 Object=0,Caster=0,Target=0;
     if(!Guid(R,Object) || !Guid(R,Caster) || !R.CanRead(14)) return;
-    const uint8 Counter=R.ReadU8(); const uint32 Spell=R.ReadU32(),Flags=R.ReadU32(); R.ReadU32(); const uint8 Hits=R.ReadU8();
-    if(!R.CanRead(int32(Hits)*8+1)) return; for(uint8 I=0;I<Hits;++I) {const uint64 Hit=R.ReadU64(); if(!Target) Target=Hit;}
+    FWowSpellLaunch Launch; Launch.CastObjectGuid=Object; Launch.CasterGuid=Caster;
+    const uint8 Counter=R.ReadU8(); const uint32 Spell=R.ReadU32(),Flags=R.ReadU32(); Launch.Counter=Counter; Launch.SpellId=Spell; Launch.CastFlags=Flags; Launch.ServerTimeMs=R.ReadU32(); const uint8 Hits=R.ReadU8();
+    if(!R.CanRead(int32(Hits)*8+1)) return; for(uint8 I=0;I<Hits;++I) {const uint64 Hit=R.ReadU64(); Launch.HitTargets.Add(Hit); if(!Target) Target=Hit;}
     const uint8 Misses=R.ReadU8(); TArray<FWowCombatEntry> Missed;
     const auto* Definition=FDbcStore::Get().Spells().GetById(Spell);
     for(uint8 I=0;I<Misses;++I)
     {
         if(!R.CanRead(9)) return; FWowCombatEntry E; E.Source=Caster; E.Destination=R.ReadU64(); E.Spell=Spell;
         const uint8 Reason=R.ReadU8(); const auto Miss=MissName(Reason); if(Miss.IsEmpty()) return;
-        if(Reason==11) {if(!R.CanRead(1)) return; R.ReadU8();}
+        uint8 Reflect=0; if(Reason==11) {if(!R.CanRead(1)) return; Reflect=R.ReadU8();}
+        Launch.MissedTargets.Add({E.Destination,Reason,Reflect});
         E.Event=Definition && (Definition->AttributesEx3&0x8000)?TEXT("RANGE_MISSED"):TEXT("SPELL_MISSED"); E.Values={V::S(Miss)}; if(Reason==2 || Reason==5 || Reason==10) E.Values.Add(V::N(0)); Missed.Add(MoveTemp(E));
     }
     uint64 ExplicitTarget=0; if(!Targets(R,ExplicitTarget)) return; if(ExplicitTarget) Target=ExplicitTarget;
+    Launch.ExplicitTargetGuid=ExplicitTarget;
     const auto& Spells=FDbcStore::Get().Spells(); const bool HasCastTime=Definition && Spells.CastTime(Definition->CastingTimeIndex)>0;
     bool OpenLock=false; if(Definition) for(uint32 Effect:Definition->Effect) OpenLock|=Effect==33;
     if(!HasCastTime && !OpenLock) {FWowCombatEntry E; E.Source=Caster; E.Destination=Target; E.Spell=Spell; E.Event=TEXT("SPELL_CAST_SUCCESS"); RecordSpellCombat(MoveTemp(E));}
@@ -103,6 +106,7 @@ void FWowPacketHandler::HandleSpellGo(FPacketReader& R)
     const auto* Active=Casts.Find(Caster); const bool Stop=Active && Active->Spell==Spell && Active->Counter==Counter && !Active->Channel;
     if(Active && Active->Spell==Spell && Active->Counter==Counter) Casts.Remove(Caster);
     OnCastResult.ExecuteIfBound(Caster,Spell,Counter,true,0); OnCastState.ExecuteIfBound(Caster,Spell,1,Counter); OnSpellGo.Broadcast(Caster,Spell,Flags);
+    OnSpellLaunch.Broadcast(Launch);
     if(Stop) OnCastState.ExecuteIfBound(Caster,Spell,8,Counter);
 }
 void FWowPacketHandler::HandleSpellFailure(FPacketReader& R)
