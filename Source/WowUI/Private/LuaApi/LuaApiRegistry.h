@@ -62,6 +62,8 @@ struct FWowLuaContext
     TFunction<void(int64,const FWowGuildEmblem&,uint32)> TabardPreview;
     TMap<FName,int32> SelectedRows;
     TMap<FString,uint64> UnitReactionState;
+    uint64 CharacterStatGuid=0;
+    TMap<uint16,uint32> CharacterStatFields;
     uint64 FocusGuid=0;
     FString CursorTexture;
     bool CursorHidden=false,SoftwareCursorVisible=false;
@@ -111,6 +113,7 @@ namespace WowLuaApi
     int SetGlyphTooltip(lua_State* L);
     int SetTalentTooltip(lua_State* L);
     void RegisterUnitApi(lua_State* L);
+    void UpdateCharacterStats(lua_State* L);
     void RegisterGroupApi(lua_State* L);
     void UpdateGroupState(lua_State* L);
     void RegisterLootApi(lua_State* L);

@@ -121,7 +121,7 @@ The Windows Editor and packaged Development client are built from the same
 source tree. `WowUnreal.Hud`, `WowUnreal.UI`, `WowUnreal.Gameplay` and the related
 player, collision, equipment, lighting, rendering, traversal and performance
 suites cover both isolated controls and live protocol state. The interface
-regression set, including runtime animation and world parsers, contains 148 tests. Existing optional character texture-layout
+regression set, including runtime animation and world parsers, contains 151 tests. Existing optional character texture-layout
 DBC and test-fixture size warnings remain.
 
 Native gameplay probes exercise live server state and rendered UI at 1280x720
@@ -165,3 +165,9 @@ Shadow quality and fullscreen glow reach the renderer, and valid effect
 defaults avoid false changes when opening the panel. Apply, Cancel, Defaults
 and ReloadUI were exercised through the original window. See
 [video controls](RenderSettings.md) for the remaining backend limitations.
+
+Character spell bonuses and mana regeneration now read authoritative server
+fields, and changed stat groups refresh the open character window. The legacy
+cast overlay is hidden when the stock CastingBarFrame exists. See
+[combat interface](CombatInterface.md) for verified behavior and remaining
+cancellation feedback work.

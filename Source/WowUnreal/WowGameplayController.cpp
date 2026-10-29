@@ -214,10 +214,15 @@ void AWowGameplayController::BeginPlay()
 	CursorManager = NewObject<UWowCursorManager>(this);
 	TooltipManager = NewObject<UWowTooltipManager>(this);
 
-	// Cast bar — kept as fallback for spell feedback
+	// FrameXML owns casting feedback whenever its stock bar is available.
 	TSharedRef<SWidget> CastBarContainer =
 		SNew(SOverlay)
-		.Visibility(EVisibility::SelfHitTestInvisible)
+		.Visibility_Lambda([WeakThis=TWeakObjectPtr<AWowGameplayController>(this)]
+        {
+            if(!WeakThis.IsValid()) return EVisibility::Collapsed;
+            const auto* UI=WeakThis->UIManager.Get(); const auto* Frames=UI?UI->GetFrameManager():nullptr;
+            return Frames && Frames->FindFrame(TEXT("CastingBarFrame"))>=0?EVisibility::Collapsed:EVisibility::SelfHitTestInvisible;
+        })
 		+ SOverlay::Slot()
 		.HAlign(HAlign_Center)
 		.VAlign(VAlign_Bottom)

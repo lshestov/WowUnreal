@@ -65,6 +65,40 @@ int AttackPower(lua_State* L,bool Ranged)
     lua_pushinteger(L,Field(L,Base)); lua_pushinteger(L,int16(Mods&0xffff)); lua_pushinteger(L,int16(Mods>>16)); return 3;
 }
 }
+void WowLuaApi::UpdateCharacterStats(lua_State* L)
+{
+    auto* C=GetContext(L); if(!C) return;
+    const auto* P=C->EntityManager?C->EntityManager->GetLocalPlayer():nullptr;
+    if(!P) { C->CharacterStatGuid=0; C->CharacterStatFields.Reset(); return; }
+    if(C->CharacterStatGuid!=P->Guid) { C->CharacterStatFields.Reset(); C->CharacterStatGuid=P->Guid; }
+    struct FWatch {uint16 First,Count; const TCHAR* Event;};
+    const FWatch Watches[]={
+        {UnitField::STAT0,15,TEXT("UNIT_STATS")},
+        {UnitField::BASE+0x005D,21,TEXT("UNIT_RESISTANCES")},
+        {UnitField::BASE+0x0038,3,TEXT("UNIT_ATTACK_SPEED")},
+        {UnitField::BASE+0x0040,4,TEXT("UNIT_DAMAGE")},
+        {UnitField::ATTACK_POWER,3,TEXT("UNIT_DAMAGE")},
+        {UnitField::RANGED_ATTACK_POWER,3,TEXT("UNIT_RANGED_ATTACK_POWER")},
+        {UnitField::BASE+0x007B,2,TEXT("UNIT_RANGEDDAMAGE")},
+        {PlayerField::BASE+0x03FF,24,TEXT("PLAYER_DAMAGE_DONE_MODS")},
+        {PlayerField::BASE+0x036C,17,TEXT("UNIT_STATS")},
+        {UnitField::BASE+0x0022,14,TEXT("UNIT_STATS")},
+        {UnitField::BYTES_0,1,TEXT("UNIT_STATS")},
+        {PlayerField::COMBAT_RATING_1,25,TEXT("COMBAT_RATING_UPDATE")},
+        {UnitField::LEVEL,1,TEXT("UNIT_LEVEL")}
+    };
+    TSet<FString> Changed;
+    for(const auto& Watch:Watches) for(uint16 I=0;I<Watch.Count;++I)
+    {
+        const uint16 Index=Watch.First+I; const uint32 Value=P->GetField(Index);
+        const auto* Before=C->CharacterStatFields.Find(Index);
+        if(!Before || *Before!=Value) {C->CharacterStatFields.Add(Index,Value); Changed.Add(Watch.Event);}
+    }
+    // Publish after the complete snapshot, so original handlers read one state.
+    if(C->EventSystem) for(const auto& Event:Changed)
+        C->EventSystem->FireEvent(Event,Event==TEXT("COMBAT_RATING_UPDATE")?TArray<FString>():TArray<FString>{TEXT("player")});
+}
+
 void WowLuaApi::RegisterUnitApi(lua_State* L)
 {
     RegisterUnit(L,"FocusUnit",[](lua_State* S)->int {
@@ -126,6 +160,26 @@ void WowLuaApi::RegisterUnitApi(lua_State* L)
     RegisterUnit(L,"GetBlockChance",[](lua_State* S)->int { lua_pushnumber(S,Float(S,PlayerField::BASE+0x036C)); return 1; });
     RegisterUnit(L,"GetShieldBlock",[](lua_State* S)->int { lua_pushnumber(S,Field(S,PlayerField::BASE+0x037B)); return 1; });
     RegisterUnit(L,"GetSpellCritChance",[](lua_State* S)->int { const int32 School=FMath::Clamp(int32(luaL_optinteger(S,1,1)),1,7); lua_settop(S,0); lua_pushstring(S,"player"); lua_pushnumber(S,Float(S,PlayerField::BASE+0x0374+School-1)); return 1; });
+    RegisterUnit(L,"GetSpellBonusDamage",[](lua_State* S)->int {
+        const int32 School=luaL_checkinteger(S,1)-1;
+        if(School<0 || School>=7) return luaL_argerror(S,1,"spell school must be 1 through 7");
+        const auto* C=GetContext(S); const auto* P=C && C->EntityManager?C->EntityManager->GetLocalPlayer():nullptr;
+        // The negative array contains signed penalties, not absolute magnitudes.
+        lua_pushnumber(S,P?int32(P->GetField(PlayerField::BASE+0x03FF+School))+int32(P->GetField(PlayerField::BASE+0x0406+School)):0);
+        return 1;
+    });
+    RegisterUnit(L,"GetSpellBonusHealing",[](lua_State* S)->int {
+        const auto* C=GetContext(S); const auto* P=C && C->EntityManager?C->EntityManager->GetLocalPlayer():nullptr;
+        lua_pushnumber(S,P?int32(P->GetField(PlayerField::BASE+0x0414)):0); return 1;
+    });
+    RegisterUnit(L,"GetManaRegen",[](lua_State* S)->int {
+        const auto* C=GetContext(S); const auto* P=C && C->EntityManager?C->EntityManager->GetLocalPlayer():nullptr;
+        // Wrath returns per-second rates plus a small rounding epsilon. Energy,
+        // rage and other active resources do not expose a mana-regeneration row.
+        const bool Mana=P && P->GetPowerTypeId()==0;
+        lua_pushnumber(S,Mana?P->GetFieldFloat(UnitField::BASE+0x0022)+.001f:0);
+        lua_pushnumber(S,Mana?P->GetFieldFloat(UnitField::BASE+0x0029)+.001f:0); return 2;
+    });
     RegisterUnit(L,"GetExpertisePercent",[](lua_State* S)->int { lua_settop(S,0); lua_pushstring(S,"player"); lua_pushnumber(S,Field(S,PlayerField::BASE+0x036F)*.25); lua_pushnumber(S,Field(S,PlayerField::BASE+0x0370)*.25); return 2; });
     RegisterUnit(L,"GetUnitMaxHealthModifier",[](lua_State* S)->int {
         const auto* E=ResolveUnitToken(S); double Factor=1;
@@ -167,5 +221,6 @@ void WowLuaApi::RegisterUnitApi(lua_State* L)
 }
 #else
 void WowLuaApi::RegisterUnitApi(lua_State*) {}
+void WowLuaApi::UpdateCharacterStats(lua_State*) {}
 FWowEntity* WowLuaApi::ResolveUnitToken(lua_State*,int32) { return nullptr; }
 #endif

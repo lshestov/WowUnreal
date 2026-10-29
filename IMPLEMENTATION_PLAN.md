@@ -114,7 +114,8 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 - [ ] Remaining full FrameXML feature parity: specialized frame/region methods, uncovered macro conditions and combat events, broader addon compatibility, and unsupported legacy configuration controls. The seven requested interface stages below have their own verified scope. See [interface status](Docs/InterfaceStatus.md) for limitations.
   - [x] Wrath nonvisual animation timers: generic Animation objects, XML comments, OnLoad initialization, delays, pause/resume and reentrant callbacks. Verified: 147 regression checks and a 20-step rendered autologin/ReloadUI route with three inspected captures. Published revision and installed binary verified without local patches. See [UI animations](Docs/UiAnimations.md).
   - [x] Stock shadow-quality and fullscreen-glow controls apply to the renderer; horizontal slider XML/inheritance, native/XML ranges, valid defaults, old preferences, Apply/Cancel and ReloadUI are covered. Verified: 148 regression checks and a 46-step rendered route with five inspected captures. Clean published revision b563f37 and installed binary verified. See [video controls](Docs/RenderSettings.md).
-  - [ ] Combat UI: remove the duplicate legacy cast bar and replace fabricated spell damage/healing and mana-regeneration formulas with authoritative server fields.
+  - [?] Combat UI: stock-only cast overlay, authoritative spell damage/healing and mana regeneration, and live character-stat events. Verified: 151 regression checks and a 37-step rendered route with six inspected captures, including Frost Armor updating the open panel. See [combat interface](Docs/CombatInterface.md).
+  - [ ] Correct duplicate cast-failure notifications and the stock casting bar's interruption feedback.
 - [x] Profile native UI/game/render/GPU frame times, reduce recurring OnUpdate GC slices from 1024 to 64 while preserving pressure checks and the 128 MiB sandbox, and move routine frame/model/animation traces to Verbose. Verified with 25 regression tests and the same 22-step native route: median UI time improves from about 3.1 ms to 0.7–0.8 ms, frame p95 from about 15 ms to 4.3 ms, with stable 56.6 MiB Lua memory. A transient-allocation test checks callback delivery and bounded heap use independently of timing.
 - [x] Lua 5.1 VM (sandboxed, memory limited 128MB, instruction limited)
 - [x] FrameXML parser (19 frame types, anchors, strata, templates)
@@ -240,7 +241,7 @@ Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 - [ ] M2 light emitters (lanterns, spell glow)
 - [ ] WMO interior lighting from Light.dbc
 - [ ] Spell visuals (SpellVisual → SpellVisualKit → effect attachment chain)
-  - [?] Correct build-12340 DBC layouts and real spell/kit/effect references. Verified: 150 regression checks and a 16-step rendered Fireball route with three inspected captures. Also repaired a packaged projectile material lookup crash. See [spell visuals](Docs/SpellVisuals.md).
+  - [x] Correct build-12340 DBC layouts and real spell/kit/effect references. Verified: 150 regression checks and a 16-step rendered Fireball route with three inspected captures. Also repaired a packaged projectile material lookup crash. Published cdb9b92 and installed binary verified without local patches. See [spell visuals](Docs/SpellVisuals.md).
 - [ ] Custom terrain shader (reduce 256 draw calls/tile)
 - [ ] Shadow flickering fix on WMOs
 

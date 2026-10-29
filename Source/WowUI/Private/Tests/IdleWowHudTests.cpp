@@ -2225,6 +2225,38 @@ bool FHudTextureAnimations::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudAuthoritativeSpellStats,"WowUnreal.Hud.AuthoritativeSpellStats",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudAuthoritativeSpellStats::RunTest(const FString&)
+{
+    FHudFixture F; TStrongObjectPtr<UWowConnectionManager> Connection(NewObject<UWowConnectionManager>());
+    auto& E=Connection->PacketHandler.EntityManager; E.LocalPlayerGuid=1;
+    auto& P=E.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER);
+    P.SetField(UnitField::BYTES_0,1|(8u<<8)); P.SetField(UnitField::STAT3,999); P.SetField(UnitField::STAT4,888); P.SetField(UnitField::LEVEL,20);
+    for(int32 I=0;I<7;++I) { P.SetField(PlayerField::BASE+0x03FF+I,100+I*10); P.SetField(PlayerField::BASE+0x0406+I,uint32(-I*3)); }
+    P.SetField(PlayerField::BASE+0x03FF+4,5); P.SetField(PlayerField::BASE+0x0406+4,uint32(-25));
+    P.SetField(PlayerField::BASE+0x0414,73);
+    const auto FloatField=[&P](uint16 Index,float Value) {uint32 Bits=0; FMemory::Memcpy(&Bits,&Value,sizeof(Bits)); P.SetField(Index,Bits);};
+    FloatField(UnitField::BASE+0x0022,3.25f); FloatField(UnitField::BASE+0x0029,.75f);
+    F.Context.ConnectionManager=Connection.Get(); F.Context.EntityManager=&E;
+    TestTrue(TEXT("Register actual character-panel event contracts"),F.Lua.ExecuteString(TEXT("StatEvents={}; StatWatcher=CreateFrame('Frame'); for _,event in ipairs({'UNIT_STATS','PLAYER_DAMAGE_DONE_MODS','UNIT_RESISTANCES','COMBAT_RATING_UPDATE','UNIT_ATTACK_SPEED','UNIT_DAMAGE','UNIT_RANGED_ATTACK_POWER','UNIT_RANGEDDAMAGE','UNIT_LEVEL'}) do StatWatcher:RegisterEvent(event) end; StatWatcher:SetScript('OnEvent',function(self,event,unit) assert(event=='COMBAT_RATING_UPDATE' and unit==nil or unit=='player'); StatEvents[event]=(StatEvents[event] or 0)+1 end)")));
+    WowLuaApi::UpdateCharacterStats(F.Lua.GetState()); WowLuaApi::UpdateCharacterStats(F.Lua.GetState());
+    TestTrue(TEXT("Initial changes publish once and unchanged polling is silent"),F.Lua.ExecuteString(TEXT("assert(StatEvents.UNIT_STATS==1 and StatEvents.PLAYER_DAMAGE_DONE_MODS==1 and StatEvents.UNIT_RESISTANCES==1 and StatEvents.COMBAT_RATING_UPDATE==1)")));
+    TestTrue(TEXT("School-specific bonuses use signed authoritative fields rather than intellect"),F.Lua.ExecuteString(TEXT("for school=1,7 do local expected=100+(school-1)*7; if school==5 then expected=-20 end; assert(GetSpellBonusDamage(school)==expected) end; assert(GetSpellBonusHealing()==73)")));
+    TestTrue(TEXT("Mana regeneration retains both server rates and Wrath rounding behavior"),F.Lua.ExecuteString(TEXT("local normal,casting=GetManaRegen(); assert(math.abs(normal-3.251)<.00001 and math.abs(casting-.751)<.00001)")));
+    P.SetField(PlayerField::BASE+0x03FF+2,0); P.SetField(PlayerField::BASE+0x0406+2,0); P.SetField(PlayerField::BASE+0x0414,0);
+    WowLuaApi::UpdateCharacterStats(F.Lua.GetState());
+    TestTrue(TEXT("Spell changes invalidate the open panel without unrelated stat events"),F.Lua.ExecuteString(TEXT("assert(StatEvents.PLAYER_DAMAGE_DONE_MODS==2 and StatEvents.UNIT_STATS==1)")));
+    TestTrue(TEXT("Live field changes and zero bonuses are not replaced by fabricated stat formulas"),F.Lua.ExecuteString(TEXT("assert(GetSpellBonusDamage(3)==0 and GetSpellBonusHealing()==0); assert(not pcall(GetSpellBonusDamage,0) and not pcall(GetSpellBonusDamage,8) and not pcall(GetSpellBonusDamage))")));
+    P.SetField(UnitField::BYTES_0,1|(1u<<8)|(1u<<24));
+    WowLuaApi::UpdateCharacterStats(F.Lua.GetState());
+    TestTrue(TEXT("Non-mana resources do not display a mana-regeneration formula"),F.Lua.ExecuteString(TEXT("local a,b=GetManaRegen(); assert(a==0 and b==0)")));
+    E.LocalPlayerGuid=0;
+    WowLuaApi::UpdateCharacterStats(F.Lua.GetState());
+    TestTrue(TEXT("Changing identity clears the previous character snapshot"),F.Context.CharacterStatGuid==0 && F.Context.CharacterStatFields.IsEmpty());
+    TestTrue(TEXT("No active player has a complete zero-valued API contract"),F.Lua.ExecuteString(TEXT("assert(GetSpellBonusDamage(3)==0 and GetSpellBonusHealing()==0); local a,b=GetManaRegen(); assert(a==0 and b==0)")));
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudRenderSettings,"WowUnreal.Hud.RenderSettings",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FHudRenderSettings::RunTest(const FString&)
 {
