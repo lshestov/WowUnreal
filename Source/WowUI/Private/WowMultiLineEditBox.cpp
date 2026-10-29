@@ -3,6 +3,7 @@
 #include "Framework/Text/SlateTextLayout.h"
 #include "Framework/Text/SlateTextLayoutFactory.h"
 #include "WowChatEditMarshaller.h"
+#include "WowEditOffsets.h"
 #include "InputCoreTypes.h"
 #include "HAL/PlatformApplicationMisc.h"
 #include "Framework/Application/SlateApplication.h"
@@ -11,12 +12,6 @@
 
 namespace
 {
-int32 CharacterOffset(const FString& Raw,int32 Bytes)
-{
-    const FTCHARToUTF8 Utf8(*Raw); int32 At=FMath::Clamp(Bytes,0,Utf8.Length());
-    while(At>0 && At<Utf8.Length() && (uint8(Utf8.Get()[At])&0xc0)==0x80) --At;
-    return FUTF8ToTCHAR(Utf8.Get(),At).Length();
-}
 class SWowChatEditableText : public SMultiLineEditableText
 {
 public:
@@ -115,8 +110,11 @@ void UWowMultiLineEditBox::Highlight(int32 Begin,int32 End)
     if(bChatMarkup && ChatMarshaller)
     {
         const auto D=ChatMarshaller->CurrentDocument();
-        MyMultiLineEditableText->SelectText(FTextLocation(0,D.ModelOffset(CharacterOffset(D.Raw,Begin))),FTextLocation(0,D.ModelOffset(End<0?D.Raw.Len():CharacterOffset(D.Raw,End)))); return;
+        MyMultiLineEditableText->SelectText(FTextLocation(0,D.ModelOffset(WowEditOffsets::CharacterIndex(D.Raw,Begin))),FTextLocation(0,D.ModelOffset(End<0?D.Raw.Len():WowEditOffsets::CharacterIndex(D.Raw,End)))); return;
     }
+    const FString Content=LuaText();
+    const auto Location=[&](int32 At){int32 Line=0,Column=0; for(int32 I=0;I<At;++I) {if(Content[I]=='\n') {++Line; Column=0;} else ++Column;} return FTextLocation(Line,Column);};
+    MyMultiLineEditableText->SelectText(Location(WowEditOffsets::CharacterIndex(Content,Begin)),Location(End<0?Content.Len():WowEditOffsets::CharacterIndex(Content,End)));
 }
 bool UWowMultiLineEditBox::HasEditFocus() const
 {
@@ -128,14 +126,14 @@ int32 UWowMultiLineEditBox::CursorOffset() const
     if(ChatMarshaller) {const auto D=ChatMarshaller->CurrentDocument(); return FTCHARToUTF8(*D.Raw.Left(D.RawOffset(MyMultiLineEditableText->GetCursorLocation().GetOffset()))).Length();}
     const auto Position=MyMultiLineEditableText->GetCursorLocation(); const FString Content=LuaText();
     int32 Line=0,I=0; for(;I<Content.Len() && Line<Position.GetLineIndex();++I) if(Content[I]=='\n') ++Line;
-    return FMath::Clamp(I+Position.GetOffset(),0,Content.Len());
+    return WowEditOffsets::ByteIndex(Content,I+Position.GetOffset());
 }
 void UWowMultiLineEditBox::SetCursorOffset(int32 Offset)
 {
     TakeWidget(); if(!MyMultiLineEditableText) return;
     if(ChatMarshaller)
-    {const auto D=ChatMarshaller->CurrentDocument(); MyMultiLineEditableText->GoTo(FTextLocation(0,D.ModelOffset(CharacterOffset(D.Raw,Offset)))); return;}
-    const FString Content=LuaText(); Offset=FMath::Clamp(Offset,0,Content.Len());
+    {const auto D=ChatMarshaller->CurrentDocument(); MyMultiLineEditableText->GoTo(FTextLocation(0,D.ModelOffset(WowEditOffsets::CharacterIndex(D.Raw,Offset)))); return;}
+    const FString Content=LuaText(); Offset=WowEditOffsets::CharacterIndex(Content,Offset);
     int32 Line=0,Column=0; for(int32 I=0;I<Offset;++I) { if(Content[I]=='\n') { ++Line; Column=0; } else ++Column; }
     MyMultiLineEditableText->GoTo(FTextLocation(Line,Column));
 }

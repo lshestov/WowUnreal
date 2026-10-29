@@ -8,6 +8,7 @@
 #include "WowFrameManager.h"
 #include "WowFrameTypes.h"
 #include "WowMultiLineEditBox.h"
+#include "../WowEditOffsets.h"
 #include "WowFontManager.h"
 #include "Components/ProgressBar.h"
 #include "Components/Button.h"
@@ -239,6 +240,31 @@ static FORCENOINLINE bool InsertEditorText(lua_State* L,const char* Utf8)
         return true;
     }
     return false;
+}
+
+static FORCENOINLINE int32 EditorCursor(lua_State* L,bool CodePoints)
+{
+    if(auto* Edit=GetMultiLineEditor(L))
+    {const int32 Bytes=Edit->CursorOffset(); return CodePoints?WowEditOffsets::CodePoints(Edit->LuaText(),Bytes):Bytes;}
+    if(auto Edit=GetSingleLineEditor(L))
+    {
+        const FString Text=Edit->GetText().ToString();
+        const int32 Bytes=WowEditOffsets::ByteIndex(Text,Edit->GetSelection().LocationB.GetOffset());
+        return CodePoints?WowEditOffsets::CodePoints(Text,Bytes):Bytes;
+    }
+    return -1;
+}
+static int LF_GetCursorPosition(lua_State* L)
+{
+    const int32 Position=EditorCursor(L,false);
+    if(Position<0) return luaL_error(L,"Cursor queries require an edit box");
+    lua_pushinteger(L,Position); return 1;
+}
+static int LF_GetUTF8CursorPosition(lua_State* L)
+{
+    const int32 Position=EditorCursor(L,true);
+    if(Position<0) return luaL_error(L,"Cursor queries require an edit box");
+    lua_pushinteger(L,Position); return 1;
 }
 
 static bool TableRepresentsRegion(lua_State* L, int Idx = 1)
@@ -2563,18 +2589,19 @@ static int LF_HasFocus(lua_State* L)
 static int LF_HighlightText(lua_State* L)
 {
     const int32 Begin=luaL_optinteger(L,2,0),End=luaL_optinteger(L,3,-1);
-    if(auto* Multi=GetMultiLineEditor(L); Multi && Multi->IsChatEditor()) {Multi->Highlight(Begin,End); return 0;}
+    if(auto* Multi=GetMultiLineEditor(L)) {Multi->Highlight(Begin,End); return 0;}
     if(auto Edit=GetSingleLineEditor(L))
     {
-        const int32 Length=Edit->GetText().ToString().Len();
-        Edit->SelectText(FTextLocation(0,FMath::Clamp(Begin,0,Length)),FTextLocation(0,End<0?Length:FMath::Clamp(End,0,Length)));
+        const FString Text=Edit->GetText().ToString();
+        Edit->SelectText(FTextLocation(0,WowEditOffsets::CharacterIndex(Text,Begin)),FTextLocation(0,End<0?Text.Len():WowEditOffsets::CharacterIndex(Text,End)));
     }
     return 0;
 }
 static int LF_SetCursorPosition(lua_State* L)
 {
-    if(auto* Edit=GetMultiLineEditor(L)) Edit->SetCursorOffset(luaL_checkinteger(L,2));
-    else if(auto* Single=GetEditBoxWidgetForTable(L)) StaticCastSharedRef<SEditableTextBox>(Single->TakeWidget())->GoTo(FTextLocation(0,FMath::Clamp(int32(luaL_checkinteger(L,2)),0,Single->GetText().ToString().Len())));
+    const int32 Offset=luaL_checkinteger(L,2);
+    if(auto* Edit=GetMultiLineEditor(L)) Edit->SetCursorOffset(Offset);
+    else if(auto* Single=GetEditBoxWidgetForTable(L)) StaticCastSharedRef<SEditableTextBox>(Single->TakeWidget())->GoTo(FTextLocation(0,WowEditOffsets::CharacterIndex(Single->GetText().ToString(),Offset)));
     return 0;
 }
 static int LF_SetTextInsets(lua_State* L)
@@ -3341,7 +3368,8 @@ static const luaL_Reg FrameMethods[] =
 	{"HasFocus", LF_HasFocus},
 	{"HighlightText", LF_HighlightText},
 	{"SetCursorPosition", LF_SetCursorPosition},
-	{"GetCursorPosition", [](lua_State* L)->int { if(auto* Edit=GetMultiLineEditor(L)) { lua_pushinteger(L,Edit->CursorOffset()); return 1; } return luaL_error(L,"Cursor queries are not supported by this input widget"); }},
+    {"GetCursorPosition", LF_GetCursorPosition},
+    {"GetUTF8CursorPosition", LF_GetUTF8CursorPosition},
 	{"Insert", [](lua_State* L)->int {luaL_checktype(L,1,LUA_TTABLE); const char* Text=luaL_checkstring(L,2); if(InsertEditorText(L,Text)) return 0; return luaL_error(L,"Cursor insertion requires an edit box"); }},
 	{"GetNumLetters", [](lua_State* L)->int { LF_GetText(L); const FString Text=UTF8_TO_TCHAR(lua_tostring(L,-1)); lua_pushinteger(L,Text.Len()); return 1; }},
 	{"IsMultiLine", [](lua_State* L)->int { const auto* Edit=GetMultiLineEditor(L); lua_pushboolean(L,Edit && !Edit->IsChatEditor()); return 1; }},

@@ -1,4 +1,5 @@
 #include "LuaApiRegistry.h"
+#include "../WowEditOffsets.h"
 
 #if __has_include("lua.h")
 extern "C" {
@@ -675,6 +676,7 @@ void WowLuaApi::RegisterGlobals(lua_State* L)
     lua_register(L, "strchar", L_strchar);
     lua_register(L, "strfind", L_strfind);
     lua_register(L, "strlen", L_strlen);
+    lua_register(L, "strlenutf8", [](lua_State* S)->int { const char* Value=luaL_checkstring(S,1); lua_pushinteger(S,WowEditOffsets::CodePoints(UTF8_TO_TCHAR(Value))); return 1; });
     lua_register(L, "strlower", L_strlower);
     lua_register(L, "strupper", L_strupper);
     lua_register(L, "strsub", L_strsub);

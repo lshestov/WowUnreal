@@ -386,7 +386,7 @@ void FWowEventSystem::SetFrameScript(int64 Handle, const FString& ScriptName, co
 	//   OnEnter/OnLeave: function(self, motion)
 	//   OnMouseDown/Up: function(self, button)
 	//   OnValueChanged: function(self, value)
-	//   OnTextChanged: function(self)
+	//   OnTextChanged: function(self, userInput)
 	//   OnChar: function(self, text)
 	//   OnSizeChanged: function(self, w, h)
 	//   OnScrollRangeChanged: function(self, xrange, yrange)
@@ -411,6 +411,8 @@ void FWowEventSystem::SetFrameScript(int64 Handle, const FString& ScriptName, co
 		Params = TEXT("self, button, ...");
 	else if (ScriptName == TEXT("OnValueChanged"))
 		Params = TEXT("self, value, ...");
+	else if (ScriptName == TEXT("OnTextChanged"))
+		Params = TEXT("self, userInput, ...");
 	else if (ScriptName == TEXT("OnMouseWheel"))
 		Params = TEXT("self, delta, ...");
 	else if (ScriptName == TEXT("OnVerticalScroll") || ScriptName == TEXT("OnHorizontalScroll"))

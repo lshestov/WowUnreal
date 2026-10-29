@@ -123,7 +123,7 @@ The Windows Editor and packaged Development client are built from the same
 source tree. `WowUnreal.Hud`, `WowUnreal.UI`, `WowUnreal.Gameplay` and the related
 player, collision, equipment, lighting, rendering, traversal and performance
 suites cover both isolated controls and live protocol state. The interface
-regression set, including runtime animation and world parsers, contains 158 tests. Existing optional character texture-layout
+regression set, including runtime animation and world parsers, contains 159 tests. Existing optional character texture-layout
 DBC and test-fixture size warnings remain.
 
 Native gameplay probes exercise live server state and rendered UI at 1280x720
@@ -190,3 +190,9 @@ instead of the previous rounded RGB values and extra field; see
 [chat editing](ChatEditor.md). ReloadUI now retains the session's focus identity
 before FrameXML loads, rebuilding its original unit frame and retaining actual
 focus-cast routing; see [focus reload](FocusReload.md).
+
+Editor cursor/selection APIs now use UTF-8 byte positions for single-line, chat
+and multiline inputs. GetUTF8CursorPosition and strlenutf8 count code points,
+and compiled XML text-change handlers retain the named userInput flag. Original
+whisper autocompletion and Cyrillic editing in chat, macro bodies and macro
+names are verified through rendered native input; see [editor offsets](EditorOffsets.md).

@@ -18,6 +18,7 @@
 #include "../WowUiModelRenderer.h"
 #include "../WowModifiedClicks.h"
 #include "../WowChatEditMarshaller.h"
+#include "../WowEditOffsets.h"
 #include "Internationalization/Regex.h"
 #include "ReferenceSkeleton.h"
 #include "../WowMapUi.h"
@@ -42,6 +43,8 @@
 #include "Engine/Engine.h"
 #include "GameFramework/GameUserSettings.h"
 #include "HAL/IConsoleManager.h"
+#include "Fonts/CompositeFont.h"
+#include "Styling/CoreStyle.h"
 
 #if WITH_DEV_AUTOMATION_TESTS && __has_include("lua.h")
 extern "C" {
@@ -1990,8 +1993,64 @@ bool FHudSingleLineInsert::RunTest(const FString&)
         SingleInput:HighlightText(); SingleInput:Insert('Hello\r\nworld'); assert(SingleInput:GetText()=='Helloworld')
         SingleInput:SetText(''); SingleInput:Insert('|cffffffff|Hitem:123:0:0|h[Sample item]|h|r'); assert(SingleInput:GetText()=='|cffffffff|Hitem:123:0:0|h[Sample item]|h|r')
         SingleInput:SetText(''); SingleInput:Insert('Привет'); assert(SingleInput:GetText()=='Привет')
+        SingleInput:SetCursorPosition(#'При'); assert(SingleInput:GetCursorPosition()==#'При' and SingleInput:GetUTF8CursorPosition()==3)
+        SingleInput:HighlightText(#'При',#'П'); assert(SingleInput:GetCursorPosition()==#'П' and SingleInput:GetUTF8CursorPosition()==1)
+        SingleInput:Insert('X'); assert(SingleInput:GetText()=='ПXвет')
         assert(not pcall(function() UIParent:Insert('invalid') end))
+        assert(not pcall(function() UIParent:GetCursorPosition() end) and not pcall(function() UIParent:GetUTF8CursorPosition() end))
     )LUA")));
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudEditorOffsets,"WowUnreal.Hud.EditorOffsets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudEditorOffsets::RunTest(const FString&)
+{
+    FHudFixture F;
+    const FString Xml=TEXT("<Ui><EditBox name='Utf8InputEvents'><Size x='300' y='24'/><Scripts><OnTextChanged>assert(type(userInput)=='boolean'); InputUserFlag=userInput</OnTextChanged></Scripts></EditBox></Ui>");
+    const FTCHARToUTF8 XmlUtf8(*Xml); TArray<uint8> XmlBytes; XmlBytes.Append(reinterpret_cast<const uint8*>(XmlUtf8.Get()),XmlUtf8.Length());
+    const auto Parsed=FWowFrameXmlParser::ParseXml(XmlBytes,TEXT("InputEvents"));
+    if(!TestEqual(TEXT("Original-style XML input handler parses"),Parsed.Num(),1)) return false;
+    const int64 Events=F.Frames.CreateFrame(Parsed[0].FrameDef);
+    TestTrue(TEXT("Compiled XML names the userInput argument for typed edits"),F.Events.RunFrameScript(Events,TEXT("OnTextChanged"),{TEXT("1")}));
+    TestTrue(TEXT("Typed input reaches the original named parameter"),F.Lua.ExecuteString(TEXT("assert(InputUserFlag==true)")));
+    TestTrue(TEXT("Compiled XML distinguishes programmatic text updates"),F.Events.RunFrameScript(Events,TEXT("OnTextChanged"),{TEXT("0")}));
+    TestTrue(TEXT("Programmatic input reaches the same named parameter as false"),F.Lua.ExecuteString(TEXT("assert(InputUserFlag==false)")));
+    FWowFrameDef Def; Def.Name=TEXT("Utf8Notes"); Def.Parent=TEXT("UIParent"); Def.Type=EWowFrameType::EditBox; Def.bMultiLine=true; Def.Width=300; Def.Height=80;
+    F.Frames.CreateFrame(Def);
+    Def.Name=TEXT("Utf8Single"); Def.bMultiLine=false; F.Frames.CreateFrame(Def);
+#if PLATFORM_WINDOWS
+    // This test exercises a supplementary character in actual Slate controls;
+    // give its fixture an installed font containing that glyph.
+    const FString GlyphFont=FPaths::Combine(FPlatformMisc::GetEnvironmentVariable(TEXT("WINDIR")),TEXT("Fonts/seguiemj.ttf"));
+    if(FPaths::FileExists(GlyphFont))
+    {
+        const auto Composite=MakeShared<FCompositeFont>(); FTypefaceEntry Face(TEXT("Regular"));
+        Face.Font=FFontData(GlyphFont,EFontHinting::Default,EFontLoadingPolicy::LazyLoad); Composite->DefaultTypeface.Fonts.Add(Face);
+        Composite->FallbackTypeface.Typeface=FCoreStyle::GetDefaultFont()->DefaultTypeface;
+        const FSlateFontInfo Font(Composite,12,TEXT("Regular"));
+        auto* Notes=F.Frames.GetMultiLineEditBoxWidget(F.Frames.FindFrame(TEXT("Utf8Notes"))); auto Style=Notes->WidgetStyle; Style.SetFont(Font); Notes->SetWidgetStyle(Style);
+        auto* Single=F.Frames.GetEditBoxWidget(F.Frames.FindFrame(TEXT("Utf8Single"))); auto SingleStyle=Single->GetWidgetStyle(); SingleStyle.SetFont(Font); Single->SetWidgetStyle(SingleStyle);
+    }
+#endif
+    TestTrue(TEXT("Multiline byte offsets, code-point queries and selection survive line breaks and surrogate pairs"),F.Lua.ExecuteString(TEXT(R"LUA(
+        local face=string.char(240,159,152,128)
+        assert(strlenutf8('До'..face..'я')==4 and strlenutf8('')==0)
+        Utf8Notes:SetText('До\n'..face..'я'); Utf8Notes:SetCursorPosition(#'До\n'+#face)
+        assert(Utf8Notes:GetCursorPosition()==9 and Utf8Notes:GetUTF8CursorPosition()==4)
+        Utf8Notes:Insert('X'); assert(Utf8Notes:GetText()=='До\n'..face..'Xя' and Utf8Notes:GetCursorPosition()==10)
+        Utf8Notes:HighlightText(#'До\n',#'До\n'+#face); Utf8Notes:Insert('!')
+        assert(Utf8Notes:GetText()=='До\n!Xя' and Utf8Notes:GetCursorPosition()==6 and Utf8Notes:GetUTF8CursorPosition()==4)
+        Utf8Notes:HighlightText(); Utf8Notes:Insert('До\n'..face..'я'); Utf8Notes:SetCursorPosition(7)
+        assert(Utf8Notes:GetCursorPosition()==5 and Utf8Notes:GetUTF8CursorPosition()==3)
+        Utf8Single:SetText('До'..face..'я'); Utf8Single:SetCursorPosition(8)
+        assert(Utf8Single:GetCursorPosition()==8 and Utf8Single:GetUTF8CursorPosition()==3)
+        Utf8Single:HighlightText(8,4); assert(Utf8Single:GetCursorPosition()==4 and Utf8Single:GetUTF8CursorPosition()==2)
+        Utf8Single:Insert('X'); assert(Utf8Single:GetText()=='ДоXя')
+        Utf8Single:SetCursorPosition(1); assert(Utf8Single:GetCursorPosition()==0)
+    )LUA")));
+    const FString Text=TEXT("До\n")+FString::Chr(0xd83d)+FString::Chr(0xde00)+TEXT("я");
+    TestEqual(TEXT("A byte offset inside a four-byte character snaps before it"),WowEditOffsets::CharacterIndex(Text,7),3);
+    TestEqual(TEXT("A Slate offset inside a surrogate pair cannot produce a split UTF-8 sequence"),WowEditOffsets::ByteIndex(Text,4),5);
+    return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudChatEditCodec,"WowUnreal.Hud.ChatEditCodec",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
@@ -2065,7 +2124,7 @@ bool FHudRichChatEditing::RunTest(const FString&)
     Check(TEXT("A single backspace removes the complete hyperlink"),TEXT("assert(Edit:GetText()=='', 'after backspace: '..Edit:GetText())"));
     Check(TEXT("Insert preserves a typed prefix and suffix"),TEXT("Edit:SetText('ab'); Edit:SetCursorPosition(1); Edit:Insert(Link); assert(Edit:GetText()=='a'..Link..'b'); assert(Edit:GetCursorPosition()==1+#Link)"));
     TestEqual(TEXT("Mixed raw text and link have the expected visible label"),Edit->DisplayText(),FString(TEXT("a[Sample item]b")));
-    Check(TEXT("UTF-8 cursor positions stay correct with Cyrillic prefixes"),TEXT("Edit:SetText('До '..Link..' после'); Edit:SetCursorPosition(#'До '); Edit:Insert('X'); assert(Edit:GetText()=='До X'..Link..' после' and Edit:GetCursorPosition()==#'До X'); Edit:HighlightText(#'До X',#'До X'+#Link)"));
+    Check(TEXT("UTF-8 cursor positions stay correct with Cyrillic prefixes"),TEXT("Edit:SetText('До '..Link..' после'); Edit:SetCursorPosition(#'До '); assert(Edit:GetUTF8CursorPosition()==3); Edit:Insert('X'); assert(Edit:GetText()=='До X'..Link..' после' and Edit:GetCursorPosition()==#'До X' and Edit:GetUTF8CursorPosition()==4); Edit:HighlightText(#'До X',#'До X'+#Link)"));
     TestEqual(TEXT("Copying an atomic selection retains the full wire link"),Edit->SelectedRawText(),FString(TEXT("|cffa335ee|Hitem:123:5:6:7:8:9:10:11|h[Sample item]|h|r")));
 
     Check(TEXT("Enter and Escape use original frame handlers"),TEXT("Enters=0; Escapes=0; Edit:SetScript('OnEnterPressed',function() Enters=Enters+1 end); Edit:SetScript('OnEscapePressed',function() Escapes=Escapes+1 end); Edit:Insert('x\\ny'); assert(Enters==0, 'unexpected enter '..tostring(Enters)..' text '..Edit:GetText())"));
