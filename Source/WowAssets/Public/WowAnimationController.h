@@ -227,6 +227,8 @@ public:
 
     /** Get all animations (ordered by M2 track index) */
     const TArray<TObjectPtr<UAnimSequence>>& GetAllAnimations() const { return AllAnimations; }
+    USkeletalMeshComponent* GetModelMesh() const {return MeshComponent;}
+    TSharedPtr<const FM2Data> GetRuntimeModel() const {return RuntimeModel;}
 
     /** Set the animation ID mapping (M2 animID → track index) */
     void SetAnimationIdMap(const TMap<int32, int32>& InMap);

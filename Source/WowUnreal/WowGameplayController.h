@@ -13,6 +13,7 @@ class AWowWorldManager;
 class UWowDeathManager;
 class UWowCursorManager;
 class UWowTooltipManager;
+class UWowM2EmitterComponent;
 class FMpqManager;
 class FWowAssetCache;
 class SWowCombatLog;
@@ -497,7 +498,11 @@ private:
     int64 PressedRightMouseFrameHandle = -1;
 
     void SpawnCastGlowEffects(uint64 CasterGuid, uint32 SpellId);
-    void RemoveCastGlowEffects();
+    void RemoveCastGlowEffects(uint64 CasterGuid=0);
+    bool StartAuthoredCastEffects(uint64 CasterGuid,uint32 SpellId);
+    void StopAuthoredCastEffects(uint64 CasterGuid,uint32 SpellId,uint8 Counter);
+    struct FAuthoredCast {uint32 Spell=0; uint8 Counter=0; TArray<TWeakObjectPtr<UWowM2EmitterComponent>> Components;};
+    TMap<uint64,FAuthoredCast> AuthoredCastEffects;
 
     /** Initialize the audio system with the world manager */
     void InitializeAudioSystem(class AWowWorldManager* WorldManager);

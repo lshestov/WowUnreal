@@ -34,6 +34,10 @@
 #include "WowDeathManager.h"
 #include "WowCursorManager.h"
 #include "WowSpellMissile.h"
+#include "WowM2EmitterComponent.h"
+#include "WowDoodadManager.h"
+#include "WowEquipmentManager.h"
+#include "Formats/M2Types.h"
 #include "Formats/Dbc/DbcStore.h"
 #include "WowTooltipManager.h"
 #include "UI/SWowActionBar.h"
@@ -2397,6 +2401,7 @@ void AWowGameplayController::OnSpellGo(const FWowSpellLaunch& Launch)
 {
 	if (!ConnectionManager) return;
 	const uint64 CasterGuid=Launch.CasterGuid; const uint32 SpellId=Launch.SpellId;
+	StopAuthoredCastEffects(CasterGuid,SpellId,Launch.Counter);
 
 	const uint64 LocalGuid = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
 
@@ -2427,7 +2432,7 @@ void AWowGameplayController::OnSpellGo(const FWowSpellLaunch& Launch)
 		}
 
 		// Remove hand glow effects
-		RemoveCastGlowEffects();
+		RemoveCastGlowEffects(CasterGuid);
 
 		// Fire spell completion events
 		FireUIEvent(TEXT("SPELL_UPDATE_COOLDOWN"));
@@ -2450,9 +2455,8 @@ void AWowGameplayController::OnSpellGo(const FWowSpellLaunch& Launch)
 
 		UE_LOG(LogWowGameplay, Log, TEXT("Entity %llu completed spell %u"), CasterGuid, SpellId);
 
-		// Remove hand glow effects for other entities - they use the same global array
-		// This is okay because only one entity can be casting at a time in our system
-		RemoveCastGlowEffects();
+		// Clear only the completing caster's fallback effects.
+		RemoveCastGlowEffects(CasterGuid);
 	}
 
 	// Check if spell should spawn a missile
@@ -3981,6 +3985,7 @@ void AWowGameplayController::OnCreatureNameReceived(uint32 Entry, const FString&
 void AWowGameplayController::OnSpellFailure(uint64 CasterGuid, uint32 SpellId, uint8 FailureReason)
 {
 	if (!ConnectionManager) return;
+	if(const auto* Failure=ConnectionManager->PacketHandler.CastFailures.Find(CasterGuid)) StopAuthoredCastEffects(CasterGuid,SpellId,Failure->Counter);
 
 	const uint64 LocalGuid = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
 
@@ -4011,7 +4016,7 @@ void AWowGameplayController::OnSpellFailure(uint64 CasterGuid, uint32 SpellId, u
 		}
 
 		// Remove hand glow effects
-		RemoveCastGlowEffects();
+		RemoveCastGlowEffects(CasterGuid);
 
 		// Fire spell failure event
 
@@ -4035,7 +4040,7 @@ void AWowGameplayController::OnSpellFailure(uint64 CasterGuid, uint32 SpellId, u
 		UE_LOG(LogWowGameplay, Log, TEXT("Entity %llu spell %u failed"), CasterGuid, SpellId);
 
 		// Remove hand glow effects for other entities
-		RemoveCastGlowEffects();
+		RemoveCastGlowEffects(CasterGuid);
 	}
 }
 
@@ -5068,10 +5073,58 @@ FLinearColor AWowGameplayController::GetSpellSchoolColor(uint32 SchoolMask) cons
 		return FLinearColor(1.0f, 1.0f, 1.0f); // white
 }
 
+void AWowGameplayController::StopAuthoredCastEffects(uint64 CasterGuid,uint32 SpellId,uint8 Counter)
+{
+    auto* State=AuthoredCastEffects.Find(CasterGuid); if(!State || (SpellId && (State->Spell!=SpellId || State->Counter!=Counter))) return;
+    for(const auto& Weak:State->Components) if(auto* Effect=Weak.Get()) Effect->StopEmitting();
+    AuthoredCastEffects.Remove(CasterGuid);
+}
+bool AWowGameplayController::StartAuthoredCastEffects(uint64 CasterGuid,uint32 SpellId)
+{
+    if(!ConnectionManager) return false;
+    const auto* CastState=ConnectionManager->PacketHandler.Casts.Find(CasterGuid);
+    if(!CastState || CastState->Spell!=SpellId || CastState->Channel) return false;
+    const uint8 Counter=CastState->Counter; const float Duration=FMath::Max(.01f,float(CastState->Ends-FPlatformTime::Seconds())+.25f);
+    StopAuthoredCastEffects(CasterGuid,0,0); CacheWorldResources();
+    for(auto It=AuthoredCastEffects.CreateIterator();It;++It)
+        if(!It.Value().Components.ContainsByPredicate([](const auto& C){return C.IsValid();})) It.RemoveCurrent();
+    if(!CachedMpq || !CachedAssetCache || AuthoredCastEffects.Num()>=32) return false;
+    AActor* Actor=CasterGuid==ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid?GetPawn():SpawnedEntityActors.FindRef(CasterGuid).Get();
+    if(!IsValid(Actor)) return false;
+    auto* Animation=FWowCharacterBuilder::GetAnimationController(Actor);
+    if(auto* PlayerPawn=Cast<AWowPlayerCharacter>(Actor); PlayerPawn && PlayerPawn->AnimationController) Animation=PlayerPawn->AnimationController;
+    if(!Animation) return false;
+    auto* Mesh=Animation->GetModelMesh(); const auto CharacterModel=Animation->GetRuntimeModel();
+    if(!Mesh || !CharacterModel) return false;
+    const auto& D=FDbcStore::Get(); const auto* Spell=D.Spells().GetById(SpellId); const auto* Visual=Spell?D.SpellVisuals().GetById(Spell->SpellVisual[0]):nullptr;
+    const auto* Kit=Visual?D.SpellVisualKits().GetById(Visual->PrecastKit):nullptr; if(!Kit) return false;
+    FAuthoredCast State; State.Spell=SpellId; State.Counter=Counter;
+    struct FSlot {uint32 Attachment,Effect;};
+    const FSlot Slots[]={{20,Kit->HeadEffectID},{34,Kit->ChestEffectID},{19,Kit->BaseEffectID},{21,Kit->LeftHandEffectID},{22,Kit->RightHandEffectID},{17,Kit->BreathEffectID},{23,Kit->SpecialEffectIDs[0]},{24,Kit->SpecialEffectIDs[1]},{25,Kit->SpecialEffectIDs[2]}};
+    for(const auto& Slot:Slots)
+    {
+        if(!Slot.Effect) continue; const auto* Effect=D.SpellVisualEffectNames().GetById(Slot.Effect); if(!Effect) continue;
+        const auto* Attachment=CharacterModel->Attachments.FindByPredicate([&](const auto& A){return A.Id==Slot.Attachment;});
+        if(!Attachment || !CharacterModel->Bones.IsValidIndex(Attachment->Bone)) continue;
+        const FName Bone=FWowSkeletalMeshBuilder::GetBoneName(Attachment->Bone); if(Mesh->GetBoneIndex(Bone)<0) continue;
+        const auto Model=FWowDoodadManager::GetOrParseM2(Effect->FilePath,CachedMpq); if(!Model || Model->ParticleEmitters.IsEmpty()) continue;
+        auto* Component=NewObject<UWowM2EmitterComponent>(Actor); Actor->AddInstanceComponent(Component); Component->SetupAttachment(Mesh,Bone);
+        Component->SetRelativeLocation(FWowEquipmentManager::GetAttachmentOffset(*CharacterModel,static_cast<FWowEquipmentManager::EAttachmentPoint>(Slot.Attachment)));
+        Component->SetRelativeScale3D(FVector(FMath::IsFinite(Effect->Scale)?FMath::Clamp(Effect->Scale,.01f,10.f):1.f));
+        Component->ComponentTags.Add(*Effect->FilePath); Component->RegisterComponent();
+        if(!Component->Initialize(Model,CachedMpq,CachedAssetCache,Duration)) {Component->DestroyComponent(); continue;}
+        State.Components.Add(Component);
+        UE_LOG(LogWowGameplay,Log,TEXT("Authored precast spell=%u caster=%llu counter=%u attachment=%u bone=%s model=%s emitters=%d"),SpellId,CasterGuid,Counter,Slot.Attachment,*Bone.ToString(),*Effect->FilePath,Component->GetEmitterCount());
+    }
+    if(State.Components.IsEmpty()) return false;
+    AuthoredCastEffects.Add(CasterGuid,MoveTemp(State)); RemoveCastGlowEffects(CasterGuid); return true;
+}
+
 void AWowGameplayController::SpawnCastGlowEffects(uint64 CasterGuid, uint32 SpellId)
 {
+	if(StartAuthoredCastEffects(CasterGuid,SpellId)) return;
 	// First clear any existing effects
-	RemoveCastGlowEffects();
+	RemoveCastGlowEffects(CasterGuid);
 
 	if (!ConnectionManager) return;
 
@@ -5202,6 +5255,7 @@ void AWowGameplayController::SpawnCastGlowEffects(uint64 CasterGuid, uint32 Spel
 
 			// Store in our active effects array
 			ActiveCastEffects.Add(LightComp);
+			LightComp->ComponentTags.Add(*FString::Printf(TEXT("cast:%llu"),CasterGuid));
 		}
 	}
 
@@ -5209,19 +5263,15 @@ void AWowGameplayController::SpawnCastGlowEffects(uint64 CasterGuid, uint32 Spel
 		ActiveCastEffects.Num(), SpellId, CasterGuid);
 }
 
-void AWowGameplayController::RemoveCastGlowEffects()
+void AWowGameplayController::RemoveCastGlowEffects(uint64 CasterGuid)
 {
-	// Destroy all active cast effect components
-	for (UPointLightComponent* LightComp : ActiveCastEffects)
+	const FName Tag=*FString::Printf(TEXT("cast:%llu"),CasterGuid);
+	for(int32 I=ActiveCastEffects.Num()-1;I>=0;--I)
 	{
-		if (IsValid(LightComp))
-		{
-			LightComp->DestroyComponent();
-		}
+		auto* Light=ActiveCastEffects[I].Get();
+		if(!IsValid(Light) || !CasterGuid || Light->ComponentTags.Contains(Tag))
+		{if(IsValid(Light)) Light->DestroyComponent(); ActiveCastEffects.RemoveAtSwap(I,1,EAllowShrinking::No);}
 	}
-
-	// Clear the array
-	ActiveCastEffects.Empty();
 }
 
 void AWowGameplayController::CreateSpellbook()

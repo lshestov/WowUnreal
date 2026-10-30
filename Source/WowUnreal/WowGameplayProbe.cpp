@@ -12,6 +12,8 @@
 #include "WowSkyManager.h"
 #include "WowSpellMissile.h"
 #include "WowPlayerCharacter.h"
+#include "WowM2EmitterComponent.h"
+#include "ProceduralMeshComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
@@ -438,7 +440,8 @@ struct FWowGameplayProbe
             auto* Pawn=Cast<AWowPlayerCharacter>(C.GetPawn()); const auto* Actor=C.SpawnedEntityActors.Find(C.TargetGuid);
             if(!Pawn || !Pawn->CameraBoom || !Actor || !IsValid(*Actor)) {Failure=TEXT("Camera framing requires a rendered target and player"); Finish(C,false); return;}
             const auto Direction=(*Actor)->GetActorLocation()-Pawn->GetActorLocation();
-            C.SetControlRotation(FRotator(-15,Direction.Rotation().Yaw,0)); Pawn->CameraBoom->TargetArmLength=1000; Done=true;
+            double Distance=1000; Step->TryGetNumberField(TEXT("distance"),Distance);
+            C.SetControlRotation(FRotator(-15,Direction.Rotation().Yaw,0)); Pawn->CameraBoom->TargetArmLength=FMath::Clamp(Distance,200.,2000.); Done=true;
         }
         else if(Op==TEXT("wait_spell_missile"))
         {
@@ -451,6 +454,78 @@ struct FWowGameplayProbe
                 const auto State=MakeShared<FJsonObject>(); State->SetStringField(TEXT("targetGuid"),FString::Printf(TEXT("%llu"),Missile->GetTargetGuid()));
                 State->SetStringField(TEXT("selectedGuid"),FString::Printf(TEXT("%llu"),C.TargetGuid)); State->SetNumberField(TEXT("spell"),Spell);
                 State->SetNumberField(TEXT("travelSeconds"),Missile->GetTravelTime()); Inspections->SetObjectField(TEXT("spellMissile"),State); Done=true; break;
+            }
+        }
+        else if(Op==TEXT("wait_cast_particles"))
+        {
+            const auto* State=C.AuthoredCastEffects.Find(Handler.EntityManager.LocalPlayerGuid);
+            if(State && State->Spell==uint32(Step->GetIntegerField(TEXT("spell"))))
+            {
+                int32 Count=0,Particles=0; TArray<TSharedPtr<FJsonValue>> Rows;
+                double MinimumTextures=0; Step->TryGetNumberField(TEXT("minTextures"),MinimumTextures); bool TexturesValid=true;
+                for(const auto& Weak:State->Components) if(auto* Effect=Weak.Get())
+                {
+                    ++Count; Particles+=Effect->GetParticleCount(); const auto Row=MakeShared<FJsonObject>(); Row->SetStringField(TEXT("bone"),Effect->GetAttachSocketName().ToString());
+                    Row->SetNumberField(TEXT("emitters"),Effect->GetEmitterCount()); Row->SetNumberField(TEXT("particles"),Effect->GetParticleCount());
+                    Row->SetNumberField(TEXT("renderCpuMs"),Effect->GetRenderMilliseconds());
+                    Row->SetStringField(TEXT("location"),Effect->GetComponentLocation().ToString());
+                    TArray<USceneComponent*> Children; Effect->GetChildrenComponents(false,Children);
+                    for(auto* Child:Children) if(auto* Mesh=Cast<UProceduralMeshComponent>(Child))
+                    {
+                        TSet<UTexture*> UniqueTextures;
+                        for(int32 I=0;I<Mesh->GetNumMaterials();++I) if(auto* Material=Mesh->GetMaterial(I))
+                        {
+                            UTexture* Texture=nullptr; if(Material->GetTextureParameterValue(FMaterialParameterInfo(TEXT("ParticleTexture")),Texture) && Texture) UniqueTextures.Add(Texture);
+                        }
+                        Row->SetNumberField(TEXT("distinctTextures"),UniqueTextures.Num()); TexturesValid&=UniqueTextures.Num()>=MinimumTextures;
+                        Row->SetBoolField(TEXT("visible"),Mesh->IsVisible() && !Mesh->bHiddenInGame);
+                        Row->SetBoolField(TEXT("rendered"),Mesh->WasRecentlyRendered(.5f));
+                        Row->SetStringField(TEXT("bounds"),Mesh->Bounds.ToString());
+                        if(auto* Material=Mesh->GetMaterial(0))
+                        {
+                            Row->SetStringField(TEXT("material"),Material->GetPathName()); UTexture* Texture=nullptr;
+                            if(Material->GetTextureParameterValue(FMaterialParameterInfo(TEXT("ParticleTexture")),Texture) && Texture) Row->SetStringField(TEXT("texture"),Texture->GetPathName());
+                        }
+                        if(const auto* Section=Mesh->GetProcMeshSection(0); Section && Section->ProcVertexBuffer.Num())
+                        {
+                            const auto& Vertex=Section->ProcVertexBuffer[0];
+                            Row->SetStringField(TEXT("vertex"),Mesh->GetComponentTransform().TransformPosition(FVector(Vertex.Position)).ToString());
+                            Row->SetStringField(TEXT("color"),Vertex.Color.ToString());
+                            Row->SetStringField(TEXT("uv"),Vertex.UV0.ToString());
+                        }
+                    }
+                    if(Effect->ComponentTags.Num()) Row->SetStringField(TEXT("model"),Effect->ComponentTags[0].ToString()); Rows.Add(MakeShared<FJsonValueObject>(Row));
+                }
+                double Minimum=12; Step->TryGetNumberField(TEXT("minParticles"),Minimum);
+                if(Count>=2 && Particles>=Minimum && TexturesValid) {Inspections->SetArrayField(TEXT("castParticles"),Rows); Done=true;}
+            }
+        }
+        else if(Op==TEXT("particle_debug_material"))
+        {
+            FString Mode; Step->TryGetStringField(TEXT("mode"),Mode);
+            if(const auto* State=C.AuthoredCastEffects.Find(Handler.EntityManager.LocalPlayerGuid))
+                for(const auto& Weak:State->Components) if(auto* Effect=Weak.Get())
+                {
+                    TArray<USceneComponent*> Children; Effect->GetChildrenComponents(false,Children);
+                    for(auto* Child:Children) if(auto* Mesh=Cast<UProceduralMeshComponent>(Child))
+                        for(int32 I=0;I<Mesh->GetNumMaterials();++I)
+                        {
+                            if(Mode==TEXT("white"))
+                            {
+                                if(auto* Material=Cast<UMaterialInstanceDynamic>(Mesh->GetMaterial(I)))
+                                {Material->SetTextureParameterValue(TEXT("ParticleTexture"),LoadObject<UTexture>(nullptr,TEXT("/Engine/EngineResources/WhiteSquareTexture"))); Material->SetScalarParameterValue(TEXT("IgnoreAlpha"),1);}
+                            }
+                            else Mesh->SetMaterial(I,LoadObject<UMaterialInterface>(nullptr,TEXT("/Engine/BasicShapes/BasicShapeMaterial")));
+                        }
+                }
+            Done=true;
+        }
+        else if(Op==TEXT("wait_no_cast_particles"))
+        {
+            if(APawn* Pawn=C.GetPawn())
+            {
+                TArray<UWowM2EmitterComponent*> Components; Pawn->GetComponents(Components);
+                Done=!C.AuthoredCastEffects.Contains(Handler.EntityManager.LocalPlayerGuid) && !Components.ContainsByPredicate([](const auto* Effect){return IsValid(Effect);});
             }
         }
         else if (Op==TEXT("jump")) { if (auto* Character=Cast<ACharacter>(C.GetPawn())) { bJumpRequested=true; bJumpObserved=false; Character->Jump(); Done=true; } }

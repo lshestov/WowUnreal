@@ -9,6 +9,8 @@
 #include "WowDoodadManager.h"
 #include "Formats/M2Parser.h"
 #include "Formats/M2Types.h"
+#include "Formats/BlpParser.h"
+#include "Materials/Material.h"
 #include <limits>
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -92,6 +94,38 @@ bool FM2ParticleLayout::RunTest(const FString&)
     Bad=F; Bad.Put<uint32>(296,257); TestTrue(TEXT("Emitter allocation count is bounded"),FM2Parser::Parse(Bad.Bytes,{}).ParticleEmitters.IsEmpty());
     Bad=F; Bad.Put<uint32>(300,0xfffffff0u); TestTrue(TEXT("Record offset arithmetic cannot wrap"),FM2Parser::Parse(Bad.Bytes,{}).ParticleEmitters.IsEmpty());
     Bad=F; Bad.Put<uint32>(8,8); Bad.Put<uint32>(12,0xfffffffcu); TestTrue(TEXT("Model string offset arithmetic cannot wrap or scan past its bounds"),FM2Parser::Parse(Bad.Bytes,{}).bIsValid);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FM2AuthoredSpriteAssets,"WowUnreal.Gameplay.M2AuthoredSpriteAssets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FM2AuthoredSpriteAssets::RunTest(const FString&)
+{
+    auto* Alpha=LoadObject<UMaterial>(nullptr,TEXT("/Game/Materials/M_WowParticleAlpha"));
+    auto* Add=LoadObject<UMaterial>(nullptr,TEXT("/Game/Materials/M_WowParticleAdd"));
+    if(!TestTrue(TEXT("Particle parents retain the authored alpha/add blend modes"),Alpha && Add && Alpha->BlendMode==BLEND_Translucent && Add->BlendMode==BLEND_Additive && Alpha->MaterialDomain==MD_Surface && Add->MaterialDomain==MD_Surface)) return false;
+    FString Path; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false;
+    FMpqManager Mpq; if(!Mpq.Initialize(Path)) return false;
+    const auto Character=FWowDoodadManager::GetOrParseM2(TEXT("Character\\Human\\Male\\HumanMale.m2"),&Mpq);
+    if(!TestTrue(TEXT("The actual player model supplies both spell hand attachments"),Character && Character->bIsValid)) return false;
+    for(uint32 Id:{21u,22u})
+    {
+        const auto* Attachment=Character->Attachments.FindByPredicate([&](const auto& A){return A.Id==Id;});
+        TestTrue(TEXT("Spell hand attachment references a real animated bone"),Attachment && Character->Bones.IsValidIndex(Attachment->Bone));
+    }
+    for(const TCHAR* Name:{TEXT("Spells\\Fire_Precast_Hand.m2"),TEXT("Spells\\Fire_Cast_Hand.m2")})
+    {
+        const auto Model=FWowDoodadManager::GetOrParseM2(Name,&Mpq);
+        if(!TestTrue(TEXT("Original hand effect parses as an emitter-only model"),Model && Model->bIsValid && Model->Vertices.IsEmpty())) return false;
+        int32 Supported=0;
+        for(const auto& E:Model->ParticleEmitters)
+        {
+            if((E.EmitterType!=1 && E.EmitterType!=2) || !(E.Flags&0x20000) || E.BlendMode<2 || E.BlendMode>4 || !Model->TexturePaths.IsValidIndex(E.Texture)) continue;
+            ++Supported; TArray<uint8> Bytes;
+            const bool Read=Mpq.ReadFile(Model->TexturePaths[E.Texture],Bytes);
+            TestTrue(TEXT("Every supported head sprite reads its original BLP texture"),Read && FBlpParser::Parse(Bytes).bIsValid);
+        }
+        TestTrue(TEXT("Each fire phase provides multiple supported head emitters"),Supported>=3);
+    }
     return true;
 }
 

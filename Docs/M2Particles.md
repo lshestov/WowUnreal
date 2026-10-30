@@ -31,8 +31,9 @@ truncation/offset limits, invalid numeric data and bounded model strings. The
 real MPQ test loads Fire_Cast_Hand, verifies its three emitters/textures, original
 colour/alpha/scale keys and scalar tracks, and resolves every texture path.
 
-This supplies data to the forthcoming authored sprite/effect renderer. It does
-not replace the existing sphere/glow approximation or establish visual parity.
+The separate [precast head-sprite renderer](M2HandEffects.md) now uses these
+tracks and textures on animated character attachments. The data parser alone
+does not replace the remaining sphere/glow approximation or establish visual parity.
 No Blizzard models or textures are copied into the repository.
 
 Verified: Windows Editor and packaged Development builds; all 163 regression
