@@ -258,6 +258,8 @@ void FWowFrameManager::SetFrameVisible(int64 Handle, bool bVisible)
 	TMap<int64,bool> WasDrawn;
 	for(const int64 Child:Descendants) WasDrawn.Add(Child,IsFrameHierarchyShown(Child));
 	Entry->Def.bHidden = !bVisible;
+	// Hidden branches are measured lazily; showing one must refresh its slots.
+	FrameRects.Reset(); bLayoutDirty=true;
 
 	for(const int64 Child:Descendants) UpdateFrameVisibility(Child);
 	if(EventSystem) for(const int64 Child:Descendants)

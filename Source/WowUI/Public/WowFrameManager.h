@@ -251,6 +251,7 @@ public:
 
 	/** Recursively invalidate cached FrameRects for a frame and all descendants */
 	void InvalidateFrameRectsRecursive(int64 Handle);
+    void InvalidateRegionLayout(const FString& Name);
 
 	/** Find the topmost interactive frame under a screen position (pixels).
 	 *  Returns frame handle or -1 if no interactive frame found. */

@@ -211,6 +211,18 @@ FVector2D FWowFrameManager::GetRegionSize(const FString& Name)
     return FVector2D(R.W,R.H)/FMath::Max(Scale,.001f);
 }
 
+void FWowFrameManager::InvalidateRegionLayout(const FString& Name)
+{
+    // A leaf texture such as CastingBarFrameSpark cannot move any frame.
+    // Update its slot directly instead of measuring the entire addon tree.
+    const auto* Owner=GetFrameDef(FindFrame(RegionOwners.FindRef(Name)));
+    bool Leaf=!bLayoutDirty && Owner && (Owner->bSetAllPoints || !Owner->Anchors.IsEmpty());
+    if(Leaf) for(const auto& Pair:Frames) if(Pair.Value.Def.Anchors.ContainsByPredicate([&](const auto& A){return A.RelativeTo==Name;})) {Leaf=false; break;}
+    if(Leaf) for(const auto& Region:RegionLayouts) if(Region.Anchors.ContainsByPredicate([&](const auto& A){return A.RelativeTo==Name;})) {Leaf=false; break;}
+    if(Leaf) {FrameRects.Remove(Name); GetFrameRect(Name);}
+    else {FrameRects.Empty(); bLayoutDirty=true;}
+}
+
 void FWowFrameManager::SetRegionSize(const FString& Name,float Width,float Height)
 {
     UWidget* Widget=GetNamedTexture(Name); if(!Widget) Widget=GetNamedFontString(Name);
@@ -218,7 +230,7 @@ void FWowFrameManager::SetRegionSize(const FString& Name,float Width,float Heigh
     {
         if((Width<0 || FMath::IsNearlyEqual(Layout.Width,Width)) && (Height<0 || FMath::IsNearlyEqual(Layout.Height,Height))) return;
         if(Width>=0) Layout.Width=Width; if(Height>=0) Layout.Height=Height;
-        FrameRects.Empty(); bLayoutDirty=true; return;
+        InvalidateRegionLayout(Name); return;
     }
 }
 
@@ -240,7 +252,7 @@ void FWowFrameManager::SetRegionPoint(const FString& Name,const FWowAnchor& Anch
             if(auto* Existing=Layout.Anchors.FindByPredicate([&](const auto& A){return A.Point==Anchor.Point;})) *Existing=Anchor;
             else Layout.Anchors.Add(Anchor);
         }
-        FrameRects.Empty(); bLayoutDirty=true; return;
+        InvalidateRegionLayout(Name); return;
     }
 }
 
@@ -351,11 +363,14 @@ void FWowFrameManager::RefreshLayout()
     {
     FrameRects.Empty(); FrameRects.Add(TEXT("UIParent"),Root);
     for (const auto Handle : Handles)
-        if (const auto* Entry = Frames.Find(Handle); Entry && Entry->Widget.IsValid())
+        if (const auto* Entry = Frames.Find(Handle); Entry && Entry->Widget.IsValid() && !Entry->Def.bVirtual && IsFrameHierarchyShown(Handle))
             ApplyAnchors(Entry->Widget.Get(), Entry->Def);
     for(const auto& Slider:SliderWidgets) UpdateSliderThumb(Slider.Key);
     for (const auto& Region : RegionLayouts)
     {
+        // Hidden addon panels can contain thousands of paragraphs. Measure
+        // them lazily if a visible anchor actually references one, or on Show.
+        if(!Region.Widget.IsValid() || !IsFrameDrawn(FindFrame(Region.Owner)) || Region.Widget->GetVisibility()==ESlateVisibility::Collapsed) continue;
         if(const auto* OwnerDef=GetFrameDef(FindFrame(Region.Owner)); OwnerDef && OwnerDef->Type==EWowFrameType::GameTooltip) continue;
         const auto Owner = GetFrameRect(Region.Owner);
         const float Scale = GetEffectiveFrameScale(FindFrame(Region.Owner));

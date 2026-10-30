@@ -172,6 +172,13 @@ bool FHudScaledAnchors::RunTest(const FString&)
     TestTrue(TEXT("Child moved with its parent"),Moved.X>Rect.X+100);
     F.Frames.SetFrameVisible(F.Frames.FindFrame(TEXT("HudPanel")),false);
     TestEqual(TEXT("Hidden ancestor prevents clicks on descendant"),F.Frames.HitTestFrames((Moved.X+5)*Scale,(Moved.Y+5)*Scale),int64(-1));
+    TestTrue(TEXT("A hidden branch can change its geometry before being shown again"),F.Lua.ExecuteString(TEXT("HudPanel:SetPoint('TOPLEFT',UIParent,'TOPLEFT',500,-90); HudButton:SetSize(60,20)")));
+    F.Frames.RefreshLayout();
+    const auto HiddenRect=F.Frames.GetLayoutRect(Button);
+    TestTrue(TEXT("Lazy geometry remains queryable on a hidden scaled child"),HiddenRect.X>Moved.X+100 && FMath::IsNearlyEqual(HiddenRect.Z,36,0.01));
+    F.Frames.SetFrameVisible(F.Frames.FindFrame(TEXT("HudPanel")),true);
+    TestEqual(TEXT("Showing the branch restores current painted and clickable geometry"),F.Frames.HitTestFrames((HiddenRect.X+HiddenRect.Z/2)*Scale,(HiddenRect.Y+HiddenRect.W/2)*Scale),Button);
+    TestTrue(TEXT("A visible external anchor follows a lazily measured branch"),HiddenRect.Equals(F.Frames.GetLayoutRect(F.Frames.FindFrame(TEXT("HudFill"))),0.01));
     return true;
 }
 
@@ -1640,6 +1647,15 @@ bool FUiRegionControls::RunTest(const FString&)
     const auto* Image=F.Frames.GetNamedTexture(TEXT("OwnerTexture")); const auto* Slot=Image?Cast<UCanvasPanelSlot>(Image->Slot):nullptr;
     TestTrue(TEXT("Draw layer/sublevel changes reach the native image"),Slot && Slot->GetZOrder()==303);
     TestTrue(TEXT("Region definitions survive a full layout refresh"),F.Lua.ExecuteString(TEXT("Owner:SetSize(350,200); assert(math.abs(Tex:GetWidth()-350)<.1 and math.abs(Tex:GetHeight()-200)<.1)")));
+    TestTrue(TEXT("Create a moving leaf texture and a separate referenced texture"),F.Lua.ExecuteString(TEXT("Leaf=Owner:CreateTexture('Leaf'); Leaf:SetSize(10,20); Leaf:SetPoint('TOPLEFT',Owner,'TOPLEFT',4,-5); Linked=CreateFrame('Button','Linked',Owner); Linked:SetSize(10,10); Linked:SetPoint('CENTER',Tex,'CENTER')")));
+    F.Frames.RefreshLayout();
+    TestTrue(TEXT("Moving a leaf updates its actual native slot immediately"),F.Lua.ExecuteString(TEXT("Leaf:ClearAllPoints(); Leaf:SetPoint('TOPLEFT',Owner,'TOPLEFT',24,-15); Leaf:SetSize(18,28)")));
+    const auto* LeafSlot=Cast<UCanvasPanelSlot>(F.Frames.GetNamedTexture(TEXT("Leaf"))->Slot);
+    TestTrue(TEXT("Leaf anchors and dimensions reach Slate without a full refresh"),LeafSlot && LeafSlot->GetPosition().Equals(FVector2D(24,15)*F.Frames.GetUIScale(),.1) && LeafSlot->GetSize().Equals(FVector2D(18,28)*F.Frames.GetUIScale(),.1));
+    const auto Linked=F.Frames.FindFrame(TEXT("Linked")); const auto Before=F.Frames.GetLayoutRect(Linked);
+    TestTrue(TEXT("Moving a referenced region invalidates its dependent frame"),F.Lua.ExecuteString(TEXT("Tex:ClearAllPoints(); Tex:SetSize(120,80); Tex:SetPoint('TOPLEFT',Owner,'TOPLEFT',40,-40)")));
+    F.Frames.UpdateMouseHover(-1,-1); const auto After=F.Frames.GetLayoutRect(Linked);
+    TestTrue(TEXT("A frame anchored to the texture follows its new rectangle"),!Before.Equals(After,.1) && FMath::IsNearlyEqual(After.X+After.Z/2,F.Frames.GetRegionRect(TEXT("OwnerTexture")).X+48,.1));
     return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUiButtonInputStates,"WowUnreal.Hud.ButtonInputStates",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
