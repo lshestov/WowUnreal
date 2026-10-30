@@ -1,0 +1,276 @@
+{
+  "qaLevel": 40,
+  "qaGm": false,
+  "qaSpells": [
+    2061,
+    139,
+    17,
+    596
+  ],
+  "steps": [
+    {
+      "op": "wait_world",
+      "timeout": 180
+    },
+    {
+      "op": "wait_floor",
+      "timeout": 90
+    },
+    {
+      "op": "peer_start",
+      "timeout": 60
+    },
+    {
+      "op": "peer_start",
+      "peer": 1,
+      "timeout": 60
+    },
+    {
+      "op": "peer_target",
+      "timeout": 20
+    },
+    {
+      "op": "wait",
+      "seconds": 0.5
+    },
+    {
+      "op": "frame_camera_target",
+      "distance": 600
+    },
+    {
+      "op": "lua",
+      "code": "InviteUnit(QAUiPeerNames[1])"
+    },
+    {
+      "op": "peer_command",
+      "action": "group_accept",
+      "timeout": 15
+    },
+    {
+      "op": "lua",
+      "code": "InviteUnit(QAUiPeerNames[2])"
+    },
+    {
+      "op": "peer_command",
+      "peer": 1,
+      "action": "group_accept",
+      "timeout": 15
+    },
+    {
+      "op": "lua_wait",
+      "condition": "GetNumPartyMembers()==2",
+      "timeout": 10
+    },
+    {
+      "op": "lua",
+      "code": "TargetUnit('player')"
+    },
+    {
+      "op": "lua",
+      "code": "assert(IsSpellKnown(2061)); CastSpellByID(2061,'player')"
+    },
+    {
+      "op": "wait_spell_effect",
+      "spell": 2061,
+      "phase": "precast",
+      "timeout": 12,
+      "label": "initial"
+    },
+    {
+      "op": "wait",
+      "seconds": 0.4
+    },
+    {
+      "op": "capture",
+      "name": "flash-heal-original-precast-ribbons"
+    },
+    {
+      "op": "wait_spell_effect",
+      "spell": 2061,
+      "phase": "impact",
+      "timeout": 12,
+      "label": "initial"
+    },
+    {
+      "op": "wait",
+      "seconds": 0.4
+    },
+    {
+      "op": "capture",
+      "name": "flash-heal-original-impact"
+    },
+    {
+      "op": "wait",
+      "seconds": 4
+    },
+    {
+      "op": "lua",
+      "code": "assert(IsSpellKnown(139)); CastSpellByID(139,'player')"
+    },
+    {
+      "op": "wait_spell_effect",
+      "spell": 139,
+      "phase": "aura",
+      "timeout": 12,
+      "label": "initial"
+    },
+    {
+      "op": "wait",
+      "seconds": 0.4
+    },
+    {
+      "op": "capture",
+      "name": "renew-original-persistent-state"
+    },
+    {
+      "op": "wait",
+      "seconds": 2
+    },
+    {
+      "op": "lua",
+      "code": "CastSpellByID(139,'player')"
+    },
+    {
+      "op": "wait",
+      "seconds": 0.5
+    },
+    {
+      "op": "wait_spell_effect",
+      "spell": 139,
+      "phase": "aura",
+      "label": "refreshed",
+      "timeout": 5
+    },
+    {
+      "op": "capture",
+      "name": "renew-refresh-keeps-single-state"
+    },
+    {
+      "op": "lua",
+      "code": "CancelUnitBuff('player',GetSpellInfo(139))"
+    },
+    {
+      "op": "wait_no_spell_effect",
+      "spell": 139,
+      "phase": "aura",
+      "timeout": 12
+    },
+    {
+      "op": "capture",
+      "name": "renew-cancel-removes-state"
+    },
+    {
+      "op": "lua",
+      "code": "assert(IsSpellKnown(17)); CastSpellByID(17,'player')"
+    },
+    {
+      "op": "wait_spell_effect",
+      "spell": 17,
+      "phase": "aura",
+      "timeout": 12,
+      "label": "initial",
+      "minGeometry": 3
+    },
+    {
+      "op": "wait",
+      "seconds": 0.4
+    },
+    {
+      "op": "capture",
+      "name": "shield-original-translucent-geometry"
+    },
+    {
+      "op": "wait",
+      "seconds": 2
+    },
+    {
+      "op": "capture",
+      "name": "shield-authored-hold-after-intro"
+    },
+    {
+      "op": "lua",
+      "code": "CancelUnitBuff('player',GetSpellInfo(17))"
+    },
+    {
+      "op": "wait_no_spell_effect",
+      "spell": 17,
+      "phase": "aura",
+      "timeout": 12
+    },
+    {
+      "op": "capture",
+      "name": "shield-removal-clears-geometry"
+    },
+    {
+      "op": "lua",
+      "code": "Healed={}; MultiHealN=0; HW=CreateFrame('Frame'); HW:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED'); HW:SetScript('OnEvent',function(self,event,...) local r={...}; if r[2]=='SPELL_HEAL' and r[9]==596 and not Healed[r[6]] then Healed[r[6]]=true; MultiHealN=MultiHealN+1 end end); CastSpellByID(596,'player')"
+    },
+    {
+      "op": "wait_spell_effect",
+      "spell": 596,
+      "phase": "impact",
+      "minComponents": 3,
+      "timeout": 12,
+      "label": "initial"
+    },
+    {
+      "op": "wait",
+      "seconds": 0.4
+    },
+    {
+      "op": "capture",
+      "name": "prayer-of-healing-original-multiple-targets"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "MultiHealN==3",
+      "timeout": 10
+    },
+    {
+      "op": "lua",
+      "code": "HW:UnregisterAllEvents(); CastSpellByID(139,'party1')"
+    },
+    {
+      "op": "wait_spell_effect",
+      "spell": 139,
+      "phase": "aura",
+      "timeout": 8,
+      "label": "initial"
+    },
+    {
+      "op": "peer_cleanup",
+      "timeout": 45
+    },
+    {
+      "op": "peer_cleanup",
+      "peer": 1,
+      "timeout": 45
+    },
+    {
+      "op": "wait",
+      "seconds": 3
+    },
+    {
+      "op": "wait_no_spell_effect",
+      "spell": 139,
+      "phase": "aura",
+      "timeout": 12
+    },
+    {
+      "op": "capture",
+      "name": "disappeared-aura-owner-cleans-effects"
+    },
+    {
+      "op": "profile",
+      "seconds": 2
+    }
+  ],
+  "qaClass": 5,
+  "qaPeer": true,
+  "qaExtraPeers": 1,
+  "peerLevel": 40,
+  "peerClasses": [
+    8,
+    8
+  ]
+}

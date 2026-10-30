@@ -314,8 +314,10 @@ void AWowGameplayController::BindEntityEvents()
         if(UIManager && UIManager->GetEventSystem()) for(int32 Bag=-1;Bag<=11;++Bag)
             UIManager->GetEventSystem()->FireEventNumbers(TEXT("BAG_UPDATE"),{double(Bag)});
 	});
-	ConnectionManager->PacketHandler.OnUnitAuraUpdate.AddLambda([this](uint64 Guid)
+	ConnectionManager->PacketHandler.OnUnitAuraUpdate.AddWeakLambda(this,[this](uint64 Guid)
 	{
+        // Preserve remove/reapply transitions even if both arrive in one frame.
+        UpdateSpellEffects();
 		if(Guid==ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid) FireUIEvent(TEXT("UNIT_AURA"),{TEXT("player")});
 		else if(Guid==TargetGuid) FireUIEvent(TEXT("UNIT_AURA"),{TEXT("target")});
 	});
@@ -1201,6 +1203,8 @@ void AWowGameplayController::Tick(float DeltaTime)
 	UpdateTargetFrame();
 
 	// Update aura display (throttled)
+    UpdateSpellEffects();
+
 	AuraUpdateTimer += DeltaTime;
 	if (AuraUpdateTimer >= AuraUpdateInterval)
 	{
@@ -1494,6 +1498,16 @@ void AWowGameplayController::OnLeftClick()
 		return; // Don't target through UI
 	}
 
+    if(ConnectionManager && ConnectionManager->HasPendingGroundSpell())
+    {
+        float X=0,Y=0; FVector Origin,Direction; FHitResult Hit;
+        if(GetMousePosition(X,Y) && DeprojectScreenPositionToWorld(X,Y,Origin,Direction))
+        {
+            FCollisionQueryParams Params; Params.AddIgnoredActor(GetPawn());
+            if(GetWorld()->LineTraceSingleByChannel(Hit,Origin,Origin+Direction*100000,ECC_WorldStatic,Params)) ConnectionManager->PlaceGroundSpell(FWowCoordinate::UEToWow(Hit.ImpactPoint));
+        }
+        return;
+    }
     if(RequestCursorItemDeletion()) return;
 	UE_LOG(LogWowGameplay, Log, TEXT("OnLeftClick: no UI hit, trying world target"));
 	TryTargetUnderCursor();
@@ -1734,6 +1748,7 @@ void AWowGameplayController::OnEntityDeath(uint64 Guid)
 
 void AWowGameplayController::OnEntityDestroyed(uint64 Guid)
 {
+    StopAuthoredCastEffects(Guid,0,0); LastVisualLaunches.Remove(Guid);
 	NpcGroundOffsets.Remove(Guid);
 	NpcReferenceFeet.Remove(Guid);
     DeadEntityGuids.Remove(Guid);
@@ -2363,8 +2378,7 @@ void AWowGameplayController::OnSpellStart(uint64 CasterGuid, uint32 SpellId, uin
 	}
 
 	// Spawn spell visual effects for all casters
-	uint64 SpellTargetGuid = 0; // Will be resolved in SpawnSpellVisualEffect
-	SpawnSpellVisualEffect(CasterGuid, SpellTargetGuid, SpellId, false);
+
 
 	if (CasterGuid != LocalGuid)
 	{
@@ -2405,6 +2419,10 @@ void AWowGameplayController::OnSpellGo(const FWowSpellLaunch& Launch)
 
 	const uint64 LocalGuid = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
 
+    const auto* Active=ConnectionManager->PacketHandler.Casts.Find(CasterGuid);
+    const bool LaterCast=Active && (Active->Spell!=SpellId || Active->Counter!=Launch.Counter);
+    if(!LaterCast)
+    {
 	if (CasterGuid == LocalGuid)
 	{
 		// Our spell cast completed
@@ -2459,7 +2477,10 @@ void AWowGameplayController::OnSpellGo(const FWowSpellLaunch& Launch)
 		RemoveCastGlowEffects(CasterGuid);
 	}
 
-	// Check if spell should spawn a missile
+    }
+	// The packet identity owns all outgoing targets and delayed arrivals.
+    LastVisualLaunches.Add(CasterGuid,Launch);
+    if(const auto* Visual=SpellVisual(SpellId)) SpawnSpellKit(SpellActor(CasterGuid),Visual->CastKit,0,TEXT("release"),SpellId,CasterGuid,Launch.Counter);
 	SpawnSpellMissile(Launch);
 }
 
@@ -4824,236 +4845,6 @@ void AWowGameplayController::OnPetBarUpdated(const FWowPetActionBarState& PetAct
 	}
 }
 
-void AWowGameplayController::SpawnSpellVisualEffect(uint64 CasterGuid, uint64 SpellTargetGuid, uint32 SpellId, bool bIsMissile)
-{
-	// Check if deferred DBCs are loaded
-	const FDbcStore& DbcStore = FDbcStore::Get();
-	if (!DbcStore.IsDeferredLoaded())
-	{
-		UE_LOG(LogWowGameplay, Warning, TEXT("SpawnSpellVisualEffect: Deferred DBCs not loaded yet, spell %u"), SpellId);
-		return;
-	}
-
-	// 1. Look up spell in SpellDbc → get SpellVisual[0]
-	const auto* SpellEntry = DbcStore.Spells().GetById(SpellId);
-	if (!SpellEntry)
-	{
-		UE_LOG(LogWowGameplay, Warning, TEXT("SpawnSpellVisualEffect: Spell %u not found in DBC"), SpellId);
-		return;
-	}
-
-	uint32 SpellVisualId = SpellEntry->SpellVisual[0];
-	if (SpellVisualId == 0)
-	{
-		UE_LOG(LogWowGameplay, Log, TEXT("SpawnSpellVisualEffect: Spell %u has no visual (SpellVisual[0] = 0)"), SpellId);
-		return;
-	}
-
-	// 2. Look up SpellVisual → get CastKit, ImpactKit, HasMissile, MissileModel
-	const auto* SpellVisualEntry = DbcStore.SpellVisuals().GetById(SpellVisualId);
-	if (!SpellVisualEntry)
-	{
-		UE_LOG(LogWowGameplay, Warning, TEXT("SpawnSpellVisualEffect: SpellVisual %u not found in DBC"), SpellVisualId);
-		return;
-	}
-
-	UE_LOG(LogWowGameplay, Log, TEXT("SpawnSpellVisualEffect: Spell %u (%s) → SpellVisual %u"),
-		SpellId, *SpellEntry->SpellName, SpellVisualId);
-	UE_LOG(LogWowGameplay, Log, TEXT("  CastKit=%u, ImpactKit=%u, HasMissile=%u, MissileModel=%d"),
-		SpellVisualEntry->CastKit, SpellVisualEntry->ImpactKit, SpellVisualEntry->HasMissile, SpellVisualEntry->MissileModel);
-
-	// 3. Process CastKit if present
-	if (SpellVisualEntry->CastKit > 0)
-	{
-		const auto* CastKitEntry = DbcStore.SpellVisualKits().GetById(SpellVisualEntry->CastKit);
-		if (CastKitEntry)
-		{
-			UE_LOG(LogWowGameplay, Log, TEXT("  CastKit %u: LeftHand=%u, RightHand=%u, Base=%u, Chest=%u"),
-				SpellVisualEntry->CastKit, CastKitEntry->LeftHandEffectID, CastKitEntry->RightHandEffectID,
-				CastKitEntry->BaseEffectID, CastKitEntry->ChestEffectID);
-
-			// Look up effect names
-			auto LogEffectName = [&](uint32 EffectId, const FString& SlotName)
-			{
-				if (EffectId > 0)
-				{
-					const auto* EffectEntry = DbcStore.SpellVisualEffectNames().GetById(EffectId);
-					if (EffectEntry)
-					{
-						UE_LOG(LogWowGameplay, Log, TEXT("    %s Effect %u: %s → %s"),
-							*SlotName, EffectId, *EffectEntry->Name, *EffectEntry->FilePath);
-					}
-					else
-					{
-						UE_LOG(LogWowGameplay, Warning, TEXT("    %s Effect %u: Not found in SpellVisualEffectName DBC"), *SlotName, EffectId);
-					}
-				}
-			};
-
-			LogEffectName(CastKitEntry->LeftHandEffectID, TEXT("LeftHand"));
-			LogEffectName(CastKitEntry->RightHandEffectID, TEXT("RightHand"));
-			LogEffectName(CastKitEntry->BaseEffectID, TEXT("Base"));
-			LogEffectName(CastKitEntry->ChestEffectID, TEXT("Chest"));
-			LogEffectName(CastKitEntry->HeadEffectID, TEXT("Head"));
-		}
-		else
-		{
-			UE_LOG(LogWowGameplay, Warning, TEXT("  CastKit %u not found in SpellVisualKit DBC"), SpellVisualEntry->CastKit);
-		}
-	}
-
-	// 4. Process ImpactKit if present
-	if (SpellVisualEntry->ImpactKit > 0)
-	{
-		const auto* ImpactKitEntry = DbcStore.SpellVisualKits().GetById(SpellVisualEntry->ImpactKit);
-		if (ImpactKitEntry)
-		{
-			UE_LOG(LogWowGameplay, Log, TEXT("  ImpactKit %u: LeftHand=%u, RightHand=%u, Base=%u, Chest=%u"),
-				SpellVisualEntry->ImpactKit, ImpactKitEntry->LeftHandEffectID, ImpactKitEntry->RightHandEffectID,
-				ImpactKitEntry->BaseEffectID, ImpactKitEntry->ChestEffectID);
-		}
-		else
-		{
-			UE_LOG(LogWowGameplay, Warning, TEXT("  ImpactKit %u not found in SpellVisualKit DBC"), SpellVisualEntry->ImpactKit);
-		}
-	}
-}
-
-void AWowGameplayController::SpawnSpellMissile(const FWowSpellLaunch& Launch)
-{
-	const uint64 CasterGuid=Launch.CasterGuid,SpellTargetGuid=Launch.PrimaryTarget(); const uint32 SpellId=Launch.SpellId;
-	if(!SpellTargetGuid || SpellTargetGuid==CasterGuid) return;
-	// Check if deferred DBCs are loaded
-	const FDbcStore& DbcStore = FDbcStore::Get();
-	if (!DbcStore.IsDeferredLoaded())
-	{
-		UE_LOG(LogWowGameplay, Warning, TEXT("SpawnSpellMissile: Deferred DBCs not loaded yet, spell %u"), SpellId);
-		return;
-	}
-
-	// Look up spell visual data
-	const auto* SpellEntry = DbcStore.Spells().GetById(SpellId);
-	if (!SpellEntry)
-	{
-		return;
-	}
-
-	uint32 SpellVisualId = SpellEntry->SpellVisual[0];
-	if (SpellVisualId == 0)
-	{
-		return;
-	}
-
-	const auto* SpellVisualEntry = DbcStore.SpellVisuals().GetById(SpellVisualId);
-	if (!SpellVisualEntry || !SpellVisualEntry->HasMissile || !FMath::IsFinite(SpellEntry->Speed) || SpellEntry->Speed<=0)
-	{
-		// No missile for this spell
-		return;
-	}
-
-	// Get caster position
-	FVector CasterLocation = FVector::ZeroVector;
-	bool bFoundCasterLocation = false;
-
-	if (!ConnectionManager)
-	{
-		return;
-	}
-
-	const uint64 LocalGuid = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
-	if (CasterGuid == LocalGuid)
-	{
-		// Local player casting
-		if (APawn* LocalPawn = GetPawn())
-		{
-			CasterLocation = LocalPawn->GetActorLocation();
-			bFoundCasterLocation = true;
-		}
-	}
-	else
-	{
-		// Other entity casting
-		if (TObjectPtr<AActor>* FoundActor = SpawnedEntityActors.Find(CasterGuid))
-		{
-			if (AActor* CasterActor = FoundActor->Get())
-			{
-				CasterLocation = CasterActor->GetActorLocation();
-				bFoundCasterLocation = true;
-			}
-		}
-	}
-
-	if (!bFoundCasterLocation)
-	{
-		UE_LOG(LogWowGameplay, Warning, TEXT("SpawnSpellMissile: Could not find caster %llu location"), CasterGuid);
-		return;
-	}
-
-	// Get target position
-	FVector TargetLocation = FVector::ZeroVector;
-	AActor* TargetActor=nullptr;
-	bool bFoundTargetLocation = false;
-
-	// Get target location
-	if (SpellTargetGuid != 0)
-	{
-		if (SpellTargetGuid == LocalGuid)
-		{
-			// Target is local player
-			if (APawn* LocalPawn = GetPawn())
-			{
-				TargetActor=LocalPawn;
-				TargetLocation = LocalPawn->GetActorLocation();
-				bFoundTargetLocation = true;
-			}
-		}
-		else
-		{
-			// Target is another entity
-			if (TObjectPtr<AActor>* FoundActor = SpawnedEntityActors.Find(SpellTargetGuid))
-			{
-				if ((TargetActor = FoundActor->Get()))
-				{
-					TargetLocation = TargetActor->GetActorLocation();
-					bFoundTargetLocation = true;
-				}
-			}
-		}
-	}
-
-	if (!bFoundTargetLocation)
-	{
-		UE_LOG(LogWowGameplay, Verbose, TEXT("SpawnSpellMissile: Packet target %llu for spell %u has no rendered actor"),SpellTargetGuid,SpellId);
-		return;
-	}
-	const auto& Entities=ConnectionManager->PacketHandler.EntityManager;
-	const auto* CasterEntity=Entities.Find(CasterGuid); const auto* TargetEntity=Entities.Find(SpellTargetGuid);
-	const float Distance=CasterEntity && TargetEntity?FVector::Distance(CasterEntity->Movement.Position,TargetEntity->Movement.Position):FVector::Distance(CasterLocation,TargetLocation)/100.f;
-	const float Reach=CasterEntity?FMath::Max(0.f,CasterEntity->GetFieldFloat(UnitField::COMBATREACH)):0.f;
-	const uint32 FlightMs=AWowSpellMissile::TravelMilliseconds(Distance,Reach,SpellEntry->Speed);
-	if(!FlightMs) return;
-
-	// Determine spell school color
-	FLinearColor SpellColor = GetSpellSchoolColor(SpellEntry->SchoolMask);
-
-	// Spawn the missile
-	if (UWorld* World = GetWorld())
-	{
-		// Adjust missile spawn position slightly above caster
-		FVector MissileStartLocation = CasterLocation + FVector(0.0f, 0.0f, 150.0f);
-		FVector MissileTargetLocation = TargetLocation + FVector(0.0f, 0.0f, 100.0f);
-
-		AWowSpellMissile* Missile = World->SpawnActor<AWowSpellMissile>();
-		if (Missile)
-		{
-			Missile->Initialize(MissileStartLocation, MissileTargetLocation, SpellColor, FlightMs/1000.f);
-			Missile->BindTarget(SpellId,CasterGuid,SpellTargetGuid,TargetActor,FVector(0,0,100));
-			UE_LOG(LogWowGameplay, Log, TEXT("Spawned spell missile spell=%u caster=%llu target=%llu counter=%u serverTime=%u flightMs=%u speed=%.3f"),
-				SpellId,CasterGuid,SpellTargetGuid,Launch.Counter,Launch.ServerTimeMs,FlightMs,SpellEntry->Speed);
-		}
-	}
-}
-
 FLinearColor AWowGameplayController::GetSpellSchoolColor(uint32 SchoolMask) const
 {
 	// Spell school color mapping based on SchoolMask - vibrant colors for missile visibility
@@ -5084,38 +4875,10 @@ bool AWowGameplayController::StartAuthoredCastEffects(uint64 CasterGuid,uint32 S
     if(!ConnectionManager) return false;
     const auto* CastState=ConnectionManager->PacketHandler.Casts.Find(CasterGuid);
     if(!CastState || CastState->Spell!=SpellId || CastState->Channel) return false;
-    const uint8 Counter=CastState->Counter; const float Duration=FMath::Max(.01f,float(CastState->Ends-FPlatformTime::Seconds())+.25f);
-    StopAuthoredCastEffects(CasterGuid,0,0); CacheWorldResources();
-    for(auto It=AuthoredCastEffects.CreateIterator();It;++It)
-        if(!It.Value().Components.ContainsByPredicate([](const auto& C){return C.IsValid();})) It.RemoveCurrent();
-    if(!CachedMpq || !CachedAssetCache || AuthoredCastEffects.Num()>=32) return false;
-    AActor* Actor=CasterGuid==ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid?GetPawn():SpawnedEntityActors.FindRef(CasterGuid).Get();
-    if(!IsValid(Actor)) return false;
-    auto* Animation=FWowCharacterBuilder::GetAnimationController(Actor);
-    if(auto* PlayerPawn=Cast<AWowPlayerCharacter>(Actor); PlayerPawn && PlayerPawn->AnimationController) Animation=PlayerPawn->AnimationController;
-    if(!Animation) return false;
-    auto* Mesh=Animation->GetModelMesh(); const auto CharacterModel=Animation->GetRuntimeModel();
-    if(!Mesh || !CharacterModel) return false;
-    const auto& D=FDbcStore::Get(); const auto* Spell=D.Spells().GetById(SpellId); const auto* Visual=Spell?D.SpellVisuals().GetById(Spell->SpellVisual[0]):nullptr;
-    const auto* Kit=Visual?D.SpellVisualKits().GetById(Visual->PrecastKit):nullptr; if(!Kit) return false;
-    FAuthoredCast State; State.Spell=SpellId; State.Counter=Counter;
-    struct FSlot {uint32 Attachment,Effect;};
-    const FSlot Slots[]={{20,Kit->HeadEffectID},{34,Kit->ChestEffectID},{19,Kit->BaseEffectID},{21,Kit->LeftHandEffectID},{22,Kit->RightHandEffectID},{17,Kit->BreathEffectID},{23,Kit->SpecialEffectIDs[0]},{24,Kit->SpecialEffectIDs[1]},{25,Kit->SpecialEffectIDs[2]}};
-    for(const auto& Slot:Slots)
-    {
-        if(!Slot.Effect) continue; const auto* Effect=D.SpellVisualEffectNames().GetById(Slot.Effect); if(!Effect) continue;
-        const auto* Attachment=CharacterModel->Attachments.FindByPredicate([&](const auto& A){return A.Id==Slot.Attachment;});
-        if(!Attachment || !CharacterModel->Bones.IsValidIndex(Attachment->Bone)) continue;
-        const FName Bone=FWowSkeletalMeshBuilder::GetBoneName(Attachment->Bone); if(Mesh->GetBoneIndex(Bone)<0) continue;
-        const auto Model=FWowDoodadManager::GetOrParseM2(Effect->FilePath,CachedMpq); if(!Model || Model->ParticleEmitters.IsEmpty()) continue;
-        auto* Component=NewObject<UWowM2EmitterComponent>(Actor); Actor->AddInstanceComponent(Component); Component->SetupAttachment(Mesh,Bone);
-        Component->SetRelativeLocation(FWowEquipmentManager::GetAttachmentOffset(*CharacterModel,static_cast<FWowEquipmentManager::EAttachmentPoint>(Slot.Attachment)));
-        Component->SetRelativeScale3D(FVector(FMath::IsFinite(Effect->Scale)?FMath::Clamp(Effect->Scale,.01f,10.f):1.f));
-        Component->ComponentTags.Add(*Effect->FilePath); Component->RegisterComponent();
-        if(!Component->Initialize(Model,CachedMpq,CachedAssetCache,Duration)) {Component->DestroyComponent(); continue;}
-        State.Components.Add(Component);
-        UE_LOG(LogWowGameplay,Log,TEXT("Authored precast spell=%u caster=%llu counter=%u attachment=%u bone=%s model=%s emitters=%d"),SpellId,CasterGuid,Counter,Slot.Attachment,*Bone.ToString(),*Effect->FilePath,Component->GetEmitterCount());
-    }
+    StopAuthoredCastEffects(CasterGuid,0,0);
+    const auto* Visual=SpellVisual(SpellId); if(!Visual) return false;
+    FAuthoredCast State; State.Spell=SpellId; State.Counter=CastState->Counter;
+    State.Components=SpawnSpellKit(SpellActor(CasterGuid),Visual->PrecastKit,float(CastState->Ends-FPlatformTime::Seconds())+.25f,TEXT("precast"),SpellId,CasterGuid,State.Counter);
     if(State.Components.IsEmpty()) return false;
     AuthoredCastEffects.Add(CasterGuid,MoveTemp(State)); RemoveCastGlowEffects(CasterGuid); return true;
 }
@@ -5322,6 +5085,7 @@ void AWowGameplayController::OnSpellbookKey()
 
 void AWowGameplayController::OnEscapeKey()
 {
+    if(ConnectionManager && ConnectionManager->HasPendingGroundSpell()) {ConnectionManager->CancelGroundSpell(); return;}
 	// If a Lua EditBox has keyboard focus, dispatch OnEscapePressed to it first
 	if (UIManager && UIManager->GetFrameManager())
 	{

@@ -30,12 +30,20 @@ void SpellDamage(FWowCombatEntry& E,uint32 Amount,uint32 Overkill,uint32 School,
     if(!Amount && (Absorb || Resist || Block)) {E.Event=Periodic?TEXT("SPELL_PERIODIC_MISSED"):Ranged?TEXT("RANGE_MISSED"):TEXT("SPELL_MISSED"); E.Values={V::S(Absorb?TEXT("ABSORB"):Block?TEXT("BLOCK"):TEXT("RESIST")),V::N(Absorb?Absorb:Block?Block:Resist)};}
     else {E.Event=Split?TEXT("DAMAGE_SPLIT"):Periodic?TEXT("SPELL_PERIODIC_DAMAGE"):Ranged?TEXT("RANGE_DAMAGE"):TEXT("SPELL_DAMAGE"); E.Values={V::N(Amount),V::N(Overkill),V::N(School),V::N(Resist),V::N(Block),V::N(Absorb),V::B(Critical),V::B(false),V::B(false)};}
 }
-bool Targets(FPacketReader& R,uint64& Target)
+bool Targets(FPacketReader& R,uint64& Target,FWowSpellLaunch* Launch=nullptr)
 {
     if(!R.CanRead(4)) return false; const uint32 Mask=R.ReadU32(); uint64 Ignored;
     if((Mask&0x18A02) && !Guid(R,Target)) return false;
     if((Mask&0x1010) && !Guid(R,Ignored)) return false;
-    for(uint32 Flag:{0x20u,0x40u}) if(Mask&Flag) {if(!Guid(R,Ignored) || !R.CanRead(12)) return false; for(int32 I=0;I<3;++I) if(!FMath::IsFinite(R.ReadFloat())) return false;}
+    if(Launch) Launch->TargetMask=Mask;
+    for(uint32 Flag:{0x20u,0x40u}) if(Mask&Flag)
+    {
+        if(!Guid(R,Ignored) || !R.CanRead(12)) return false;
+        const float X=R.ReadFloat(),Y=R.ReadFloat(),Z=R.ReadFloat();
+        if(!FMath::IsFinite(X) || !FMath::IsFinite(Y) || !FMath::IsFinite(Z)) return false;
+        if(Launch) {if(Flag==0x20) {Launch->HasSource=true; Launch->Source=FVector(X,Y,Z); Launch->SourceTransport=Ignored;}
+            else {Launch->HasDestination=true; Launch->Destination=FVector(X,Y,Z); Launch->DestinationTransport=Ignored;}}
+    }
     if(Mask&0x2000) {int32 N=0; while(N<R.Remaining() && R.Data[R.Pos+N]) ++N; if(N==R.Remaining() || N>1024) return false; R.ReadCString();}
     return true;
 }
@@ -97,8 +105,11 @@ void FWowPacketHandler::HandleSpellGo(FPacketReader& R)
         Launch.MissedTargets.Add({E.Destination,Reason,Reflect});
         E.Event=Definition && (Definition->AttributesEx3&0x8000)?TEXT("RANGE_MISSED"):TEXT("SPELL_MISSED"); E.Values={V::S(Miss)}; if(Reason==2 || Reason==5 || Reason==10) E.Values.Add(V::N(0)); Missed.Add(MoveTemp(E));
     }
-    uint64 ExplicitTarget=0; if(!Targets(R,ExplicitTarget)) return; if(ExplicitTarget) Target=ExplicitTarget;
+    uint64 ExplicitTarget=0; if(!Targets(R,ExplicitTarget,&Launch)) return; if(ExplicitTarget) Target=ExplicitTarget;
     Launch.ExplicitTargetGuid=ExplicitTarget;
+    Launch.ReceivedAt=FPlatformTime::Seconds();
+    if(RecentSpellLaunches.Num()>=256) for(auto It=RecentSpellLaunches.CreateIterator();It;++It) if(Launch.ReceivedAt-It.Value().ReceivedAt>5) It.RemoveCurrent();
+    if(RecentSpellLaunches.Num()<256 || RecentSpellLaunches.Contains(Caster)) RecentSpellLaunches.Add(Caster,Launch);
     const auto& Spells=FDbcStore::Get().Spells(); const bool HasCastTime=Definition && Spells.CastTime(Definition->CastingTimeIndex)>0;
     bool OpenLock=false; if(Definition) for(uint32 Effect:Definition->Effect) OpenLock|=Effect==33;
     if(!HasCastTime && !OpenLock) {FWowCombatEntry E; E.Source=Caster; E.Destination=Target; E.Spell=Spell; E.Event=TEXT("SPELL_CAST_SUCCESS"); RecordSpellCombat(MoveTemp(E));}
@@ -190,11 +201,20 @@ void FWowPacketHandler::HandleCombatPacket(uint32 Opcode,FPacketReader& R)
 {
     FWowCombatEntry Base; TArray<FWowCombatEntry> Entries;
     const auto Push=[&](const FString& Event){Base.Event=Event; Entries.Add(Base);};
+    if(Opcode==0x01E2)
+    {
+        uint64 Caster=0; if(!Guid(R,Caster) || R.Remaining()!=4) return;
+        const uint32 Delay=R.ReadU32(); auto* Cast=Casts.Find(Caster);
+        if(!Cast || Cast->Channel || Delay>60000) return;
+        Cast->Ends+=Delay/1000.; OnCastState.ExecuteIfBound(Caster,Cast->Spell,9,Cast->Counter); return;
+    }
     if(Opcode==0x0139 || Opcode==0x013A)
     {
         uint64 Caster=0; if(!Guid(R,Caster) || !R.CanRead(Opcode==0x0139?8:4)) return;
         const uint32 Spell=Opcode==0x0139?R.ReadU32():(Casts.Find(Caster)?Casts[Caster].Spell:0); const uint32 Duration=R.ReadU32(); if(R.Remaining()) return;
-        const auto* Old=Casts.Find(Caster); const uint8 Counter=Old?Old->Counter:0; const double Started=Old?Old->Started:FPlatformTime::Seconds();
+        const auto* Old=Casts.Find(Caster); const auto* Launch=RecentSpellLaunches.Find(Caster);
+        const uint8 Counter=Old?Old->Counter:Launch && Launch->SpellId==Spell && FPlatformTime::Seconds()-Launch->ReceivedAt<5?Launch->Counter:0;
+        const double Started=Old?Old->Started:FPlatformTime::Seconds();
         if(!Duration) Casts.Remove(Caster);
         else if(Spell) {const double Now=FPlatformTime::Seconds(); Casts.Add(Caster,{Spell,Counter,Started,Now+Duration/1000.,true});}
         OnCastState.ExecuteIfBound(Caster,Spell,!Duration?5:Opcode==0x139?3:4,Counter); return;

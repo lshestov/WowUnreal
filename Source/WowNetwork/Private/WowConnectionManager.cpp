@@ -127,7 +127,7 @@ void UWowConnectionManager::SelectRealm(int32 I)
             for(uint64 Guid:Guids) PacketHandler.EntityManager.Remove(Guid);
             PacketHandler.EntityManager.LocalPlayerGuid=0; TargetGuid=0; CursorPayload=FCursorPayloadState();
             PacketHandler.KnownSpells.Reset(); PacketHandler.ActionButtons.Reset(); PacketHandler.QuestLog.Reset(); PacketHandler.ResetTalentState(); PacketHandler.Reputations.Reset(); PacketHandler.ForcedReactions.Reset();
-            PacketHandler.SpellCooldowns.Reset(); PacketHandler.SpellCooldownInfo.Reset(); PacketHandler.CombatHistory.Reset(); PacketHandler.Casts.Reset(); PacketHandler.CastFailures.Reset(); PacketHandler.LocalCastRequests.Reset(); PacketHandler.HasPendingAttackCast=false;
+            PacketHandler.SpellCooldowns.Reset(); PacketHandler.SpellCooldownInfo.Reset(); PacketHandler.CombatHistory.Reset(); PacketHandler.Casts.Reset(); PacketHandler.RecentSpellLaunches.Reset(); PendingGroundSpell=0; PacketHandler.CastFailures.Reset(); PacketHandler.LocalCastRequests.Reset(); PacketHandler.HasPendingAttackCast=false;
             PacketHandler.ResetGroupState(); PacketHandler.PetActionBar=FWowPetActionBarState(); PacketHandler.ResetChannels();
             PacketHandler.ResetMapState();
             PacketHandler.Merchant.Clear(); PacketHandler.CurrentBankerGuid=0; ResetMailState(); ResetTradeState();
@@ -330,6 +330,8 @@ void UWowConnectionManager::SendCastSpell(int32 SpellId, int64 InTargetGuid)
     if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
 
     // Most UI callers pass 0 to mean "use the current selection".
+    if(const auto* Spell=FDbcStore::Get().Spells().GetById(SpellId); Spell && (Spell->Targets&0x40))
+    {PendingGroundSpell=SpellId; OnCursorChanged.Broadcast(); return;}
     if(BeginItemSpell(uint32(SpellId))) return;
     const int64 ResolvedTargetGuid = (InTargetGuid != 0) ? InTargetGuid : TargetGuid;
 
@@ -394,6 +396,17 @@ void UWowConnectionManager::SendCastSpell(int32 SpellId, int64 InTargetGuid)
     PacketHandler.CastFailures.Remove(PacketHandler.EntityManager.LocalPlayerGuid); PacketHandler.LocalCastRequests.Add(CastCounter,Spell); OnLocalCastSent.ExecuteIfBound(Spell,CastCounter);
     WorldSocket->SendPacket(WowOpcode::CMSG_CAST_SPELL, Data);
     UE_LOG(LogWowNet, Log, TEXT("Cast spell %d on target %lld"), SpellId, ResolvedTargetGuid);
+}
+
+bool UWowConnectionManager::PlaceGroundSpell(const FVector& Position)
+{
+    if(!PendingGroundSpell || !WorldSocket.IsValid() || State!=EWowSessionState::WorldInGame || Position.ContainsNaN() || Position.GetAbsMax()>32000) return false;
+    const auto* Player=PacketHandler.EntityManager.GetLocalPlayer(); if(!Player || FVector::DistSquared(Player->Movement.Position,Position)>10000) return false;
+    const uint32 Spell=PendingGroundSpell; const uint8 Counter=NextSpellCastCount++; TArray<uint8> Data; Data.Add(Counter);
+    const auto Append=[&](auto V){Data.Append(reinterpret_cast<const uint8*>(&V),sizeof(V));};
+    Append(Spell); Data.Add(0); Append(uint32(0x40)); Data.Add(0); Append(float(Position.X)); Append(float(Position.Y)); Append(float(Position.Z));
+    CancelGroundSpell(); PacketHandler.CastFailures.Remove(Player->Guid); PacketHandler.LocalCastRequests.Add(Counter,Spell); OnLocalCastSent.ExecuteIfBound(Spell,Counter);
+    WorldSocket->SendPacket(WowOpcode::CMSG_CAST_SPELL,Data); return true;
 }
 
 void UWowConnectionManager::SendSetActionButton(int32 SlotIndex, uint32 ActionId, uint8 ActionType)
@@ -1569,7 +1582,7 @@ void UWowConnectionManager::Disconnect()
             PacketHandler.Merchant.Clear(); PacketHandler.CurrentBankerGuid=0; ResetMailState(); ResetTradeState();
     RepairCursor=false; PacketHandler.GuildCanRepair=false; PacketHandler.GuildRepairRequested=false; PacketHandler.GuildRepairId=0; PacketHandler.GuildWithdrawMoney=0; PacketHandler.ResetGuildState(); PacketHandler.ResetInspectState(); PacketHandler.ArenaIdentities.Reset(); PacketHandler.ResetPvpState(); PacketHandler.ResetLfgState(); PacketHandler.ResetAchievementState(); PacketHandler.ItemRefunds.Empty(); PacketHandler.RequestedItemRefunds.Empty(); PacketHandler.TotalPlayedTime=0; PacketHandler.PlayedTimeReceived=0; PacketHandler.PlayedTimeRequested=false;
     PacketHandler.WeaponProficiency=PacketHandler.ArmorProficiency=0; PacketHandler.HasWeaponProficiency=PacketHandler.HasArmorProficiency=false;
-    PacketHandler.CombatHistory.Reset(); PacketHandler.Casts.Reset(); PacketHandler.CastFailures.Reset(); PacketHandler.LocalCastRequests.Reset(); PacketHandler.HasPendingAttackCast=false;
+    PacketHandler.CombatHistory.Reset(); PacketHandler.Casts.Reset(); PacketHandler.RecentSpellLaunches.Reset(); PendingGroundSpell=0; PacketHandler.CastFailures.Reset(); PacketHandler.LocalCastRequests.Reset(); PacketHandler.HasPendingAttackCast=false;
     PacketHandler.OnLoginVerifyWorld.Clear();
     PacketHandler.OnSendPacket.Unbind();
 

@@ -60,6 +60,8 @@ void FWowUiTestPeer::Stop()
     if(auto* Player=Client->PacketHandler.EntityManager.GetLocalPlayer()) Client->SendMovement(WowOpcode::MSG_MOVE_STOP,Player->Movement.Position,Player->Movement.Orientation,0);
     Walking=false;
     Client->SendCancelTrade();
+    const auto& Duel=Client->PacketHandler.CurrentDuel;
+    if(Duel.ArbiterGuid && Duel.InitiatorGuid==MasterGuid) Client->SendCancelDuel(int64(Duel.ArbiterGuid));
     if(Client->PacketHandler.GroupInfo.FindMember(MasterGuid)) Client->SendRawPacket(0x007B,{});
     if(Client->GetState()==EWowSessionState::WorldInGame) Client->RequestLogout();
 }
@@ -127,6 +129,21 @@ void FWowUiTestPeer::Tick()
 bool FWowUiTestPeer::Command(const FString& Action,int32 Slot,uint32 Value)
 {
     if(!Ready()) return false;
+    if(Action==TEXT("cast_owned"))
+    {
+        if(Slot<0 || Slot>1 || !Client->PacketHandler.KnownSpells.Contains(Value)) return false;
+        const auto* Player=Client->PacketHandler.EntityManager.GetLocalPlayer(); const auto* Target=Client->PacketHandler.EntityManager.Find(Slot?CharacterGuid:MasterGuid);
+        if(!Player || !Target) return false;
+        const FVector Direction=Target->Movement.Position-Player->Movement.Position;
+        if(!Direction.IsNearlyZero()) Client->SendMovement(WowOpcode::MSG_MOVE_SET_FACING,Player->Movement.Position,FMath::Atan2(Direction.Y,Direction.X),0);
+        Client->SendCastSpell(Value,Slot?CharacterGuid:MasterGuid); return true;
+    }
+    if(Action==TEXT("duel_accept"))
+    {
+        const auto& D=Client->PacketHandler.CurrentDuel;
+        if(D.InitiatorGuid!=MasterGuid || !D.ArbiterGuid) return false;
+        Client->SendAcceptDuel(int64(D.ArbiterGuid)); return true;
+    }
     if(Action.StartsWith(TEXT("lfg_")))
     {
         const auto& H=Client->PacketHandler; const auto* P=H.EntityManager.GetLocalPlayer();

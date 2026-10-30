@@ -1,0 +1,152 @@
+{
+  "qaLevel": 20,
+  "qaGm": false,
+  "qaSpawnEntry": 69,
+  "qaSpawnStatic": true,
+  "qaSpawnOffset": 25,
+  "steps": [
+    {
+      "op": "wait_world",
+      "timeout": 180
+    },
+    {
+      "op": "wait_floor",
+      "timeout": 90
+    },
+    {
+      "op": "select_entry",
+      "entry": 69,
+      "timeout": 45
+    },
+    {
+      "op": "approach",
+      "range": 22,
+      "timeout": 50
+    },
+    {
+      "op": "wait",
+      "seconds": 1
+    },
+    {
+      "op": "frame_camera_target",
+      "distance": 400
+    },
+    {
+      "seconds": 0.5,
+      "op": "wait"
+    },
+    {
+      "op": "lua",
+      "code": "assert(UnitCanAttack('player','target')); FocusUnit('target'); LaunchTarget=UnitGUID('focus'); LaunchWatch=CreateFrame('Frame'); LaunchWatch:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED'); LaunchWatch:SetScript('OnEvent',function(self,event,...) local row={...}; if (row[2]=='SPELL_DAMAGE' or row[2]=='SPELL_MISSED') and row[9]==3140 and row[3]==UnitGUID('player') then LaunchServerTarget=row[6] end end); CastSpellByName(GetSpellInfo(3140),'target')"
+    },
+    {
+      "op": "wait_cast_particles",
+      "timeout": 8,
+      "spell": 3140,
+      "minTextures": 3
+    },
+    {
+      "seconds": 0.6,
+      "op": "profile"
+    },
+    {
+      "name": "original-fire-sprites-on-animated-hands",
+      "op": "capture"
+    },
+    {
+      "op": "lua",
+      "code": "SpellStopCasting()"
+    },
+    {
+      "condition": "UnitCastingInfo('player')==nil",
+      "op": "lua_wait",
+      "timeout": 6
+    },
+    {
+      "timeout": 12,
+      "op": "wait_no_cast_particles"
+    },
+    {
+      "name": "cancelled-cast-clears-both-hand-effects",
+      "op": "capture"
+    },
+    {
+      "seconds": 1,
+      "op": "wait"
+    },
+    {
+      "op": "lua",
+      "code": "CastSpellByName(GetSpellInfo(3140),'focus')"
+    },
+    {
+      "op": "wait_cast_particles",
+      "timeout": 8,
+      "spell": 3140,
+      "minTextures": 3
+    },
+    {
+      "name": "repeat-cast-restores-original-hand-effects",
+      "op": "capture"
+    },
+    {
+      "op": "lua",
+      "code": "TargetUnit('player'); assert(UnitIsUnit('target','player') and UnitGUID('focus')==LaunchTarget)"
+    },
+    {
+      "op": "wait_spell_missile",
+      "spell": 3140,
+      "targetEntry": 69,
+      "timeout": 12
+    },
+    {
+      "op": "capture",
+      "name": "missile-follows-packet-target-with-self-selected"
+    },
+    {
+      "op": "wait_spell_effect",
+      "spell": 3140,
+      "phase": "impact",
+      "timeout": 8
+    },
+    {
+      "op": "wait",
+      "seconds": 0.15
+    },
+    {
+      "op": "capture",
+      "name": "fireball-original-molten-impact"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "LaunchServerTarget==LaunchTarget",
+      "timeout": 8
+    },
+    {
+      "op": "wait",
+      "seconds": 1.5
+    },
+    {
+      "op": "lua",
+      "code": "assert(UnitIsUnit('target','player') and UnitGUID('focus')==LaunchTarget); LaunchWatch:UnregisterAllEvents()"
+    },
+    {
+      "op": "capture",
+      "name": "server-impact-retains-original-wolf-target"
+    },
+    {
+      "op": "profile",
+      "seconds": 3
+    },
+    {
+      "timeout": 12,
+      "op": "wait_no_cast_particles"
+    },
+    {
+      "name": "completed-cast-clears-authored-particles",
+      "op": "capture"
+    }
+  ],
+  "qaSpells": [
+    3140
+  ]
+}

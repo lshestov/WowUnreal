@@ -31,6 +31,7 @@ bool FSpellVisualKitDbc::Load(const FDbcParser& Parser)
 		E.WorldEffectID = Parser.GetUInt(i, 14);
 		E.SoundID = Parser.GetUInt(i, 15);
 		E.ShakeID = Parser.GetUInt(i, 16);
+        for(int32 J=0;J<4;++J) {E.CharProc[J]=int32(Parser.GetUInt(i,17+J)); for(int32 K=0;K<4;++K) E.CharParams[K][J]=Parser.GetFloat(i,21+K*4+J);}
 		E.Flags = Parser.GetUInt(i, 37);
 
 		IdIndex.Add(E.ID, Entries.Num());
@@ -45,4 +46,17 @@ const FSpellVisualKitDbcEntry* FSpellVisualKitDbc::GetById(uint32 ID) const
 {
 	const int32* Idx = IdIndex.Find(ID);
 	return Idx ? &Entries[*Idx] : nullptr;
+}
+
+bool FSpellVisualKitDbc::LoadAreaModels(const FDbcParser& Parser)
+{
+    if(!Parser.IsValid() || Parser.GetFieldCount()!=3) return false;
+    AreaModels.Reset();
+    for(uint32 I=0;I<Parser.GetRecordCount();++I)
+    {
+        FString Path=Parser.GetString(I,1);
+        if(Path.EndsWith(TEXT(".mdx"),ESearchCase::IgnoreCase) || Path.EndsWith(TEXT(".mdl"),ESearchCase::IgnoreCase)) Path=Path.LeftChop(4)+TEXT(".m2");
+        AreaModels.Add(Path);
+    }
+    return true;
 }

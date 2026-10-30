@@ -1,0 +1,191 @@
+{
+  "qaLevel": 40,
+  "qaGm": false,
+  "qaPeer": true,
+  "peerLevel": 40,
+  "peerOffset": 8,
+  "peerSpells": [
+    10074,
+    2136
+  ],
+  "qaSpells": [
+    7266,
+    3140,
+    1459
+  ],
+  "steps": [
+    {
+      "op": "wait_world",
+      "timeout": 180
+    },
+    {
+      "op": "wait_floor",
+      "timeout": 90
+    },
+    {
+      "op": "peer_start",
+      "timeout": 60
+    },
+    {
+      "op": "peer_target",
+      "timeout": 20
+    },
+    {
+      "op": "frame_camera_target",
+      "distance": 600
+    },
+    {
+      "op": "wait",
+      "seconds": 1
+    },
+    {
+      "op": "lua",
+      "code": "FocusUnit('target'); assert(IsSpellKnown(7266)); CastSpellByID(7266,'focus')"
+    },
+    {
+      "op": "peer_command",
+      "action": "duel_accept",
+      "timeout": 10
+    },
+    {
+      "op": "wait",
+      "seconds": 4
+    },
+    {
+      "op": "approach",
+      "range": 10,
+      "timeout": 8
+    },
+    {
+      "op": "frame_camera_target",
+      "distance": 700
+    },
+    {
+      "op": "wait",
+      "seconds": 1
+    },
+    {
+      "op": "lua",
+      "code": "Delayed=false; ReflectSeen=false; ReflectHit=false; SW=CreateFrame('Frame'); SW:RegisterEvent('UNIT_SPELLCAST_DELAYED'); SW:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED'); SW:SetScript('OnEvent',function(self,event,...) if event=='UNIT_SPELLCAST_DELAYED' then Delayed=true else local r={...}; if r[2]=='SPELL_MISSED' and r[9]==3140 and r[12]=='REFLECT' then ReflectSeen=true end; if r[2]=='SPELL_DAMAGE' and r[9]==3140 and r[6]==UnitGUID('player') then ReflectHit=true end end end); CastSpellByID(3140,'focus')"
+    },
+    {
+      "op": "wait_cast_particles",
+      "spell": 3140,
+      "minTextures": 3,
+      "timeout": 8
+    },
+    {
+      "op": "lua",
+      "code": "OriginalCastEnd=select(6,UnitCastingInfo('player')); assert(OriginalCastEnd)"
+    },
+    {
+      "op": "wait",
+      "seconds": 0.6
+    },
+    {
+      "op": "peer_command",
+      "action": "cast_owned",
+      "value": 2136,
+      "slot": 0,
+      "timeout": 5
+    },
+    {
+      "op": "lua_wait",
+      "condition": "Delayed",
+      "timeout": 5
+    },
+    {
+      "op": "lua",
+      "code": "assert(select(6,UnitCastingInfo('player'))>=OriginalCastEnd+499)"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "GetTime()*1000>OriginalCastEnd+80 and UnitCastingInfo('player')~=nil",
+      "timeout": 6
+    },
+    {
+      "op": "wait_cast_particles",
+      "spell": 3140,
+      "minTextures": 3,
+      "timeout": 2
+    },
+    {
+      "op": "capture",
+      "name": "server-pushback-extends-original-precast"
+    },
+    {
+      "op": "lua",
+      "code": "TargetUnit('player')"
+    },
+    {
+      "op": "wait_spell_missile",
+      "spell": 3140,
+      "targetEntry": 0,
+      "timeout": 8
+    },
+    {
+      "op": "capture",
+      "name": "outgoing-original-fireball-to-owned-reflector"
+    },
+    {
+      "op": "wait_spell_missile",
+      "spell": 3140,
+      "targetEntry": 0,
+      "reflected": true,
+      "timeout": 4
+    },
+    {
+      "op": "capture",
+      "name": "reflected-original-fireball-return-leg"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "ReflectSeen and ReflectHit",
+      "timeout": 8
+    },
+    {
+      "op": "wait",
+      "seconds": 2
+    },
+    {
+      "op": "capture",
+      "name": "reflected-impact-on-original-caster"
+    },
+    {
+      "op": "lua",
+      "code": "SW:UnregisterAllEvents(); CastSpellByID(1459,'player')"
+    },
+    {
+      "op": "wait_spell_effect",
+      "spell": 1459,
+      "phase": "impact",
+      "timeout": 5
+    },
+    {
+      "op": "wait",
+      "seconds": 0.5
+    },
+    {
+      "op": "capture",
+      "name": "arcane-intellect-original-symbols"
+    },
+    {
+      "op": "peer_cleanup",
+      "timeout": 45
+    },
+    {
+      "op": "wait",
+      "seconds": 4
+    },
+    {
+      "op": "wait_no_cast_particles",
+      "timeout": 12
+    },
+    {
+      "op": "capture",
+      "name": "owned-reflector-removed-without-orphan-effects"
+    }
+  ],
+  "qaSpawnEntry": 113,
+  "qaSpawnOffset": -25
+}

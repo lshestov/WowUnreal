@@ -1,0 +1,157 @@
+{
+  "qaLevel": 40,
+  "qaGm": false,
+  "qaSpells": [
+    116,
+    10
+  ],
+  "qaSpawnEntry": 38,
+  "qaSpawnStatic": true,
+  "qaSpawnOffset": 25,
+  "steps": [
+    {
+      "op": "wait_world",
+      "timeout": 180
+    },
+    {
+      "op": "wait_floor",
+      "timeout": 90
+    },
+    {
+      "op": "select_entry",
+      "entry": 38,
+      "timeout": 45
+    },
+    {
+      "op": "approach",
+      "range": 22,
+      "timeout": 45
+    },
+    {
+      "op": "wait",
+      "seconds": 1
+    },
+    {
+      "op": "frame_camera_target",
+      "distance": 500
+    },
+    {
+      "op": "lua",
+      "code": "FocusUnit('target'); assert(IsSpellKnown(116)); CastSpellByID(116,'focus')"
+    },
+    {
+      "op": "wait_spell_effect",
+      "spell": 116,
+      "phase": "precast",
+      "timeout": 6,
+      "label": "live"
+    },
+    {
+      "op": "wait",
+      "seconds": 0.4
+    },
+    {
+      "op": "capture",
+      "name": "frostbolt-original-precast"
+    },
+    {
+      "op": "lua",
+      "code": "TargetUnit('player')"
+    },
+    {
+      "op": "wait_spell_missile",
+      "spell": 116,
+      "targetEntry": 38,
+      "timeout": 8
+    },
+    {
+      "op": "capture",
+      "name": "frostbolt-original-missile-and-ribbons"
+    },
+    {
+      "op": "wait_spell_effect",
+      "spell": 116,
+      "phase": "impact",
+      "timeout": 8,
+      "label": "live"
+    },
+    {
+      "op": "wait",
+      "seconds": 0.3
+    },
+    {
+      "op": "capture",
+      "name": "frostbolt-original-impact"
+    },
+    {
+      "op": "wait",
+      "seconds": 3
+    },
+    {
+      "op": "lua",
+      "code": "TargetUnit('focus')"
+    },
+    {
+      "op": "frame_camera_target",
+      "distance": 1500
+    },
+    {
+      "op": "lua",
+      "code": "TargetUnit('player')"
+    },
+    {
+      "op": "lua",
+      "code": "CastSpellByID(10); assert(SpellIsTargeting())"
+    },
+    {
+      "op": "place_ground_spell"
+    },
+    {
+      "op": "wait_spell_effect",
+      "spell": 10,
+      "phase": "channel",
+      "timeout": 6,
+      "label": "live"
+    },
+    {
+      "op": "wait_spell_effect",
+      "spell": 10,
+      "phase": "persistent-area",
+      "timeout": 8,
+      "label": "live",
+      "minParticles": 12
+    },
+    {
+      "op": "wait",
+      "seconds": 1
+    },
+    {
+      "op": "capture",
+      "name": "blizzard-original-area-shards-and-channel"
+    },
+    {
+      "op": "lua",
+      "code": "SpellStopCasting()"
+    },
+    {
+      "op": "wait_no_spell_effect",
+      "spell": 10,
+      "phase": "channel",
+      "timeout": 12
+    },
+    {
+      "op": "wait_no_spell_effect",
+      "spell": 10,
+      "phase": "persistent-area",
+      "timeout": 12
+    },
+    {
+      "op": "capture",
+      "name": "cancelled-blizzard-clears-channel-and-area"
+    },
+    {
+      "op": "profile",
+      "seconds": 2
+    }
+  ]
+}

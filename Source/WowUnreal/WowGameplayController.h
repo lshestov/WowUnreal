@@ -1,5 +1,6 @@
 #pragma once
 #include "CoreMinimal.h"
+#include "WowSpellLaunch.h"
 #include "GameFramework/PlayerController.h"
 #include "Components/WidgetComponent.h"
 #include "Components/PointLightComponent.h"
@@ -485,7 +486,16 @@ private:
     void OnToggleMap(); // 'M' key handler
 
     // Spell visual effects
-    void SpawnSpellVisualEffect(uint64 CasterGuid, uint64 SpellTargetGuid, uint32 SpellId, bool bIsMissile);
+    const struct FSpellVisualDbcEntry* SpellVisual(uint32 Spell) const;
+    AActor* SpellActor(uint64 Guid) const;
+    FVector SpellAttachment(AActor* Actor,uint32 Attachment,const FVector& Offset=FVector::ZeroVector) const;
+    UWowM2EmitterComponent* SpawnSpellModel(AActor* Actor,uint32 Effect,uint32 Attachment,float Duration,bool WorldSpace=false,const FVector& Position=FVector::ZeroVector,const FString& ModelPath=FString());
+    TArray<TWeakObjectPtr<UWowM2EmitterComponent>> SpawnSpellKit(AActor* Actor,uint32 Kit,float Duration,const TCHAR* Phase,uint32 Spell,uint64 Caster,uint8 Counter,bool WorldSpace=false,const FVector& Position=FVector::ZeroVector);
+    void SpellImpact(const FWowSpellLaunch& Launch,uint64 Target,bool Hit,const FVector& Position,bool Ground=false);
+    void UpdateSpellEffects();
+    TMap<uint64,FWowSpellLaunch> LastVisualLaunches;
+    struct FVisualState {uint64 Unit=0,Caster=0; uint32 Spell=0,DoneKit=0; uint8 Counter=0; bool Channel=false; double Updated=0,Accumulator=0; TArray<TWeakObjectPtr<UWowM2EmitterComponent>> Components;};
+    TMap<FString,FVisualState> PersistentSpellEffects;
     void SpawnSpellMissile(const FWowSpellLaunch& Launch);
 
     // Active spell cast effects (destroyed when cast completes)

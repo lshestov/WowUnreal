@@ -80,6 +80,10 @@ public:
 
     /** Cast a spell on the current target (or self if no target) */
     UFUNCTION(BlueprintCallable) void SendCastSpell(int32 SpellId, int64 TargetGuid = 0);
+    bool HasPendingGroundSpell() const {return PendingGroundSpell!=0;}
+    void CancelGroundSpell() {if(PendingGroundSpell) {PendingGroundSpell=0; OnCursorChanged.Broadcast();}}
+    bool PlaceGroundSpell(const FVector& WowPosition);
+    uint32 PendingGroundSpell=0;
     bool JoinChannel(const FString& Name,const FString& Password=FString(),uint32 Id=0,int32 Number=0,int32 Window=1);
     bool LeaveChannel(const FString& Name);
     bool RequestChannelRoster(const FString& Name,bool Refresh=false);

@@ -449,12 +449,39 @@ struct FWowGameplayProbe
             for(TActorIterator<AWowSpellMissile> It(C.GetWorld());It;++It)
             {
                 auto* Missile=*It; const auto* Target=Handler.EntityManager.Find(Missile->GetTargetGuid());
-                if(Missile->GetSpellId()!=Spell || Missile->GetCasterGuid()!=Handler.EntityManager.LocalPlayerGuid || !Target || Target->Entry!=Entry) continue;
-                if(C.TargetGuid==Missile->GetTargetGuid()) {Failure=TEXT("Projectile probe requires selection to have changed"); Finish(C,false); return;}
+                bool Reflected=false; Step->TryGetBoolField(TEXT("reflected"),Reflected);
+                const bool Owner=Reflected?Missile->GetTargetGuid()==Handler.EntityManager.LocalPlayerGuid && Missile->GetCasterGuid()!=Handler.EntityManager.LocalPlayerGuid:Missile->GetCasterGuid()==Handler.EntityManager.LocalPlayerGuid;
+                if(!Missile->IsFlying() || Missile->GetSpellId()!=Spell || !Owner || !Target || Target->Entry!=Entry) continue;
+                if(!Reflected && C.TargetGuid==Missile->GetTargetGuid()) {Failure=TEXT("Projectile probe requires selection to have changed"); Finish(C,false); return;}
                 const auto State=MakeShared<FJsonObject>(); State->SetStringField(TEXT("targetGuid"),FString::Printf(TEXT("%llu"),Missile->GetTargetGuid()));
                 State->SetStringField(TEXT("selectedGuid"),FString::Printf(TEXT("%llu"),C.TargetGuid)); State->SetNumberField(TEXT("spell"),Spell);
-                State->SetNumberField(TEXT("travelSeconds"),Missile->GetTravelTime()); Inspections->SetObjectField(TEXT("spellMissile"),State); Done=true; break;
+                State->SetNumberField(TEXT("travelSeconds"),Missile->GetTravelTime()); Inspections->SetObjectField(Reflected?TEXT("spellReturn"):TEXT("spellMissile"),State); Done=true; break;
             }
+        }
+        else if(Op==TEXT("place_ground_spell"))
+        {
+            FVector Position=FVector::ZeroVector; if(auto* Actor=C.SpellActor(C.TargetGuid)) Position=FWowCoordinate::UEToWow(C.SpellAttachment(Actor,19)); else if(const auto* Player=Handler.EntityManager.GetLocalPlayer()) Position=Player->Movement.Position;
+            Done=Connection->PlaceGroundSpell(Position);
+        }
+        else if(Op==TEXT("wait_spell_effect") || Op==TEXT("wait_no_spell_effect"))
+        {
+            const uint32 Spell=Step->GetIntegerField(TEXT("spell")); const FString Phase=Step->GetStringField(TEXT("phase"));
+            const FName SpellTag(*FString::Printf(TEXT("spell:%u"),Spell)),PhaseTag(*FString::Printf(TEXT("phase:%s"),*Phase));
+            int32 Components=0,Particles=0,Geometry=0; TArray<TSharedPtr<FJsonValue>> Models,Ids;
+            for(TActorIterator<AActor> It(C.GetWorld());It;++It)
+            {
+                TInlineComponentArray<UWowM2EmitterComponent*> Effects(*It);
+                for(auto* Effect:Effects) if(Effect->ComponentHasTag(SpellTag) && Effect->ComponentHasTag(PhaseTag))
+                {
+                    if(Effect->GetParticleCount()==0 && (!Effect->IsEmitting() || Effect->GetGeometryCount()==0)) continue;
+                    ++Components; Particles+=Effect->GetParticleCount(); Geometry+=Effect->GetGeometryCount(); Ids.Add(MakeShared<FJsonValueNumber>(Effect->GetUniqueID()));
+                    if(Effect->ComponentTags.Num()) Models.Add(MakeShared<FJsonValueString>(Effect->ComponentTags[0].ToString()));
+                }
+            }
+            double Minimum=1; Step->TryGetNumberField(TEXT("minComponents"),Minimum);
+            double MinParticles=0,MinGeometry=0; Step->TryGetNumberField(TEXT("minParticles"),MinParticles); Step->TryGetNumberField(TEXT("minGeometry"),MinGeometry);
+            Done=Op==TEXT("wait_no_spell_effect")?Components==0:Components>=Minimum && Particles>=MinParticles && Geometry>=MinGeometry;
+            if(Done) {const auto Row=MakeShared<FJsonObject>(); Row->SetNumberField(TEXT("components"),Components); Row->SetNumberField(TEXT("particles"),Particles); Row->SetNumberField(TEXT("geometryPasses"),Geometry); Row->SetArrayField(TEXT("models"),Models); Row->SetArrayField(TEXT("ids"),Ids); FString Label; Step->TryGetStringField(TEXT("label"),Label); Inspections->SetObjectField(FString::Printf(TEXT("effect:%u:%s:%s"),Spell,*Phase,*Label),Row);}
         }
         else if(Op==TEXT("wait_cast_particles"))
         {

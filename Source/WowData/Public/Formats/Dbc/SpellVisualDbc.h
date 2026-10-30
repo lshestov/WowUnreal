@@ -37,6 +37,11 @@ struct FSpellVisualDbcEntry
 	uint32 InstantAreaKit;
 	uint32 ImpactAreaKit;
 	uint32 PersistentAreaKit;
+    static uint32 EffectAttachment(uint32 Index,bool Raw=false)
+    {
+        static constexpr uint32 Ids[]={20,34,19,21,22,17,23,24,25,15,16,37,38,22,47,48};
+        return Raw?Index:Index<UE_ARRAY_COUNT(Ids)?Ids[Index]:MAX_uint32;
+    }
 };
 
 class WOWDATA_API FSpellVisualDbc

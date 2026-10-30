@@ -18,8 +18,8 @@ the user's MPQs and are never included in Git.
 The controller resolves `SpellVisual.PrecastKit` and its original attachment
 IDs. Human spell hands are attachment 21/22, rather than the equipment palms.
 The component uses the animated skeletal bone plus the authored attachment
-offset. The actual Fireball precast model has four supported sphere head
-emitters per hand and one tail-only emitter, which is currently omitted.
+offset. The actual Fireball precast model has four sphere head emitters and one
+tail-only emitter per hand. Both paths are now supported.
 
 Each caster owns its components. Spell ID and cast counter distinguish a
 completion or interruption from an older cast. Cancellation/completion stops
@@ -28,11 +28,10 @@ older point-light fallback is removed only for that caster when authored
 sprites are available. Effects have a bounded duration and stale registry
 entries are pruned before new casts.
 
-The implementation is a first subset: tails/ribbons, spline emitters, the
-effect model's own bone animation, wind/advanced particle flags, channel/aura
-lifecycles and authored cast/impact/projectile geometry remain separate work.
-The projectile currently still uses the earlier sphere approximation.
-Cast pushback does not yet extend the initial emitter deadline.
+The initial head-sprite subset has been extended to tails, ribbons, animated
+model geometry and the remaining spell phases. Cast pushback extends the
+existing deadline. See [spell lifecycle](SpellEffectLifecycle.md) for release,
+flight/impact, channels, aura refresh/removal, area procedures and limits.
 
 The rendered probe inspects both bone bindings, live particle counts and CPU
 submission cost, verifies cancellation and a second cast, retains the server's

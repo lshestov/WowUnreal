@@ -308,6 +308,8 @@ void FDbcStore::LoadDeferred(FMpqManager& Mpq)
         UE_LOG(LogDbcStore, Verbose, TEXT("SpellVisualKit: %d records"), SpellVisualKitDbc.Num());
     }
 
+    if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\SpellVisualKitAreaModel.dbc"),Parser)) SpellVisualKitDbc.LoadAreaModels(Parser);
+
     if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\SpellVisualEffectName.dbc"), Parser))
     {
         SpellVisualEffectNameDbc.Load(Parser);

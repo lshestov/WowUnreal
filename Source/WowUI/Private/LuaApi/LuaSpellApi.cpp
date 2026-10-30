@@ -215,8 +215,8 @@ void WowLuaApi::RegisterSpellApi(lua_State* L)
 }
 void WowLuaApi::NotifyCastState(lua_State* L,uint64 Caster,uint32 Spell,uint8 Kind,bool HasRequest,uint8 Counter)
 {
-    auto* C=GetContext(L); if(!C || !C->EventSystem || Kind>8) return;
-    static const TCHAR* Events[]={TEXT("UNIT_SPELLCAST_START"),TEXT("UNIT_SPELLCAST_SUCCEEDED"),TEXT("UNIT_SPELLCAST_FAILED"),TEXT("UNIT_SPELLCAST_CHANNEL_START"),TEXT("UNIT_SPELLCAST_CHANNEL_UPDATE"),TEXT("UNIT_SPELLCAST_CHANNEL_STOP"),TEXT("UNIT_SPELLCAST_SENT"),TEXT("UNIT_SPELLCAST_INTERRUPTED"),TEXT("UNIT_SPELLCAST_STOP")};
+    auto* C=GetContext(L); if(!C || !C->EventSystem || Kind>9) return;
+    static const TCHAR* Events[]={TEXT("UNIT_SPELLCAST_START"),TEXT("UNIT_SPELLCAST_SUCCEEDED"),TEXT("UNIT_SPELLCAST_FAILED"),TEXT("UNIT_SPELLCAST_CHANNEL_START"),TEXT("UNIT_SPELLCAST_CHANNEL_UPDATE"),TEXT("UNIT_SPELLCAST_CHANNEL_STOP"),TEXT("UNIT_SPELLCAST_SENT"),TEXT("UNIT_SPELLCAST_INTERRUPTED"),TEXT("UNIT_SPELLCAST_STOP"),TEXT("UNIT_SPELLCAST_DELAYED")};
     const auto* S=FDbcStore::Get().Spells().GetById(Spell); const int32 Top=lua_gettop(L);
     TArray<FString> Units={TEXT("player"),TEXT("target"),TEXT("focus"),TEXT("pet"),TEXT("vehicle")};
     for(int32 I=1;I<=4;++I) Units.Add(FString::Printf(TEXT("party%d"),I)); for(int32 I=1;I<=40;++I) Units.Add(FString::Printf(TEXT("raid%d"),I));

@@ -70,8 +70,8 @@ void WowLuaApi::RegisterGlyphApi(lua_State* L)
     Register(L,"GlyphMatchesSocket",[](lua_State* S)->int { const auto* C=GetContext(S); const int32 Index=luaL_checkinteger(S,1)-1; if(C && C->ConnectionManager && C->ConnectionManager->GlyphMatchesSocket(Index)) lua_pushinteger(S,1); else lua_pushnil(S); return 1; });
     Register(L,"PlaceGlyphInSocket",[](lua_State* S)->int { auto* C=GetContext(S); const int32 Index=luaL_checkinteger(S,1)-1; if(C && C->ConnectionManager && C->ConnectionManager->PlaceGlyph(Index)) lua_pushinteger(S,1); else lua_pushnil(S); return 1; });
     Register(L,"RemoveGlyphFromSocket",[](lua_State* S)->int { auto* C=GetContext(S); if(C && C->ConnectionManager) C->ConnectionManager->SendRemoveGlyph(luaL_checkinteger(S,1)-1); return 0; });
-    Register(L,"SpellIsTargeting",[](lua_State* S)->int { const auto* C=GetContext(S); lua_pushboolean(S,C && C->ConnectionManager && (C->ConnectionManager->HasPendingGlyph() || C->ConnectionManager->HasPendingItemSpell())); return 1; });
-    Register(L,"SpellStopTargeting",[](lua_State* S)->int { auto* C=GetContext(S); if(C && C->ConnectionManager) {C->ConnectionManager->CancelGlyphUse(); C->ConnectionManager->CancelItemSpell();} return 0; });
+    Register(L,"SpellIsTargeting",[](lua_State* S)->int { const auto* C=GetContext(S); lua_pushboolean(S,C && C->ConnectionManager && (C->ConnectionManager->HasPendingGlyph() || C->ConnectionManager->HasPendingItemSpell() || C->ConnectionManager->HasPendingGroundSpell())); return 1; });
+    Register(L,"SpellStopTargeting",[](lua_State* S)->int { auto* C=GetContext(S); if(C && C->ConnectionManager) {C->ConnectionManager->CancelGlyphUse(); C->ConnectionManager->CancelItemSpell(); C->ConnectionManager->CancelGroundSpell();} return 0; });
 }
 #else
 void WowLuaApi::RegisterGlyphApi(lua_State*) {}

@@ -77,3 +77,9 @@ and account are removed and existing characters/inventories remain unchanged.
 Verified: Windows Editor and packaged Development builds; all 161 regression
 checks pass (157 clean and four existing warning cases). The two focused launch
 and timing checks pass without warnings.
+
+The subsequent [authored spell lifecycle](SpellEffectLifecycle.md) replaces the
+prototype projectile, renders release/impact/healing and state/channel kits,
+retains ground destinations and all outgoing targets, implements reflected
+return legs and extends effects during server cast delays. The earlier
+foundation-only limitations above describe the original verification stage.

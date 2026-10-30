@@ -169,6 +169,7 @@ public:
     FOnWowCastResult OnCastResult;
     FOnWowCastState OnCastState;
     struct FCast {uint32 Spell=0; uint8 Counter=0; double Started=0,Ends=0; bool Channel=false;};
+    TMap<uint64,FWowSpellLaunch> RecentSpellLaunches;
     TMap<uint64,FCast> Casts;
     // Wrath reports a local rejection privately and then broadcasts the same cast.
     struct FCastFailure {uint32 Spell=0; uint8 Counter=0; bool Private=false;};
