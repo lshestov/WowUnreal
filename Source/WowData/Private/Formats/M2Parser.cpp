@@ -208,6 +208,16 @@ static_assert(sizeof(FM2CameraRaw)==100);
 struct FM2ArrayRaw {uint32 Count,Offset;};
 struct FM2ParticleTrackRaw {uint16 Interpolation; int16 GlobalSequence; FM2ArrayRaw Times,Values;};
 struct FM2ParticleCurveRaw {FM2ArrayRaw Times,Values;};
+struct FM2ColorRaw {FM2ParticleTrackRaw Color,Alpha;};
+struct FM2TransformRaw {FM2ParticleTrackRaw Translation,Rotation,Scale;};
+struct FM2RibbonRaw
+{
+    uint32 Id; int16 Bone; uint16 Padding; float Position[3]; FM2ArrayRaw Textures,Materials;
+    FM2ParticleTrackRaw Color,Alpha,Above,Below;
+    float EdgesPerSecond,EdgeLifetime,Gravity; uint16 Rows,Cols;
+    FM2ParticleTrackRaw Slot,Visibility; int16 Priority; uint16 Padding2;
+};
+static_assert(sizeof(FM2RibbonRaw)==176);
 struct FM2ParticleEmitterRaw
 {
     uint32 Id,Flags; float Position[3]; int16 Bone; uint16 Texture;
@@ -262,6 +272,28 @@ template<typename T> static bool ReadParticleScalarTrack(const uint8* Base,int32
             const float Time=Times[I].Count?float(Timestamps[J]):0,Value=float(Keys[J]);
             if(!FMath::IsFinite(Value) || (J && Time<Sequence.Times.Last())) return false;
             Sequence.Times.Add(Time); Sequence.Values.Add(Value);
+        }
+    }
+    Out=MoveTemp(Parsed); return true;
+}
+template<typename Raw,typename Value,typename Convert> static bool ReadAnimated(const uint8* Base,int32 Size,const FM2ParticleTrackRaw& Src,TM2AnimatedTrack<Value>& Out,int64& Budget,Convert Make)
+{
+    if(Src.Interpolation>1 || Src.Times.Count!=Src.Values.Count || Src.Times.Count>256) return false;
+    const FM2ArrayRaw *Times=nullptr,*Values=nullptr;
+    if(!SafeRead(Base,Size,Src.Times.Offset,Src.Times.Count,Times) || !SafeRead(Base,Size,Src.Values.Offset,Src.Values.Count,Values)) return false;
+    TM2AnimatedTrack<Value> Parsed; Parsed.Interpolation=Src.Interpolation; Parsed.GlobalSequence=Src.GlobalSequence; Parsed.Sequences.SetNum(Src.Times.Count);
+    for(uint32 I=0;I<Src.Times.Count;++I)
+    {
+        if(Values[I].Count>4096 || Times[I].Count!=Values[I].Count) return false;
+        const int64 Cost=int64(Values[I].Count)*(sizeof(Value)+sizeof(float)); if(Cost>Budget) return false; Budget-=Cost;
+        const uint32* Timestamps=nullptr; const Raw* Keys=nullptr;
+        if(!SafeRead(Base,Size,Times[I].Offset,Times[I].Count,Timestamps) || !SafeRead(Base,Size,Values[I].Offset,Values[I].Count,Keys)) return false;
+        auto& Sequence=Parsed.Sequences[I];
+        for(uint32 J=0;J<Values[I].Count;++J)
+        {
+            const Value V=Make(Keys[J]); const float Time=float(Timestamps[J]);
+            if(V.ContainsNaN() || (J && Time<Sequence.Times.Last())) return false;
+            Sequence.Times.Add(Time); Sequence.Values.Add(V);
         }
     }
     Out=MoveTemp(Parsed); return true;
@@ -731,7 +763,10 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
         const FM2SkinTextureUnit& TU = SkinTexUnits[i];
         FM2RenderPass& Pass = Result.RenderPasses[i];
 
-        Pass.SubmeshIndex = TU.SkinSectionIndex;
+        Pass.SubmeshIndex = TU.SkinSectionIndex; Pass.ColorIndex=TU.ColorIndex;
+        const int16* Lookup=nullptr;
+        if(SafeRead(M2Base,M2Size,Header.ofsTransLookup,Header.nTransLookup,Lookup) && TU.TransparencyComboIndex<Header.nTransLookup) Pass.AlphaIndex=Lookup[TU.TransparencyComboIndex];
+        if(SafeRead(M2Base,M2Size,Header.ofsTexAnimLookup,Header.nTexAnimLookup,Lookup) && TU.TexAnimComboIndex<Header.nTexAnimLookup) Pass.TransformIndex=Lookup[TU.TexAnimComboIndex];
 
         // Resolve texture index through the texture lookup table
         if (TU.TextureComboIndex < static_cast<uint16>(TexLookup.Num()))
@@ -783,6 +818,49 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
         Result.GlobalSequenceDurations.Append(GlobalDurations,Header.nGlobalSequences);
     const FM2ParticleEmitterRaw* RawParticleEmitters = nullptr;
     int64 ParticleBudget=8*1024*1024;
+    const auto Vector=[](const FVector3f& V){return V;};
+    const auto Alpha=[](FM2ParticleFloatTrack& Track){for(auto& Sequence:Track.Sequences) for(auto& Value:Sequence.Values) Value=FMath::Clamp(Value/32767.f,0.f,1.f);};
+    const FM2ColorRaw* Colors=nullptr;
+    if(Header.nColors<=256 && SafeRead(M2Base,M2Size,Header.ofsColors,Header.nColors,Colors))
+    {
+        Result.Colors.SetNum(Header.nColors);
+        for(uint32 I=0;I<Header.nColors;++I) {ReadAnimated<FVector3f>(M2Base,M2Size,Colors[I].Color,Result.Colors[I].Color,ParticleBudget,Vector); ReadParticleScalarTrack<int16>(M2Base,M2Size,Colors[I].Alpha,Result.Colors[I].Alpha,ParticleBudget); Alpha(Result.Colors[I].Alpha);}
+    }
+    const FM2ParticleTrackRaw* Weights=nullptr;
+    if(Header.nTransparency<=256 && SafeRead(M2Base,M2Size,Header.ofsTransparency,Header.nTransparency,Weights))
+    {
+        Result.TextureWeights.SetNum(Header.nTransparency);
+        for(uint32 I=0;I<Header.nTransparency;++I) {ReadParticleScalarTrack<int16>(M2Base,M2Size,Weights[I],Result.TextureWeights[I],ParticleBudget); Alpha(Result.TextureWeights[I]);}
+    }
+    const FM2TransformRaw* Transforms=nullptr;
+    if(Header.nTexAnims<=256 && SafeRead(M2Base,M2Size,Header.ofsTexAnims,Header.nTexAnims,Transforms))
+    {
+        Result.TextureTransforms.SetNum(Header.nTexAnims);
+        for(uint32 I=0;I<Header.nTexAnims;++I)
+        {
+            auto& D=Result.TextureTransforms[I]; const auto& R=Transforms[I];
+            ReadAnimated<FVector3f>(M2Base,M2Size,R.Translation,D.Translation,ParticleBudget,Vector); ReadAnimated<FVector3f>(M2Base,M2Size,R.Scale,D.Scale,ParticleBudget,Vector);
+            ReadAnimated<FQuat4f>(M2Base,M2Size,R.Rotation,D.Rotation,ParticleBudget,[](const FQuat4f& Q){return Q.GetNormalized();});
+        }
+    }
+    const FM2RibbonRaw* Ribbons=nullptr;
+    if(Header.nRibbonEmitters<=64 && SafeRead(M2Base,M2Size,Header.ofsRibbonEmitters,Header.nRibbonEmitters,Ribbons))
+    {
+        for(uint32 I=0;I<Header.nRibbonEmitters;++I)
+        {
+            const auto& R=Ribbons[I]; const uint16 *Textures=nullptr,*Materials=nullptr;
+            if(!R.Textures.Count || !R.Materials.Count || !SafeRead(M2Base,M2Size,R.Textures.Offset,R.Textures.Count,Textures) || !SafeRead(M2Base,M2Size,R.Materials.Offset,R.Materials.Count,Materials)) continue;
+            FM2Ribbon D; D.Bone=R.Bone; D.Texture=Textures[0]; D.Position=FVector(R.Position[0],R.Position[1],R.Position[2]);
+            if(Materials[0]<RenderFlags.Num()) D.BlendMode=RenderFlags[Materials[0]].BlendMode;
+            if(!FMath::IsFinite(R.EdgesPerSecond) || !FMath::IsFinite(R.EdgeLifetime) || D.Position.ContainsNaN()) continue;
+            D.EdgesPerSecond=FMath::Clamp(R.EdgesPerSecond,1.f,120.f); D.EdgeLifetime=FMath::Clamp(R.EdgeLifetime,.01f,10.f); D.Gravity=FMath::IsFinite(R.Gravity)?R.Gravity:0; D.Rows=R.Rows; D.Cols=R.Cols;
+            ReadAnimated<FVector3f>(M2Base,M2Size,R.Color,D.Color,ParticleBudget,Vector);
+            ReadParticleScalarTrack<int16>(M2Base,M2Size,R.Alpha,D.Alpha,ParticleBudget); Alpha(D.Alpha);
+            ReadParticleScalarTrack<float>(M2Base,M2Size,R.Above,D.Above,ParticleBudget); ReadParticleScalarTrack<float>(M2Base,M2Size,R.Below,D.Below,ParticleBudget);
+            ReadParticleScalarTrack<uint16>(M2Base,M2Size,R.Slot,D.Slot,ParticleBudget); ReadParticleScalarTrack<uint8>(M2Base,M2Size,R.Visibility,D.Visibility,ParticleBudget);
+            Result.Ribbons.Add(MoveTemp(D));
+        }
+    }
     if (Header.Version==264 && Header.nParticleEmitters>0 && Header.nParticleEmitters<=256 && SafeRead(M2Base, M2Size, Header.ofsParticleEmitters, Header.nParticleEmitters, RawParticleEmitters))
     {
         Result.ParticleEmitters.SetNum(Header.nParticleEmitters);

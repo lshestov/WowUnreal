@@ -17,6 +17,7 @@ struct WOWDATA_API FM2RenderPass
     uint16 TextureIndex = 0;
     uint16 BlendMode = 0;
     uint16 Flags = 0;
+    int16 ColorIndex=-1,AlphaIndex=-1,TransformIndex=-1;
 };
 
 struct WOWDATA_API FM2Bone
@@ -108,6 +109,29 @@ struct WOWDATA_API FM2ParticleFloatTrack
     float Sample(int32 Animation,float TimeMs,const TArray<uint32>& GlobalDurations,float Default=0) const;
 };
 
+template<typename T> struct TM2AnimatedTrack
+{
+    uint16 Interpolation=0; int16 GlobalSequence=-1;
+    TArray<TM2ParticleCurve<T>> Sequences;
+    T Sample(float TimeMs,const TArray<uint32>& Durations,const T& Default,int32 Animation=0) const
+    {
+        if(Sequences.IsEmpty()) return Default;
+        if(Durations.IsValidIndex(GlobalSequence) && Durations[GlobalSequence]) TimeMs=FMath::Fmod(TimeMs,float(Durations[GlobalSequence]));
+        if(GlobalSequence>=0 || !Sequences.IsValidIndex(Animation)) Animation=0;
+        return Sequences[Animation].Sample(TimeMs,Default,Interpolation==0);
+    }
+};
+struct FM2ModelColor {TM2AnimatedTrack<FVector3f> Color; FM2ParticleFloatTrack Alpha;};
+struct FM2TextureTransform {TM2AnimatedTrack<FVector3f> Translation,Scale; TM2AnimatedTrack<FQuat4f> Rotation;};
+struct FM2Ribbon
+{
+    int16 Bone=-1; uint16 Texture=0,BlendMode=2,Rows=1,Cols=1;
+    FVector Position=FVector::ZeroVector;
+    float EdgesPerSecond=10,EdgeLifetime=1,Gravity=0;
+    TM2AnimatedTrack<FVector3f> Color;
+    FM2ParticleFloatTrack Alpha,Above,Below,Slot,Visibility;
+};
+
 struct WOWDATA_API FM2ParticleEmitter
 {
     uint32 Id = 0;                          // Particle emitter ID
@@ -192,6 +216,10 @@ struct WOWDATA_API FM2Data
     TArray<FM2Attachment> Attachments;
     TArray<FM2ParticleEmitter> ParticleEmitters; // particle emitter data
     TArray<uint32> GlobalSequenceDurations;
+    TArray<FM2ModelColor> Colors;
+    TArray<FM2ParticleFloatTrack> TextureWeights;
+    TArray<FM2TextureTransform> TextureTransforms;
+    TArray<FM2Ribbon> Ribbons;
     TArray<FM2Submesh> Submeshes;          // geoset info from skin file
     TArray<int16> AttachmentLookup;        // attachment ID → index in Attachments
     uint32 NumBones = 0;
