@@ -71,22 +71,43 @@ implemented paths. Separate world lighting and login work are unchanged.
 ## Verification status
 
 Windows Editor and packaged Development builds succeed. The full regression
-passes 168 checks (164 clean, four existing warning cases). Rendered owned-QA
-routes cover Fireball cancellation/recast/retarget and authored impact (32
-steps), Flash Heal/Renew/shield state and cancellation (31 steps), Frostbolt
-and Blizzard channel/area cancellation (28 steps), and a real duel with
-pushback past the original deadline and reflected return impact (38 steps).
-Their 24 engine captures were checked for content and visually inspected.
-The reflected flight is 271 ms outward and 135 ms back.
+passes 168 checks (164 clean, four existing warning cases). The repeated
+rendered owned-QA suite on the installed lifecycle implementation passes:
 
-These are initial verification results, not the final clean-install signoff.
-The last route's gameplay and peer cleanup passed, but the host wrapper's
-protected-character checksum comparison failed. QA accounts were deleted;
-existing character records were not restored or overwritten. The existing
-binlog audit has not explained that checksum discrepancy. New realm QA runs
-remain stopped. The wider-camera area capture, final Hold/Decay/refresh and
-three-target healing scenario, and published-install verification are pending
-resolution of that guard. The source plan remains pending verification.
+| Route | Steps | Inspected engine captures |
+| --- | ---: | ---: |
+| Fireball cancellation, recast, retarget and authored impact | 32 | 7 |
+| Flash Heal, Renew refresh, shield Hold/Decay, three-target healing and owner loss | 58 | 11 |
+| Frostbolt and wide-camera Blizzard channel/area cancellation | 31 | 5 |
+| Real duel: pushback beyond the original deadline and reflected return impact | 38 | 6 |
+| Total | 159 | 29 |
+
+Renew retains the same component ID across refresh. The shield retains its
+component through the intro-to-Hold transition, with three original geometry
+passes; removal plays Decay and clears the state. Prayer of Healing produces
+three separate impact components and three server heal destinations. The
+wide-camera Blizzard capture shows the original airborne shard; its probe
+observes at least twelve particles. Channel interruption clears both channel
+and persistent-area effects. Reflected flight is 271 ms outward and 135 ms back.
+Every final PNG was checked for content and visually inspected.
+
+The earlier host protected-character checksum discrepancy remains unexplained
+in the retained audit. On 2026-11-01 the user authorized accepting the current
+database state as a fresh baseline. The old QA registrations were confirmed
+absent before resuming; no existing character records were restored or
+overwritten. All four repeated routes now pass the complete before/after
+character, inventory and item fingerprint comparison, including the previously
+affected duel. Every disposable participant is removed and the realm is empty.
+The launcher saves diagnostic hashes by table, numeric row key and field in
+separate reports, keeping the native tool's bounded fixture compact. These are
+hashes only, not SQL dumps or copies of user records.
+
+Host evidence: `11-spell-runtime-evidence.json`, `11-priest-identity-evidence.json`
+and the `11-*-captures.json` reports under `logs/wowunreal-ui-completion`.
+`11-authorized-baseline.json` links the preserved old audit to the authorization.
+The installation verifier checks the published clean revision, all tracked
+staged sources, executable hashes, regression results, captures, closed owned
+fixtures, absence of running clients and the empty realm.
 
 Replayable scenario inputs are in `Scripts/Verification`. They contain no
 credentials or Blizzard binary data. The host owned-account launcher supports

@@ -184,12 +184,28 @@
       "seconds": 2
     },
     {
+      "op": "wait_spell_effect",
+      "spell": 17,
+      "phase": "aura",
+      "label": "hold",
+      "minGeometry": 3,
+      "timeout": 5
+    },
+    {
       "op": "capture",
       "name": "shield-authored-hold-after-intro"
     },
     {
       "op": "lua",
       "code": "CancelUnitBuff('player',GetSpellInfo(17))"
+    },
+    {
+      "op": "wait",
+      "seconds": 0.15
+    },
+    {
+      "op": "capture",
+      "name": "shield-authored-decay-on-removal"
     },
     {
       "op": "wait_no_spell_effect",
@@ -235,7 +251,7 @@
       "spell": 139,
       "phase": "aura",
       "timeout": 8,
-      "label": "initial"
+      "label": "owner-loss"
     },
     {
       "op": "peer_cleanup",
