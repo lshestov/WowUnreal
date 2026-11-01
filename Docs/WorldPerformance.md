@@ -60,3 +60,27 @@ reach 5,313.8, 6,619.7 and 5,504.9 MiB on Abbey returns, with a Westfall peak
 of 7,118.0 MiB before automatic garbage collection. This does not establish
 an unbounded UObject leak: collection recovers memory, while parsed-M2 cache
 ownership and the repeated allocation peak still need investigation.
+
+The second unoptimized run, `17-baseline-isolated`, uses a new project user
+directory and repeats all ten inspected captures. Initial settled time is
+16.76 s; ordinary initial p95/p99/max is 32.25/363.92/692.04 ms. The last Abbey
+return peaks at 1,050.54 ms. GPU time on the entry route remains about 1.60 ms
+while render-thread/frame distributions vary substantially between these runs;
+the difference must not be attributed solely to cache state. Both retain the
+same sections, textures and geometry. Their reports preserve the different
+sample counts and complete distributions.
+
+The corrected 19-step native baseline is
+`logs/wowunreal-gameplay/run-20261101-201527-342`: real server login, UI,
+stairs/doorway/interior and return, three inspected nonempty PNGs. The ten
+profile intervals have frame medians 6.86–13.88 ms, p95 9.18–25.40 ms, maxima
+11.69–44.69 ms and typical draw counts 1,927–3,548. UI/network/entity costs
+remain included. All owned fixtures are removed; protected fingerprints match.
+An earlier failed QA path is retained but excluded: automatic wall avoidance
+diverted it at the doorway. The corrected path uses the already verified
+stair/doorway coordinates and the probe's explicit direct-walk option.
+
+`baseline-runtime-manifest.json` retains the staged runtime input hashes and
+executable hash before any terrain optimization. The only later baseline
+instrumentation adjustment adds the direct-walk option to profile steps;
+production streaming/rendering is unchanged.

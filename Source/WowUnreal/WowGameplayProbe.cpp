@@ -368,7 +368,10 @@ struct FWowGameplayProbe
             Done=Now-StepStarted>=FMath::Clamp(Step->GetNumberField(TEXT("seconds")),1.0,60.0);
             const TArray<TSharedPtr<FJsonValue>>* Destination=nullptr;
             if(Step->TryGetArrayField(TEXT("position"),Destination) && Destination->Num()==3)
-                Done=Walk(C,FWowCoordinate::WowToUE((*Destination)[0]->AsNumber(),(*Destination)[1]->AsNumber(),(*Destination)[2]->AsNumber()),1.5f);
+            {
+                bool Direct=false; Step->TryGetBoolField(TEXT("direct"),Direct);
+                Done=Walk(C,FWowCoordinate::WowToUE((*Destination)[0]->AsNumber(),(*Destination)[1]->AsNumber(),(*Destination)[2]->AsNumber()),1.5f,!Direct);
+            }
         }
         else if (Op==TEXT("select_entry"))
         {
