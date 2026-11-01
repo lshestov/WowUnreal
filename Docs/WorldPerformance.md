@@ -1,5 +1,141 @@
 # World streaming performance
 
+## Clean published verification, 1 November 2026
+
+Implementation `8d996a241f61a830bd9f6c03a188d07ed32bcb7a` is published and
+installed without local patches. The clean repeat passes 179 regression checks
+(175 clean, four previously recorded warning cases), the 19-step native
+UI/network route and 57 individually inspected, nonempty engine captures:
+10 existing-directory, 10 isolated-directory, 13 memory and 21 lighting PNGs,
+plus three native PNGs. Source/stage/package/runtime verification matches 921
+source files, 1,504 runtime inputs and all 47 packaged files. The three EXEs
+share SHA256 `0C5E7F26576A224357B6A0ADA661603CF8F00862930FD6C76C0BE467BBE70F95`.
+Owned fixtures are closed/restored, protected fingerprints match, credentials
+are removed, and the realm and client process counts are zero.
+
+Machine: Windows 11, UE 5.7.4 Development, Ryzen 7 9800X3D, RTX 5080,
+approximately 32 GiB RAM, 1280x900 window, no VSync. These are individual runs
+on this machine, with ordinary host activity and system/driver caches
+uncontrolled. They are not a mid-range hardware or universal FPS claim.
+
+### Loading and streaming
+
+Times below include each route's unchanged settling/minimum-duration rules.
+Process launch to first settled capture additionally includes startup, MPQ/DBC
+and map initialization; it is distinct from the initial phase's own timer.
+
+| Measurement | Original existing | Published existing | Original isolated | Published isolated |
+|---|---:|---:|---:|---:|
+| Launch to first settled capture, s | 21.08 | 19.18 | 24.19 | 20.09 |
+| Initial phase settled, s | 13.50 | 12.93 | 16.76 | 13.45 |
+| Initial frame p95 / p99 / max, ms | 11.04 / 270.26 / 569.73 | 9.03 / 45.87 / 257.97 | 32.25 / 363.92 / 692.04 | 9.43 / 51.40 / 261.79 |
+| Elwynn crossing maximum, ms | 275.49 | 179.13 | 377.40 | 67.92 |
+| Abbey return maxima, ms | 548.29 / 542.76 / 543.92 | 107.28 / 68.76 / 72.62 | 707.25 / 818.80 / 1050.54 | 85.73 / 75.94 / 71.28 |
+| First Westfall settled, s | 20.18 | 11.00 | 20.20 | 11.12 |
+| Later Westfall settled, s | 16.42 / 16.42 | 8.00 / 8.00 | 16.46 / 16.65 | 8.00 / 8.00 |
+
+Eight seconds is the route's minimum duration, not a measurement that the
+revisited region requires exactly eight seconds of loading. The differing
+crossing maxima are both retained; their cause has not been isolated.
+
+Across the ordinary existing-directory route, the frame mean improves
+3.057→2.522 ms and maximum 569.73→257.97 ms, but p95 **worsens**
+2.767→2.976 ms and p99 **worsens** 4.385→9.910 ms. There are fewer very large
+stalls, with more work distributed among smaller frames. Samples are
+42,663→41,098 and phase durations differ, so these aggregate percentiles are
+descriptive workload mixtures, not controlled steady-state FPS comparisons.
+Frames above 50/100 ms change from 142/128 to 130/28. Raw diagnostic frames
+remain separately available and are not discarded from the evidence.
+
+| Ordinary whole-route counter | Original median / p95 / p99 / max | Published median / p95 / p99 / max |
+|---|---:|---:|
+| Game thread, ms | .506 / .895 / 3.536 / 570.13 | .617 / 1.723 / 9.079 / 195.93 |
+| Render thread, ms | 2.184 / 2.710 / 3.167 / 163.56 | 2.087 / 2.576 / 3.203 / 180.42 |
+| GPU, ms | 1.555 / 1.781 / 1.918 / 14.35 | 1.544 / 1.638 / 1.781 / 9.99 |
+| RHI draw calls | 4876 / 8488 / 8758 / 8886 | 1542 / 2770 / 3324 / 3688 |
+
+Warm entry frame p95 is 2.34→2.27 ms, with draw-call median 1628→1190;
+this small frame-time difference must not be promoted as an overall FPS gain.
+The initial terrain has 6,395→750 sections/materials (88.27% fewer). All 923
+source textures, 13,471 instanced placements in 1,175 HISMC batches and 590 WMO
+shadow casters remain; original/new initial placement totals also match the
+independent instancing logs. The 25 alpha atlases occupy 100 MiB; source
+texture mip bytes total 20.97 MiB in the corrected compressed-format accounting.
+Visual RGB-grid mean differences versus the original are .98–1.48/255 in the
+existing run and .95–2.05/255 in the isolated run. Animation/temporal history
+are not frozen, so these are diagnostics rather than pixel-identity claims.
+
+Final existing-run terrain-finalization p95/max is 127.60/133.13 ms, LOD1
+.54/2.41 ms, WDL 14.61/18.53 ms and WMO-job creation 11.17/104.29 ms.
+M2 model-group p95/max is 1.34/9.95 ms; it now measures one model group rather
+than the old whole tile. The worker and queue reports retain at most four
+active/ready tiles and one selected heavy job per frame. Terrain collision,
+materials, uploads and WMO work still produce visible hitches; a fully
+16.7-ms streaming budget has not been achieved.
+
+### Retention and native gameplay
+
+The clean six-cycle diagnostic route records the following Abbey returns.
+Every return has exactly 54,588 UObjects, 2,772 live static meshes, 21,624
+instanced placements and the same terrain/shadow populations. Parsed-world
+cache payload remains 3.96 MiB / 256 entries, below its 128 MiB limit.
+
+| Return | Before diagnostic collection, MiB | After collection and settling, MiB |
+|---|---:|---:|
+| 1 | 5019.1 | 4366.1 |
+| 2 | 4932.3 | 4408.6 |
+| 3 | 4612.6 | 4342.1 |
+| 4 | 4938.0 | 4429.1 |
+| 5 | 4948.2 | 4430.6 |
+| 6 | 4205.7 | 4196.2 |
+
+The late range is 234.4 MiB, with no sustained growth and identical retained
+scene populations. Seven explicit diagnostic collections and two additional
+natural collections are recorded. The unchanged three-cycle route instead
+ends at 6,122.2 MiB before collection (isolated: 6,380.1 MiB). The original
+last return already followed natural collection; comparing those endpoints
+as an equal-state memory reduction would be misleading. No forced collection
+was added to production gameplay.
+
+The repeated native route is
+`logs/wowunreal-gameplay/run-20261101-220636-487`. All 19 steps pass, including
+real login, floor/capsule movement, doorway/interior and return, and all three
+PNG views preserve the original UI and world. Its first 12-second frame
+median/p95/p99/max is 7.60/10.35/12.25/14.16 ms, versus
+7.12/9.54/10.55/11.69 ms originally. Draw-call median falls 2757→1832;
+GPU p95 is 2.66→2.62 ms. Profile p95 values across all ten intervals are
+9.71–10.69 ms, versus 9.18–25.40 ms before, with differing live NPC/network
+and render-thread activity. These results do not establish a general native
+frame-rate gain.
+
+The native `wait_world` interval **regresses from 13.01 to 21.19 seconds**.
+This full UI/network readiness result is distinct from the quicker offline
+settled route; its cause has not been isolated by these measurements. Native
+startup throughput and remaining upload hitches are explicit limitations of
+this implementation, not accepted as solved or hidden by weakening collision
+readiness or selecting a faster offline figure.
+
+### Reproduction and evidence
+
+Run `Invoke-PerformanceCapture.ps1 -Name <unique-name>` for the existing mode;
+add `-CacheMode fresh-process-isolated-project-cache` for a new project user
+directory. Use `-Spec .../21-performance-memory-stress.json` for the six-cycle
+diagnostic route. Run `Summarize-Performance.py <run-directories>` after the
+clients exit. `Invoke-PerformanceNative.ps1` uses only the owned QA launcher;
+`Verify-PerformanceInstall.ps1 -Reviewed` checks clean publication, every staged
+runtime input, package identity, queue/cache bounds, stable retained populations,
+capture hashes and fixture cleanup. `-Reviewed` requires personal inspection
+of every final PNG before asserting acceptance.
+
+Evidence is under `D:/Games/idle_wow/logs/wowunreal-performance/`: the two
+`17-baseline-*` directories, three `22-published-*` route directories,
+`before-after.json` (full distributions/native intervals/raw CSV hashes) and
+`install-verification.json`. Each route retains its spec/executable provenance,
+raw CSV, runtime JSON, scope log, nonblack/hash checks and PNGs. The 21 lighting
+captures and their installation proof are in
+`logs/wowunreal-lighting/22-published-lighting`. The historical cycles below
+explain the measured implementation steps; the clean results above are final.
+
 The performance route uses real MPQ terrain, M2 placements, WMO collision and
 the production sky. `Scripts/Verification/Invoke-PerformanceCapture.ps1` launches
 a new installed process and records raw wall-clock frame intervals, game/render
