@@ -1,0 +1,25 @@
+{
+  "qaLevel": 20,
+  "qaGm": true,
+  "width": 1280,
+  "height": 900,
+  "steps": [
+    {"op":"wait_world","timeout":180},
+    {"op":"wait_floor","timeout":90},
+    {"op":"time","minutes":540},
+    {"op":"wait","seconds":3},
+    {"op":"profile","seconds":12},
+    {"op":"capture","name":"native-start"},
+    {"op":"wait","seconds":1},
+    {"op":"profile","position":[-8926,-130,83],"seconds":30,"timeout":90},
+    {"op":"profile","position":[-8910,-147,83],"seconds":30,"timeout":90},
+    {"op":"profile","position":[-8904,-160,83],"seconds":30,"timeout":90},
+    {"op":"profile","seconds":10},
+    {"op":"capture","name":"native-interior"},
+    {"op":"wait","seconds":1},
+    {"op":"profile","position":[-8910,-147,83],"seconds":30,"timeout":90},
+    {"op":"profile","position":[-8926,-130,83],"seconds":30,"timeout":90},
+    {"op":"profile","seconds":10},
+    {"op":"capture","name":"native-return"}
+  ]
+}

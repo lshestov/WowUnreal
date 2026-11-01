@@ -1,4 +1,5 @@
 #include "WowDoodadManager.h"
+#include "WowStreamingProfile.h"
 #include "WowM2LightSubsystem.h"
 #include "WowWorldCollision.h"
 #include "PhysicsEngine/BodySetup.h"
@@ -575,6 +576,7 @@ TArray<UInstancedStaticMeshComponent*> FWowDoodadManager::SpawnDoodadsInstanced(
     AActor* ParentActor, const TArray<FAdtDoodadPlacement>& Placements,
     const TArray<FString>& DoodadPaths, FMpqManager* Mpq, FWowAssetCache* Cache)
 {
+    FWowStreamingProfile Profile(TEXT("m2Instances"));
     TArray<UInstancedStaticMeshComponent*> Result;
 
     if (!ParentActor || !Mpq || !Cache || Placements.Num() == 0)

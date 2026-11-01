@@ -1,4 +1,5 @@
 #include "WowWorldManager.h"
+#include "WowStreamingProfile.h"
 #include "WowWmoArea.h"
 #include "WowWorldCollision.h"
 #include "WowRuntimeMeshMaterials.h"
@@ -684,6 +685,7 @@ void AWowWorldManager::EndPlay(const EEndPlayReason::Type R)
 
 void AWowWorldManager::Tick(float DT)
 {
+    FWowStreamingProfile Profile(TEXT("worldTick"));
     Super::Tick(DT);
 
     // Always process completed async loads, even before streaming is enabled
@@ -868,6 +870,7 @@ void AWowWorldManager::LoadTileAsync(int32 TX, int32 TY)
 
 void AWowWorldManager::FinalizeTileLoad(int32 TX, int32 TY, TSharedPtr<FAdtData> AdtData)
 {
+    FWowStreamingProfile Profile(TEXT("finalizeTile"));
     if (!AdtData || IsTileLoaded(TX, TY))
     {
         return;
@@ -1097,6 +1100,7 @@ void AWowWorldManager::UpdateWdlStreaming(const FIntPoint& CameraTile)
 
 void AWowWorldManager::SpawnWdlTile(int32 TX, int32 TY)
 {
+    FWowStreamingProfile Profile(TEXT("wdl"));
     if (!WdlData || !WdlData->HasTile(TX, TY)) return;
 
     const FWdlTileData& TileData = *WdlData->Tiles[TY][TX];
@@ -1343,6 +1347,7 @@ void AWowWorldManager::UpdateLod1Streaming(const FIntPoint& CameraTile)
 
 void AWowWorldManager::SpawnLod1Tile(int32 TX, int32 TY)
 {
+    FWowStreamingProfile Profile(TEXT("lod1"));
     FString AdtPath = FString::Printf(TEXT("World\\Maps\\%s\\%s_%d_%d.adt"), *MapName, *MapName, TX, TY);
     TArray<uint8> AdtRaw;
     if (!MpqManager->ReadFile(AdtPath, AdtRaw))
@@ -1737,6 +1742,7 @@ bool AWowWorldManager::LoadGlobalWmo(const FVector& Position)
 }
 void AWowWorldManager::UpdatePendingWmoLoads()
 {
+    FWowStreamingProfile Profile(TEXT("wmoJob"));
     PendingWmoLoads.RemoveAll([](const auto& Job){return !Job.Actor.IsValid() || Job.Actor->IsActorBeingDestroyed() || Job.Next>=Job.Order.Num();});
     if(PendingWmoLoads.IsEmpty()) return;
     auto& Job=PendingWmoLoads[0]; const int32 Group=Job.Order[Job.Next++];

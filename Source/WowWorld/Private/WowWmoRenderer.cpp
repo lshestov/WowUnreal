@@ -1,4 +1,5 @@
 #include "WowWmoRenderer.h"
+#include "WowStreamingProfile.h"
 #include "WowWmoArea.h"
 #include "WowWmoLighting.h"
 #include "WowM2LightSubsystem.h"
@@ -40,6 +41,7 @@ FString FWowWmoRenderer::GetGroupPath(const FString& RootPath, int32 GroupIndex)
 AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const FAdtWmoPlacement& Placement,
     FMpqManager* Mpq, FWowAssetCache* Cache,AActor* Existing,const FWmoRootData* ParsedRoot,int32 FirstGroup,int32 GroupLimit)
 {
+    FWowStreamingProfile Profile(TEXT("wmoSpawn"));
     if (!World || !Mpq || WmoPath.IsEmpty())
     {
         return nullptr;

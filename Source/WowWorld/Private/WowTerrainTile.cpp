@@ -1,4 +1,5 @@
 #include "WowTerrainTile.h"
+#include "WowStreamingProfile.h"
 #include "UObject/StrongObjectPtr.h"
 #include "WowRuntimeMeshMaterials.h"
 #include "WowTerrainMeshBuilder.h"
@@ -37,6 +38,7 @@ UMaterialInterface* AWowTerrainTile::GetDefaultTerrainMaterial() const
 
 void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY, FMpqManager* Mpq, FWowAssetCache* Cache, TSet<uint32>* SpawnedWmoIds)
 {
+    FWowStreamingProfile Profile(TEXT("terrainBuild"));
     TileCoord = FIntPoint(TX, TY);
     if (!Data.bIsValid) return;
 

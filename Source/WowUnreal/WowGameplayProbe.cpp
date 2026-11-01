@@ -19,6 +19,8 @@
 #include "Kismet/GameplayStatics.h"
 #include "Misc/App.h"
 #include "RenderTimer.h"
+#include "RHIStats.h"
+#include "HAL/PlatformMemory.h"
 #include "DynamicRHI.h"
 #include "Coord/WowCoordinate.h"
 #include "GameFramework/Character.h"
@@ -77,6 +79,7 @@ struct FWowGameplayProbe
     TWeakObjectPtr<UPrimitiveComponent> Avoiding;
     float AvoidSide=1;
     TMap<FString,TArray<double>> Profile;
+    double PreviousProfileTime=0;
     TSharedPtr<FJsonObject> Inspections=MakeShared<FJsonObject>();
     TSharedPtr<FWowProbeInputGuard> InputGuard;
     TUniquePtr<FWowUiTestPeer> Peers[4];
@@ -350,8 +353,9 @@ struct FWowGameplayProbe
         {
             // UE's frame/thread counters describe the preceding frame. The
             // first observation predates this interval (often UI bootstrap).
-            if(!bInvoked) {bInvoked=true; return;}
-            Profile.FindOrAdd(TEXT("frameMs")).Add(FApp::GetDeltaTime()*1000);
+            if(!bInvoked) {bInvoked=true; PreviousProfileTime=Now; return;}
+            Profile.FindOrAdd(TEXT("frameMs")).Add((Now-PreviousProfileTime)*1000); PreviousProfileTime=Now;
+            Profile.FindOrAdd(TEXT("drawCalls")).Add(GNumDrawCallsRHI[0]);
             Profile.FindOrAdd(TEXT("gameThreadMs")).Add(FPlatformTime::ToMilliseconds(GGameThreadTime));
             Profile.FindOrAdd(TEXT("renderThreadMs")).Add(FPlatformTime::ToMilliseconds(GRenderThreadTime));
             Profile.FindOrAdd(TEXT("gpuMs")).Add(FPlatformTime::ToMilliseconds(RHIGetGPUFrameCycles()));
@@ -362,6 +366,9 @@ struct FWowGameplayProbe
             Profile.FindOrAdd(TEXT("uiWidgetsMs")).Add(C.LastWidgetMilliseconds);
             if (auto* Lua=C.UIManager->GetLuaVM()) Profile.FindOrAdd(TEXT("luaMiB")).Add(Lua->GetMemoryUsage()/(1024.0*1024));
             Done=Now-StepStarted>=FMath::Clamp(Step->GetNumberField(TEXT("seconds")),1.0,60.0);
+            const TArray<TSharedPtr<FJsonValue>>* Destination=nullptr;
+            if(Step->TryGetArrayField(TEXT("position"),Destination) && Destination->Num()==3)
+                Done=Walk(C,FWowCoordinate::WowToUE((*Destination)[0]->AsNumber(),(*Destination)[1]->AsNumber(),(*Destination)[2]->AsNumber()),1.5f);
         }
         else if (Op==TEXT("select_entry"))
         {
@@ -835,9 +842,14 @@ struct FWowGameplayProbe
                     Metric->SetNumberField(TEXT("samples"),Values.Num()); Metric->SetNumberField(TEXT("mean"),Sum/Values.Num());
                     Metric->SetNumberField(TEXT("median"),Values[Values.Num()/2]); Metric->SetNumberField(TEXT("p95"),Values[FMath::FloorToInt((Values.Num()-1)*.95)]);
                     Metric->SetNumberField(TEXT("max"),Values.Last());
+                    Metric->SetNumberField(TEXT("p99"),Values[FMath::Clamp(FMath::CeilToInt(Values.Num()*.99)-1,0,Values.Num()-1)]);
+                    Metric->SetNumberField(TEXT("above50"),Values.FilterByPredicate([](double Value){return Value>50;}).Num());
                     Metrics->SetObjectField(Column.Key,Metric);
                 }
                 Result->SetObjectField(TEXT("profile"),Metrics); Profile.Reset();
+                const auto Memory=FPlatformMemory::GetStats();
+                Result->SetNumberField(TEXT("privateMiB"),Memory.UsedVirtual/1048576.);
+                Result->SetNumberField(TEXT("workingSetMiB"),Memory.UsedPhysical/1048576.);
             }
             Result->SetNumberField(TEXT("seconds"),Now-StepStarted); Result->SetStringField(TEXT("target"),FString::Printf(TEXT("%llu"),C.TargetGuid));
             Result->SetNumberField(TEXT("quests"),Handler.QuestLog.Num());

@@ -1,0 +1,14 @@
+{
+  "steps": [
+    {"name":"initial-abbey","map":0,"initial":1,"position":[-8930,-117,87],"target":[-8908,-149,91],"duration":8,"settle":3},
+    {"name":"abbey-enter","position":[-8930,-117,87],"end":[-8908,-151,86],"target":[-8899,-171,86],"duration":8},
+    {"name":"abbey-exit","position":[-8908,-151,86],"end":[-8930,-117,87],"target":[-8938,-105,86],"duration":8},
+    {"name":"elwynn-crossing","position":[-8930,-117,130],"end":[-9460,-300,130],"target":[-9550,-300,90],"duration":20},
+    {"name":"westfall-cycle1","position":[-10920,1500,120],"target":[-10980,1500,70],"duration":8,"settle":4},
+    {"name":"abbey-cycle1","position":[-8930,-117,87],"target":[-8908,-149,91],"duration":8,"settle":4},
+    {"name":"westfall-cycle2","position":[-10920,1500,120],"target":[-10980,1500,70],"duration":8,"settle":4},
+    {"name":"abbey-cycle2","position":[-8930,-117,87],"target":[-8908,-149,91],"duration":8,"settle":4},
+    {"name":"westfall-cycle3","position":[-10920,1500,120],"target":[-10980,1500,70],"duration":8,"settle":4},
+    {"name":"abbey-cycle3","position":[-8930,-117,87],"target":[-8908,-149,91],"duration":8,"settle":4}
+  ]
+}
