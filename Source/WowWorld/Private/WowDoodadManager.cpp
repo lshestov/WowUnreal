@@ -1,4 +1,6 @@
 #include "WowDoodadManager.h"
+#include "WowRuntimeStaticMesh.h"
+#include "StaticMeshResources.h"
 #include "WowStreamingProfile.h"
 #include "WowM2LightSubsystem.h"
 #include "WowWorldCollision.h"
@@ -501,48 +503,7 @@ UStaticMesh* FWowDoodadManager::CreateStaticMeshFromM2(const FM2Data& Data, cons
         }
     }
 
-    // Add materials BEFORE build
-    FWowRuntimeMeshMaterials::Assign(StaticMesh, MeshDesc, BatchMaterials);
-
-    // Build static mesh from description
-    TArray<const FMeshDescription*> MeshDescs;
-    MeshDescs.Add(&MeshDesc);
-
-    UStaticMesh::FBuildMeshDescriptionsParams Params;
-    Params.bBuildSimpleCollision = false;
-    Params.bFastBuild = true;
-    Params.bCommitMeshDescription = true;
-    StaticMesh->BuildFromMeshDescriptions(MeshDescs, Params);
-    StaticMesh->NeverStream = true;
-    StaticMesh->InitResources();
-    for (FStaticMaterial& Mat : StaticMesh->GetStaticMaterials()) { Mat.UVChannelData.bInitialized = true; }
-
-    // Log material state after build to diagnose
-    static bool bLoggedMatState = false;
-    if (!bLoggedMatState)
-    {
-        bLoggedMatState = true;
-        UE_LOG(LogWowDoodad, Warning, TEXT("After build: %d static materials, %d batch materials"),
-            StaticMesh->GetStaticMaterials().Num(), BatchMaterials.Num());
-        for (int32 i = 0; i < StaticMesh->GetStaticMaterials().Num(); ++i)
-        {
-            UMaterialInterface* M = StaticMesh->GetStaticMaterials()[i].MaterialInterface;
-            UE_LOG(LogWowDoodad, Warning, TEXT("  mat[%d] = %s"), i, M ? *M->GetName() : TEXT("null"));
-        }
-    }
-
-    // Re-set materials after build in case BuildFromMeshDescriptions resets them
-    for (int32 i = 0; i < BatchMaterials.Num(); ++i)
-    {
-        if (StaticMesh->GetStaticMaterials().Num() <= i)
-        {
-            StaticMesh->GetStaticMaterials().SetNum(i + 1);
-        }
-        StaticMesh->GetStaticMaterials()[i].MaterialInterface = BatchMaterials[i];
-    }
-
-    // Ensure bounds are computed — bFastBuild may skip this
-    StaticMesh->CalculateExtendedBounds();
+    FWowRuntimeStaticMesh::Initialize(StaticMesh,FWowRuntimeStaticMesh::Prepare(MeshDesc,false,true),BatchMaterials);
 
     return StaticMesh;
 }

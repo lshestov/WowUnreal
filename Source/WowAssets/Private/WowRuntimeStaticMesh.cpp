@@ -6,18 +6,20 @@
 #include "StaticMeshAttributes.h"
 #include "PhysicsEngine/BodySetup.h"
 
-TUniquePtr<FStaticMeshRenderData> FWowRuntimeStaticMesh::Prepare(const FMeshDescription& Description)
+TUniquePtr<FStaticMeshRenderData> FWowRuntimeStaticMesh::Prepare(const FMeshDescription& Description,bool VertexColors,bool CastShadow)
 {
     auto Data=MakeUnique<FStaticMeshRenderData>(); Data->AllocateLODResources(1);
     auto& Lod=Data->LODResources[0]; FStaticMeshConstAttributes Attributes(Description);
     const auto Positions=Attributes.GetVertexPositions(); const auto Normals=Attributes.GetVertexInstanceNormals();
     const auto Tangents=Attributes.GetVertexInstanceTangents(); const auto Signs=Attributes.GetVertexInstanceBinormalSigns(); const auto UVs=Attributes.GetVertexInstanceUVs();
+    const auto Colors=Attributes.GetVertexInstanceColors();
     TArray<FStaticMeshBuildVertex> Vertices; Vertices.Reserve(Description.VertexInstances().Num());
     TMap<FVertexInstanceID,uint32> Lookup; Lookup.Reserve(Description.VertexInstances().Num()); FBox Bounds(ForceInit);
     for(const auto Instance:Description.VertexInstances().GetElementIDs())
     {
         FStaticMeshBuildVertex V{}; V.Position=Positions[Description.GetVertexInstanceVertex(Instance)];
         V.TangentX=Tangents[Instance]; V.TangentZ=Normals[Instance]; V.TangentY=FVector3f::CrossProduct(V.TangentZ,V.TangentX)*Signs[Instance]; V.Color=FColor::White;
+        if(VertexColors){const auto C=Colors[Instance]; V.Color=FLinearColor(C.X,C.Y,C.Z,C.W).ToFColor(true);}
         for(int32 UV=0;UV<UVs.GetNumChannels();++UV) V.UVs[UV]=UVs.Get(Instance,UV);
         Bounds+=FVector(V.Position); Lookup.Add(Instance,Vertices.Add(V));
     }
@@ -25,7 +27,7 @@ TUniquePtr<FStaticMeshRenderData> FWowRuntimeStaticMesh::Prepare(const FMeshDesc
     for(const auto Group:Description.PolygonGroups().GetElementIDs())
     {
         FStaticMeshSection Section; Section.MaterialIndex=Material++; Section.FirstIndex=Indices.Num(); Section.MinVertexIndex=MAX_uint32; Section.MaxVertexIndex=0;
-        Section.bEnableCollision=false; Section.bCastShadow=false;
+        Section.bEnableCollision=false; Section.bCastShadow=CastShadow;
         for(const auto Triangle:Description.GetPolygonGroupTriangles(Group)) for(const auto Instance:Description.GetTriangleVertexInstances(Triangle))
         {
             const uint32 Index=Lookup.FindChecked(Instance); Indices.Add(Index);
@@ -37,12 +39,13 @@ TUniquePtr<FStaticMeshRenderData> FWowRuntimeStaticMesh::Prepare(const FMeshDesc
     Lod.VertexBuffers.PositionVertexBuffer.Init(Vertices,false);
     Lod.VertexBuffers.StaticMeshVertexBuffer.Init(Vertices,UVs.GetNumChannels(),false);
     Lod.IndexBuffer.SetIndices(Indices,EIndexBufferStride::AutoDetect);
-    Lod.MaxDeviation=0; Lod.bBuffersInlined=true; Lod.bIsOptionalLOD=false; Lod.bHasColorVertexData=false;
+    if(VertexColors) Lod.VertexBuffers.ColorVertexBuffer.Init(Vertices);
+    Lod.MaxDeviation=0; Lod.bBuffersInlined=true; Lod.bIsOptionalLOD=false; Lod.bHasColorVertexData=VertexColors;
     Data->Bounds=FBoxSphereBounds(Bounds); Lod.SourceMeshBounds=Data->Bounds;
     Data->ScreenSize[0].Default=1; Data->NumInlinedLODs=1; Data->CurrentFirstLODIdx=0;
     return Data;
 }
-TUniquePtr<FStaticMeshRenderData> FWowRuntimeStaticMesh::PrepareSurface(const TArray<FVector>& Positions,const TArray<FVector>& Normals,const TArray<FVector2D>& UVs,const TArray<int32>& SourceIndices)
+TUniquePtr<FStaticMeshRenderData> FWowRuntimeStaticMesh::PrepareSurface(const TArray<FVector>& Positions,const TArray<FVector>& Normals,const TArray<FVector2D>& UVs,const TArray<int32>& SourceIndices,const TArray<FVector4f>* LiquidColors)
 {
     auto Data=MakeUnique<FStaticMeshRenderData>(); Data->AllocateLODResources(1); auto& Lod=Data->LODResources[0];
     TArray<FStaticMeshBuildVertex> Vertices; Vertices.SetNum(Positions.Num()); FBox Bounds(ForceInit);
@@ -52,11 +55,18 @@ TUniquePtr<FStaticMeshRenderData> FWowRuntimeStaticMesh::PrepareSurface(const TA
         V.TangentZ=Normals.IsValidIndex(I)?FVector3f(Normals[I]):FVector3f(0,0,1); V.TangentZ.Normalize();
         V.TangentX=FVector3f::CrossProduct(V.TangentZ,FVector3f(0,1,0)); if(V.TangentX.SizeSquared()<.001f) V.TangentX=FVector3f::CrossProduct(V.TangentZ,FVector3f(1,0,0)); V.TangentX.Normalize();
         V.TangentY=FVector3f::CrossProduct(V.TangentZ,V.TangentX); V.UVs[0]=UVs.IsValidIndex(I)?FVector2f(UVs[I]):FVector2f::ZeroVector; V.Color=FColor::White;
+        if(LiquidColors)
+        {
+            V.TangentX=FVector3f(1,0,0); V.TangentY=FVector3f(0,1,0);
+            const auto C=LiquidColors->IsValidIndex(I)?(*LiquidColors)[I]:FVector4f(1,1,1,.7f);
+            V.Color=FLinearColor(C.X,C.Y,C.Z,C.W).ToFColor(true);
+        }
     }
     TArray<uint32> Indices; Indices.Reserve(SourceIndices.Num()); for(int32 Index:SourceIndices) Indices.Add(Index);
     FStaticMeshSection Section; Section.NumTriangles=Indices.Num()/3; Section.MaxVertexIndex=FMath::Max(0,Vertices.Num()-1); Section.bCastShadow=false; Lod.Sections.Add(Section);
     Lod.VertexBuffers.PositionVertexBuffer.Init(Vertices,false); Lod.VertexBuffers.StaticMeshVertexBuffer.Init(Vertices,1,false); Lod.IndexBuffer.SetIndices(Indices,EIndexBufferStride::AutoDetect);
-    Lod.MaxDeviation=0; Lod.bBuffersInlined=true; Lod.bIsOptionalLOD=false; Lod.bHasColorVertexData=false;
+    if(LiquidColors) Lod.VertexBuffers.ColorVertexBuffer.Init(Vertices);
+    Lod.MaxDeviation=0; Lod.bBuffersInlined=true; Lod.bIsOptionalLOD=false; Lod.bHasColorVertexData=LiquidColors!=nullptr;
     Data->Bounds=FBoxSphereBounds(Bounds); Lod.SourceMeshBounds=Data->Bounds; Data->ScreenSize[0].Default=1; Data->NumInlinedLODs=1; Data->CurrentFirstLODIdx=0;
     return Data;
 }

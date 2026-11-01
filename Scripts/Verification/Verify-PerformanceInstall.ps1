@@ -21,6 +21,8 @@ foreach($name in $Runs){
     & git -C $source diff --quiet $run.commit HEAD -- Source Content Config Scripts BuildSupport WowUnreal.uproject
     if($LASTEXITCODE -ne 0){throw "Runtime inputs changed since $name"}
     if($summary.queueMaxima.preparedSlots -gt 4 -or -not $summary.oneHeavyUnitPerKindPerFrame){throw 'Streaming bounds were not verified'}
+    if($summary.budgetedStreamingVerified -and ($summary.queueMaxima.streamingJobsPerFrame -gt 8 -or $summary.queueMaxima.terrainUploadsPerFrame -gt 1)){throw 'Streaming time/count budget was exceeded'}
+    if($summary.allWmoGroupsPreparedOnWorkers){foreach($row in $runtime.steps){if($row.missingTerrainCoverage -ne 0){throw "Missing full/mid/far source coverage in $name"}}}
     foreach($png in @(Get-Content "$path\captures.json" -Raw|ConvertFrom-Json)){
         if($png.nonBlackRatio -lt .01 -or (Get-FileHash -LiteralPath $png.file).Hash -ne $png.sha256){throw 'Empty or changed PNG'}
         ++$images
@@ -29,7 +31,7 @@ foreach($name in $Runs){
     if($checkpoints.Count){
         if($checkpoints.Count -lt 7){throw 'Incomplete six-cycle memory stress route'}
         $returns=@($checkpoints|Where-Object {$_.name -like 'stress-abbey-*'})
-        foreach($row in $checkpoints){if($row.worldParsedM2MiB -gt 128 -or $row.characterParsedM2MiB -gt 64 -or $row.worldParsedM2Entries -gt 256 -or $row.characterParsedM2Entries -gt 256 -or $row.pendingTiles -or $row.pendingWmoGroups -or $row.pendingDoodadTiles -or $row.pendingLod1){throw 'Memory/cache/queue limit failed'}}
+        foreach($row in $checkpoints){if($row.worldParsedM2MiB -gt 128 -or $row.characterParsedM2MiB -gt 64 -or $row.worldParsedM2Entries -gt 2048 -or $row.characterParsedM2Entries -gt 2048 -or $row.pendingTiles -or $row.pendingWmoGroups -or $row.pendingDoodadTiles -or $row.pendingLod1){throw 'Memory/cache/queue limit failed'}}
         $late=@($returns|Select-Object -Skip 1); $range=($late|Measure-Object privateMiB -Maximum).Maximum-($late|Measure-Object privateMiB -Minimum).Minimum
         if($range -gt 256){throw "Post-collection private memory did not plateau: range=$range MiB"}
         foreach($field in @('uobjects','uniqueStaticMeshes','doodadInstances','terrainSections','wmoShadowCasters')){

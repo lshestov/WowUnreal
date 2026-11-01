@@ -15,6 +15,7 @@ class AWowTerrainTile;
 class URuntimeVirtualTexture;
 class URuntimeVirtualTextureComponent;
 struct FWowTerrainGeometry;
+struct FWowPreparedWmoGroup;
 
 struct FWowPreparedTile
 {
@@ -29,6 +30,7 @@ struct FPendingTileLoad
     int32 TY = 0;
     uint32 Generation=0;
     bool Lod1=false;
+    bool Wdl=false;
     TFuture<FWowPreparedTile> Future;
 };
 struct FPendingWmoLoad
@@ -36,7 +38,8 @@ struct FPendingWmoLoad
     TWeakObjectPtr<AActor> Actor;
     FString Path;
     FAdtWmoPlacement Placement;
-    TSharedPtr<FWmoRootData> Root;
+    TSharedPtr<FWmoRootData,ESPMode::ThreadSafe> Root;
+    TFuture<TSharedPtr<FWowPreparedWmoGroup>> Future;
     FMpqManager* Mpq=nullptr;
     FWowAssetCache* Cache=nullptr;
     TArray<int32> Order;
@@ -49,6 +52,7 @@ class WOWWORLD_API AWowWorldManager : public AActor
     friend class FIdleWowLargeWmo;
     friend class FIdleWowServerMapSelection;
     friend class FIdleWowGlobalWmo;
+    friend class FIdleWowWdlWorker;
     GENERATED_BODY()
 public:
     AWowWorldManager();
@@ -78,6 +82,8 @@ public:
 
     /** Whether all initially-queued tiles have finished loading */
     bool IsInitialLoadComplete() const;
+    /** Verification: full/mid/far source tiles missing from the rendered rings; -1 for non-terrain maps. */
+    int32 GetMissingTerrainCoverage() const;
     bool IsStreamingWorkIdle() const;
     int32 GetPendingDoodadJobs() const;
     int32 GetPendingLod1Count() const {return PendingLod1Keys.Num();}
@@ -146,7 +152,7 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Streaming")
     int32 MaxActiveWmoGroups = 2000;
 
-    /** WMOs above this group count stream one group per world tick. */
+    /** Legacy serialized field. All groups now use the bounded worker queue. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Streaming")
     int32 MaxWmoGroupsPerObject = 0;
 
@@ -186,6 +192,7 @@ private:
     int32 InitialTilesLoaded = 0;
     int32 InitialObjectTiles=0;
     TArray<FPendingWmoLoad> PendingWmoLoads;
+    TArray<TFuture<TSharedPtr<FWowPreparedWmoGroup>>> RetiredWmoReads;
     UPROPERTY() TObjectPtr<AActor> GlobalWmo;
     FTSTicker::FDelegateHandle WmoTicker;
     TMap<FString,uint32> WmoGroupCounts;
@@ -219,8 +226,10 @@ private:
     void LoadTileAsync(int32 TX, int32 TY);
     void FinalizeTileLoad(int32 TX, int32 TY, TSharedPtr<FAdtData> AdtData,TSharedPtr<FWowTerrainGeometry> Prepared=nullptr);
     void StartPendingTileLoads();
+    void StartPendingWmoReads();
     bool ProcessPendingLoads(bool Lod1=false);
     void PumpStreamingWork();
+    bool IsCollisionReady() const;
     bool ProcessDoodadJob();
     bool ProcessWdlJob();
     void UnloadTile(int32 TX, int32 TY);
@@ -231,7 +240,7 @@ private:
     void UpdateZoneAudio();
     void UpdateWdlStreaming(const FIntPoint& CameraTile);
     void UpdateLod1Streaming(const FIntPoint& CameraTile);
-    void SpawnWdlTile(int32 TX, int32 TY);
+    void SpawnWdlTile(int32 TX, int32 TY,const FAdtData* Transition=nullptr);
     void SpawnLod1Tile(int32 TX, int32 TY,const FAdtData& Data,TSharedPtr<FWowTerrainGeometry> Prepared);
     void SetupRuntimeVirtualTexture();
     void UpdateRVTBounds(const FIntPoint& CameraTile);
@@ -251,6 +260,7 @@ private:
     TSet<int64> PendingLod1Keys, PendingWdlKeys;
     TArray<FIntPoint> PendingWdlTiles;
     int32 NextWorkKind=0;
+    mutable bool CollisionReadyCached=false;
     bool ObjectScanPending=true;
     double NextObjectScan=0;
     FVector GetStreamingFocus() const;

@@ -10,6 +10,7 @@ struct FM2Data;
 class WOWWORLD_API FWowWorldCollision
 {
 public:
+    static bool IsReady(const AActor* Actor);
     static UProceduralMeshComponent* Create(USceneComponent* Parent, FName Name,
         const TArray<FVector>& Vertices, const TArray<int32>& Indices);
     static void DestroyChildren(USceneComponent* Parent);

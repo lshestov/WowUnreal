@@ -1,4 +1,5 @@
 #include "WowWorldManager.h"
+#include "WowStreamingBudget.h"
 #include "WowStreamingProfile.h"
 #include "WowWmoArea.h"
 #include "WowWorldCollision.h"
@@ -111,23 +112,7 @@ uint8 DetermineWdlTransitionEdges(const FWdtData* WdtData, const FIntPoint& Came
     return EdgeMask;
 }
 
-bool LoadTileAdtForTransition(FMpqManager* Mpq, const FString& MapName, bool bBigAlpha, int32 TX, int32 TY, FAdtData& OutAdtData)
-{
-    if (!Mpq)
-    {
-        return false;
-    }
 
-    const FString AdtPath = FString::Printf(TEXT("World\\Maps\\%s\\%s_%d_%d.adt"), *MapName, *MapName, TX, TY);
-    TArray<uint8> AdtRaw;
-    if (!Mpq->ReadFile(AdtPath, AdtRaw))
-    {
-        return false;
-    }
-
-    OutAdtData = FAdtParser::Parse(AdtRaw, bBigAlpha);
-    return OutAdtData.bIsValid;
-}
 
 void BuildNorthEdgeHeights(const FAdtData& AdtData, TArray<float>& OutHeights)
 {
@@ -339,6 +324,7 @@ void AWowWorldManager::BeginPlay()
 {
     Super::BeginPlay();
     const TWeakObjectPtr<AWowWorldManager> Weak(this);
+    if(FWowStreamingProfile::IsEnabled()) UE_LOG(LogTemp,Display,TEXT("StreamPolicy allWmoWorkers=1 slots=4 legacyCutoff=%d"),MaxWmoGroupsPerObject);
     WmoTicker=FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([Weak](float){if(!Weak.IsValid()) return false; if(!Weak->bStreamingSuspended && Weak->MpqManager && Weak->MpqManager->IsInitialized()) Weak->PumpStreamingWork(); return true;}));
     const TCHAR* CmdLine = FCommandLine::Get();
     MpqManager = MakeUnique<FMpqManager>();
@@ -579,10 +565,10 @@ bool AWowWorldManager::SelectMap(uint32 MapId)
     const auto* Map=FDbcStore::Get().Maps().GetById(MapId);
     if(!Map || Map->InternalName.IsEmpty()) return false;
     if(MapName.Equals(Map->InternalName,ESearchCase::IgnoreCase)) return true;
-    bStreamingSuspended=true; bStreamingEnabled=false; ++MapGeneration;
+    bStreamingSuspended=true; bStreamingEnabled=false; CollisionReadyCached=false; ++MapGeneration;
     // Old MPQ reads can finish in the background; their generation prevents
     // them from being finalized into this map without blocking the game thread.
-    PendingTileKeys.Reset(); PendingLod1Keys.Reset(); PendingWdlKeys.Reset(); PendingWdlTiles.Reset(); InitialTileKeys.Reset(); InitialTilesQueued=InitialTilesLoaded=InitialObjectTiles=0; PendingWmoLoads.Reset(); WmoGroupCounts.Reset(); PendingObjectGroups=0;
+    PendingTileKeys.Reset(); PendingLod1Keys.Reset(); PendingWdlKeys.Reset(); PendingWdlTiles.Reset(); InitialTileKeys.Reset(); InitialTilesQueued=InitialTilesLoaded=InitialObjectTiles=0; for(auto& J:PendingWmoLoads) if(J.Future.IsValid()) RetiredWmoReads.Add(MoveTemp(J.Future)); PendingWmoLoads.Reset(); WmoGroupCounts.Reset(); PendingObjectGroups=0;
     if(IsValid(GlobalWmo)) GlobalWmo->Destroy(); GlobalWmo=nullptr;
     for(auto& Pair:LoadedTiles) if(IsValid(Pair.Value))
     {
@@ -638,7 +624,7 @@ void AWowWorldManager::EnableTerrainStreaming()
 void AWowWorldManager::EndPlay(const EEndPlayReason::Type R)
 {
     if(IsValid(GlobalWmo)) GlobalWmo->Destroy(); GlobalWmo=nullptr;
-    FTSTicker::RemoveTicker(WmoTicker); WmoTicker.Reset(); PendingWmoLoads.Reset();
+    FTSTicker::RemoveTicker(WmoTicker); WmoTicker.Reset(); for(auto& J:PendingWmoLoads) if(J.Future.IsValid()) J.Future.Wait(); for(auto& F:RetiredWmoReads) if(F.IsValid()) F.Wait(); PendingWmoLoads.Reset(); RetiredWmoReads.Reset();
     // Wait for any pending async loads to complete before cleanup
     for (FPendingTileLoad& Pending : PendingLoads)
     {
@@ -851,34 +837,35 @@ void AWowWorldManager::StartPendingTileLoads()
     for(int32 I=PendingLoads.Num()-1;I>=0;--I)
     {
         auto& P=PendingLoads[I];
-        const int32 Limit=P.Lod1?Lod1Radius+1:UnloadRadius;
+        const int32 Limit=P.Wdl?WdlRadius:P.Lod1?Lod1Radius+1:UnloadRadius;
         const bool Far=GetTileDistance(Tile,P.TX,P.TY)>Limit && !InitialTileKeys.Contains(TileKey(P.TX,P.TY));
         if(P.Generation!=MapGeneration || Far)
         {
-            if(P.Generation==MapGeneration) (P.Lod1?PendingLod1Keys:PendingTileKeys).Remove(TileKey(P.TX,P.TY));
+            if(P.Generation==MapGeneration) (P.Wdl?PendingWdlKeys:P.Lod1?PendingLod1Keys:PendingTileKeys).Remove(TileKey(P.TX,P.TY));
             if(!P.Future.IsValid() || P.Future.IsReady()){if(P.Future.IsValid()) P.Future.Get(); PendingLoads.RemoveAt(I);}
         }
     }
-    int32 InFlight=0; for(const auto& P:PendingLoads) if(P.Future.IsValid()) ++InFlight;
+    int32 InFlight=GetPreparedTileCount();
     while(InFlight<4)
     {
         int32 Best=INDEX_NONE; double Distance=MAX_dbl;
         for(int32 I=0;I<PendingLoads.Num();++I)
         {
             const auto& P=PendingLoads[I]; if(P.Generation!=MapGeneration || P.Future.IsValid()) continue;
-            const double D=FVector::DistSquared2D(FWowCoordinate::TileToWorld(P.TX,P.TY),Focus)+(P.Lod1?1.e14:0);
+            const double D=FVector::DistSquared2D(FWowCoordinate::TileToWorld(P.TX,P.TY),Focus)+(P.Wdl?2.e14:P.Lod1?1.e14:0);
             if(D<Distance){Distance=D; Best=I;}
         }
         if(Best<0) break;
-        auto& P=PendingLoads[Best]; const int32 TX=P.TX,TY=P.TY; const bool Lod1=P.Lod1,BigAlpha=WdtData && WdtData->bUseBigAlpha;
+        auto& P=PendingLoads[Best]; const int32 TX=P.TX,TY=P.TY; const bool Lod1=P.Lod1,Wdl=P.Wdl,BigAlpha=WdtData && WdtData->bUseBigAlpha;
         FMpqManager* Mpq=MpqManager.Get(); const FString Map=MapName;
-        P.Future=Async(EAsyncExecution::ThreadPool,[Mpq,Map,TX,TY,Lod1,BigAlpha]()
+        P.Future=Async(EAsyncExecution::ThreadPool,[Mpq,Map,TX,TY,Lod1,Wdl,BigAlpha]()
         {
+            FWowStreamingProfile Profile(Wdl?TEXT("wdlTransitionWorker"):TEXT("tileReadWorker"));
             FWowPreparedTile Result; TArray<uint8> Raw;
             if(Mpq->ReadFile(FString::Printf(TEXT("World\\Maps\\%s\\%s_%d_%d.adt"),*Map,*Map,TX,TY),Raw))
             {
                 auto Data=MakeShared<FAdtData>(FAdtParser::Parse(Raw,BigAlpha));
-                if(Data->bIsValid){Result.Geometry=MakeShared<FWowTerrainGeometry>(*Data,TX,TY,Lod1); Result.Data=MoveTemp(Data);}
+                if(Data->bIsValid){if(!Wdl) Result.Geometry=MakeShared<FWowTerrainGeometry>(*Data,TX,TY,Lod1); Result.Data=MoveTemp(Data);}
             }
             return Result;
         });
@@ -923,7 +910,7 @@ bool AWowWorldManager::ProcessPendingLoads(bool Lod1)
     int32 Best=INDEX_NONE; double Distance=MAX_dbl; const FVector Focus=GetStreamingFocus();
     for(int32 I=0;I<PendingLoads.Num();++I)
     {
-        const auto& P=PendingLoads[I]; if(P.Generation!=MapGeneration || P.Lod1!=Lod1 || !P.Future.IsValid() || !P.Future.IsReady()) continue;
+        const auto& P=PendingLoads[I]; if(P.Wdl || P.Generation!=MapGeneration || P.Lod1!=Lod1 || !P.Future.IsValid() || !P.Future.IsReady()) continue;
         const double D=FVector::DistSquared2D(FWowCoordinate::TileToWorld(P.TX,P.TY),Focus);
         if(D<Distance){Distance=D; Best=I;}
     }
@@ -950,14 +937,41 @@ int32 AWowWorldManager::GetPendingDoodadJobs() const
     return Count;
 }
 int32 AWowWorldManager::GetPreparedTileCount() const
-{int32 Count=0; for(const auto& P:PendingLoads) if(P.Future.IsValid()) ++Count; return Count;}
+{int32 Count=0; for(const auto& P:PendingLoads) if(P.Future.IsValid()) ++Count; for(const auto& J:PendingWmoLoads) if(J.Future.IsValid()) ++Count; for(const auto& F:RetiredWmoReads) if(F.IsValid()) ++Count; return Count;}
 bool AWowWorldManager::IsInitialLoadComplete() const
 {
-    if(WdtData && (WdtData->Flags&1)) return WdtData->bIsValid && IsValid(GlobalWmo) && PendingWmoLoads.IsEmpty();
-    return InitialTilesQueued>0 && InitialTilesLoaded>=InitialTilesQueued && InitialObjectTiles>=InitialTilesQueued && PendingWmoLoads.IsEmpty() && GetPendingDoodadJobs()==0;
+    if(WdtData && (WdtData->Flags&1)) return WdtData->bIsValid && IsValid(GlobalWmo) && PendingWmoLoads.IsEmpty() && IsCollisionReady();
+    return InitialTilesQueued>0 && InitialTilesLoaded>=InitialTilesQueued && InitialObjectTiles>=InitialTilesQueued && PendingWmoLoads.IsEmpty() && GetPendingDoodadJobs()==0 && IsCollisionReady();
+}
+bool AWowWorldManager::IsCollisionReady() const
+{
+    if(CollisionReadyCached) return true;
+    if(IsValid(GlobalWmo) && !FWowWorldCollision::IsReady(GlobalWmo)) return false;
+    for(const auto& P:LoadedTiles) if(IsValid(P.Value))
+    {
+        if(!FWowWorldCollision::IsReady(P.Value)) return false;
+        for(const auto& W:P.Value->SpawnedWmos) if(IsValid(W.Value) && !FWowWorldCollision::IsReady(W.Value)) return false;
+    }
+    CollisionReadyCached=true; return true;
 }
 bool AWowWorldManager::IsStreamingWorkIdle() const
-{return PendingTileKeys.IsEmpty() && PendingLod1Keys.IsEmpty() && PendingWdlKeys.IsEmpty() && GetPendingWmoGroupCount()==0 && GetPendingDoodadJobs()==0;}
+{return PendingTileKeys.IsEmpty() && PendingLod1Keys.IsEmpty() && PendingWdlKeys.IsEmpty() && GetPendingWmoGroupCount()==0 && GetPendingDoodadJobs()==0 && IsCollisionReady();}
+int32 AWowWorldManager::GetMissingTerrainCoverage() const
+{
+    if(!WdtData || !WdlData || !WdlData->bIsValid || (WdtData->Flags&1)) return INDEX_NONE;
+    const auto Center=FWowCoordinate::WorldToTile(GetStreamingFocus()); int32 Missing=0;
+    for(int32 X=Center.X-WdlRadius;X<=Center.X+WdlRadius;++X) for(int32 Y=Center.Y-WdlRadius;Y<=Center.Y+WdlRadius;++Y)
+    {
+        if(X<0 || X>=64 || Y<0 || Y>=64) continue;
+        const int32 D=GetTileDistance(Center,X,Y); const auto Key=TileKey(X,Y);
+        if(WdtData->TileExists[X][Y] && D<=LoadRadius){if(!LoadedTiles.Contains(Key)) ++Missing; continue;}
+        if(WdtData->TileExists[X][Y] && D<=Lod1Radius){if(!LoadedTiles.Contains(Key) && !Lod1Tiles.Contains(Key)) ++Missing; continue;}
+        if(!WdlData->HasTile(X,Y) || LoadedTiles.Contains(Key) || Lod1Tiles.Contains(Key) || WdlTiles.Contains(Key)) continue;
+        bool HasSurface=false; for(int32 R=0;R<16 && !HasSurface;++R) for(int32 C=0;C<16;++C) if(!WdlData->Tiles[Y][X]->IsHole(C,R)){HasSurface=true; break;}
+        if(HasSurface) ++Missing;
+    }
+    return Missing;
+}
 bool AWowWorldManager::ProcessDoodadJob()
 {
     AWowTerrainTile* Best=nullptr; double Distance=MAX_dbl; const FVector Focus=GetStreamingFocus();
@@ -970,26 +984,46 @@ bool AWowWorldManager::ProcessDoodadJob()
 }
 bool AWowWorldManager::ProcessWdlJob()
 {
+    for(int32 I=0;I<PendingLoads.Num();++I)
+    {
+        auto& P=PendingLoads[I]; if(!P.Wdl || P.Generation!=MapGeneration || !P.Future.IsValid() || !P.Future.IsReady()) continue;
+        const int32 TX=P.TX,TY=P.TY; auto Result=P.Future.Get(); PendingLoads.RemoveAt(I); PendingWdlKeys.Remove(TileKey(TX,TY));
+        if(!IsTileLoaded(TX,TY) && !IsTilePending(TX,TY) && !Lod1Tiles.Contains(TileKey(TX,TY)) && !WdlTiles.Contains(TileKey(TX,TY))) SpawnWdlTile(TX,TY,Result.Data.Get());
+        return true;
+    }
     while(!PendingWdlTiles.IsEmpty())
     {
-        const auto Point=PendingWdlTiles.Pop(EAllowShrinking::No); PendingWdlKeys.Remove(TileKey(Point.X,Point.Y));
+        const auto Point=PendingWdlTiles.Pop(EAllowShrinking::No);
         const auto Focus=FWowCoordinate::WorldToTile(GetStreamingFocus());
-        if(GetTileDistance(Focus,Point.X,Point.Y)>WdlRadius || IsTileLoaded(Point.X,Point.Y) || IsTilePending(Point.X,Point.Y) || Lod1Tiles.Contains(TileKey(Point.X,Point.Y)) || WdlTiles.Contains(TileKey(Point.X,Point.Y))) continue;
+        if(GetTileDistance(Focus,Point.X,Point.Y)>WdlRadius || IsTileLoaded(Point.X,Point.Y) || IsTilePending(Point.X,Point.Y) || Lod1Tiles.Contains(TileKey(Point.X,Point.Y)) || WdlTiles.Contains(TileKey(Point.X,Point.Y))) {PendingWdlKeys.Remove(TileKey(Point.X,Point.Y)); continue;}
+        if(DetermineWdlTransitionEdges(WdtData.Get(),LastCameraTile,LoadRadius,Lod1Radius,Point.X,Point.Y))
+        {
+            FPendingTileLoad P; P.TX=Point.X; P.TY=Point.Y; P.Generation=MapGeneration; P.Wdl=true; PendingLoads.Add(MoveTemp(P)); return true;
+        }
+        PendingWdlKeys.Remove(TileKey(Point.X,Point.Y));
         SpawnWdlTile(Point.X,Point.Y); return true;
     }
     return false;
 }
 void AWowWorldManager::PumpStreamingWork()
 {
-    StartPendingTileLoads();
-    // One heavy unit per engine frame. Rotating classes prevents terrain,
-    // city rooms, foliage and distant terrain from starving one another.
-    for(int32 Attempt=0;Attempt<6;++Attempt)
+    StartPendingTileLoads(); StartPendingWmoReads();
+    FWowStreamingBudget Budget(FPlatformTime::Seconds());
+    // Keep fairness, but use remaining time for cheap jobs instead of making
+    // every model/room wait an entire rendered UI frame. Never weaken readiness.
+    while(Budget.Jobs<FWowStreamingBudget::MaxJobs)
     {
-        const int32 Kind=NextWorkKind; NextWorkKind=(NextWorkKind+1)%6;
-        const bool Worked=Kind==0?ProcessPendingLoads():Kind==1?ProcessDoodadJob():Kind==2?UpdatePendingWmoLoads():Kind==3?ProcessPendingLoads(true):Kind==4?ProcessWdlJob():UpdateObjectStreaming();
-        if(Worked) return;
+        bool Worked=false;
+        for(int32 Attempt=0;Attempt<6;++Attempt)
+        {
+            const int32 Kind=NextWorkKind; NextWorkKind=(NextWorkKind+1)%6;
+            if(!Budget.CanStart(Kind,FPlatformTime::Seconds())) continue;
+            Worked=Kind==0?ProcessPendingLoads():Kind==1?ProcessDoodadJob():Kind==2?UpdatePendingWmoLoads():Kind==3?ProcessPendingLoads(true):Kind==4?ProcessWdlJob():UpdateObjectStreaming();
+            if(Worked){CollisionReadyCached=false; Budget.Complete(Kind); break;}
+        }
+        if(!Worked) break;
     }
+    if(Budget.Jobs && FWowStreamingProfile::IsEnabled()) UE_LOG(LogTemp,Display,TEXT("StreamBudget jobs=%d terrain=%d ms=%.3f frame=%llu"),Budget.Jobs,Budget.TerrainUploads,(FPlatformTime::Seconds()-Budget.Started)*1000.,GFrameCounter);
 }
 
 bool AWowWorldManager::IsTilePending(int32 TX, int32 TY) const
@@ -1170,7 +1204,7 @@ void AWowWorldManager::UpdateWdlStreaming(const FIntPoint& CameraTile)
     }
 }
 
-void AWowWorldManager::SpawnWdlTile(int32 TX, int32 TY)
+void AWowWorldManager::SpawnWdlTile(int32 TX, int32 TY,const FAdtData* Transition)
 {
     FWowStreamingProfile Profile(TEXT("wdl"));
     if (!WdlData || !WdlData->HasTile(TX, TY)) return;
@@ -1221,9 +1255,9 @@ void AWowWorldManager::SpawnWdlTile(int32 TX, int32 TY)
     const uint8 TransitionEdges = DetermineWdlTransitionEdges(WdtData.Get(), LastCameraTile, LoadRadius, Lod1Radius, TX, TY);
     if (TransitionEdges != 0)
     {
-        FAdtData TransitionAdtData;
-        if (LoadTileAdtForTransition(MpqManager.Get(), MapName, WdtData ? WdtData->bUseBigAlpha : false, TX, TY, TransitionAdtData))
+        if (Transition && Transition->bIsValid)
         {
+            const auto& TransitionAdtData=*Transition;
             TArray<float> EdgeHeights;
             if ((TransitionEdges & WdlTransition_North) != 0)
             {
@@ -1630,10 +1664,11 @@ bool AWowWorldManager::UpdateObjectStreaming()
 
             // Spawn it
             AActor* WmoActor=nullptr;
-            if(int32(GroupCount)>MaxWmoGroupsPerObject)
+            // Always enqueue, including single-group walls/houses. Older map
+            // instances serialize the previous cutoff and must not bypass workers.
             {
                 TArray<uint8> Bytes; if(!Tile->CachedMpq->ReadFile(WmoPath,Bytes)) continue;
-                TSharedPtr<FWmoRootData> Root=MakeShared<FWmoRootData>(FWmoParser::ParseRoot(Bytes)); if(!Root->bIsValid || Root->NumGroups!=GroupCount || GroupCount>4096) continue;
+                TSharedPtr<FWmoRootData,ESPMode::ThreadSafe> Root=MakeShared<FWmoRootData,ESPMode::ThreadSafe>(FWmoParser::ParseRoot(Bytes)); if(!Root->bIsValid || Root->NumGroups!=GroupCount || GroupCount>4096) continue;
                 WmoActor=FWowWmoRenderer::SpawnWmo(GetWorld(),WmoPath,Placement,Tile->CachedMpq,Tile->CachedCache,nullptr,Root.Get(),0,0);
                 if(WmoActor)
                 {
@@ -1643,7 +1678,6 @@ bool AWowWorldManager::UpdateObjectStreaming()
                     UE_LOG(LogWowWorld,Log,TEXT("Streaming large WMO %s (%u groups)"),*WmoPath,GroupCount);
                 }
             }
-            else WmoActor=FWowWmoRenderer::SpawnWmo(GetWorld(),WmoPath,Placement,Tile->CachedMpq,Tile->CachedCache);
             if (WmoActor)
             {
                 WmoActor->AttachToActor(Tile, FAttachmentTransformRules::KeepWorldTransform);
@@ -1663,7 +1697,7 @@ bool AWowWorldManager::LoadGlobalWmo(const FVector& Position)
     if(IsValid(GlobalWmo)) return true;
     if(!WdtData || !WdtData->bIsValid || !(WdtData->Flags&1) || !WdtData->bHasGlobalWmoPlacement || !MpqManager || !AssetCache) return false;
     TArray<uint8> Bytes; if(!MpqManager->ReadFile(WdtData->GlobalWmoPath,Bytes)) return false;
-    TSharedPtr<FWmoRootData> Root=MakeShared<FWmoRootData>(FWmoParser::ParseRoot(Bytes)); if(!Root->bIsValid || !Root->NumGroups || Root->NumGroups>4096) return false;
+    TSharedPtr<FWmoRootData,ESPMode::ThreadSafe> Root=MakeShared<FWmoRootData,ESPMode::ThreadSafe>(FWmoParser::ParseRoot(Bytes)); if(!Root->bIsValid || !Root->NumGroups || Root->NumGroups>4096) return false;
     auto Placement=WdtData->GlobalWmoPlacement; Placement.Position=FWowCoordinate::WdtWmoToAdt(Placement.Position);
     GlobalWmo=FWowWmoRenderer::SpawnWmo(GetWorld(),WdtData->GlobalWmoPath,Placement,MpqManager.Get(),AssetCache.Get(),nullptr,Root.Get(),0,0);
     if(!GlobalWmo) return false; GlobalWmo->AttachToActor(this,FAttachmentTransformRules::KeepWorldTransform);
@@ -1671,20 +1705,42 @@ bool AWowWorldManager::LoadGlobalWmo(const FVector& Position)
     FPendingWmoLoad Job; Job.Actor=GlobalWmo; Job.Path=WdtData->GlobalWmoPath; Job.Placement=Placement; Job.Root=Root; Job.Mpq=MpqManager.Get(); Job.Cache=AssetCache.Get(); Job.Order=FWowWmoRenderer::GroupLoadOrder(*Root,FVector(P.Y,P.X,P.Z)); PendingWmoLoads.Add(MoveTemp(Job));
     ActiveWmoGroupCount=Root->NumGroups; UE_LOG(LogWowWorld,Log,TEXT("Streaming global WMO %s (%u groups)"),*WdtData->GlobalWmoPath,Root->NumGroups); return true;
 }
+void AWowWorldManager::StartPendingWmoReads()
+{
+    for(int32 I=RetiredWmoReads.Num()-1;I>=0;--I) if(!RetiredWmoReads[I].IsValid() || RetiredWmoReads[I].IsReady()) {if(RetiredWmoReads[I].IsValid()) RetiredWmoReads[I].Get(); RetiredWmoReads.RemoveAt(I);}
+    int32 Slots=GetPreparedTileCount(); const FVector Focus=GetStreamingFocus();
+    while(Slots<4)
+    {
+        int32 Best=INDEX_NONE; double Distance=MAX_dbl;
+        for(int32 I=0;I<PendingWmoLoads.Num();++I)
+        {
+            const auto& J=PendingWmoLoads[I]; if(J.Future.IsValid() || !J.Root || !J.Actor.IsValid() || J.Actor->IsActorBeingDestroyed() || J.Next>=J.Order.Num()) continue;
+            const double D=FVector::DistSquared(J.Actor->GetActorLocation(),Focus); if(D<Distance){Best=I; Distance=D;}
+        }
+        if(Best==INDEX_NONE) break;
+        auto& J=PendingWmoLoads[Best]; const auto Root=J.Root; const auto Path=J.Path; auto* Mpq=J.Mpq; const int32 Group=J.Order[J.Next];
+        J.Future=Async(EAsyncExecution::ThreadPool,[Root,Path,Mpq,Group](){return FWowWmoRenderer::PrepareGroup(Mpq,Path,*Root,Group);}); ++Slots;
+    }
+}
 bool AWowWorldManager::UpdatePendingWmoLoads()
 {
     FWowStreamingProfile Profile(TEXT("wmoJob"));
+    for(auto& J:PendingWmoLoads) if((!J.Actor.IsValid() || J.Actor->IsActorBeingDestroyed() || J.Next>=J.Order.Num()) && J.Future.IsValid()) RetiredWmoReads.Add(MoveTemp(J.Future));
     PendingWmoLoads.RemoveAll([](const auto& Job){return !Job.Actor.IsValid() || Job.Actor->IsActorBeingDestroyed() || Job.Next>=Job.Order.Num();});
     if(PendingWmoLoads.IsEmpty()) return false;
-    const FVector Focus=GetStreamingFocus(); int32 Best=0; double Distance=MAX_dbl;
+    const FVector Focus=GetStreamingFocus(); int32 Best=INDEX_NONE; double Distance=MAX_dbl;
     for(int32 I=0;I<PendingWmoLoads.Num();++I)
     {
-        const auto& J=PendingWmoLoads[I]; const FVector Local=J.Actor->GetActorTransform().InverseTransformPosition(Focus)/FWowCoordinate::SCALE;
+        const auto& J=PendingWmoLoads[I]; if(!J.Future.IsValid() || !J.Future.IsReady()) continue; const FVector Local=J.Actor->GetActorTransform().InverseTransformPosition(Focus)/FWowCoordinate::SCALE;
         const double D=J.Root?J.Root->BoundingBox.ComputeSquaredDistanceToPoint(FVector(Local.Y,Local.X,Local.Z)):0;
         if(D<Distance){Distance=D; Best=I;}
     }
-    auto& Job=PendingWmoLoads[Best]; const int32 Group=Job.Order[Job.Next++];
-    FWowWmoRenderer::SpawnWmo(GetWorld(),Job.Path,Job.Placement,Job.Mpq,Job.Cache,Job.Actor.Get(),Job.Root.Get(),Group,1);
+    if(Best==INDEX_NONE) return false;
+    auto& Job=PendingWmoLoads[Best]; const int32 Group=Job.Order[Job.Next++]; auto Prepared=Job.Future.Get();
+    // Unreal Get() consumes the result but leaves the shared future state valid.
+    // Release that state so the next group schedules its own worker preparation.
+    Job.Future=TFuture<TSharedPtr<FWowPreparedWmoGroup>>();
+    FWowWmoRenderer::SpawnWmo(GetWorld(),Job.Path,Job.Placement,Job.Mpq,Job.Cache,Job.Actor.Get(),Job.Root.Get(),Group,1,MoveTemp(Prepared));
     if(Job.Next>=Job.Order.Num()) {UE_LOG(LogWowWorld,Log,TEXT("Large WMO streaming complete: %s"),*Job.Path); PendingWmoLoads.RemoveAt(Best);}
     return true;
 }

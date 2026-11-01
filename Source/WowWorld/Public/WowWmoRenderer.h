@@ -8,6 +8,15 @@ class USceneComponent;
 struct FAdtWmoPlacement;
 struct FWmoGroupData;
 struct FWmoRootData;
+class FStaticMeshRenderData;
+struct WOWWORLD_API FWowPreparedWmoGroup
+{
+    int32 Index=INDEX_NONE;
+    TSharedPtr<FWmoGroupData> Data;
+    TArray<FLinearColor> Lighting;
+    TUniquePtr<FStaticMeshRenderData> RenderData;
+    ~FWowPreparedWmoGroup();
+};
 
 /**
  * Renders WMO (World Map Object) buildings.
@@ -19,7 +28,8 @@ public:
     /** Spawn a WMO instance at the given placement. Returns the parent actor. */
     static AActor* SpawnWmo(UWorld* World, const FString& WmoPath, const FAdtWmoPlacement& Placement,
                             FMpqManager* Mpq, FWowAssetCache* Cache,AActor* Existing=nullptr,
-                            const FWmoRootData* ParsedRoot=nullptr,int32 FirstGroup=0,int32 GroupLimit=MAX_int32);
+                            const FWmoRootData* ParsedRoot=nullptr,int32 FirstGroup=0,int32 GroupLimit=MAX_int32,TSharedPtr<FWowPreparedWmoGroup> PreparedGroup=nullptr);
+    static TSharedPtr<FWowPreparedWmoGroup> PrepareGroup(FMpqManager* Mpq,const FString& Path,const FWmoRootData& Root,int32 Index);
 
     /** Query the number of groups in a WMO root file without spawning anything. Returns 0 on failure. */
     static uint32 GetWmoGroupCount(const FString& WmoPath, FMpqManager* Mpq);
@@ -32,5 +42,5 @@ private:
     /** Create a UStaticMesh from WMO group geometry with Nanite support */
     static UStaticMesh* CreateStaticMeshFromWmoGroup(const FWmoGroupData& GroupData,
         const FWmoRootData& RootData, const FString& WmoPath, int32 GroupIdx,
-        FMpqManager* Mpq, FWowAssetCache* Cache);
+        FMpqManager* Mpq, FWowAssetCache* Cache,FWowPreparedWmoGroup* Prepared=nullptr);
 };

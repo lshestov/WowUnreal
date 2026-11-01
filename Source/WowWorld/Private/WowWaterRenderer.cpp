@@ -1,10 +1,12 @@
 #include "WowWaterRenderer.h"
+#include "WowRuntimeStaticMesh.h"
 #include "WowRuntimeMeshMaterials.h"
 #include "WowWaterMaterial.h"
 #include "Formats/AdtTypes.h"
 #include "Coord/WowCoordinate.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
+#include "StaticMeshResources.h"
 #include "MeshDescription.h"
 #include "StaticMeshAttributes.h"
 #include "Materials/Material.h"
@@ -20,77 +22,12 @@ static UStaticMesh* BuildLiquidStaticMesh(
 	const TArray<FVector4f>& Colors,
 	UMaterial* Material)
 {
-	FMeshDescription MeshDesc;
-	FStaticMeshAttributes Attributes(MeshDesc);
-	Attributes.Register();
-
-	TVertexAttributesRef<FVector3f> VertexPositions = Attributes.GetVertexPositions();
-	TVertexInstanceAttributesRef<FVector3f> VertexInstanceNormals = Attributes.GetVertexInstanceNormals();
-	TVertexInstanceAttributesRef<FVector3f> VertexInstanceTangents = Attributes.GetVertexInstanceTangents();
-	TVertexInstanceAttributesRef<float> VertexInstanceBinormalSigns = Attributes.GetVertexInstanceBinormalSigns();
-	TVertexInstanceAttributesRef<FVector2f> VertexInstanceUVs = Attributes.GetVertexInstanceUVs();
-	TVertexInstanceAttributesRef<FVector4f> VertexInstanceColors = Attributes.GetVertexInstanceColors();
-
-	FPolygonGroupID PolyGroup = MeshDesc.CreatePolygonGroup();
-	MeshDesc.ReserveNewVertices(Vertices.Num());
-	MeshDesc.ReserveNewVertexInstances(Vertices.Num());
-	MeshDesc.ReserveNewPolygons(Indices.Num() / 3);
-
-	TArray<FVertexInstanceID> VertexInstanceIDs;
-	VertexInstanceIDs.SetNum(Vertices.Num());
-
-	for (int32 v = 0; v < Vertices.Num(); ++v)
-	{
-		const FVector& P = Vertices[v];
-		FVertexID VertID = MeshDesc.CreateVertex();
-		VertexPositions[VertID] = FVector3f(P.X, P.Y, P.Z);
-
-		FVertexInstanceID InstID = MeshDesc.CreateVertexInstance(VertID);
-		VertexInstanceIDs[v] = InstID;
-
-		VertexInstanceNormals[InstID] = FVector3f(0, 0, 1); // liquid faces up
-		VertexInstanceTangents[InstID] = FVector3f(1, 0, 0);
-		VertexInstanceBinormalSigns[InstID] = 1.0f;
-
-		FVector2f UV = (v < UVs.Num()) ? FVector2f(UVs[v]) : FVector2f(0, 0);
-		VertexInstanceUVs.Set(InstID, 0, UV);
-
-		// Vertex color: RGBA — alpha carries depth for water transparency
-		FVector4f VC = (v < Colors.Num()) ? Colors[v] : FVector4f(1, 1, 1, 0.7f);
-		VertexInstanceColors[InstID] = VC;
-	}
-
-	for (int32 t = 0; t < Indices.Num(); t += 3)
-	{
-		TArray<FVertexInstanceID> TriVerts;
-		TriVerts.Add(VertexInstanceIDs[Indices[t]]);
-		TriVerts.Add(VertexInstanceIDs[Indices[t + 1]]);
-		TriVerts.Add(VertexInstanceIDs[Indices[t + 2]]);
-		MeshDesc.CreatePolygon(PolyGroup, TriVerts);
-	}
-
-	UStaticMesh* SM = NewObject<UStaticMesh>();
-
-	TArray<const FMeshDescription*> MeshDescs;
-	MeshDescs.Add(&MeshDesc);
-	UStaticMesh::FBuildMeshDescriptionsParams BuildParams;
-	BuildParams.bBuildSimpleCollision = false;
-	BuildParams.bFastBuild = true;
-	FWowRuntimeMeshMaterials::AssignSingle(SM, MeshDesc, Material);
-	SM->BuildFromMeshDescriptions(MeshDescs, BuildParams);
-	SM->NeverStream = true;
-	SM->InitResources();
-	for (FStaticMaterial& Mat : SM->GetStaticMaterials()) { Mat.UVChannelData.bInitialized = true; }
-
-	if (Material)
-	{
-		if (SM->GetStaticMaterials().Num() <= 0)
-		{
-			SM->GetStaticMaterials().SetNum(1);
-		}
-		SM->GetStaticMaterials()[0].MaterialInterface = Material;
-		SM->GetStaticMaterials()[0].UVChannelData.bInitialized = true;
-	}
+    // Preserve authored positions, triangles, UVs, +X tangent and depth alpha.
+    // Build runtime buffers directly; the editor mesh builder also cooked an
+    // unnecessary physics body and destroyed topology on the game thread.
+    TArray<FVector> Normals; Normals.Init(FVector(0,0,1),Vertices.Num());
+    UStaticMesh* SM=NewObject<UStaticMesh>();
+    FWowRuntimeStaticMesh::Initialize(SM,FWowRuntimeStaticMesh::PrepareSurface(Vertices,Normals,UVs,Indices,&Colors),TArray<UMaterialInterface*>{Material});
 
 	return SM;
 }

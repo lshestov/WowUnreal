@@ -126,6 +126,7 @@ TSharedPtr<FJsonObject> AWowPerformanceTestGameMode::Snapshot() const
     O->SetNumberField(TEXT("pendingDoodadTiles"),CachedWorldManager->GetPendingDoodadJobs()); O->SetNumberField(TEXT("pendingLod1"),CachedWorldManager->GetPendingLod1Count());
     O->SetNumberField(TEXT("lod1Tiles"),CachedWorldManager->GetLod1TileCount()); O->SetNumberField(TEXT("wdlTiles"),CachedWorldManager->GetWdlTileCount());
     O->SetNumberField(TEXT("preparedSlots"),CachedWorldManager->GetPreparedTileCount());
+    O->SetNumberField(TEXT("missingTerrainCoverage"),CachedWorldManager->GetMissingTerrainCoverage());
     O->SetNumberField(TEXT("cachedTextures"),Stats.TextureCount); O->SetNumberField(TEXT("cachedMeshes"),Stats.MeshCount);
     O->SetNumberField(TEXT("estimatedAssetMiB"),Stats.TotalEstimatedMemory()/1048576.);
     if(auto* L=GetWorld()->GetSubsystem<UWowM2LightSubsystem>())

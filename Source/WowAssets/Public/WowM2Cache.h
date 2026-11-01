@@ -9,6 +9,7 @@ struct FWowM2CacheStats {uint64 Bytes=0, Budget=0, Evictions=0; int32 Entries=0;
 class FWowM2Cache
 {
 public:
+    static constexpr int32 MaxEntries=2048;
     explicit FWowM2Cache(uint64 InBudget=128ull*1024*1024):Budget(InBudget){}
     TSharedPtr<FM2Data>* Find(const FString& Path)
     {auto* E=Entries.Find(Path); if(!E) return nullptr; E->Used=++Clock; return &E->Model;}
@@ -19,7 +20,7 @@ public:
         const uint64 Size=Model->GetAllocatedSize()+Path.GetAllocatedSize()+sizeof(FEntry);
         if(Size>Budget){++Evictions; return;}
         FEntry E; E.Model=Model; E.Bytes=Size; E.Used=++Clock; Entries.Add(Path,MoveTemp(E)); Bytes+=Size;
-        while(Bytes>Budget || Entries.Num()>256)
+        while(Bytes>Budget || Entries.Num()>MaxEntries)
         {
             FString Oldest; uint64 Age=MAX_uint64;
             for(const auto& P:Entries) if(P.Value.Used<Age){Age=P.Value.Used; Oldest=P.Key;}

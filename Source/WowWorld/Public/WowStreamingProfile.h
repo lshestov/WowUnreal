@@ -6,10 +6,10 @@ struct FWowStreamingProfile
 {
     const TCHAR* Stage;
     double Started;
+    static bool IsEnabled(){static const bool Enabled=FParse::Param(FCommandLine::Get(),TEXT("wowstreamprofile")); return Enabled;}
     explicit FWowStreamingProfile(const TCHAR* InStage):Stage(InStage),Started(0)
     {
-        static const bool Enabled=FParse::Param(FCommandLine::Get(),TEXT("wowstreamprofile"));
-        if(Enabled) Started=FPlatformTime::Seconds();
+        if(IsEnabled()) Started=FPlatformTime::Seconds();
     }
     ~FWowStreamingProfile()
     {

@@ -47,12 +47,14 @@ bool FIdleWowCollisionSurfaces::RunTest(const FString& Parameters)
     Floor(Root, 0, TEXT("Terrain")); Floor(Root, 130, TEXT("IndoorFloor"));
     FWowWorldCollision::Create(Root, TEXT("Wall"), {FVector(200,800,0), FVector(200,1200,0), FVector(200,1200,300), FVector(200,800,300)}, {0,1,2,0,2,3});
     const double Started = FPlatformTime::Seconds();
+    TestFalse(TEXT("Queued triangle cooks keep collision readiness closed"),FWowWorldCollision::IsReady(Root->GetOwner()));
     ADD_LATENT_AUTOMATION_COMMAND(FFunctionLatentCommand([this, World, Root, Started]()
     {
         FHitResult Hit;
-        const bool Ready = FWowWorldCollision::FindFloor(World, FVector(0,0,180), nullptr, Hit);
+        const bool Ready = FWowWorldCollision::IsReady(Root->GetOwner()) && FWowWorldCollision::FindFloor(World, FVector(0,0,180), nullptr, Hit);
         if (!Ready && FPlatformTime::Seconds() - Started < 5) return false;
         TestTrue(TEXT("Asynchronously cooked world floor exists"), Ready);
+        TestTrue(TEXT("Readiness opens only after all triangle bodies exist"),FWowWorldCollision::IsReady(Root->GetOwner()));
         if (Ready) TestTrue(TEXT("NPC resolves nearby floor below its server height"), FMath::IsNearlyEqual(Hit.ImpactPoint.Z,130.0,0.1));
         TestTrue(TEXT("Capsule placement finds room floor instead of terrain underneath it"),
             FWowWorldCollision::FindFloor(World, FVector::ZeroVector, nullptr, Hit, 200, 1000, 35, 88) && FMath::IsNearlyEqual(Hit.ImpactPoint.Z,130.0,0.1));

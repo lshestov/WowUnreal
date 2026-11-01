@@ -14,14 +14,14 @@ bool FIdleWowParsedCache::RunTest(const FString&)
         Model->Lights[0].DiffuseIntensity.Sequences[0].Times={0,100}; Model->Lights[0].DiffuseIntensity.Sequences[0].Values={2,4};
         if(I==0) Pinned=Model;
         Cache.Add(FString::FromInt(I),Model); const auto Stats=Cache.GetStats();
-        if(Stats.Bytes>Stats.Budget || Stats.Entries>256){AddError(TEXT("Parsed cache exceeded its retained payload budget")); return false;}
+        if(Stats.Bytes>Stats.Budget || Stats.Entries>FWowM2Cache::MaxEntries){AddError(TEXT("Parsed cache exceeded its retained payload budget")); return false;}
     }
     TestTrue(TEXT("Repeated unique models evict old cache ownership"),Cache.GetStats().Evictions>70 && Cache.Find(TEXT("0"))==nullptr);
     TestTrue(TEXT("An active light/animation/effect's shared data survives eviction intact"),Pinned.IsValid() && Pinned->Vertices.Num()==3000 && Pinned->Lights[0].DiffuseIntensity.Sample(0,50,{},0)==3);
     auto Huge=MakeShared<FM2Data>(); Huge->Vertices.SetNum(20000); Cache.Add(TEXT("oversize"),Huge);
     TestTrue(TEXT("Oversized models can be used by a live owner without entering the cache"),!Cache.Find(TEXT("oversize")) && Cache.GetStats().Bytes<=Cache.GetStats().Budget && Huge->Vertices.Num()==20000);
-    FWowM2Cache SmallEntries(16*1024*1024); auto Tiny=MakeShared<FM2Data>(); for(int32 I=0;I<900;++I) SmallEntries.Add(FString::FromInt(I),Tiny);
-    TestEqual(TEXT("Metadata entries are bounded independently of payload size"),SmallEntries.GetStats().Entries,256);
+    FWowM2Cache SmallEntries(16*1024*1024); auto Tiny=MakeShared<FM2Data>(); for(int32 I=0;I<3000;++I) SmallEntries.Add(FString::FromInt(I),Tiny);
+    TestEqual(TEXT("Metadata entries are bounded independently of payload size"),SmallEntries.GetStats().Entries,2048);
     return true;
 }
 #endif

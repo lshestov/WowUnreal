@@ -35,16 +35,33 @@ def summarize(path):
     for stage, ms in re.findall(r"StreamPerf stage=(\w+) ms=([\d.]+)", (path / "client.log").read_text(encoding="utf-8-sig")):
         scopes[stage].append(float(ms))
     result["scopesMs"] = {stage: distribution(v) for stage, v in scopes.items()}
+    policy_log = (path / "client.log").read_text(encoding="utf-8-sig")
+    if "StreamPolicy allWmoWorkers=1" in policy_log:
+        if result["scopesMs"].get("wmoReadParse", {}).get("samples", 0):
+            raise RuntimeError("A WMO group bypassed worker preparation")
+        result["allWmoGroupsPreparedOnWorkers"] = True
     result["queueMaxima"] = {name: max(v) for name, v in queues.items()}
     if result["queueMaxima"].get("preparedSlots", 0) > 4:
         raise RuntimeError("More than four prepared/in-flight tile results")
     per_frame = defaultdict(int)
-    for stage, frame in re.findall(r"StreamPerf stage=(finalizeTile|m2Instances|lod1|wdl) ms=[\d.]+ frame=(\d+)", (path / "client.log").read_text(encoding="utf-8-sig")):
+    log = (path / "client.log").read_text(encoding="utf-8-sig")
+    budgets = re.findall(r"StreamBudget jobs=(\d+) terrain=(\d+) ms=([\d.]+) frame=(\d+)", log)
+    stages = "finalizeTile|lod1|wdl" if budgets else "finalizeTile|m2Instances|lod1|wdl"
+    for stage, frame in re.findall(r"StreamPerf stage=("+stages+r") ms=[\d.]+ frame=(\d+)", log):
         per_frame[stage, frame] += 1
         per_frame["all", frame] += 1
     if any(count > 1 for count in per_frame.values()):
         raise RuntimeError("More than one heavy unit of a kind in one engine frame")
     result["oneHeavyUnitPerKindPerFrame"] = bool(per_frame)
+    if budgets:
+        if any(int(j)>8 or int(t)>1 for j,t,ms,f in budgets) or len({f for j,t,ms,f in budgets})!=len(budgets):
+            raise RuntimeError("Unbounded jobs, multiple terrain uploads or pumps in a frame")
+        result["budgetedStreamingVerified"] = True
+        result["queueMaxima"]["streamingJobsPerFrame"] = max(int(j) for j,t,ms,f in budgets)
+        result["queueMaxima"]["terrainUploadsPerFrame"] = max(int(t) for j,t,ms,f in budgets)
+        result["streamingBudget"] = {"cooperativeMs": 1, "maxJobs": 8,
+             "batchMs": distribution([float(ms) for j,t,ms,f in budgets]),
+             "note": "An indivisible job can overrun; no further job starts after the deadline."}
     (path / "summary.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
     print(path.name, "cache:", result["cacheMode"])
     for step in result["steps"]:

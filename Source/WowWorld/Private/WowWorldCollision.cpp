@@ -27,9 +27,19 @@ UProceduralMeshComponent* FWowWorldCollision::Create(USceneComponent* Parent, FN
     Collision->SetVisibility(false);
     Collision->SetHiddenInGame(true);
     Collision->ComponentTags.Add(TEXT("WowGroundSurface"));
-    Collision->CreateMeshSection(0, Vertices, Indices, TArray<FVector>(), TArray<FVector2D>(), TArray<FColor>(), TArray<FProcMeshTangent>(), true);
+    // Register the empty body first. Registering populated pending-async data
+    // can synchronously cook a second body while creating its physics state.
     Collision->RegisterComponent();
+    Collision->CreateMeshSection(0, Vertices, Indices, TArray<FVector>(), TArray<FVector2D>(), TArray<FColor>(), TArray<FProcMeshTangent>(), true);
     return Collision;
+}
+
+bool FWowWorldCollision::IsReady(const AActor* Actor)
+{
+    if(!Actor) return true;
+    TInlineComponentArray<UProceduralMeshComponent*> Components(Actor);
+    for(auto* C:Components) if(C->GetCollisionEnabled()!=ECollisionEnabled::NoCollision && C->ContainsPhysicsTriMeshData(true) && !C->BodyInstance.IsValidBodyInstance()) return false;
+    return true;
 }
 
 void FWowWorldCollision::DestroyChildren(USceneComponent* Parent)

@@ -63,14 +63,18 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
     TArray<UMaterialInterface*> SectionMaterials;
     if(!MeshReused)
     {
-        auto* AlphaAtlas=FWowTerrainMaterial::CreateAlphaAtlas(Data,&Geometry->AlphaPixels);
+        auto* AlphaAtlas=[&](){FWowStreamingProfile P(TEXT("terrainAtlas")); return FWowTerrainMaterial::CreateAlphaAtlas(Data,&Geometry->AlphaPixels);}();
+        {
+        FWowStreamingProfile P(TEXT("terrainMaterials"));
         for(int32 Representative:Geometry->Representatives)
         {
             auto* Material=FWowTerrainMaterial::CreateBatchMaterial(Data.Chunks[Representative],Data,AlphaAtlas,Mpq,Cache,SM);
             SectionMaterials.Add(Material?static_cast<UMaterialInterface*>(Material):DefaultMat);
         }
+        }
         if(Geometry->Chunks>0)
         {
+            FWowStreamingProfile P(TEXT("terrainResources"));
             FWowRuntimeStaticMesh::Initialize(SM,MoveTemp(Geometry->RenderData),SectionMaterials);
             if(Cache && !CacheKey.IsEmpty()) Cache->CacheMesh(CacheKey,SM);
         }
@@ -81,6 +85,8 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
     {
         // ProceduralMeshComponent cooks triangle collision in packaged games;
         // transient UStaticMesh imported collision is only reliable in Editor.
+        {
+        FWowStreamingProfile P(TEXT("terrainCollision"));
         auto* GroundCollision = NewObject<UProceduralMeshComponent>(this, TEXT("TerrainCollision"));
         GroundCollision->SetupAttachment(RootScene);
         GroundCollision->bUseAsyncCooking = true;
@@ -90,9 +96,10 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
         GroundCollision->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
         GroundCollision->SetVisibility(false);
         GroundCollision->SetHiddenInGame(true);
+        GroundCollision->RegisterComponent();
         GroundCollision->CreateMeshSection(0, CollisionVertices, CollisionIndices,
             TArray<FVector>(), TArray<FVector2D>(), TArray<FColor>(), TArray<FProcMeshTangent>(), true);
-        GroundCollision->RegisterComponent();
+        }
 
         // Create UStaticMeshComponent and set materials on the component
         UStaticMeshComponent* MeshComp = NewObject<UStaticMeshComponent>(this, TEXT("TerrainMesh"));
@@ -116,6 +123,7 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
 
     // Spawn water meshes from MH2O data
     {
+        FWowStreamingProfile P(TEXT("terrainWater"));
         TArray<UStaticMeshComponent*> WaterComps = FWowWaterRenderer::CreateWaterMeshes(this, Data, TX, TY);
         for (UStaticMeshComponent* WC : WaterComps)
         {

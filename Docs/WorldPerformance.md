@@ -1,5 +1,50 @@
 # World streaming performance
 
+## Follow-up: startup and p99, first verified cycle (2 November)
+
+`31-wmo-future-existing` improves ordinary whole-route p99 from the regressed
+9.910 ms to 3.932 ms (original: 4.385 ms), p95 2.977→2.467 ms and frames above
+50/100 ms 130/28→1/1. The remaining maximum is 224.79 ms during initial loading.
+Initial settled time is 8.22 s; crossing maximum 18.09 ms and Abbey returns
+13.94/15.01/12.58 ms. Its ten nonempty PNGs are individually inspected.
+The repeated 19-step native route is `run-20261102-015722-503`; world readiness
+is 9.40 s, versus 21.19 s in the regressed run and 13.01 s originally.
+Its three PNGs are inspected and owned fixtures/fingerprints are restored.
+
+The scheduler now uses a cooperative 1 ms budget, at most eight jobs per frame
+and at most one terrain/LOD/WDL upload. An indivisible operation may overrun,
+then yields. Cheap operations no longer each consume an entire UI frame.
+Terrain, LOD, WDL-transition reads and WMO group preparation share four
+active/ready slots. Cancelled WMO futures keep counting until completion;
+shutdown waits before closing MPQs. Root snapshots use thread-safe shared
+ownership. WMO read/parse, authored portal/MOCV lighting, topology/buffer
+preparation and temporary topology destruction run on workers without UObjects.
+Each successive group releases its consumed Unreal future explicitly; a real
+two-group regression prevents reusing a valid-but-consumed future state.
+
+Registering empty procedural collision components before populating sections
+avoids the synchronous body creation observed when registering populated
+pending-async geometry. Readiness now additionally waits for actual physics
+bodies. Terrain collision drops from roughly 40 ms to a few milliseconds;
+terrain water, static M2 and WMO rendering avoid the editor mesh builder.
+An independent test compares prepared object vertex colours byte-for-byte
+with that previous engine builder, including its sRGB conversion. Water keeps
+source depth alpha/UVs/tangents; WMO/M2 sections explicitly retain shadow flags.
+
+The initial 256-entry parsed-model limit caused 2,113 evictions while retaining
+only about 4 MiB. Metadata is now bounded at 2,048 entries while payload budgets
+remain 128/64 MiB. This route retains 723 models / 12.75 MiB with zero evictions.
+This is bounded reuse rather than retaining unloaded actors or forcing GC.
+
+`32-combined-tests` passes all 30 related checks without warnings. The latest
+`32-coverage-smoke` is also inspected and reports zero missing full/mid/far
+source-tile coverage, 750 terrain sections, 13,471 instanced placements and all
+590 WMO shadow casters. Distant radii remain unchanged. Pending WDL requests
+covered by loaded LOD1 are discarded, so retained WDL object counts may differ
+from the earlier overlapping load order; coverage is checked independently.
+Full clean publication, regression, both cache modes and memory repeat remain
+pending before final acceptance.
+
 ## Follow-up: warning fixes
 
 `24-warning-tests-final` executes all four formerly warning-bearing tests with

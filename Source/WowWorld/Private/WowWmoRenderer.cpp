@@ -1,4 +1,6 @@
 #include "WowWmoRenderer.h"
+#include "WowRuntimeStaticMesh.h"
+#include "StaticMeshResources.h"
 #include "WowStreamingProfile.h"
 #include "WowWmoArea.h"
 #include "WowWmoLighting.h"
@@ -38,8 +40,126 @@ FString FWowWmoRenderer::GetGroupPath(const FString& RootPath, int32 GroupIndex)
     return FString::Printf(TEXT("%s_%03d.wmo"), *Base, GroupIndex);
 }
 
+FWowPreparedWmoGroup::~FWowPreparedWmoGroup()=default;
+static TUniquePtr<FStaticMeshRenderData> PrepareWmoGeometry(const FWmoGroupData& GroupData,const TArray<FLinearColor>& Lighting)
+{
+    FMeshDescription MeshDesc;
+    FStaticMeshAttributes Attributes(MeshDesc);
+    Attributes.Register();
+
+    const int32 NumVerts = GroupData.Vertices.Num();
+
+    TVertexAttributesRef<FVector3f> VertexPositions = Attributes.GetVertexPositions();
+    TVertexInstanceAttributesRef<FVector3f> VertexInstanceNormals = Attributes.GetVertexInstanceNormals();
+    TVertexInstanceAttributesRef<FVector3f> VertexInstanceTangents = Attributes.GetVertexInstanceTangents();
+    TVertexInstanceAttributesRef<float> VertexInstanceBinormalSigns = Attributes.GetVertexInstanceBinormalSigns();
+    TVertexInstanceAttributesRef<FVector2f> VertexInstanceUVs = Attributes.GetVertexInstanceUVs();
+    TVertexInstanceAttributesRef<FVector4f> VertexInstanceColors = Attributes.GetVertexInstanceColors();
+
+    // Create vertices and instances
+    TArray<FVertexInstanceID> VertexInstanceIDs;
+    VertexInstanceIDs.SetNum(NumVerts);
+
+    // If we have batches, create one polygon group per batch for separate materials
+    int32 NumPolyGroups = FMath::Max(1, GroupData.Batches.Num());
+    TArray<FPolygonGroupID> PolyGroups;
+    for (int32 i = 0; i < NumPolyGroups; ++i)
+    {
+        PolyGroups.Add(MeshDesc.CreatePolygonGroup());
+    }
+
+    MeshDesc.ReserveNewVertices(NumVerts);
+    MeshDesc.ReserveNewVertexInstances(NumVerts);
+
+    for (int32 i = 0; i < NumVerts; ++i)
+    {
+        const FVector& P = GroupData.Vertices[i];
+        FVertexID VertID = MeshDesc.CreateVertex();
+        // WMO model space → UE local space: (Y, X, Z) * SCALE
+        // Derivation: WMO→ADT is (X,Z,-Y) [noggit3], ADT→UE is (-Z,X,Y)
+        // Combined: UE.X=WMO.Y, UE.Y=WMO.X, UE.Z=WMO.Z (det=-1 handles RH→LH winding)
+        VertexPositions[VertID] = FVector3f(P.Y * FWowCoordinate::SCALE, P.X * FWowCoordinate::SCALE, P.Z * FWowCoordinate::SCALE);
+
+        FVertexInstanceID InstID = MeshDesc.CreateVertexInstance(VertID);
+        VertexInstanceIDs[i] = InstID;
+
+        FVector3f N = (i < GroupData.Normals.Num())
+            ? FVector3f(GroupData.Normals[i].Y, GroupData.Normals[i].X, GroupData.Normals[i].Z)
+            : FVector3f(0, 0, 1);
+        N.Normalize();
+        VertexInstanceNormals[InstID] = N;
+
+        FVector3f T = FVector3f::CrossProduct(N, FVector3f(0, 1, 0));
+        if (T.SizeSquared() < 0.001f)
+        {
+            T = FVector3f::CrossProduct(N, FVector3f(1, 0, 0));
+        }
+        T.Normalize();
+        VertexInstanceTangents[InstID] = T;
+        VertexInstanceBinormalSigns[InstID] = 1.0f;
+
+        FVector2f UV = (i < GroupData.TexCoords.Num())
+            ? FVector2f(GroupData.TexCoords[i].X, GroupData.TexCoords[i].Y)
+            : FVector2f(0, 0);
+        VertexInstanceUVs.Set(InstID, 0, UV);
+
+        if (Lighting.IsValidIndex(i))
+        {
+            const FLinearColor& LC=Lighting[i];
+            VertexInstanceColors[InstID] = FVector4f(LC.R, LC.G, LC.B, LC.A);
+        }
+        else VertexInstanceColors[InstID]=FVector4f(1,1,1,1);
+    }
+
+    // Create triangles
+    if (GroupData.Batches.Num() > 0)
+    {
+        for (int32 BatchIdx = 0; BatchIdx < GroupData.Batches.Num(); ++BatchIdx)
+        {
+            const FWmoGroupData::FBatch& Batch = GroupData.Batches[BatchIdx];
+            for (uint16 j = 0; j + 2 < Batch.IndexCount; j += 3)
+            {
+                int32 Idx0 = Batch.IndexStart + j;
+                int32 Idx1 = Batch.IndexStart + j + 1;
+                int32 Idx2 = Batch.IndexStart + j + 2;
+                if (Idx2 >= GroupData.Indices.Num()) break;
+
+                TArray<FVertexInstanceID> TriVerts;
+                TriVerts.Add(VertexInstanceIDs[GroupData.Indices[Idx0]]);
+                TriVerts.Add(VertexInstanceIDs[GroupData.Indices[Idx1]]);
+                TriVerts.Add(VertexInstanceIDs[GroupData.Indices[Idx2]]);
+                MeshDesc.CreatePolygon(PolyGroups[BatchIdx], TriVerts);
+            }
+        }
+    }
+    else
+    {
+        int32 NumTris = GroupData.Indices.Num() / 3;
+        for (int32 i = 0; i < NumTris; ++i)
+        {
+            TArray<FVertexInstanceID> TriVerts;
+            TriVerts.Add(VertexInstanceIDs[GroupData.Indices[i * 3]]);
+            TriVerts.Add(VertexInstanceIDs[GroupData.Indices[i * 3 + 1]]);
+            TriVerts.Add(VertexInstanceIDs[GroupData.Indices[i * 3 + 2]]);
+            MeshDesc.CreatePolygon(PolyGroups[0], TriVerts);
+        }
+    }
+
+    return FWowRuntimeStaticMesh::Prepare(MeshDesc,true,true);
+}
+TSharedPtr<FWowPreparedWmoGroup> FWowWmoRenderer::PrepareGroup(FMpqManager* Mpq,const FString& Path,const FWmoRootData& Root,int32 Index)
+{
+    FWowStreamingProfile P(TEXT("wmoPrepareWorker")); auto Result=MakeShared<FWowPreparedWmoGroup>(); Result->Index=Index;
+    TArray<uint8> Raw; if(!Mpq || !Mpq->ReadFile(GetGroupPath(Path,Index),Raw)) return Result;
+    Result->Data=MakeShared<FWmoGroupData>(FWmoParser::ParseGroup(Raw));
+    if(!Result->Data->bIsValid || Result->Data->Vertices.IsEmpty() || Result->Data->Indices.IsEmpty()){Result->Data.Reset(); return Result;}
+    Result->Lighting=FWowWmoLighting::Prepare(Root,*Result->Data);
+    Result->RenderData=PrepareWmoGeometry(*Result->Data,Result->Lighting);
+    return Result;
+}
+
 AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const FAdtWmoPlacement& Placement,
-    FMpqManager* Mpq, FWowAssetCache* Cache,AActor* Existing,const FWmoRootData* ParsedRoot,int32 FirstGroup,int32 GroupLimit)
+    FMpqManager* Mpq, FWowAssetCache* Cache,AActor* Existing,const FWmoRootData* ParsedRoot,int32 FirstGroup,int32 GroupLimit,TSharedPtr<FWowPreparedWmoGroup> PreparedGroup)
 {
     FWowStreamingProfile Profile(TEXT("wmoSpawn"));
     if (!World || !Mpq || WmoPath.IsEmpty())
@@ -109,14 +229,16 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
     {
         FString GroupPath = GetGroupPath(WmoPath, GroupIdx);
 
-        TArray<uint8> GroupRaw;
-        if (!Mpq->ReadFile(GroupPath, GroupRaw))
+        FWmoGroupData OwnedGroup;
+        const bool Prepared=PreparedGroup && PreparedGroup->Index==int32(GroupIdx);
+        if(!Prepared)
         {
-            UE_LOG(LogWowWmo, Verbose, TEXT("Failed to read WMO group %d: %s"), GroupIdx, *GroupPath);
-            continue;
+            FWowStreamingProfile P(TEXT("wmoReadParse")); TArray<uint8> GroupRaw;
+            if(!Mpq->ReadFile(GroupPath,GroupRaw)) continue;
+            OwnedGroup=FWmoParser::ParseGroup(GroupRaw);
         }
-
-        FWmoGroupData GroupData = FWmoParser::ParseGroup(GroupRaw);
+        else if(!PreparedGroup->Data) continue;
+        const auto& GroupData=Prepared?*PreparedGroup->Data:OwnedGroup;
         if (!GroupData.bIsValid || GroupData.Vertices.Num() == 0 || GroupData.Indices.Num() == 0)
         {
             continue;
@@ -124,8 +246,8 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
 
         auto& Room=Area->Groups[GroupIdx]; Room.Id=GroupData.GroupId; Room.Flags=GroupData.Flags; Room.Bounds=GroupData.BoundingBox;
         Room.PortalStart=GroupData.PortalStart; Room.PortalCount=GroupData.PortalCount;
-        Room.Collision=FWowWorldCollision::AddWmo(RootComp, *FString::Printf(TEXT("WmoCollision_%u"), GroupIdx), GroupData);
-        Room.Lighting=FWowWmoLighting::Prepare(RootData,GroupData);
+        Room.Collision=[&](){FWowStreamingProfile P(TEXT("wmoCollision")); return FWowWorldCollision::AddWmo(RootComp, *FString::Printf(TEXT("WmoCollision_%u"), GroupIdx), GroupData);}();
+        Room.Lighting=Prepared?PreparedGroup->Lighting:FWowWmoLighting::Prepare(RootData,GroupData);
         Room.FallbackLight=FLinearColor(RootData.AmbientColor.R/255.f,RootData.AmbientColor.G/255.f,RootData.AmbientColor.B/255.f);
         if(auto* Lights=World->GetSubsystem<UWowM2LightSubsystem>()) for(uint16 Ref:GroupData.DoodadRefs)
         {
@@ -135,7 +257,7 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
         }
 
         // Create UStaticMesh with Nanite for this group
-        UStaticMesh* GroupMesh = CreateStaticMeshFromWmoGroup(GroupData, RootData, WmoPath, GroupIdx, Mpq, Cache);
+        UStaticMesh* GroupMesh = [&](){FWowStreamingProfile P(TEXT("wmoMesh")); return CreateStaticMeshFromWmoGroup(GroupData, RootData, WmoPath, GroupIdx, Mpq, Cache,Prepared?PreparedGroup.Get():nullptr);}();
         if (!GroupMesh) continue;
 
         FName CompName = *FString::Printf(TEXT("WmoGroup_%d"), GroupIdx);
@@ -330,7 +452,7 @@ TArray<int32> FWowWmoRenderer::GroupLoadOrder(const FWmoRootData& Root,const FVe
 UStaticMesh* FWowWmoRenderer::CreateStaticMeshFromWmoGroup(
     const FWmoGroupData& GroupData, const FWmoRootData& RootData,
     const FString& WmoPath, int32 GroupIdx,
-    FMpqManager* Mpq, FWowAssetCache* Cache)
+    FMpqManager* Mpq, FWowAssetCache* Cache,FWowPreparedWmoGroup* Prepared)
 {
     if (GroupData.Vertices.Num() == 0 || GroupData.Indices.Num() == 0)
     {
@@ -344,109 +466,8 @@ UStaticMesh* FWowWmoRenderer::CreateStaticMeshFromWmoGroup(
     SM->CreateBodySetup();
     SM->GetBodySetup()->bNeverNeedsCookedCollisionData = true;
 
-    FMeshDescription MeshDesc;
-    FStaticMeshAttributes Attributes(MeshDesc);
-    Attributes.Register();
-
-    const int32 NumVerts = GroupData.Vertices.Num();
-    const auto Lighting = FWowWmoLighting::Prepare(RootData,GroupData);
-
-    TVertexAttributesRef<FVector3f> VertexPositions = Attributes.GetVertexPositions();
-    TVertexInstanceAttributesRef<FVector3f> VertexInstanceNormals = Attributes.GetVertexInstanceNormals();
-    TVertexInstanceAttributesRef<FVector3f> VertexInstanceTangents = Attributes.GetVertexInstanceTangents();
-    TVertexInstanceAttributesRef<float> VertexInstanceBinormalSigns = Attributes.GetVertexInstanceBinormalSigns();
-    TVertexInstanceAttributesRef<FVector2f> VertexInstanceUVs = Attributes.GetVertexInstanceUVs();
-    TVertexInstanceAttributesRef<FVector4f> VertexInstanceColors = Attributes.GetVertexInstanceColors();
-
-    // Create vertices and instances
-    TArray<FVertexInstanceID> VertexInstanceIDs;
-    VertexInstanceIDs.SetNum(NumVerts);
-
-    // If we have batches, create one polygon group per batch for separate materials
-    int32 NumPolyGroups = FMath::Max(1, GroupData.Batches.Num());
-    TArray<FPolygonGroupID> PolyGroups;
-    for (int32 i = 0; i < NumPolyGroups; ++i)
-    {
-        PolyGroups.Add(MeshDesc.CreatePolygonGroup());
-    }
-
-    MeshDesc.ReserveNewVertices(NumVerts);
-    MeshDesc.ReserveNewVertexInstances(NumVerts);
-
-    for (int32 i = 0; i < NumVerts; ++i)
-    {
-        const FVector& P = GroupData.Vertices[i];
-        FVertexID VertID = MeshDesc.CreateVertex();
-        // WMO model space → UE local space: (Y, X, Z) * SCALE
-        // Derivation: WMO→ADT is (X,Z,-Y) [noggit3], ADT→UE is (-Z,X,Y)
-        // Combined: UE.X=WMO.Y, UE.Y=WMO.X, UE.Z=WMO.Z (det=-1 handles RH→LH winding)
-        VertexPositions[VertID] = FVector3f(P.Y * FWowCoordinate::SCALE, P.X * FWowCoordinate::SCALE, P.Z * FWowCoordinate::SCALE);
-
-        FVertexInstanceID InstID = MeshDesc.CreateVertexInstance(VertID);
-        VertexInstanceIDs[i] = InstID;
-
-        FVector3f N = (i < GroupData.Normals.Num())
-            ? FVector3f(GroupData.Normals[i].Y, GroupData.Normals[i].X, GroupData.Normals[i].Z)
-            : FVector3f(0, 0, 1);
-        N.Normalize();
-        VertexInstanceNormals[InstID] = N;
-
-        FVector3f T = FVector3f::CrossProduct(N, FVector3f(0, 1, 0));
-        if (T.SizeSquared() < 0.001f)
-        {
-            T = FVector3f::CrossProduct(N, FVector3f(1, 0, 0));
-        }
-        T.Normalize();
-        VertexInstanceTangents[InstID] = T;
-        VertexInstanceBinormalSigns[InstID] = 1.0f;
-
-        FVector2f UV = (i < GroupData.TexCoords.Num())
-            ? FVector2f(GroupData.TexCoords[i].X, GroupData.TexCoords[i].Y)
-            : FVector2f(0, 0);
-        VertexInstanceUVs.Set(InstID, 0, UV);
-
-        if (Lighting.IsValidIndex(i))
-        {
-            const FLinearColor& LC=Lighting[i];
-            VertexInstanceColors[InstID] = FVector4f(LC.R, LC.G, LC.B, LC.A);
-        }
-        else VertexInstanceColors[InstID]=FVector4f(1,1,1,1);
-    }
-
-    // Create triangles
-    if (GroupData.Batches.Num() > 0)
-    {
-        for (int32 BatchIdx = 0; BatchIdx < GroupData.Batches.Num(); ++BatchIdx)
-        {
-            const FWmoGroupData::FBatch& Batch = GroupData.Batches[BatchIdx];
-            for (uint16 j = 0; j + 2 < Batch.IndexCount; j += 3)
-            {
-                int32 Idx0 = Batch.IndexStart + j;
-                int32 Idx1 = Batch.IndexStart + j + 1;
-                int32 Idx2 = Batch.IndexStart + j + 2;
-                if (Idx2 >= GroupData.Indices.Num()) break;
-
-                TArray<FVertexInstanceID> TriVerts;
-                TriVerts.Add(VertexInstanceIDs[GroupData.Indices[Idx0]]);
-                TriVerts.Add(VertexInstanceIDs[GroupData.Indices[Idx1]]);
-                TriVerts.Add(VertexInstanceIDs[GroupData.Indices[Idx2]]);
-                MeshDesc.CreatePolygon(PolyGroups[BatchIdx], TriVerts);
-            }
-        }
-    }
-    else
-    {
-        int32 NumTris = GroupData.Indices.Num() / 3;
-        for (int32 i = 0; i < NumTris; ++i)
-        {
-            TArray<FVertexInstanceID> TriVerts;
-            TriVerts.Add(VertexInstanceIDs[GroupData.Indices[i * 3]]);
-            TriVerts.Add(VertexInstanceIDs[GroupData.Indices[i * 3 + 1]]);
-            TriVerts.Add(VertexInstanceIDs[GroupData.Indices[i * 3 + 2]]);
-            MeshDesc.CreatePolygon(PolyGroups[0], TriVerts);
-        }
-    }
-
+    const auto Lighting=Prepared?TArray<FLinearColor>():FWowWmoLighting::Prepare(RootData,GroupData);
+    const int32 LightingCount=Prepared?Prepared->Lighting.Num():Lighting.Num();
     // Build materials BEFORE mesh so sections are initialized correctly
     UMaterial* BaseMat = LoadObject<UMaterial>(nullptr,TEXT("/Game/Materials/M_WowWmo"));
     if (!BaseMat) BaseMat=FWowTerrainMaterial::GetSimpleObjectMaterial();
@@ -473,7 +494,7 @@ UStaticMesh* FWowWmoRenderer::CreateStaticMeshFromWmoGroup(
                 {
                     UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, SM);
                     MID->SetTextureParameterValue(FName(TEXT("Layer0Texture")), Tex);
-                    const bool Baked=Lighting.Num()==GroupData.Vertices.Num();
+                    const bool Baked=LightingCount==GroupData.Vertices.Num();
                     MID->SetScalarParameterValue(TEXT("BakedLightStrength"),Baked?1.f:0.f);
                     MID->SetVectorParameterValue(TEXT("WmoAmbient"),(RootData.Flags&2) || GroupData.VertexColors.IsEmpty()?FLinearColor::Black:FLinearColor(RootData.AmbientColor.R/255.f,RootData.AmbientColor.G/255.f,RootData.AmbientColor.B/255.f));
                     MID->SetScalarParameterValue(TEXT("Unlit"),(WmoMat.Flags&1)?1.f:0.f);
@@ -488,20 +509,9 @@ UStaticMesh* FWowWmoRenderer::CreateStaticMeshFromWmoGroup(
         SectionMaterials.Add(FallbackMat);
     }
 
-    // Add materials to static mesh before building
-    FWowRuntimeMeshMaterials::Assign(SM, MeshDesc, SectionMaterials);
-
-    // Build mesh
-    TArray<const FMeshDescription*> MeshDescs;
-    MeshDescs.Add(&MeshDesc);
-    UStaticMesh::FBuildMeshDescriptionsParams Params;
-    Params.bBuildSimpleCollision = false;
-    Params.bFastBuild = true;
-    Params.bCommitMeshDescription = true;
-    SM->BuildFromMeshDescriptions(MeshDescs, Params);
-    SM->NeverStream = true;
-    SM->InitResources();
-    for (FStaticMaterial& Mat : SM->GetStaticMaterials()) { Mat.UVChannelData.bInitialized = true; }
+    // Rendering buffers need neither editor topology commits nor an imported
+    // physics body: original WMO collision is a separate procedural component.
+    FWowRuntimeStaticMesh::Initialize(SM,Prepared?MoveTemp(Prepared->RenderData):PrepareWmoGeometry(GroupData,Lighting),SectionMaterials);
 
     if(Cache) Cache->CacheMesh(CacheKey,SM);
     return SM;
