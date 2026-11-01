@@ -65,3 +65,24 @@ Median game-thread cost is 0.48–0.57 ms and GPU cost 1.56–1.97 ms in these
 offline scenes. The same route's baseline was 0.47–0.52 and 1.58–2.01 ms.
 This first cycle marks WMO lighting pending a published clean-build recheck.
 M2 emitters and the shadow-flicker diagnosis remain separate open items.
+
+## Published WMO verification
+
+Published implementation `9322573d9abbd8b0f31464fbc26d0f2eb6945f26` was rebuilt
+without local changes and installed. The full regression has 172 successful
+checks and the same four existing warnings (WMO rooms/minimap, optional
+equipment DBC, HUD scroll content and ADT area IDs). The repeated route
+`14-wmo-published` produced 21 more nonempty PNGs, all individually inspected.
+The first and published acceptance cycles therefore cover 42 inspected frames.
+
+`logs/wowunreal-lighting/14-wmo-published/install-verification.json` verifies
+903 source files and 1,469 tracked runtime inputs against the stage, all 47
+packaged files against the installation, and three identical executable hashes:
+`84471C7712B6C591C8979016124589DA1040450A9697B705966537267809CFA5`.
+There are no extra staged sources or running UE processes. Verification used
+no network login, database access, server operation or user character.
+
+The shadow audit also found that `SetupLoginScene` spawns an unmanaged fixed
+directional light in addition to the sky manager. Its effect and the sky's
+10 Hz rotation updates require the next shadow-specific reproduction; the
+offline WMO route uses the production sky manager without that login fill.
