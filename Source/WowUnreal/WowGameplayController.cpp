@@ -1168,6 +1168,7 @@ void AWowGameplayController::Tick(float DeltaTime)
 	}
 
 	// Update character animations
+	UpdateSpellAnimations();
 	UpdatePlayerAnimations();
 	UpdateEntityAnimations();
 	UpdateEntityGrounding();
@@ -1216,6 +1217,7 @@ void AWowGameplayController::Tick(float DeltaTime)
 void AWowGameplayController::PrepareCharacterSelect()
 {
     bIsAutoAttacking=false; AutoAttackTargetGuid=0; TargetGuid=0; bIsCasting=false;
+    if(auto* PawnCharacter=Cast<AWowPlayerCharacter>(GetPawn())) if(PawnCharacter->AnimationController) PawnCharacter->AnimationController->StopSpellAnimation(true);
     for(auto& Pair:SpawnedEntityActors) if(IsValid(Pair.Value)) Pair.Value->Destroy();
     SpawnedEntityActors.Reset(); EntityNameplates.Reset(); DeadEntityGuids.Reset();
     NpcGroundOffsets.Reset(); NpcReferenceFeet.Reset(); LocalPlayerAppearance.Reset();
@@ -2353,19 +2355,6 @@ void AWowGameplayController::OnSpellStart(uint64 CasterGuid, uint32 SpellId, uin
 			CastBarWidget->StartCast(SpellName, CastDuration);
 		}
 
-		// Play casting animation for local player if cast time > 0
-		if (CastTime > 0)
-		{
-			if (AWowPlayerCharacter* PlayerChar = Cast<AWowPlayerCharacter>(GetPawn()))
-			{
-				if (UWowAnimationController* AnimController = PlayerChar->AnimationController)
-				{
-					AnimController->PlaySpellAnimation(SpellId);
-					UE_LOG(LogWowGameplay, Log, TEXT("Playing spell cast animation for local player"));
-				}
-			}
-		}
-
 		// Also log to combat log
 		FString Message = FString::Printf(TEXT("You cast %s"), *SpellName);
 		AddCombatMessage(Message, FLinearColor::Yellow);
@@ -2382,22 +2371,6 @@ void AWowGameplayController::OnSpellStart(uint64 CasterGuid, uint32 SpellId, uin
 
 	if (CasterGuid != LocalGuid)
 	{
-		// Other entity casting - play their cast animation if cast time > 0
-		if (CastTime > 0)
-		{
-			if (TObjectPtr<AActor>* FoundActor = SpawnedEntityActors.Find(CasterGuid))
-			{
-				if (AActor* CasterActor = FoundActor->Get())
-				{
-					if (UWowAnimationController* AnimController = FWowCharacterBuilder::GetAnimationController(CasterActor))
-					{
-						AnimController->PlaySpellAnimation(SpellId);
-						UE_LOG(LogWowGameplay, Log, TEXT("Playing spell cast animation for entity %llu"), CasterGuid);
-					}
-				}
-			}
-		}
-
 		// Other entity casting
 		UE_LOG(LogWowGameplay, Log, TEXT("Entity %llu started casting spell %u"), CasterGuid, SpellId);
 
@@ -2409,6 +2382,7 @@ void AWowGameplayController::OnSpellStart(uint64 CasterGuid, uint32 SpellId, uin
 		// Spawn hand glow effects for other entities
 		SpawnCastGlowEffects(CasterGuid, SpellId);
 	}
+	if(CastTime>0) SynchronizeSpellAnimation(CasterGuid);
 }
 
 void AWowGameplayController::OnSpellGo(const FWowSpellLaunch& Launch)
@@ -2444,7 +2418,7 @@ void AWowGameplayController::OnSpellGo(const FWowSpellLaunch& Launch)
 		{
 			if (UWowAnimationController* AnimController = PlayerChar->AnimationController)
 			{
-				if(!AnimController->PlaySpellAnimation(SpellId,true)) AnimController->PlayAnimationById(EWowAnimId::Stand,true);
+				AnimController->ReleaseServerSpell(SpellId,Launch.Counter);
 			}
 		}
 
@@ -2464,7 +2438,7 @@ void AWowGameplayController::OnSpellGo(const FWowSpellLaunch& Launch)
 			{
 				if (UWowAnimationController* AnimController = FWowCharacterBuilder::GetAnimationController(CasterActor))
 				{
-					if(!AnimController->PlaySpellAnimation(SpellId,true)) AnimController->PlayAnimationById(EWowAnimId::Stand,true);
+					AnimController->ReleaseServerSpell(SpellId,Launch.Counter);
 				}
 			}
 		}
@@ -2664,20 +2638,8 @@ void AWowGameplayController::UpdatePlayerAnimations()
 					if (Runtime->PlayM2Animation(CaptureAnimation, true)) return;
 				}
 			}
-			// Don't override casting animations with movement animations
-			// The casting animation will be explicitly set/unset in spell handlers
-			if (!bIsCasting)
-			{
-				// Get local player entity data to check stand state
-				const uint64 LocalGuid = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
-				const FWowEntity* LocalEntity = ConnectionManager->PacketHandler.EntityManager.Find(LocalGuid);
-
-				// For now, let's skip stand state checking for the local player
-				// since the core issue seems to be that AnimationID 0 is not the correct Stand animation
-				// in the character's M2 file. We'll handle this differently.
-
-				AnimController->UpdateLocalPlayerState(PlayerChar, PlayerChar->bIsWalking);
-			}
+			// Spell torso tracks are independent of locomotion and its play rate.
+			AnimController->UpdateLocalPlayerState(PlayerChar, PlayerChar->bIsWalking);
 		}
 	}
 }
@@ -2753,18 +2715,6 @@ void AWowGameplayController::UpdateEntityAnimations()
 					AnimMovement.MoveFlags |= WowMovementFlags::WALK_MODE;
 				else AnimMovement.MoveFlags &= ~WowMovementFlags::WALK_MODE;
 			}
-		}
-
-		// A ready pose is owned by the server cast, including delayed deadlines.
-		if(const auto* Cast=ConnectionManager->PacketHandler.Casts.Find(Guid))
-		{
-			if(!Cast->Channel && Cast->Ends>FPlatformTime::Seconds()) continue;
-		}
-		// Don't override explicit cast/attack animations with movement updates
-		EWowAnimState CurrentAnimState = AnimController->GetCurrentState();
-		if (CurrentAnimState == EWowAnimState::Casting || CurrentAnimState == EWowAnimState::Channeling)
-		{
-			continue;
 		}
 
 		// Check for stand state-based animations (sit, kneel, sleep) that override movement
@@ -4009,7 +3959,12 @@ void AWowGameplayController::OnCreatureNameReceived(uint32 Entry, const FString&
 void AWowGameplayController::OnSpellFailure(uint64 CasterGuid, uint32 SpellId, uint8 FailureReason)
 {
 	if (!ConnectionManager) return;
-	if(const auto* Failure=ConnectionManager->PacketHandler.CastFailures.Find(CasterGuid)) StopAuthoredCastEffects(CasterGuid,SpellId,Failure->Counter);
+	const auto* Failure=ConnectionManager->PacketHandler.CastFailures.Find(CasterGuid);
+	if(Failure) StopAuthoredCastEffects(CasterGuid,SpellId,Failure->Counter);
+	if(const auto* Active=ConnectionManager->PacketHandler.Casts.Find(CasterGuid))
+	{
+		if(Active->Spell!=SpellId || (Failure && Active->Counter!=Failure->Counter)) return;
+	}
 
 	const uint64 LocalGuid = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
 
@@ -4034,7 +3989,7 @@ void AWowGameplayController::OnSpellFailure(uint64 CasterGuid, uint32 SpellId, u
 		{
 			if (UWowAnimationController* AnimController = PlayerChar->AnimationController)
 			{
-				AnimController->PlayAnimationById(EWowAnimId::Stand, true);
+				AnimController->StopSpellAnimation();
 				UE_LOG(LogWowGameplay, Log, TEXT("Returning local player to idle animation after spell failure"));
 			}
 		}
@@ -4055,7 +4010,7 @@ void AWowGameplayController::OnSpellFailure(uint64 CasterGuid, uint32 SpellId, u
 			{
 				if (UWowAnimationController* AnimController = FWowCharacterBuilder::GetAnimationController(CasterActor))
 				{
-					AnimController->PlayAnimationById(EWowAnimId::Stand, true);
+					AnimController->StopSpellAnimation();
 					UE_LOG(LogWowGameplay, Log, TEXT("Returning entity %llu to idle animation after spell failure"), CasterGuid);
 				}
 			}

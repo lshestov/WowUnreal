@@ -119,6 +119,13 @@ enum class EWowAnimState : uint8
     Dead            // Death state
 };
 
+enum class EWowSpellPosePhase : uint8 { Precast, Release, Channel };
+struct FWowSpellAnimationPlan
+{
+    int32 Intro=INDEX_NONE, Animation=INDEX_NONE;
+    bool Loop=false;
+};
+
 /**
  * WoW Movement flags for animation state detection.
  * These match the server movement flags from 3.3.5a.
@@ -187,7 +194,14 @@ public:
 
     /** Character pose from the spell's original precast/cast visual kit. */
     static int32 ResolveSpellAnimation(uint32 SpellId, bool bRelease);
+    static FWowSpellAnimationPlan ResolveSpellAnimationPlan(uint32 SpellId, EWowSpellPosePhase Phase);
     bool PlaySpellAnimation(uint32 SpellId, bool bRelease = false);
+    bool PlaySpellAnimationPhase(uint32 SpellId, EWowSpellPosePhase Phase, bool bRestart = true);
+    void MaintainServerSpell(uint32 SpellId, uint8 Counter, bool bChannel);
+    void UpdateServerSpell(uint32 SpellId, uint8 Counter, bool bChannel, double Ends, double Now);
+    void ReleaseServerSpell(uint32 SpellId, uint8 Counter);
+    void ClearServerSpell();
+    void StopSpellAnimation(bool bImmediate = false);
 
     /**
      * Play attack animation with fallback chain.
@@ -271,6 +285,10 @@ protected:
     bool bPlayingOneShot = false;
 
 private:
+    bool bServerSpellPose=false;
+    uint32 ServerSpellId=0;
+    uint8 ServerSpellCounter=0;
+    EWowSpellPosePhase ServerSpellPhase=EWowSpellPosePhase::Precast;
     /** Determine animation state from movement info */
     EWowAnimState DetermineAnimationState(const struct FWowMovementInfo& MovementInfo, bool bIsInCombat, bool bIsCasting) const;
 

@@ -166,6 +166,12 @@ void AWowModelViewerGameMode::RespawnCharacter()
         return;
     }
 
+    uint32 CaptureSpell=0;
+    if(FParse::Value(FCommandLine::Get(),TEXT("capturespell="),CaptureSpell) && CaptureSpell && !FDbcStore::Get().IsDeferredLoaded())
+    {
+        FTimerHandle Retry; GetWorldTimerManager().SetTimer(Retry,this,&AWowModelViewerGameMode::RespawnCharacter,.1f,false); return;
+    }
+
     DestroyCurrentModel();
 
     FMpqManager* Mpq = WorldMgr->GetMpqManager();
@@ -318,15 +324,30 @@ void AWowModelViewerGameMode::RespawnCharacter()
         if(FParse::Value(FCommandLine::Get(),TEXT("capturespell="),Spell) && Spell
             && FParse::Value(FCommandLine::Get(),TEXT("capturespellshot="),CapturePath))
         {
-            if(auto* Animation=FWowCharacterBuilder::GetAnimationController(CurrentModelActor)) Animation->PlaySpellAnimation(Spell);
+            const bool Channel=FParse::Param(FCommandLine::Get(),TEXT("capturespellchannel"));
+            if(auto* Animation=FWowCharacterBuilder::GetAnimationController(CurrentModelActor))
+            {
+                if(FParse::Param(FCommandLine::Get(),TEXT("capturespellmove")))
+                {
+                    Animation->PlayAnimationById(EWowAnimId::Run,true);
+                    if(auto* Runtime=Animation->GetRuntimeInstance()) Runtime->SetM2MovementSpeed(7,1);
+                }
+                Animation->PlaySpellAnimationPhase(Spell,Channel?EWowSpellPosePhase::Channel:EWowSpellPosePhase::Precast);
+            }
             const TWeakObjectPtr<AActor> Model=CurrentModelActor;
             const bool Release=FParse::Param(FCommandLine::Get(),TEXT("capturespellrelease"));
+            const bool Cancel=FParse::Param(FCommandLine::Get(),TEXT("capturespellcancel"));
+            float Delay=2.f,After=.35f;
+            FParse::Value(FCommandLine::Get(),TEXT("capturespelldelay="),Delay);
+            FParse::Value(FCommandLine::Get(),TEXT("capturespellafter="),After);
+            Delay=FMath::Clamp(Delay,.01f,8.f); After=FMath::Clamp(After,.01f,4.f);
             FTimerHandle PhaseTimer;
-            GetWorldTimerManager().SetTimer(PhaseTimer,[Model,Spell,Release,CapturePath]()
+            GetWorldTimerManager().SetTimer(PhaseTimer,[Model,Spell,Release,Cancel,CapturePath,After]()
             {
                 if(!Model.IsValid()) return;
                 auto* Animation=FWowCharacterBuilder::GetAnimationController(Model.Get());
                 if(!Animation || (Release && !Animation->PlaySpellAnimation(Spell,true))) return;
+                if(Cancel) Animation->StopSpellAnimation();
                 FTimerHandle ShotTimer;
                 Model->GetWorld()->GetTimerManager().SetTimer(ShotTimer,[Model,Spell,Release,CapturePath]()
                 {
@@ -334,10 +355,12 @@ void AWowModelViewerGameMode::RespawnCharacter()
                     auto* Animation=FWowCharacterBuilder::GetAnimationController(Model.Get());
                     auto* Runtime=Animation?Animation->GetRuntimeInstance():nullptr;
                     if(!Runtime) return;
-                    UE_LOG(LogModelViewer,Display,TEXT("SpellPoseCapture spell=%u release=%d anim=%d time=%.3f oneShot=%d"),Spell,Release,Runtime->GetM2AnimationId(),Runtime->GetM2Time(),Animation->IsPlayingOneShot());
+                    UE_LOG(LogModelViewer,Display,TEXT("SpellPoseCapture spell=%u release=%d anim=%d time=%.3f oneShot=%d base=%d baseTime=%.3f intro=%d loop=%d torsoBones=%d active=%d baseLock=%d"),
+                        Spell,Release,Runtime->GetM2SpellAnimationId(),Runtime->GetM2SpellTime(),Runtime->HasM2SpellAnimation() && !Runtime->IsM2SpellLooping() && !Runtime->IsM2SpellIntro(),
+                        Runtime->GetM2AnimationId(),Runtime->GetM2Time(),Runtime->IsM2SpellIntro(),Runtime->IsM2SpellLooping(),Runtime->GetSpellTorsoBoneCount(),Runtime->HasM2SpellAnimation(),Animation->IsPlayingOneShot());
                     FScreenshotRequest::RequestScreenshot(CapturePath,false,false);
-                },.35f,false);
-            },2.f,false);
+                },After,false);
+            },Delay,false);
         }
     }
     else

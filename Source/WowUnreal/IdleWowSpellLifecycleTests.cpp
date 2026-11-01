@@ -121,16 +121,45 @@ bool FSpellCharacterAnimations::RunTest(const FString&)
     if(TestNotNull(TEXT("Real HumanMale MPQ model has a runtime animation controller"),Runtime))
     {
         TestTrue(TEXT("Holy Light ready pose starts"),Animation->PlaySpellAnimation(635));
-        TestEqual(TEXT("Human model samples animation 52 during the cast"),Runtime->GetM2AnimationId(),52);
-        const float Duration=Runtime->GetM2Duration(); Runtime->NativeUpdateAnimation(Duration+.25f);
-        TestTrue(TEXT("Ready gesture loops without a one-shot attack lock"),!Animation->IsPlayingOneShot() && Runtime->GetM2Time()<Duration);
+        TestEqual(TEXT("Human model samples animation 52 during the cast"),Runtime->GetM2SpellAnimationId(),52);
+        const float Duration=Runtime->GetM2SpellDuration(); Runtime->NativeUpdateAnimation(Duration+.25f);
+        TestTrue(TEXT("Ready gesture loops independently of locomotion"),!Animation->IsPlayingOneShot() && Runtime->GetM2SpellTime()<Duration && Runtime->GetM2AnimationId()==0);
         TestTrue(TEXT("Holy Light release starts"),Animation->PlaySpellAnimation(635,true));
-        TestEqual(TEXT("Release switches the actual model to animation 54"),Runtime->GetM2AnimationId(),54);
-        TestTrue(TEXT("Release locks normal movement only for one clip"),Animation->IsPlayingOneShot());
-        Runtime->NativeUpdateAnimation(Runtime->GetM2Duration()+.25f);
-        TestTrue(TEXT("Release clamps instead of repeating through the cast"),FMath::IsNearlyEqual(Runtime->GetM2Time(),Runtime->GetM2Duration(),.001f));
-        Animation->PlayAnimationById(EWowAnimId::Stand,true);
-        TestTrue(TEXT("Interruption can immediately return to idle"),Runtime->GetM2AnimationId()==0 && !Animation->IsPlayingOneShot());
+        TestEqual(TEXT("Release switches the spell layer to animation 54"),Runtime->GetM2SpellAnimationId(),54);
+        TestFalse(TEXT("Spell release does not lock the locomotion layer"),Animation->IsPlayingOneShot());
+        Runtime->NativeUpdateAnimation(Runtime->GetM2SpellDuration()+.25f);
+        TestFalse(TEXT("One-shot release drains instead of repeating"),Runtime->HasM2SpellAnimation());
+        Animation->PlaySpellAnimation(635); Animation->StopSpellAnimation(true);
+        TestTrue(TEXT("Interruption can immediately clear the spell layer"),Runtime->GetM2AnimationId()==0 && !Runtime->HasM2SpellAnimation());
+
+        Animation->UpdateServerSpell(10,37,true,105,100); Runtime->NativeUpdateAnimation(.3f);
+        TestEqual(TEXT("Blizzard channel uses its own animation 125"),Runtime->GetM2SpellAnimationId(),125);
+        const float ChannelTime=Runtime->GetM2SpellTime();
+        Animation->UpdateServerSpell(10,37,true,109,106);
+        TestEqual(TEXT("Channel extension beyond the original deadline keeps the same playback clock"),Runtime->GetM2SpellTime(),ChannelTime);
+        Animation->ReleaseServerSpell(133,36);
+        TestEqual(TEXT("Late completion cannot replace a newer channel"),Runtime->GetM2SpellAnimationId(),125);
+        Animation->ReleaseServerSpell(10,37);
+        TestEqual(TEXT("Completion arriving after channel start cannot downgrade its phase"),Runtime->GetM2SpellTime(),ChannelTime);
+        Animation->UpdateServerSpell(10,37,true,109,110); Runtime->NativeUpdateAnimation(.2f);
+        TestFalse(TEXT("Channel deadline expiration clears its pose"),Runtime->HasM2SpellAnimation());
+        Animation->MaintainServerSpell(5143,38,true);
+        TestEqual(TEXT("Arcane Missiles selects the directed channel pose 124"),Runtime->GetM2SpellAnimationId(),124);
+        Animation->ClearServerSpell(); Runtime->NativeUpdateAnimation(.2f);
+        TestFalse(TEXT("Server removal/zero duration clears the channel layer"),Runtime->HasM2SpellAnimation());
+        const auto Intro=UWowAnimationController::ResolveSpellAnimationPlan(52440,EWowSpellPosePhase::Precast);
+        TestTrue(TEXT("Original Swarm precast kit contains a distinct intro and hold"),Intro.Intro==54 && Intro.Animation==125);
+        Animation->MaintainServerSpell(52440,40,false);
+        TestTrue(TEXT("Intro starts on the actual model"),Runtime->GetM2SpellAnimationId()==54 && Runtime->IsM2SpellIntro());
+        Runtime->NativeUpdateAnimation(Runtime->GetM2SpellDuration()+.2f);
+        TestTrue(TEXT("Intro transitions once into the authored looping pose"),Runtime->GetM2SpellAnimationId()==125 && Runtime->IsM2SpellLooping() && !Runtime->IsM2SpellIntro());
+        const float HoldTime=Runtime->GetM2SpellTime(); Animation->MaintainServerSpell(52440,40,false);
+        TestEqual(TEXT("Refresh does not replay the intro"),Runtime->GetM2SpellTime(),HoldTime);
+        Animation->MaintainServerSpell(52440,41,false); Runtime->NativeUpdateAnimation(.1f);
+        Animation->ReleaseServerSpell(52440,40);
+        TestTrue(TEXT("A new counter restarts the intro and rejects the previous completion"),Runtime->GetM2SpellAnimationId()==54 && Runtime->IsM2SpellIntro() && FMath::IsNearlyEqual(Runtime->GetM2SpellTime(),.1f));
+        Animation->StopSpellAnimation(); Runtime->NativeUpdateAnimation(2.f);
+        TestFalse(TEXT("Cancellation discards the queued hold"),Runtime->HasM2SpellAnimation());
     }
     World->DestroyWorld(false); GEngine->DestroyWorldContext(World);
     return true;

@@ -24,6 +24,7 @@ void UWowAnimationController::InitializeRuntime(USkeletalMeshComponent* InMeshCo
     CurrentAnimation = nullptr;
     CurrentState = EWowAnimState::Idle;
     bPlayingOneShot = false;
+    bServerSpellPose=false;
     if (!MeshComponent || !RuntimeModel || !RuntimeModel->HasAnimationData()) return;
     MeshComponent->SetAnimInstanceClass(UWowM2AnimInstance::StaticClass());
     RuntimeInstance = Cast<UWowM2AnimInstance>(MeshComponent->GetAnimInstance());
@@ -478,18 +479,75 @@ void UWowAnimationController::SetAnimationIdMap(const TMap<int32, int32>& InMap)
 
 int32 UWowAnimationController::ResolveSpellAnimation(uint32 SpellId, bool bRelease)
 {
+    return ResolveSpellAnimationPlan(SpellId,bRelease?EWowSpellPosePhase::Release:EWowSpellPosePhase::Precast).Animation;
+}
+
+FWowSpellAnimationPlan UWowAnimationController::ResolveSpellAnimationPlan(uint32 SpellId,EWowSpellPosePhase Phase)
+{
     const auto& Dbc=FDbcStore::Get();
     const auto* Spell=Dbc.Spells().GetById(SpellId);
     const auto* Visual=Spell?Dbc.SpellVisuals().GetById(Spell->SpellVisual[0]):nullptr;
-    const auto* Kit=Visual?Dbc.SpellVisualKits().GetById(bRelease?Visual->CastKit:Visual->PrecastKit):nullptr;
-    return Kit && Kit->AnimID>0 && Kit->AnimID<=MAX_uint16?Kit->AnimID:INDEX_NONE;
+    const uint32 KitId=Visual?(Phase==EWowSpellPosePhase::Release?Visual->CastKit:Phase==EWowSpellPosePhase::Channel?Visual->ChannelKit:Visual->PrecastKit):0;
+    const auto* Kit=Dbc.SpellVisualKits().GetById(KitId);
+    FWowSpellAnimationPlan Plan; Plan.Loop=Phase!=EWowSpellPosePhase::Release;
+    if(Kit)
+    {
+        if(Kit->AnimID>0 && Kit->AnimID<=MAX_uint16) Plan.Animation=Kit->AnimID;
+        // The original channel selector uses AnimID directly, without a cast intro.
+        if(Phase!=EWowSpellPosePhase::Channel && Kit->StartAnimID>0 && Kit->StartAnimID<=MAX_uint16) Plan.Intro=Kit->StartAnimID;
+    }
+    return Plan;
 }
 
 bool UWowAnimationController::PlaySpellAnimation(uint32 SpellId, bool bRelease)
 {
-    const int32 Id=ResolveSpellAnimation(SpellId,bRelease);
-    // Ready poses loop for the server cast. The release gesture plays once.
-    return Id!=INDEX_NONE && PlayAnimationById(static_cast<EWowAnimId>(Id),!bRelease);
+    return PlaySpellAnimationPhase(SpellId,bRelease?EWowSpellPosePhase::Release:EWowSpellPosePhase::Precast);
+}
+
+bool UWowAnimationController::PlaySpellAnimationPhase(uint32 SpellId,EWowSpellPosePhase Phase,bool bRestart)
+{
+    const auto Plan=ResolveSpellAnimationPlan(SpellId,Phase);
+    if(RuntimeInstance)
+    {
+        if(RuntimeInstance->GetM2AnimationId()==1 || RuntimeInstance->GetM2AnimationId()==6) {StopSpellAnimation(true); return false;}
+        if(bPlayingOneShot) SetAnimationState(CurrentState,true);
+        return RuntimeInstance->PlayM2SpellAnimation(Plan.Intro,Plan.Animation,Plan.Loop,bRestart);
+    }
+    return Plan.Animation!=INDEX_NONE && PlayAnimationById(static_cast<EWowAnimId>(Plan.Animation),Plan.Loop);
+}
+
+void UWowAnimationController::MaintainServerSpell(uint32 SpellId,uint8 Counter,bool bChannel)
+{
+    const auto Phase=bChannel?EWowSpellPosePhase::Channel:EWowSpellPosePhase::Precast;
+    if(bServerSpellPose && ServerSpellId==SpellId && ServerSpellCounter==Counter && ServerSpellPhase==Phase) return;
+    bServerSpellPose=true; ServerSpellId=SpellId; ServerSpellCounter=Counter; ServerSpellPhase=Phase;
+    if(!PlaySpellAnimationPhase(SpellId,Phase,!bChannel) && RuntimeInstance) RuntimeInstance->StopM2SpellAnimation();
+}
+
+void UWowAnimationController::UpdateServerSpell(uint32 SpellId,uint8 Counter,bool bChannel,double Ends,double Now)
+{
+    if(Ends>Now) MaintainServerSpell(SpellId,Counter,bChannel);
+    else ClearServerSpell();
+}
+
+void UWowAnimationController::ReleaseServerSpell(uint32 SpellId,uint8 Counter)
+{
+    if(bServerSpellPose && (ServerSpellId!=SpellId || ServerSpellCounter!=Counter)) return;
+    if(bServerSpellPose && ServerSpellPhase==EWowSpellPosePhase::Channel) return;
+    bServerSpellPose=false;
+    if(!PlaySpellAnimationPhase(SpellId,EWowSpellPosePhase::Release) && RuntimeInstance) RuntimeInstance->StopM2SpellAnimation();
+}
+
+void UWowAnimationController::ClearServerSpell()
+{
+    if(bServerSpellPose) StopSpellAnimation();
+}
+
+void UWowAnimationController::StopSpellAnimation(bool bImmediate)
+{
+    bServerSpellPose=false;
+    if(RuntimeInstance) RuntimeInstance->StopM2SpellAnimation(bImmediate);
+    else PlayAnimationById(EWowAnimId::Stand,true);
 }
 
 bool UWowAnimationController::PlayAnimationById(EWowAnimId AnimId, bool bLooping)
@@ -498,6 +556,7 @@ bool UWowAnimationController::PlayAnimationById(EWowAnimId AnimId, bool bLooping
 
     if (RuntimeInstance)
     {
+        if(AnimId==EWowAnimId::Death || AnimId==EWowAnimId::Dead) StopSpellAnimation(true);
         bool bStarted = RuntimeInstance->PlayM2Animation(static_cast<int32>(AnimId), bLooping);
         if (!bStarted)
         {

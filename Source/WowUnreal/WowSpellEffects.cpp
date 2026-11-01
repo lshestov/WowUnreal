@@ -5,6 +5,7 @@
 #include "WowM2EmitterComponent.h"
 #include "WowDoodadManager.h"
 #include "WowAnimationController.h"
+#include "WowM2AnimInstance.h"
 #include "WowCharacterBuilder.h"
 #include "WowSkeletalMeshBuilder.h"
 #include "WowEquipmentManager.h"
@@ -150,6 +151,27 @@ void AWowGameplayController::SpawnSpellMissile(const FWowSpellLaunch& Launch)
     }
     SpawnSpellKit(Caster,V->CasterImpactKit,0,TEXT("caster-impact"),Launch.SpellId,Launch.CasterGuid,Launch.Counter);
 }
+void AWowGameplayController::SynchronizeSpellAnimation(uint64 Guid)
+{
+    if(!ConnectionManager) return;
+    auto* Animation=SpellAnimation(SpellActor(Guid)); if(!Animation) return;
+    const auto* Runtime=Animation->GetRuntimeInstance();
+    if(DeadEntityGuids.Contains(Guid) || (Runtime && (Runtime->GetM2AnimationId()==1 || Runtime->GetM2AnimationId()==6)))
+    {
+        Animation->StopSpellAnimation(true); return;
+    }
+    const auto* Cast=ConnectionManager->PacketHandler.Casts.Find(Guid);
+    if(Cast) Animation->UpdateServerSpell(Cast->Spell,Cast->Counter,Cast->Channel,Cast->Ends,FPlatformTime::Seconds());
+    else Animation->ClearServerSpell();
+}
+
+void AWowGameplayController::UpdateSpellAnimations()
+{
+    if(!ConnectionManager) return;
+    SynchronizeSpellAnimation(ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid);
+    for(const auto& Pair:SpawnedEntityActors) SynchronizeSpellAnimation(Pair.Key);
+}
+
 void AWowGameplayController::UpdateSpellEffects()
 {
     if(!ConnectionManager) return;

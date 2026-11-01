@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {"name":"heal-ready-moving","spell":635,"moving":true,"animation":52,"base":5,"intro":0,"loop":1},
+    {"name":"blizzard-channel","spell":10,"channel":true,"animation":125,"base":0,"intro":0,"loop":1},
+    {"name":"arcane-missiles-channel","spell":5143,"channel":true,"animation":124,"base":0,"intro":0,"loop":1},
+    {"name":"swarm-intro","spell":52440,"delay":0.01,"after":0.2,"animation":54,"base":0,"intro":1,"loop":0},
+    {"name":"swarm-hold","spell":52440,"animation":125,"base":0,"intro":0,"loop":1},
+    {"name":"channel-cancel","spell":5143,"channel":true,"cancel":true,"animation":-1,"base":0,"intro":0,"loop":0},
+    {"name":"renew-release-moving","spell":139,"moving":true,"release":true,"animation":54,"base":5,"intro":0,"loop":0},
+    {"name":"intro-cancel","spell":52440,"cancel":true,"delay":0.01,"animation":-1,"base":0,"intro":0,"loop":0}
+  ]
+}

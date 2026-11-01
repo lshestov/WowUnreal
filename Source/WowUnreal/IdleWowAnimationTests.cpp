@@ -189,4 +189,79 @@ bool FIdleWowRuntimeAnimations::RunTest(const FString& Parameters)
     }));
     return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIdleWowSpellLayers,"WowUnreal.Animation.SpellLayers",
+    EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FIdleWowSpellLayers::RunTest(const FString&)
+{
+    UWorld* World=UWorld::CreateWorld(EWorldType::Game,false);
+    GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+    auto Data=MakeShared<FM2Data>(); Data->Bones.SetNum(5);
+    // Torso and feet are interleaved in M2 order; the skeleton is remapped by UE.
+    Data->Bones[0].ParentBone=3; Data->Bones[0].KeyBoneId=4;
+    Data->Bones[1].ParentBone=0;
+    Data->Bones[2].ParentBone=3;
+    Data->Bones[3].ParentBone=-1;
+    Data->Bones[4].ParentBone=0; Data->Bones[4].KeyBoneId=6;
+    Data->Vertices.SetNum(3); Data->Vertices[1].Position=FVector(1,0,0); Data->Vertices[2].Position=FVector(0,0,1);
+    for(auto& V:Data->Vertices) {V.BoneWeights[0]=255; V.Normal=FVector(0,1,0);}
+    Data->Indices={0,1,2}; Data->BoundingBox=FBox(FVector::ZeroVector,FVector(1,1,1));
+    for(int32 Id:{0,1,5,52,54,125})
+    {
+        FM2AnimationData Clip; Clip.AnimationId=Id; Clip.Duration=Id==54?300:1000; Clip.MoveSpeed=Id==5?7:0;
+        Clip.BoneTracks.SetNum(5);
+        auto& Torso=Clip.BoneTracks[0]; Torso.RotTimestamps={0}; Torso.RotValues={FQuat(FVector::UpVector,Id==52?.8f:Id==125?1.2f:Id==54?.6f:.1f)};
+        auto& Foot=Clip.BoneTracks[2]; Foot.TransTimestamps={0,1000};
+        Foot.TransValues={FVector::ZeroVector,FVector(Id==5?2:20,0,0)};
+        Data->AnimationTracks.Add(MoveTemp(Clip));
+    }
+    auto* Skeleton=FWowSkeletalMeshBuilder::CreateSkeleton(*Data,TEXT("SpellLayerTest"));
+    auto* Mesh=FWowSkeletalMeshBuilder::CreateSkeletalMesh(*Data,Skeleton,TEXT("SpellLayerTest"),nullptr,nullptr,nullptr,nullptr,true);
+    auto* Player=World->SpawnActor<AWowPlayerCharacter>(); Player->GetMesh()->SetSkeletalMesh(Mesh);
+    auto* Controller=NewObject<UWowAnimationController>(Player); Controller->InitializeRuntime(Player->GetMesh(),Data);
+    auto* Runtime=Controller->GetRuntimeInstance();
+    if(TestNotNull(TEXT("Runtime spell-layer fixture initializes"),Runtime))
+    {
+        const int32 Foot=Mesh->GetRefSkeleton().FindBoneIndex(FWowSkeletalMeshBuilder::GetBoneName(2));
+        const int32 Torso=Mesh->GetRefSkeleton().FindBoneIndex(FWowSkeletalMeshBuilder::GetBoneName(0));
+        TestEqual(TEXT("Only spine descendants belong to the torso mask after bone remapping"),Runtime->GetSpellTorsoBoneCount(),3);
+        Runtime->PlayM2Animation(5,true); Runtime->SetM2MovementSpeed(14,1); Runtime->NativeUpdateAnimation(.2f);
+        TArray<FTransform> Before,Started,Mixed,Base;
+        Runtime->SampleLocalPose(Before); Runtime->PlayM2SpellAnimation(INDEX_NONE,52,true); Runtime->SampleLocalPose(Started);
+        TestTrue(TEXT("Spell transition begins at the previous composed pose"),Before[Torso].Equals(Started[Torso],.001));
+        Runtime->NativeUpdateAnimation(.2f); Runtime->SampleLocalPose(Mixed);
+        TestTrue(TEXT("Spell clock is independent of the doubled locomotion rate"),FMath::IsNearlyEqual(Runtime->GetM2SpellTime(),.2f,.001f) && FMath::IsNearlyEqual(Runtime->GetM2Time(),.8f,.001f));
+        Runtime->StopM2SpellAnimation(true); Runtime->SampleLocalPose(Base);
+        TestTrue(TEXT("Moving feet keep the locomotion clip, not spell leg keys"),Mixed[Foot].Equals(Base[Foot],.001));
+        TestFalse(TEXT("Torso receives the spell pose while feet keep moving"),Mixed[Torso].Equals(Base[Torso],.001));
+        Runtime->PlayM2SpellAnimation(INDEX_NONE,52,true); Runtime->NativeUpdateAnimation(.2f); Runtime->SampleLocalPose(Before);
+        Runtime->PlayM2Animation(0,true); Runtime->SampleLocalPose(Started);
+        TestTrue(TEXT("Stopping movement blends into the stationary spell stance without a leg snap"),Before[Foot].Equals(Started[Foot],.001));
+        Runtime->NativeUpdateAnimation(.2f); Runtime->PlayM2Animation(5,true); Runtime->NativeUpdateAnimation(.2f);
+        Runtime->PlayM2SpellAnimation(54,125,true); Runtime->NativeUpdateAnimation(.5f);
+        TestTrue(TEXT("Large frame delta crosses the intro and retains elapsed hold time"),Runtime->GetM2SpellAnimationId()==125 && FMath::IsNearlyEqual(Runtime->GetM2SpellTime(),.2f,.001f));
+        Runtime->StopM2SpellAnimation(); Runtime->NativeUpdateAnimation(.2f);
+        TestFalse(TEXT("Stopping drains the layer without replacing locomotion"),Runtime->HasM2SpellAnimation());
+        TestEqual(TEXT("Run remains active after spell cleanup"),Runtime->GetM2AnimationId(),5);
+        Runtime->PlayM2SpellAnimation(65535,125,true);
+        TestEqual(TEXT("Missing intro falls back to an available hold"),Runtime->GetM2SpellAnimationId(),125);
+        Runtime->PlayM2SpellAnimation(54,65535,true); Runtime->NativeUpdateAnimation(.6f);
+        TestFalse(TEXT("Intro-only kit terminates rather than inventing a hold"),Runtime->HasM2SpellAnimation());
+        TestFalse(TEXT("Unavailable intro and hold are reported"),Runtime->PlayM2SpellAnimation(65535,65534,true));
+        Runtime->PlayM2SpellAnimation(54,125,true); Runtime->NativeUpdateAnimation(.1f);
+        Runtime->StopM2SpellAnimation(); Runtime->NativeUpdateAnimation(1.f);
+        TestFalse(TEXT("Cancelled intro never activates its queued hold later"),Runtime->HasM2SpellAnimation());
+        Runtime->PlayM2SpellAnimation(INDEX_NONE,54,false); Runtime->NativeUpdateAnimation(.2f);
+        TestTrue(TEXT("Release is active before the one-shot ends"),Runtime->GetM2SpellAnimationId()==54 && !Runtime->IsM2SpellLooping());
+        Runtime->NativeUpdateAnimation(.3f);
+        TestFalse(TEXT("Release fades away after one authored clip"),Runtime->HasM2SpellAnimation());
+        Runtime->PlayM2SpellAnimation(INDEX_NONE,52,true); Controller->PlayAnimationById(EWowAnimId::Death,false);
+        TestTrue(TEXT("Death immediately removes the spell pose and plays the death clip"),!Runtime->HasM2SpellAnimation() && Runtime->GetM2AnimationId()==1);
+        Data->Bones[0].KeyBoneId=-1; Data->Bones[4].KeyBoneId=-1;
+        Runtime->InitializeModel(Data); Runtime->PlayM2Animation(5,true); Runtime->NativeUpdateAnimation(.2f);
+        Runtime->PlayM2SpellAnimation(INDEX_NONE,52,true); Runtime->NativeUpdateAnimation(.2f); Runtime->SampleLocalPose(Mixed);
+        Runtime->StopM2SpellAnimation(true); Runtime->SampleLocalPose(Base);
+        TestTrue(TEXT("Models without torso/head keybones use a finite full-body fallback"),Runtime->GetSpellTorsoBoneCount()==0 && !Mixed[Foot].Equals(Base[Foot],.001));
+    }
+    World->DestroyWorld(false); GEngine->DestroyWorldContext(World); return true;
+}
 #endif
