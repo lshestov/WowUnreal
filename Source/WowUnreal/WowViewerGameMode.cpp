@@ -448,8 +448,6 @@ void AWowViewerGameMode::SetupLoginScene(UWorld* World)
             FVector::ZeroVector, FRotator::ZeroRotator, SkyParams);
     }
 
-    SpawnDirectionalLight(World);
-
     // Spawn WorldManager early for MPQ access (streaming is disabled by default,
     // will be enabled by LoginController when entering the world)
     AWowWorldManager* WorldMgr = SpawnWorldManager(World);

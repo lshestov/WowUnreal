@@ -23,6 +23,8 @@ bool FLightingSunCycle::RunTest(const FString&)
     auto* World=UWorld::CreateWorld(EWorldType::Game,false);
     GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
     auto* Sky=World->SpawnActor<AWowSkyManager>();
+    TestEqual(TEXT("Shadow direction is updated every frame"),Sky->PrimaryActorTick.TickInterval,0.f);
+    TestTrue(TEXT("Default clock advances one game minute per real minute"),FMath::IsNearlyEqual(Sky->TimeSpeed,1.f/60.f));
     Sky->DispatchBeginPlay();
     TArray<UDirectionalLightComponent*> Lights; Sky->GetComponents(Lights);
     TestEqual(TEXT("Sun and moon are separate lights"),Lights.Num(),2);
@@ -34,6 +36,13 @@ bool FLightingSunCycle::RunTest(const FString&)
     }
     Sky->TimeOfDay=0; Sky->TimeSpeed=0; Sky->Tick(.1f);
     for (auto* Light:Lights) if (Light->GetName()==TEXT("SunLight")) TestFalse(TEXT("Sun does not illuminate the world at midnight"),Light->IsVisible());
+    Sky->TimeOfDay=1200; Sky->TimeSpeed=1.f/60.f;
+    const double Before=Sky->TimeOfDay;
+    for(int32 I=0;I<600;++I) Sky->Tick(1.f/600.f);
+    TestTrue(TEXT("Realtime clock retains increments at high frame rates"),FMath::Abs(Sky->TimeOfDay-Before-1./60.)<1.e-7);
+    TestEqual(TEXT("Horizon has no below-ground direct light"),AWowSkyManager::HorizonWeight(0),0.f);
+    TestEqual(TEXT("Daylight retains full shadowed light"),AWowSkyManager::HorizonWeight(8),1.f);
+    TestTrue(TEXT("Old five-degree cutoff is now continuous"),FMath::Abs(AWowSkyManager::HorizonWeight(5.001f)-AWowSkyManager::HorizonWeight(4.999f))<.001f);
     World->DestroyWorld(false); GEngine->DestroyWorldContext(World);
     return true;
 }

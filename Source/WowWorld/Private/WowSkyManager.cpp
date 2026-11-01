@@ -92,7 +92,7 @@ void AWowSkyManager::UpdateInteriorUnits(float DeltaTime)
 AWowSkyManager::AWowSkyManager()
 {
 	PrimaryActorTick.bCanEverTick = true;
-	PrimaryActorTick.TickInterval = 0.1f; // update 10x/sec
+	PrimaryActorTick.TickInterval = 0; // Celestial shadow direction follows every frame.
 	SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("SkyRoot")));
 }
 
@@ -729,7 +729,6 @@ void AWowSkyManager::LoadLightZones(int32 MapId)
 void AWowSkyManager::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
-	UpdateInteriorUnits(DeltaTime);
 
 	if (TimeSpeed != 0.0f)
 	{
@@ -754,17 +753,25 @@ void AWowSkyManager::Tick(float DeltaTime)
 	}
 
 	UpdateSunPosition();
-	UpdateLightColors();
-	UpdateFog();
-	UpdateSkydome();
-	UpdateClouds();
 	UpdateCelestialDiscs();
+	EnvironmentElapsed+=DeltaTime;
+	if(EnvironmentElapsed>=.1f)
+	{
+		// DBC/room work stays bounded at 10 Hz; it must not quantize shadows.
+		UpdateInteriorUnits(EnvironmentElapsed); EnvironmentElapsed=0;
+		UpdateLightColors(); UpdateFog(); UpdateSkydome(); UpdateClouds();
+	}
 }
 
-FRotator AWowSkyManager::SunRotationForTime(float Minutes)
+FRotator AWowSkyManager::SunRotationForTime(double Minutes)
 {
-	const float Phase=(Minutes-360.f)*(2.f*PI/1440.f);
-	return FRotator(-90.f*FMath::Sin(Phase),Minutes/4.f+180.f,0);
+	const double Phase=(Minutes-360.)*(2.*PI/1440.);
+	return FRotator(-90.*FMath::Sin(Phase),Minutes/4.+180.,0);
+}
+
+float AWowSkyManager::HorizonWeight(float Altitude)
+{
+	return FMath::SmoothStep(0.f,8.f,Altitude);
 }
 
 void AWowSkyManager::UpdateSunPosition()
@@ -774,13 +781,18 @@ void AWowSkyManager::UpdateSunPosition()
 	const auto Rotation=SunRotationForTime(TimeOfDay);
 	SunLight->SetWorldRotation(Rotation);
 
-	bool bSunAboveHorizon = Rotation.Pitch < -5.0f;
-	SunLight->SetVisibility(bSunAboveHorizon);
+	// Fade energy before hiding a light. The previous -5-degree switch
+	// abruptly removed a still-bright sun and enabled a below-horizon moon.
+	const float SunWeight=HorizonWeight(-Rotation.Pitch);
+	SunLight->SetIntensity(GetSunIntensityForTime()*SunWeight);
+	SunLight->SetVisibility(SunWeight>0);
 
 	if (MoonLight)
 	{
 		MoonLight->SetWorldRotation(FRotator(-Rotation.Pitch,Rotation.Yaw+180.f,0));
-		MoonLight->SetVisibility(!bSunAboveHorizon);
+		const float MoonWeight=HorizonWeight(Rotation.Pitch);
+		MoonLight->SetIntensity(.5f*MoonWeight);
+		MoonLight->SetVisibility(MoonWeight>0);
 	}
 }
 
@@ -802,7 +814,6 @@ void AWowSkyManager::UpdateLightColors()
 		FLinearColor AmbientColor = BlendZoneColor(LP_GlobalAmbient, PlayerPos);
 
 		SunLight->SetLightColor(SunColor);
-		SunLight->SetIntensity(SunIntensity);
 
 		if (SkyLight)
 		{
@@ -814,7 +825,6 @@ void AWowSkyManager::UpdateLightColors()
 	else
 	{
 		SunLight->SetLightColor(GetSunColorFallback());
-		SunLight->SetIntensity(SunIntensity);
 
 		if (SkyLight)
 		{

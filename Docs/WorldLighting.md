@@ -122,3 +122,43 @@ red by 5.88/255. A 1.5x placement scales the campfire's 1.6667-yard radius to
 Typical subsystem time is about .012 ms, compared with the rejected initial
 2.05 ms full-queue scan. Run `Scripts/Verification/Test-M2LightCapture.ps1`
 against a capture directory to repeat the integration checks.
+
+Published M2 commit `78ce1f3eb0378b196493fa93ffc4224fd1a250cf` was rebuilt
+without local changes and installed. `15-m2-published-tests` repeats all seven
+checks and `15-m2-published` repeats all eight inspected captures; its rendered
+on/off, radius and ownership checks pass again (mean red increase 5.887/255).
+
+## WMO shadow timing and ownership
+
+The reproduction has both a frozen camera/clock and independently moving
+camera/clock cases. `15-shadow-before` recreates the login scene's extra fixed
+directional light: three directionals illuminate the world, including at night.
+`16-shadow-isolation-before` removes only that diagnostic light. With the old
+10 Hz sky tick and speed 1, 97.5–97.6% of sampled frames hold the previous
+direction, followed by steps up to .046–.054 degrees. The old -5-degree sun
+visibility cutoff also abruptly removes remaining direct illumination.
+
+The production login scene now relies on its sky manager alone. Solar rotation
+and horizon energy update every frame; DBC colours, fog and room sampling stay
+at 10 Hz. Sun/moon energy fades smoothly within eight degrees above each
+light's horizon, and neither lights surfaces from below the horizon. Default
+speed is now realtime (1/60 game minute per second), with a double clock so
+high frame rates cannot discard small increments. Cascades, contact shadows,
+biases and WMO shadow casting remain enabled.
+
+`16-shadow-acceptance` covers seven cases and 27 inspected, nonempty captures.
+At the same accelerated speed, the held fraction is zero. Realtime step p95
+is .000115 degrees by day and .000121 by night; UE component tolerance still
+batches these tiny rotations, so the verifier bounds their amplitude instead
+of requiring every microscopic transform to change. Screenshot readback
+pauses remain included in maxima and must not be interpreted as a normal
+frame's angular step. Motion blur is disabled only in the shadow diagnostic
+route to expose edges clearly. All cases retain two directionals and 590 WMO
+casters; `Test-ShadowCapture.ps1` checks the measured clocks and baseline.
+
+The full regression has 175 successful checks (171 clean and the same four
+existing warnings), no failures. `16-world-acceptance` repeats the nine-case,
+21-frame exterior/door/interior route with the M2 and shadow changes combined.
+Floor colours and doorway outdoor weight remain unchanged. Median game-thread
+cost is .49–.60 ms, GPU 1.55–1.97 ms in this offline scene. These measurements
+do not include networking or gameplay UI. Clean published recheck is pending.

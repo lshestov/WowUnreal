@@ -28,11 +28,11 @@ public:
 
 	/** Current time in minutes (0-1440, where 720 = noon) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Sky")
-	float TimeOfDay = 600.0f; // 10:00 AM
+	double TimeOfDay = 600.0; // 10:00 AM; preserve sub-frame realtime increments.
 
-	/** Speed: game minutes per real second. 0 = frozen. 1 = realtime. 60 = 24 min cycle */
+	/** Game minutes per real second: 0 frozen, 1/60 realtime, 1 a 24-minute cycle. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Sky")
-	float TimeSpeed = 1.0f;
+	float TimeSpeed = 1.0f/60.0f;
 
 	/** Enable fog */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Sky")
@@ -46,13 +46,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Sky")
 	int32 CurrentMapId = 0;
 
-	float GetTimeOfDay() const { return TimeOfDay; }
-	static FRotator SunRotationForTime(float Minutes);
+	double GetTimeOfDay() const { return TimeOfDay; }
+	static FRotator SunRotationForTime(double Minutes);
+	static float HorizonWeight(float Altitude);
 
 	/** Load light zones from Light.dbc for the given map */
 	void LoadLightZones(int32 MapId);
 
 private:
+	float EnvironmentElapsed=.1f;
 	TArray<TWeakObjectPtr<AActor>> LightingSubjects;
 	TMap<TWeakObjectPtr<AActor>,TWeakObjectPtr<UPointLightComponent>> UnitLights;
 	int32 LightingCursor=0;
