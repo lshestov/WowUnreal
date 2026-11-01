@@ -4,10 +4,18 @@
 #include "WowStreamingProfile.h"
 #include "Formats/AdtTypes.h"
 #include "StaticMeshAttributes.h"
+#include "WowRuntimeStaticMesh.h"
+#include "StaticMeshResources.h"
+#include "MeshDescription.h"
+
+FWowTerrainGeometry::~FWowTerrainGeometry()=default;
 
 FWowTerrainGeometry::FWowTerrainGeometry(const FAdtData& Data,int32 TX,int32 TY,bool Lod1)
 {
     FWowStreamingProfile Profile(Lod1?TEXT("lod1PrepareWorker"):TEXT("terrainPrepareWorker"));
+    // The temporary topology is also destroyed on this worker. Retaining it
+    // until upload would move its substantial destruction cost back to the GT.
+    FMeshDescription Mesh;
     TArray<int32> Sections;
     if(Lod1)
     {
@@ -59,4 +67,5 @@ FWowTerrainGeometry::FWowTerrainGeometry(const FAdtData& Data,int32 TX,int32 TY,
             Mesh.CreatePolygon(Groups[Sections[I]],Triangle);
         }
     }
+    RenderData=FWowRuntimeStaticMesh::Prepare(Mesh);
 }

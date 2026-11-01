@@ -20,6 +20,7 @@
 #include "UnrealClient.h"
 #include "RHI.h"
 #include "RHIStats.h"
+#include "RenderTimer.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWorldPerformance,Log,All);
 namespace
@@ -122,6 +123,7 @@ void AWowPerformanceTestGameMode::Tick(float DT)
     const double Game=FPlatformTime::ToMilliseconds(GGameThreadTime),Render=FPlatformTime::ToMilliseconds(GRenderThreadTime),Gpu=FPlatformTime::ToMilliseconds(RHIGetGPUFrameCycles());
     Samples.FindOrAdd(TEXT("wallFrameMs")).Add(WallMs); Samples.FindOrAdd(TEXT("gameThreadMs")).Add(Game);
     Samples.FindOrAdd(TEXT("renderThreadMs")).Add(Render); Samples.FindOrAdd(TEXT("gpuMs")).Add(Gpu); Samples.FindOrAdd(TEXT("drawCalls")).Add(GNumDrawCallsRHI[0]);
+    Samples.FindOrAdd(TEXT("presentMs")).Add(FPlatformTime::ToMilliseconds(GSwapBufferTime));
     Frames+=FString::Printf(TEXT("%s,%s,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%d,%d,%d,%d,%d\n"),*Name,DiagnosticFrames>0?TEXT("diagnostic"):TEXT("ordinary"),Now-PhaseStarted,WallMs,Game,Render,Gpu,GNumDrawCallsRHI[0],CachedWorldManager->GetPendingTileCount(),CachedWorldManager->GetPendingWmoGroupCount(),CachedWorldManager->GetPendingDoodadJobs(),CachedWorldManager->GetPendingLod1Count(),CachedWorldManager->GetPreparedTileCount());
     if(DiagnosticFrames>0) --DiagnosticFrames;
     const double Elapsed=Now-PhaseStarted,Duration=Number(Step,TEXT("duration"),8);

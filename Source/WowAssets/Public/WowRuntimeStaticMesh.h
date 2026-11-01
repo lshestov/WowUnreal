@@ -1,0 +1,14 @@
+#pragma once
+#include "CoreMinimal.h"
+struct FMeshDescription;
+class FStaticMeshRenderData;
+class UStaticMesh;
+class UMaterialInterface;
+
+/** CPU buffer preparation is worker-safe; UObject/RHI initialization stays on the game thread. */
+struct WOWASSETS_API FWowRuntimeStaticMesh
+{
+    static TUniquePtr<FStaticMeshRenderData> Prepare(const FMeshDescription& Description);
+    static TUniquePtr<FStaticMeshRenderData> PrepareSurface(const TArray<FVector>& Positions,const TArray<FVector>& Normals,const TArray<FVector2D>& UVs,const TArray<int32>& Indices);
+    static void Initialize(UStaticMesh* Mesh,TUniquePtr<FStaticMeshRenderData> Data,const TArray<UMaterialInterface*>& Materials);
+};

@@ -356,6 +356,7 @@ struct FWowGameplayProbe
             if(!bInvoked) {bInvoked=true; PreviousProfileTime=Now; return;}
             Profile.FindOrAdd(TEXT("frameMs")).Add((Now-PreviousProfileTime)*1000); PreviousProfileTime=Now;
             Profile.FindOrAdd(TEXT("drawCalls")).Add(GNumDrawCallsRHI[0]);
+            Profile.FindOrAdd(TEXT("presentMs")).Add(FPlatformTime::ToMilliseconds(GSwapBufferTime));
             Profile.FindOrAdd(TEXT("gameThreadMs")).Add(FPlatformTime::ToMilliseconds(GGameThreadTime));
             Profile.FindOrAdd(TEXT("renderThreadMs")).Add(FPlatformTime::ToMilliseconds(GRenderThreadTime));
             Profile.FindOrAdd(TEXT("gpuMs")).Add(FPlatformTime::ToMilliseconds(RHIGetGPUFrameCycles()));

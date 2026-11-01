@@ -3,6 +3,7 @@
 #include "WowTerrainMeshBuilder.h"
 #include "Formats/AdtTypes.h"
 #include "StaticMeshAttributes.h"
+#include "StaticMeshResources.h"
 #include "Async/Async.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -17,8 +18,8 @@ bool FIdleWowWorkerTerrain::RunTest(const FString&)
     }
     Data->Chunks[0].Holes=0x1021; Data->Chunks[255].Holes=0xffff;
     auto Future=Async(EAsyncExecution::ThreadPool,[Data](){return MakeShared<FWowTerrainGeometry>(*Data,32,48);});
-    auto Geometry=Future.Get(); FStaticMeshAttributes Attributes(Geometry->Mesh);
-    const auto Positions=Attributes.GetVertexPositions(); const auto UVs=Attributes.GetVertexInstanceUVs();
+    auto Geometry=Future.Get(); const auto& Render=Geometry->RenderData->LODResources[0];
+    const auto& Positions=Render.VertexBuffers.PositionVertexBuffer; const auto& UVs=Render.VertexBuffers.StaticMeshVertexBuffer;
     TestEqual(TEXT("All visible chunks survive worker preparation"),Geometry->Chunks,255);
     int32 Vertex=0,Triangles=0;
     for(int32 I=0;I<256;++I)
@@ -27,11 +28,14 @@ bool FIdleWowWorkerTerrain::RunTest(const FString&)
         Triangles+=Original.Indices.Num()/3;
         for(int32 V=0;V<Original.Vertices.Num();++V,++Vertex)
         {
-            if(Positions[FVertexID(Vertex)]!=FVector3f(Original.Vertices[V]) || UVs.Get(FVertexInstanceID(Vertex),0)!=FVector2f(Original.UVs[V]) || UVs.Get(FVertexInstanceID(Vertex),1)!=FVector2f(Original.TiledUVs[V]) || UVs.Get(FVertexInstanceID(Vertex),2)!=FVector2f(Data->Chunks[I].IndexX,Data->Chunks[I].IndexY))
+            if(Positions.VertexPosition(Vertex)!=FVector3f(Original.Vertices[V]) || UVs.GetVertexUV(Vertex,0)!=FVector2f(Original.UVs[V]) || UVs.GetVertexUV(Vertex,1)!=FVector2f(Original.TiledUVs[V]) || UVs.GetVertexUV(Vertex,2)!=FVector2f(Data->Chunks[I].IndexX,Data->Chunks[I].IndexY))
             {AddError(TEXT("Worker changed terrain position or alpha/tiled/cell UVs")); return false;}
         }
     }
-    TestEqual(TEXT("Original triangle/hole topology survives the handoff"),Geometry->Mesh.Triangles().Num(),Triangles);
+    TestEqual(TEXT("Original triangle/hole topology survives the handoff"),int32(Render.IndexBuffer.GetNumIndices()),Triangles*3);
+    int32 SectionTriangles=0;
+    for(int32 I=0;I<Render.Sections.Num();++I) {SectionTriangles+=Render.Sections[I].NumTriangles; TestEqual(TEXT("Explicit material indices survive direct runtime buffers"),Render.Sections[I].MaterialIndex,I);}
+    TestEqual(TEXT("All section triangles remain drawable"),SectionTriangles,Triangles);
     TestEqual(TEXT("Independent runtime collision has identical triangle count"),Geometry->CollisionIndices.Num(),Triangles*3);
     auto Lod=Async(EAsyncExecution::ThreadPool,[Data](){return MakeShared<FWowTerrainGeometry>(*Data,32,48,true);}).Get();
     TestTrue(TEXT("LOD worker does not allocate full-detail alpha textures or collision"),Lod->AlphaPixels.IsEmpty() && Lod->CollisionVertices.IsEmpty() && Lod->Chunks==255);

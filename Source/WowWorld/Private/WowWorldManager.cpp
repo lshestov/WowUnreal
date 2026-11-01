@@ -3,6 +3,7 @@
 #include "WowWmoArea.h"
 #include "WowWorldCollision.h"
 #include "WowRuntimeMeshMaterials.h"
+#include "WowRuntimeStaticMesh.h"
 #include "WowTerrainTile.h"
 #include "WowTerrainGeometry.h"
 #include "Mpq/MpqManager.h"
@@ -1268,58 +1269,7 @@ void AWowWorldManager::SpawnWdlTile(int32 TX, int32 TY)
     }
     for (FVector& N : Normals) N = N.GetSafeNormal();
 
-    // Build UStaticMesh from FMeshDescription
-    UStaticMesh* SM = NewObject<UStaticMesh>();
-
-    FMeshDescription MeshDesc;
-    FStaticMeshAttributes Attributes(MeshDesc);
-    Attributes.Register();
-
-    TVertexAttributesRef<FVector3f> VertexPositions = Attributes.GetVertexPositions();
-    TVertexInstanceAttributesRef<FVector3f> VertexInstanceNormals = Attributes.GetVertexInstanceNormals();
-    TVertexInstanceAttributesRef<FVector3f> VertexInstanceTangents = Attributes.GetVertexInstanceTangents();
-    TVertexInstanceAttributesRef<float> VertexInstanceBinormalSigns = Attributes.GetVertexInstanceBinormalSigns();
-    TVertexInstanceAttributesRef<FVector2f> VertexInstanceUVs = Attributes.GetVertexInstanceUVs();
-
-    FPolygonGroupID PolyGroup = MeshDesc.CreatePolygonGroup();
-    MeshDesc.ReserveNewVertices(Vertices.Num());
-    MeshDesc.ReserveNewVertexInstances(Vertices.Num());
-    MeshDesc.ReserveNewPolygons(Indices.Num() / 3);
-
-    TArray<FVertexInstanceID> VertexInstanceIDs;
-    VertexInstanceIDs.SetNum(Vertices.Num());
-
-    for (int32 i = 0; i < Vertices.Num(); ++i)
-    {
-        const FVector& P = Vertices[i];
-        FVertexID VertID = MeshDesc.CreateVertex();
-        VertexPositions[VertID] = FVector3f(P.X, P.Y, P.Z);
-
-        FVertexInstanceID InstID = MeshDesc.CreateVertexInstance(VertID);
-        VertexInstanceIDs[i] = InstID;
-
-        FVector3f N = (i < Normals.Num()) ? FVector3f(Normals[i]) : FVector3f(0, 0, 1);
-        N.Normalize();
-        VertexInstanceNormals[InstID] = N;
-
-        FVector3f T = FVector3f::CrossProduct(N, FVector3f(0, 1, 0));
-        if (T.SizeSquared() < 0.001f) T = FVector3f::CrossProduct(N, FVector3f(1, 0, 0));
-        T.Normalize();
-        VertexInstanceTangents[InstID] = T;
-        VertexInstanceBinormalSigns[InstID] = 1.0f;
-
-        FVector2f UV = (i < UVs.Num()) ? FVector2f(UVs[i]) : FVector2f(0, 0);
-        VertexInstanceUVs.Set(InstID, 0, UV);
-    }
-
-    for (int32 i = 0; i < Indices.Num(); i += 3)
-    {
-        TArray<FVertexInstanceID> TriVerts;
-        TriVerts.Add(VertexInstanceIDs[Indices[i]]);
-        TriVerts.Add(VertexInstanceIDs[Indices[i + 1]]);
-        TriVerts.Add(VertexInstanceIDs[Indices[i + 2]]);
-        MeshDesc.CreatePolygon(PolyGroup, TriVerts);
-    }
+    UStaticMesh* SM=NewObject<UStaticMesh>();
 
     // Simple green-brown material for distant terrain
     UMaterial* DistantBase = LoadObject<UMaterial>(nullptr, TEXT("/Game/Materials/M_WowDistantTerrain"));
@@ -1328,15 +1278,7 @@ void AWowWorldManager::SpawnWdlTile(int32 TX, int32 TY)
     {
         Mat->SetVectorParameterValue(TEXT("BaseColor"), FLinearColor(0.3f, 0.4f, 0.2f, 1.0f));
     }
-    FWowRuntimeMeshMaterials::AssignSingle(SM, MeshDesc, Mat);
-    TArray<const FMeshDescription*> MeshDescs;
-    MeshDescs.Add(&MeshDesc);
-    UStaticMesh::FBuildMeshDescriptionsParams Params;
-    Params.bBuildSimpleCollision = false;
-    Params.bFastBuild = true;
-    SM->BuildFromMeshDescriptions(MeshDescs, Params);
-    SM->NeverStream = true;
-    SM->InitResources();
+    FWowRuntimeStaticMesh::Initialize(SM,FWowRuntimeStaticMesh::PrepareSurface(Vertices,Normals,UVs,Indices),TArray<UMaterialInterface*>{Mat});
 
     // Spawn actor with UStaticMeshComponent
     FActorSpawnParameters SpawnParams;
@@ -1433,7 +1375,7 @@ void AWowWorldManager::SpawnLod1Tile(int32 TX,int32 TY,const FAdtData& AdtData,T
     Root->RegisterComponent();
     Lod1Actor->SetRootComponent(Root);
 
-    auto& MeshDesc=Prepared->Mesh;
+
     TArray<UMaterialInterface*> SectionMaterials;
     UMaterial* BaseMat=FWowTerrainMaterial::GetBaseMaterial();
     const int32 TotalChunks=Prepared->Chunks;
@@ -1460,19 +1402,7 @@ void AWowWorldManager::SpawnLod1Tile(int32 TX,int32 TY,const FAdtData& AdtData,T
     if (TotalChunks > 0)
     {
         UStaticMesh* SM = NewObject<UStaticMesh>();
-        FWowRuntimeMeshMaterials::Assign(SM, MeshDesc, SectionMaterials);
-        SM->bAllowCPUAccess = false;
-
-        TArray<const FMeshDescription*> MeshDescs;
-        MeshDescs.Add(&MeshDesc);
-        UStaticMesh::FBuildMeshDescriptionsParams Params;
-        Params.bBuildSimpleCollision = false;
-        Params.bFastBuild = true;
-        Params.bCommitMeshDescription = false;
-        SM->BuildFromMeshDescriptions(MeshDescs, Params);
-        SM->NeverStream = true;
-        SM->InitResources();
-        for (FStaticMaterial& Mat : SM->GetStaticMaterials()) { Mat.UVChannelData.bInitialized = true; }
+        FWowRuntimeStaticMesh::Initialize(SM,MoveTemp(Prepared->RenderData),SectionMaterials);
 
         UStaticMeshComponent* MeshComp = NewObject<UStaticMeshComponent>(Lod1Actor, TEXT("Lod1Mesh"));
         MeshComp->SetStaticMesh(SM);

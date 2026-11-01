@@ -153,3 +153,34 @@ The shorter route finishes before the previous run's automatic collection
 window; private memory reaches 7,856.4 MiB. This is retained as an unresolved
 memory result. Repeated asset reconstruction and parsed-model cache ownership
 are the next changes, followed by a longer post-collection cycle test.
+
+## Prepared runtime buffers
+
+`FWowRuntimeStaticMesh` in WowAssets converts the prepared geometry directly
+to static-mesh vertex/index buffers with explicit section material indices.
+Terrain/LOD1 preparation and temporary topology destruction both run on the
+worker. WDL keeps its original heights, holes, transition strips, UVs and
+normals but prepares its small buffers without an intermediate MeshDescription.
+UObject creation, material binding and RHI initialization remain on the game
+thread. No imported collision is substituted for the existing runtime collision.
+
+`20-buffers-tests` passes the same 23 checks. The worker test now reads the
+actual prepared buffers and compares their positions/UVs, triangle counts and
+section material indices with the original terrain builder. The accepted
+`20-worker-release-existing` route repeats ten nonempty, individually inspected
+captures with preserved terrain layers and 590 initial WMO shadow casters.
+
+LOD1 upload p95/max is .89/3.54 ms, versus 34.12/63.86 ms in the original
+synchronous read/build path. Terrain finalization p95/max is 95.52/99.64 ms,
+versus 172.06/247.11 ms originally. Its remaining cost includes runtime collision
+and material/resource creation. First Westfall settles in 10.27 s; all later
+Westfall/Abbey stops reach the route's eight-second minimum. Initial full-scene
+settling is 13.00 s, compared with the original 13.50 s; this is a small loading
+time improvement, not a claim that all world entry is now fast. Initial ordinary
+frame p99 is 42.73 ms; crossing maximum 74.65 ms and repeated Abbey-return maxima
+64–67 ms. Private memory still rises to 6,768.9 MiB before collection, so the
+memory stage remains open.
+
+The added Present counter is near zero in this accepted run. It does not explain
+the frame/render-thread variation in the other runs; that variation remains
+explicitly unassigned rather than being mislabeled as a cache effect.

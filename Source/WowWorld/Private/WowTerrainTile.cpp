@@ -2,6 +2,7 @@
 #include "WowStreamingProfile.h"
 #include "UObject/StrongObjectPtr.h"
 #include "WowRuntimeMeshMaterials.h"
+#include "WowRuntimeStaticMesh.h"
 #include "WowTerrainMeshBuilder.h"
 #include "WowTerrainMaterial.h"
 #include "WowTerrainBatch.h"
@@ -54,38 +55,20 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
     UMaterialInterface* DefaultMat = GetDefaultTerrainMaterial();
 
     auto Geometry=Prepared?MoveTemp(Prepared):MakeShared<FWowTerrainGeometry>(Data,TX,TY);
-    auto& MeshDesc=Geometry->Mesh;
+    auto* SM=NewObject<UStaticMesh>();
     const auto& CollisionVertices=Geometry->CollisionVertices;
     const auto& CollisionIndices=Geometry->CollisionIndices;
     TArray<UMaterialInterface*> SectionMaterials;
     auto* AlphaAtlas=FWowTerrainMaterial::CreateAlphaAtlas(Data,&Geometry->AlphaPixels);
     for(int32 Representative:Geometry->Representatives)
     {
-        auto* Material=FWowTerrainMaterial::CreateBatchMaterial(Data.Chunks[Representative],Data,AlphaAtlas,Mpq,Cache,this);
+        auto* Material=FWowTerrainMaterial::CreateBatchMaterial(Data.Chunks[Representative],Data,AlphaAtlas,Mpq,Cache,SM);
         SectionMaterials.Add(Material?static_cast<UMaterialInterface*>(Material):DefaultMat);
     }
 
     if (Geometry->Chunks > 0)
     {
-        // Build UStaticMesh from the mesh description
-        UStaticMesh* SM = NewObject<UStaticMesh>();
-
-        // Add materials BEFORE building so sections are initialized with correct materials
-        FWowRuntimeMeshMaterials::Assign(SM, MeshDesc, SectionMaterials);
-
-        // Rendering uses GPU buffers; terrain collision has its own PMC data.
-        SM->bAllowCPUAccess = false;
-
-        TArray<const FMeshDescription*> MeshDescs;
-        MeshDescs.Add(&MeshDesc);
-        UStaticMesh::FBuildMeshDescriptionsParams Params;
-        Params.bBuildSimpleCollision = false;
-        Params.bFastBuild = true;
-        Params.bCommitMeshDescription = false;
-        SM->BuildFromMeshDescriptions(MeshDescs, Params);
-        SM->NeverStream = true;
-        SM->InitResources();
-        for (FStaticMaterial& Mat : SM->GetStaticMaterials()) { Mat.UVChannelData.bInitialized = true; }
+        FWowRuntimeStaticMesh::Initialize(SM,MoveTemp(Geometry->RenderData),SectionMaterials);
 
         // ProceduralMeshComponent cooks triangle collision in packaged games;
         // transient UStaticMesh imported collision is only reliable in Editor.
