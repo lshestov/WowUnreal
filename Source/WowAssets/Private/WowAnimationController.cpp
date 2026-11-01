@@ -6,6 +6,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "WowNetwork/Public/WowEntity.h"
 #include "WowData/Public/Formats/M2Types.h"
+#include "Formats/Dbc/DbcStore.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowAnim, Log, All);
 
@@ -343,7 +344,7 @@ EWowAnimId UWowAnimationController::GetAnimationForState(EWowAnimState State) co
         case EWowAnimState::Combat:
             return EWowAnimId::ReadyUnarmed;
         case EWowAnimState::Casting:
-            return EWowAnimId::SpellCastDirected;
+            return EWowAnimId::ReadySpellDirected;
         case EWowAnimState::Channeling:
             return EWowAnimId::ChannelCast;
         case EWowAnimState::Dead:
@@ -473,6 +474,22 @@ void UWowAnimationController::SetAnimationIdMap(const TMap<int32, int32>& InMap)
     {
         UE_LOG(LogWowAnim, Warning, TEXT("SetAnimationIdMap: No Stand animation available in AnimationCache"));
     }
+}
+
+int32 UWowAnimationController::ResolveSpellAnimation(uint32 SpellId, bool bRelease)
+{
+    const auto& Dbc=FDbcStore::Get();
+    const auto* Spell=Dbc.Spells().GetById(SpellId);
+    const auto* Visual=Spell?Dbc.SpellVisuals().GetById(Spell->SpellVisual[0]):nullptr;
+    const auto* Kit=Visual?Dbc.SpellVisualKits().GetById(bRelease?Visual->CastKit:Visual->PrecastKit):nullptr;
+    return Kit && Kit->AnimID>0 && Kit->AnimID<=MAX_uint16?Kit->AnimID:INDEX_NONE;
+}
+
+bool UWowAnimationController::PlaySpellAnimation(uint32 SpellId, bool bRelease)
+{
+    const int32 Id=ResolveSpellAnimation(SpellId,bRelease);
+    // Ready poses loop for the server cast. The release gesture plays once.
+    return Id!=INDEX_NONE && PlayAnimationById(static_cast<EWowAnimId>(Id),!bRelease);
 }
 
 bool UWowAnimationController::PlayAnimationById(EWowAnimId AnimId, bool bLooping)

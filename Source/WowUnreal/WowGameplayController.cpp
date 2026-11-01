@@ -2360,7 +2360,7 @@ void AWowGameplayController::OnSpellStart(uint64 CasterGuid, uint32 SpellId, uin
 			{
 				if (UWowAnimationController* AnimController = PlayerChar->AnimationController)
 				{
-					AnimController->PlayAnimationById(EWowAnimId::SpellCastDirected, true);
+					AnimController->PlaySpellAnimation(SpellId);
 					UE_LOG(LogWowGameplay, Log, TEXT("Playing spell cast animation for local player"));
 				}
 			}
@@ -2391,7 +2391,7 @@ void AWowGameplayController::OnSpellStart(uint64 CasterGuid, uint32 SpellId, uin
 				{
 					if (UWowAnimationController* AnimController = FWowCharacterBuilder::GetAnimationController(CasterActor))
 					{
-						AnimController->PlayAnimationById(EWowAnimId::SpellCastDirected, true);
+						AnimController->PlaySpellAnimation(SpellId);
 						UE_LOG(LogWowGameplay, Log, TEXT("Playing spell cast animation for entity %llu"), CasterGuid);
 					}
 				}
@@ -2439,13 +2439,12 @@ void AWowGameplayController::OnSpellGo(const FWowSpellLaunch& Launch)
 			CastBarWidget->StopCast();
 		}
 
-		// Return to idle animation for local player
+		// Release is a one-shot gesture from CastKit, followed by normal movement.
 		if (AWowPlayerCharacter* PlayerChar = Cast<AWowPlayerCharacter>(GetPawn()))
 		{
 			if (UWowAnimationController* AnimController = PlayerChar->AnimationController)
 			{
-				AnimController->PlayAnimationById(EWowAnimId::Stand, true);
-				UE_LOG(LogWowGameplay, Log, TEXT("Returning local player to idle animation"));
+				if(!AnimController->PlaySpellAnimation(SpellId,true)) AnimController->PlayAnimationById(EWowAnimId::Stand,true);
 			}
 		}
 
@@ -2458,15 +2457,14 @@ void AWowGameplayController::OnSpellGo(const FWowSpellLaunch& Launch)
 	}
 	else
 	{
-		// Return other entity to idle animation
+		// Use the same authored release for other casters.
 		if (TObjectPtr<AActor>* FoundActor = SpawnedEntityActors.Find(CasterGuid))
 		{
 			if (AActor* CasterActor = FoundActor->Get())
 			{
 				if (UWowAnimationController* AnimController = FWowCharacterBuilder::GetAnimationController(CasterActor))
 				{
-					AnimController->PlayAnimationById(EWowAnimId::Stand, true);
-					UE_LOG(LogWowGameplay, Log, TEXT("Returning entity %llu to idle animation"), CasterGuid);
+					if(!AnimController->PlaySpellAnimation(SpellId,true)) AnimController->PlayAnimationById(EWowAnimId::Stand,true);
 				}
 			}
 		}
@@ -2757,6 +2755,11 @@ void AWowGameplayController::UpdateEntityAnimations()
 			}
 		}
 
+		// A ready pose is owned by the server cast, including delayed deadlines.
+		if(const auto* Cast=ConnectionManager->PacketHandler.Casts.Find(Guid))
+		{
+			if(!Cast->Channel && Cast->Ends>FPlatformTime::Seconds()) continue;
+		}
 		// Don't override explicit cast/attack animations with movement updates
 		EWowAnimState CurrentAnimState = AnimController->GetCurrentState();
 		if (CurrentAnimState == EWowAnimState::Casting || CurrentAnimState == EWowAnimState::Channeling)

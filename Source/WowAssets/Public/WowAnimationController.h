@@ -185,6 +185,10 @@ public:
     UFUNCTION(BlueprintCallable)
     bool PlayAnimationById(EWowAnimId AnimId, bool bLooping = true);
 
+    /** Character pose from the spell's original precast/cast visual kit. */
+    static int32 ResolveSpellAnimation(uint32 SpellId, bool bRelease);
+    bool PlaySpellAnimation(uint32 SpellId, bool bRelease = false);
+
     /**
      * Play attack animation with fallback chain.
      * Tries Attack1H -> AttackUnarmed -> Attack2H -> Spell

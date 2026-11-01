@@ -5,6 +5,12 @@
 #include "WowDoodadManager.h"
 #include "WowM2EmitterComponent.h"
 #include "Mpq/MpqManager.h"
+#include "WowAnimationController.h"
+#include "WowM2AnimInstance.h"
+#include "WowCharacterBuilder.h"
+#include "WowAssetCache.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 namespace
@@ -90,6 +96,43 @@ bool FSpellPhaseModelCoverage::RunTest(const FString&)
         if(V->HasMissile && V->MissileModel>0) Check(V->MissileModel);
     }
     TestTrue(TEXT("Coverage includes authored geometry, particle-only effects and tails"),Geometry>=3 && Particles>=10 && Tails>=1 && Checked.Num()>=15);
+    return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSpellCharacterAnimations,"WowUnreal.Gameplay.SpellCharacterAnimations",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FSpellCharacterAnimations::RunTest(const FString&)
+{
+    FString Path; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false;
+    FMpqManager Mpq; if(!Mpq.Initialize(Path)) return false;
+    auto& D=FDbcStore::Get(); if(!D.IsLoaded()) D.LoadAll(Mpq); if(!D.IsDeferredLoaded()) D.LoadDeferred(Mpq);
+    for(uint32 Spell:{635u,639u,19750u,2061u})
+    {
+        TestEqual(TEXT("Holy Light and Flash heals prepare with ReadySpellOmni, never a repeated directed release"),UWowAnimationController::ResolveSpellAnimation(Spell,false),52);
+        TestEqual(TEXT("Healing release uses its own SpellCastOmni kit"),UWowAnimationController::ResolveSpellAnimation(Spell,true),54);
+    }
+    TestEqual(TEXT("Fireball keeps a directed ready pose"),UWowAnimationController::ResolveSpellAnimation(133,false),51);
+    TestEqual(TEXT("Fireball release remains directed"),UWowAnimationController::ResolveSpellAnimation(133,true),53);
+    TestEqual(TEXT("Missing visual cannot invent a gesture"),UWowAnimationController::ResolveSpellAnimation(MAX_uint32,false),INDEX_NONE);
+    UWorld* World=UWorld::CreateWorld(EWorldType::Game,false);
+    GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+    FWowAssetCache Cache;
+    auto* Actor=FWowCharacterBuilder::SpawnCharacter(World,&Mpq,&Cache,FWowCharacterBuilder::ERace::Human,FWowCharacterBuilder::EGender::Male,FVector::ZeroVector);
+    auto* Animation=Actor?FWowCharacterBuilder::GetAnimationController(Actor):nullptr;
+    auto* Runtime=Animation?Animation->GetRuntimeInstance():nullptr;
+    if(TestNotNull(TEXT("Real HumanMale MPQ model has a runtime animation controller"),Runtime))
+    {
+        TestTrue(TEXT("Holy Light ready pose starts"),Animation->PlaySpellAnimation(635));
+        TestEqual(TEXT("Human model samples animation 52 during the cast"),Runtime->GetM2AnimationId(),52);
+        const float Duration=Runtime->GetM2Duration(); Runtime->NativeUpdateAnimation(Duration+.25f);
+        TestTrue(TEXT("Ready gesture loops without a one-shot attack lock"),!Animation->IsPlayingOneShot() && Runtime->GetM2Time()<Duration);
+        TestTrue(TEXT("Holy Light release starts"),Animation->PlaySpellAnimation(635,true));
+        TestEqual(TEXT("Release switches the actual model to animation 54"),Runtime->GetM2AnimationId(),54);
+        TestTrue(TEXT("Release locks normal movement only for one clip"),Animation->IsPlayingOneShot());
+        Runtime->NativeUpdateAnimation(Runtime->GetM2Duration()+.25f);
+        TestTrue(TEXT("Release clamps instead of repeating through the cast"),FMath::IsNearlyEqual(Runtime->GetM2Time(),Runtime->GetM2Duration(),.001f));
+        Animation->PlayAnimationById(EWowAnimId::Stand,true);
+        TestTrue(TEXT("Interruption can immediately return to idle"),Runtime->GetM2AnimationId()==0 && !Animation->IsPlayingOneShot());
+    }
+    World->DestroyWorld(false); GEngine->DestroyWorldContext(World);
     return true;
 }
 #endif

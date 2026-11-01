@@ -4,6 +4,9 @@
 #include "WowWorldManager.h"
 #include "WowCharacterBuilder.h"
 #include "WowEquipmentManager.h"
+#include "WowAnimationController.h"
+#include "WowM2AnimInstance.h"
+#include "UnrealClient.h"
 #include "WowDebugHUD.h"
 #include "Formats/Dbc/DbcStore.h"
 #include "Formats/Dbc/CharStartOutfitDbc.h"
@@ -97,6 +100,12 @@ void AWowModelViewerGameMode::SetupTestScene(UWorld* World, AWowWorldManager* Wo
             if (AWowOrbitCamera* OrbitCam = Cast<AWowOrbitCamera>(PC->GetPawn()))
             {
                 OrbitCam->SetFocalPoint(FVector(0.0f, 0.0f, 80.0f));
+                uint32 CaptureSpell=0;
+                if(FParse::Value(FCommandLine::Get(),TEXT("capturespell="),CaptureSpell) && CaptureSpell)
+                {
+                    OrbitCam->OrbitDistance=380.f;
+                    OrbitCam->SetFocalPoint(FVector(0,0,115));
+                }
             }
         }
     }, 0.2f, false);
@@ -175,7 +184,9 @@ void AWowModelViewerGameMode::RespawnCharacter()
 
     // Equipment — manual weapon ID
     bool bDrawn = ViewerWidget->GetWeaponsDrawn();
+    if(FParse::Param(FCommandLine::Get(),TEXT("captureweapondrawn"))) bDrawn=true;
     uint32 WeaponId = ViewerWidget->GetWeaponDisplayId();
+    FParse::Value(FCommandLine::Get(),TEXT("captureweapon="),WeaponId);
     if (WeaponId > 0)
     {
         FWowCharacterBuilder::FEquipmentSlot Slot;
@@ -301,6 +312,33 @@ void AWowModelViewerGameMode::RespawnCharacter()
         ViewerWidget->SetStatusText(FString::Printf(TEXT("Spawned: Race %d %s"),
             static_cast<int32>(Params.Race),
             Params.Gender == FWowCharacterBuilder::EGender::Male ? TEXT("Male") : TEXT("Female")));
+
+        // Offline, opt-in visual regression: this game mode never creates a connection.
+        uint32 Spell=0; FString CapturePath;
+        if(FParse::Value(FCommandLine::Get(),TEXT("capturespell="),Spell) && Spell
+            && FParse::Value(FCommandLine::Get(),TEXT("capturespellshot="),CapturePath))
+        {
+            if(auto* Animation=FWowCharacterBuilder::GetAnimationController(CurrentModelActor)) Animation->PlaySpellAnimation(Spell);
+            const TWeakObjectPtr<AActor> Model=CurrentModelActor;
+            const bool Release=FParse::Param(FCommandLine::Get(),TEXT("capturespellrelease"));
+            FTimerHandle PhaseTimer;
+            GetWorldTimerManager().SetTimer(PhaseTimer,[Model,Spell,Release,CapturePath]()
+            {
+                if(!Model.IsValid()) return;
+                auto* Animation=FWowCharacterBuilder::GetAnimationController(Model.Get());
+                if(!Animation || (Release && !Animation->PlaySpellAnimation(Spell,true))) return;
+                FTimerHandle ShotTimer;
+                Model->GetWorld()->GetTimerManager().SetTimer(ShotTimer,[Model,Spell,Release,CapturePath]()
+                {
+                    if(!Model.IsValid()) return;
+                    auto* Animation=FWowCharacterBuilder::GetAnimationController(Model.Get());
+                    auto* Runtime=Animation?Animation->GetRuntimeInstance():nullptr;
+                    if(!Runtime) return;
+                    UE_LOG(LogModelViewer,Display,TEXT("SpellPoseCapture spell=%u release=%d anim=%d time=%.3f oneShot=%d"),Spell,Release,Runtime->GetM2AnimationId(),Runtime->GetM2Time(),Animation->IsPlayingOneShot());
+                    FScreenshotRequest::RequestScreenshot(CapturePath,false,false);
+                },.35f,false);
+            },2.f,false);
+        }
     }
     else
     {

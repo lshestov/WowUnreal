@@ -114,3 +114,8 @@ credentials or Blizzard binary data. The host owned-account launcher supports
 `qaClass`, bounded `peerSpells` and `peerOffset`; every participant is temporary.
 The multiplayer healing scenario verifies three server heal destinations,
 aura refresh and loss of an aura owner, and includes server-side cleanup.
+
+The subsequent [character-pose correction](CasterSpellAnimations.md) fixes the
+hardcoded looping directed release used during Holy Light preparation. Original
+precast/cast kit animation IDs now select the ready and one-shot release poses;
+the correction is verified offline without touching the user's servers or DB.
