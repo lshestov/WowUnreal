@@ -99,6 +99,8 @@ bool FIdleWowEquipmentModels::RunTest(const FString& Parameters)
     TStrongObjectPtr<UTexture2D> Bare(FWowCharacterTexture::BuildCompositeTexture(&Mpq, &Cache, Custom));
     const auto Before = TextureBytes(Bare.Get());
     TestFalse(TEXT("Skin atlas has CPU pixels"), Before.IsEmpty());
+    if (!Mpq.FileExists(TEXT("DBFilesClient\\CharComponentTextureLayouts.dbc")))
+        TestTrue(TEXT("The original client without optional layout DBCs produces the complete 512x512 WotLK atlas"), Bare.IsValid() && Bare->GetSizeX()==512 && Bare->GetSizeY()==512);
     auto* Player = World->SpawnActor<AWowPlayerCharacter>();
     TArray<FWowCharacterEquipment> Items;
     for (const auto& Fixture : {FIntVector(9891, 4, 3), FIntVector(9892, 7, 6), FIntVector(10141, 8, 7), FIntVector(2380, 17, 15)})

@@ -1,5 +1,20 @@
 # World streaming performance
 
+## Follow-up: warning fixes
+
+`24-warning-tests-final` executes all four formerly warning-bearing tests with
+four clean successes, zero warnings/failures. The shared parser-test MPQ helper
+now honors `-wowdata=`; AreaIds fails when its data is unavailable instead of
+reporting an unexecuted check as success. The real ADT assertions execute.
+Optional character-atlas extension tables use the existing fixed WotLK layout
+when absent; present corrupt tables still report failure. Equipment verification
+also checks the actual 512x512 composite in the no-extension case. Region
+creation can legally precede Lua sizing/reparenting, so its transient zero-size
+diagnostic is Verbose; the scroll test continues to assert final measured text,
+anchors and scroll range after layout. `24-warning-smoke-final` supplies two
+individually inspected, nonempty exterior/interior engine captures. Full clean
+regression and the performance follow-up remain pending.
+
 ## Clean published verification, 1 November 2026
 
 Implementation `8d996a241f61a830bd9f6c03a188d07ed32bcb7a` is published and

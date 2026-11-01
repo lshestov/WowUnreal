@@ -41,6 +41,12 @@ namespace WowTestUtils
         if (!bInit)
         {
             bInit = true;
+            FString ExplicitPath;
+            if (FParse::Value(FCommandLine::Get(), TEXT("wowdata="), ExplicitPath))
+            {
+                Mpq.Initialize(ExplicitPath);
+                return Mpq;
+            }
             // Try known WoW 3.3.5a data paths
             TArray<FString> Paths = {
                 FPaths::Combine(FPlatformProcess::UserHomeDir(), TEXT("Downloads/World of Warcraft 3.3.5a/Data")),
@@ -3780,8 +3786,8 @@ bool FAdtAreaIds::RunTest(const FString& Parameters)
     FMpqManager& Mpq = WowTestUtils::GetMpq();
     if (!Mpq.IsInitialized())
     {
-        AddWarning(TEXT("MPQ not available — skipping"));
-        return true;
+        AddError(TEXT("Area-ID verification requires readable MPQs; supply -wowdata=<client Data>"));
+        return false;
     }
 
     TArray<uint8> Data;

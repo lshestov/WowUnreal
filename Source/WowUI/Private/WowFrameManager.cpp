@@ -819,7 +819,10 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 		}
 		if (EffectiveParentW <= 0.f || EffectiveParentH <= 0.f)
 		{
-			UE_LOG(LogWowFrame, Warning, TEXT("CreateLayerContent: %s has zero effective size (def=%.0fx%.0f rect=%.0fx%.0f) — element anchors will collapse"),
+            // Lua can create regions before SetSize/SetPoint or reparent them
+            // from a hidden, zero-size staging frame. RefreshLayout resolves
+            // those regions after the script has supplied their final anchors.
+			UE_LOG(LogWowFrame, Verbose, TEXT("CreateLayerContent: %s parent size is deferred until layout (def=%.0fx%.0f rect=%.0fx%.0f)"),
 				*Def.Name, Def.Width, Def.Height, EffectiveParentW, EffectiveParentH);
 		}
 	}

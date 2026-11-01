@@ -44,6 +44,18 @@ static bool LoadSingleDbc(FMpqManager& Mpq, const TCHAR* DbcPath, FDbcParser& Ou
     return true;
 }
 
+static bool LoadOptionalAtlasDbc(FMpqManager& Mpq, const TCHAR* Path, FDbcParser& Parser)
+{
+    // Original build-12340 clients use the fixed character-atlas layout.
+    // Accept supplied layout extensions, but still report corrupt present files.
+    if (!Mpq.FileExists(Path))
+    {
+        UE_LOG(LogDbcStore, Log, TEXT("Optional %s absent; using the built-in WotLK character atlas layout"), Path);
+        return false;
+    }
+    return LoadSingleDbc(Mpq, Path, Parser);
+}
+
 static bool LoadSingleDbcAny(FMpqManager& Mpq, std::initializer_list<const TCHAR*> Paths, FDbcParser& OutParser, FString& OutLoadedPath)
 {
     for (const TCHAR* Path : Paths)
@@ -408,7 +420,7 @@ void FDbcStore::LoadDeferred(FMpqManager& Mpq)
         ++Loaded;
     }
 
-    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\CharComponentTextureLayouts.dbc"), Parser))
+    if (LoadOptionalAtlasDbc(Mpq, TEXT("DBFilesClient\\CharComponentTextureLayouts.dbc"), Parser))
     {
         CharComponentTextureLayoutsDbc.Load(Parser);
         ++Loaded;
@@ -421,7 +433,7 @@ void FDbcStore::LoadDeferred(FMpqManager& Mpq)
         }
     }
 
-    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\CharComponentTextureSections.dbc"), Parser))
+    if (LoadOptionalAtlasDbc(Mpq, TEXT("DBFilesClient\\CharComponentTextureSections.dbc"), Parser))
     {
         CharComponentTextureSectionsDbc.Load(Parser);
         ++Loaded;
