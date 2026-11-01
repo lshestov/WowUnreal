@@ -56,14 +56,16 @@ The ModelViewer has opt-in `capturespell`, `capturespellshot`,
 `capturespellrelease`, `capturespellchannel`, `capturespellmove`,
 `capturespellcancel`, `capturespelldelay`, `capturespellafter`, `captureweapon`
 and `captureweapondrawn` parameters.
-Its game mode creates no network connection. Rendered Holy Light captures with
+Its game mode creates no network connection. Rendered HumanMale captures with
 the original starter hammer (display 8690) cover a moving ready pose and Renew
 release, directed and omni channel poses, an intro and subsequent hold, and
-both channel/intro cancellation. Eight initial FScreenshotRequest captures were
-checked for content and visually inspected. Build and regression pass; the
-published-install repeat remains pending before final signoff. Servers were not
+both channel/intro cancellation. Eight scenarios passed initially and again on
+the clean published `8fd2705` installation. All sixteen FScreenshotRequest PNGs
+were checked for content and visually inspected. All 899 staged sources and
+the built, packaged and installed executable hashes match. Servers were not
 started/restarted; no database queries or character/account operations are used.
 
 Replay cases: `Scripts/Verification/13-caster-pose-offline.json`.
 Host replay: `logs/wowunreal-ui-completion/Invoke-CasterPoseCapture.ps1 -Name NAME`.
 Regression: `logs/wowunreal-ui-completion/13-spell-layers-regression/index.json`.
+Installed-package evidence: `logs/wowunreal-ui-completion/13-caster-pose-install-verification.json`.

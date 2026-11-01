@@ -119,3 +119,5 @@ The subsequent [character-pose correction](CasterSpellAnimations.md) fixes the
 hardcoded looping directed release used during Holy Light preparation. Original
 precast/cast kit animation IDs now select the ready and one-shot release poses;
 the correction is verified offline without touching the user's servers or DB.
+ChannelKit poses, queued StartAnimID introductions and an independent torso
+layer over locomotion are also verified by the repeated offline caster suite.
