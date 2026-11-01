@@ -4,6 +4,7 @@
 #include "WowRuntimeMeshMaterials.h"
 #include "WowTerrainMeshBuilder.h"
 #include "WowTerrainMaterial.h"
+#include "WowTerrainBatch.h"
 #include "Formats/AdtTypes.h"
 #include "Coord/WowCoordinate.h"
 #include "WowDoodadManager.h"
@@ -51,10 +52,10 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
 
     UMaterialInterface* DefaultMat = GetDefaultTerrainMaterial();
 
-    // Build a single UStaticMesh with one polygon group per chunk (up to 256 material slots)
+    // One section per ordered ground-texture set; alpha remains per chunk.
     FMeshDescription MeshDesc;
     // Must set UV channels before Register() so attributes are allocated correctly
-    MeshDesc.SetNumUVChannels(2); // UV0 = alpha/splatmap [0,1], UV1 = world-space tiled
+    MeshDesc.SetNumUVChannels(3); // UV0=local alpha, UV1=unchanged tiled, UV2=constant chunk cell
     FStaticMeshAttributes Attributes(MeshDesc);
     Attributes.Register();
 
@@ -66,6 +67,15 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
 
     // Collect materials per section
     TArray<UMaterialInterface*> SectionMaterials;
+    const FWowTerrainBatch Batch(Data);
+    auto* AlphaAtlas=FWowTerrainMaterial::CreateAlphaAtlas(Data);
+    TArray<FPolygonGroupID> Groups;
+    for(int32 Representative:Batch.Representatives)
+    {
+        Groups.Add(MeshDesc.CreatePolygonGroup());
+        auto* Material=FWowTerrainMaterial::CreateBatchMaterial(Data.Chunks[Representative],Data,AlphaAtlas,Mpq,Cache,this);
+        SectionMaterials.Add(Material?static_cast<UMaterialInterface*>(Material):DefaultMat);
+    }
     TArray<FVector> CollisionVertices;
     TArray<int32> CollisionIndices;
     int32 SectionIndex = 0;
@@ -93,7 +103,7 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
         if (bHasHeights) ChunksWithHeights++;
 
         // Create a polygon group for this chunk (maps to a material slot)
-        FPolygonGroupID PolyGroup = MeshDesc.CreatePolygonGroup();
+        const FPolygonGroupID PolyGroup = Groups[Batch.SectionForChunk[i]];
         const int32 CollisionBase = CollisionVertices.Num();
         CollisionVertices.Append(MeshData.Vertices);
         for (int32 Index : MeshData.Indices) CollisionIndices.Add(CollisionBase + Index);
@@ -131,6 +141,7 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
             FVector2f UV1 = (v < MeshData.TiledUVs.Num())
                 ? FVector2f(MeshData.TiledUVs[v]) : FVector2f(0, 0);
             VertexInstanceUVs.Set(InstID, 1, UV1);
+            VertexInstanceUVs.Set(InstID, 2, FVector2f(Chunk.IndexX,Chunk.IndexY));
         }
 
         // Create triangles for this chunk
@@ -144,18 +155,7 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
         }
 
         // Determine material for this chunk
-        UMaterialInstanceDynamic* ChunkMat = FWowTerrainMaterial::CreateChunkMaterial(
-            Chunk, Data, Mpq, Cache, this);
-
-        if (ChunkMat)
-        {
-            SectionMaterials.Add(ChunkMat);
-            ChunksTextured++;
-        }
-        else
-        {
-            SectionMaterials.Add(DefaultMat);
-        }
+        if(SectionMaterials[Batch.SectionForChunk[i]]!=DefaultMat) ++ChunksTextured;
 
         SectionIndex++;
     }
@@ -168,14 +168,15 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
         // Add materials BEFORE building so sections are initialized with correct materials
         FWowRuntimeMeshMaterials::Assign(SM, MeshDesc, SectionMaterials);
 
-        SM->bAllowCPUAccess = true;
+        // Rendering uses GPU buffers; terrain collision has its own PMC data.
+        SM->bAllowCPUAccess = false;
 
         TArray<const FMeshDescription*> MeshDescs;
         MeshDescs.Add(&MeshDesc);
         UStaticMesh::FBuildMeshDescriptionsParams Params;
         Params.bBuildSimpleCollision = false;
         Params.bFastBuild = true;
-        Params.bCommitMeshDescription = true;
+        Params.bCommitMeshDescription = false;
         SM->BuildFromMeshDescriptions(MeshDescs, Params);
         SM->NeverStream = true;
         SM->InitResources();
@@ -213,7 +214,7 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
 
         ChunkMeshes.Add(MeshComp);
         UE_LOG(LogTerrainTile, Log, TEXT("Tile %d,%d: %d sections, %d textured, %d/%d have heights, %d skipped"),
-            TX, TY, SectionIndex, ChunksTextured, ChunksWithHeights, 256 - ChunksSkipped, ChunksSkipped);
+            TX, TY, SectionMaterials.Num(), ChunksTextured, ChunksWithHeights, 256 - ChunksSkipped, ChunksSkipped);
     }
 
     // Spawn water meshes from MH2O data

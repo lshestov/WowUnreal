@@ -84,3 +84,34 @@ stair/doorway coordinates and the probe's explicit direct-walk option.
 executable hash before any terrain optimization. The only later baseline
 instrumentation adjustment adds the direct-walk option to profile steps;
 production streaming/rendering is unchanged.
+
+## Batched terrain, first verified cycle
+
+The cookable `M_WowTerrainBatched` shader groups chunks by their ordered
+original ground-texture set. A single 1024x1024 RGBA texture stores the three
+unchanged 64x64 alpha maps in RGB. UV0 remains local alpha coordinates, UV1
+remains the original tiled coordinates, and constant UV2 selects the chunk.
+Per-fragment half-texel clamping exactly reproduces each old clamp sampler
+without filtering across atlas cells. Source ground textures are not resized,
+atlased, baked or replaced. Original triangles, holes, normals and seams remain.
+Default-lit shading, roughness/specular and WMO/M2 shadows are retained.
+
+`18-terrain-tests` passes 22 Rendering/World/Collision/Lighting checks (20 clean,
+the same two relevant pre-existing warnings). Tests independently compare
+bilinear sampling at cell edges/corners in all three channels, verify real ADT
+alpha bytes and ordered texture sets, and retain original hole/UV topology.
+
+`18-terrain-existing` repeats the entire ten-stop route. All PNGs are nonempty
+and individually inspected. Initial terrain sections/materials fall from
+6,395 to **750** (88.27% fewer); the Abbey tile itself falls from 256 to 28.
+All 923 cached source textures, 2,157 unique static meshes and 590 WMO shadow
+casters remain at the initial stop. The four-pixel visual comparison grid has
+mean RGB differences 1.01–1.88/255 across the ten images; time-based scene
+animation and temporal rendering are not frozen by this route.
+
+This change alone does **not** improve streaming latency: initial settled time
+is 15.03 s and ordinary-frame maximum 627.36 ms. Combined world-tick p95/max
+is 272.25/623.43 ms. Root/group WMO builds, LOD1 and full terrain mesh preparation
+remain synchronous. Private memory reaches 6,437.3 MiB before collection and
+5,285.2 MiB on the final return. These results justify a separate scheduling
+and geometry-preparation change rather than claiming an overall FPS win.

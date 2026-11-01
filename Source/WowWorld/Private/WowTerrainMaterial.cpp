@@ -1,4 +1,5 @@
 #include "WowTerrainMaterial.h"
+#include "WowTerrainBatch.h"
 #include "UObject/StrongObjectPtr.h"
 #include "Misc/ScopeExit.h"
 #include "Formats/AdtTypes.h"
@@ -26,6 +27,38 @@
 #endif
 
 DEFINE_LOG_CATEGORY_STATIC(LogTerrainMat, Log, All);
+
+UMaterial* FWowTerrainMaterial::GetBatchedMaterial()
+{
+    static TStrongObjectPtr<UMaterial> Material;
+    if(!Material) Material.Reset(LoadObject<UMaterial>(nullptr,TEXT("/Game/Materials/M_WowTerrainBatched")));
+    ensureMsgf(Material.IsValid(),TEXT("Missing cooked batched terrain material; run CreateTerrainBatchedMaterial.py"));
+    return Material.Get();
+}
+UTexture2D* FWowTerrainMaterial::CreateAlphaAtlas(const FAdtData& Data)
+{
+    const auto Pixels=FWowTerrainBatch::AlphaPixels(Data);
+    auto* Texture=UTexture2D::CreateTransient(FWowTerrainBatch::AtlasPixels,FWowTerrainBatch::AtlasPixels,PF_B8G8R8A8);
+    if(!Texture) return nullptr;
+    Texture->SRGB=false; Texture->Filter=TF_Bilinear; Texture->NeverStream=true;
+    Texture->AddressX=Texture->AddressY=TA_Clamp; Texture->LODGroup=TEXTUREGROUP_Terrain_Weightmap;
+    void* Dest=Texture->GetPlatformData()->Mips[0].BulkData.Lock(LOCK_READ_WRITE);
+    FMemory::Memcpy(Dest,Pixels.GetData(),Pixels.Num()*sizeof(FColor)); Texture->GetPlatformData()->Mips[0].BulkData.Unlock();
+    Texture->UpdateResource(); return Texture;
+}
+UMaterialInstanceDynamic* FWowTerrainMaterial::CreateBatchMaterial(const FAdtChunkData& Chunk,const FAdtData& Data,
+    UTexture2D* AlphaAtlas,FMpqManager* Mpq,FWowAssetCache* Cache,UObject* Outer)
+{
+    UMaterial* Base=GetBatchedMaterial(); if(!Base || !AlphaAtlas || !Mpq || !Outer || Chunk.TextureIndices.IsEmpty()) return nullptr;
+    UTexture2D* Textures[4]={};
+    for(int32 Layer=0;Layer<4;++Layer)
+        if(Chunk.TextureIndices.IsValidIndex(Layer) && Data.TexturePaths.IsValidIndex(Chunk.TextureIndices[Layer]))
+            Textures[Layer]=LoadBlpTexture(Data.TexturePaths[Chunk.TextureIndices[Layer]],Mpq,Cache);
+    if(!Textures[0]) return nullptr;
+    auto* Material=UMaterialInstanceDynamic::Create(Base,Outer);
+    for(int32 Layer=0;Layer<4;++Layer) Material->SetTextureParameterValue(*FString::Printf(TEXT("Layer%dTexture"),Layer),Textures[Layer]?Textures[Layer]:Textures[0]);
+    Material->SetTextureParameterValue(TEXT("AlphaAtlas"),AlphaAtlas); return Material;
+}
 
 UMaterialInstanceDynamic* FWowTerrainMaterial::CreateChunkMaterial(
     const FAdtChunkData& ChunkData,
