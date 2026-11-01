@@ -184,3 +184,59 @@ memory stage remains open.
 The added Present counter is near zero in this accepted run. It does not explain
 the frame/render-thread variation in the other runs; that variation remains
 explicitly unassigned rather than being mislabeled as a cache effect.
+
+## Bounded ownership and memory verification
+
+Parsed world M2 data now uses an LRU with a 128 MiB retained-payload budget;
+character M2 data uses 64 MiB. Both also cap metadata at 256 entries. Accounting
+includes nested animation, light, material, particle and ribbon track arrays,
+not just vertex buffers. Oversized models remain usable by their live owner
+without entering the cache. Eviction releases cache ownership only: active
+animation, light and effect shared references preserve their original data.
+Container allocation overhead and active owners outside the cache are separate
+from this payload budget. The ownership regression exercises eviction, oversized
+data, metadata bounds and an active animated light after eviction.
+
+Terrain and WMO meshes reuse the existing weak asset cache. A live mesh keeps
+its materials; an unloaded mesh gains no persistent strong cache owner. Each
+new terrain actor still builds its original separate collision component; WMO
+instances still prepare their room, collision, light and shadow metadata. This
+does not pool actors or retain an entire previous region. Terrain upload can
+reuse still-live meshes before natural garbage collection, while worker reads
+and collision preparation remain bounded by the same four slots.
+
+Snapshots now separate source-texture pixel-format/mip bytes from the terrain
+alpha atlases, parsed-model payloads, live meshes/instances/UObjects and process
+private/working-set memory. The source-texture figure replaces the earlier
+RGBA-plus-mip approximation, so these two estimates must not be directly
+compared. Mesh estimates remain approximate; process memory is measured.
+
+`21-performance-memory-stress.json` makes six unload/revisit cycles. Its seven
+explicit diagnostic collections happen only in this verification game mode,
+after streaming has settled; ordinary gameplay does not force collection.
+Before/after private memory and collection counts are preserved, and collection
+frames join the diagnostic population rather than ordinary latency figures.
+This route tests post-collection retention separately from the unchanged
+three-cycle route and its natural collection timing. A plateau across this
+finite route is evidence for these two regions, not an unlimited-world proof.
+
+The first `21-memory-existing` route has ten individually inspected, nonempty
+captures. It retains 750 initial terrain sections and 590 WMO shadow casters;
+13 still-live terrain meshes are reused on later returns. Private memory is
+4,035.2 MiB initially and 6,392.2 MiB at the final pre-collection return.
+Initial settled time is 12.93 s, initial ordinary p99/max 41.00/251.87 ms;
+Abbey-return maxima are 85.61/71.50/71.90 ms. The crossing maximum is 189.45 ms,
+higher than the preceding prepared-buffer run, and is not hidden by selecting
+the faster sample. The four-pixel visual grid differs by .38–1.50/255 on average.
+
+The separate provisional `21-memory-stress` numeric report records 4,371.8,
+4,411.9, 4,346.3, 4,431.4, 4,433.3 and 4,199.7 MiB after collection on successive
+Abbey returns. All six retain exactly 54,588 UObjects, 2,772 live static meshes
+and 21,624 instanced placements. The parsed-world cache stays at 256 entries
+and about 4 MiB of retained payload. Final acceptance still requires the clean
+published repeat and individual review of that repeat's complete capture set.
+
+`21-memory-tests-fixed` passes 26 Performance/Rendering/World/Collision/Lighting
+checks: 24 clean, the same two relevant pre-existing warnings. The ownership
+test explicitly selects linear interpolation for its independently expected
+midpoint sample; its first fixture accidentally left the default step sampler.

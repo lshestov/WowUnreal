@@ -24,6 +24,9 @@ private:
     int32 Index=-1, DiagnosticFrames=0;
     double Started=0, Previous=0, PhaseStarted=0, IdleSince=0, ShotAt=0;
     bool Finished=false, ShotRequested=false;
+    bool DiagnosticCollected=false;
+    int32 GarbageCollections=0;
+    double BeforeCollectMiB=0;
     FVector From=FVector::ZeroVector, To=FVector::ZeroVector, Target=FVector::ZeroVector;
     void StartStep();
     TSharedPtr<FJsonObject> Snapshot() const;

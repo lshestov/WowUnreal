@@ -3,6 +3,7 @@
 #include "UObject/StrongObjectPtr.h"
 #include "WowRuntimeMeshMaterials.h"
 #include "WowRuntimeStaticMesh.h"
+#include "WowAssetCache.h"
 #include "WowTerrainMeshBuilder.h"
 #include "WowTerrainMaterial.h"
 #include "WowTerrainBatch.h"
@@ -39,7 +40,7 @@ UMaterialInterface* AWowTerrainTile::GetDefaultTerrainMaterial() const
     return DefaultMat.Get();
 }
 
-void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY, FMpqManager* Mpq, FWowAssetCache* Cache, TSet<uint32>* SpawnedWmoIds,TSharedPtr<FWowTerrainGeometry> Prepared)
+void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY, FMpqManager* Mpq, FWowAssetCache* Cache, TSet<uint32>* SpawnedWmoIds,TSharedPtr<FWowTerrainGeometry> Prepared,const FString& CacheKey)
 {
     FWowStreamingProfile Profile(TEXT("terrainBuild"));
     TileCoord = FIntPoint(TX, TY);
@@ -55,21 +56,29 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
     UMaterialInterface* DefaultMat = GetDefaultTerrainMaterial();
 
     auto Geometry=Prepared?MoveTemp(Prepared):MakeShared<FWowTerrainGeometry>(Data,TX,TY);
-    auto* SM=NewObject<UStaticMesh>();
+    UStaticMesh* SM=Cache && !CacheKey.IsEmpty()?Cache->FindMesh(CacheKey):nullptr;
+    MeshReused=SM!=nullptr; if(!SM) SM=NewObject<UStaticMesh>();
     const auto& CollisionVertices=Geometry->CollisionVertices;
     const auto& CollisionIndices=Geometry->CollisionIndices;
     TArray<UMaterialInterface*> SectionMaterials;
-    auto* AlphaAtlas=FWowTerrainMaterial::CreateAlphaAtlas(Data,&Geometry->AlphaPixels);
-    for(int32 Representative:Geometry->Representatives)
+    if(!MeshReused)
     {
-        auto* Material=FWowTerrainMaterial::CreateBatchMaterial(Data.Chunks[Representative],Data,AlphaAtlas,Mpq,Cache,SM);
-        SectionMaterials.Add(Material?static_cast<UMaterialInterface*>(Material):DefaultMat);
+        auto* AlphaAtlas=FWowTerrainMaterial::CreateAlphaAtlas(Data,&Geometry->AlphaPixels);
+        for(int32 Representative:Geometry->Representatives)
+        {
+            auto* Material=FWowTerrainMaterial::CreateBatchMaterial(Data.Chunks[Representative],Data,AlphaAtlas,Mpq,Cache,SM);
+            SectionMaterials.Add(Material?static_cast<UMaterialInterface*>(Material):DefaultMat);
+        }
+        if(Geometry->Chunks>0)
+        {
+            FWowRuntimeStaticMesh::Initialize(SM,MoveTemp(Geometry->RenderData),SectionMaterials);
+            if(Cache && !CacheKey.IsEmpty()) Cache->CacheMesh(CacheKey,SM);
+        }
     }
+    else for(const auto& Material:SM->GetStaticMaterials()) SectionMaterials.Add(Material.MaterialInterface);
 
-    if (Geometry->Chunks > 0)
+    if(Geometry->Chunks>0)
     {
-        FWowRuntimeStaticMesh::Initialize(SM,MoveTemp(Geometry->RenderData),SectionMaterials);
-
         // ProceduralMeshComponent cooks triangle collision in packaged games;
         // transient UStaticMesh imported collision is only reliable in Editor.
         auto* GroundCollision = NewObject<UProceduralMeshComponent>(this, TEXT("TerrainCollision"));

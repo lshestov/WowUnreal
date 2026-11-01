@@ -30,8 +30,9 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowDoodad, Log, All);
 
-TMap<FString, TSharedPtr<FM2Data>> FWowDoodadManager::ParsedM2Cache;
+FWowM2Cache FWowDoodadManager::ParsedM2Cache;
 FCriticalSection FWowDoodadManager::CacheLock;
+FWowM2CacheStats FWowDoodadManager::GetParsedCacheStats() {FScopeLock Lock(&CacheLock); return ParsedM2Cache.GetStats();}
 TMap<FString, TWeakObjectPtr<USkeleton>> FWowDoodadManager::SkeletonCache;
 TMap<FString, TArray<TWeakObjectPtr<UAnimSequence>>> FWowDoodadManager::AnimCache;
 

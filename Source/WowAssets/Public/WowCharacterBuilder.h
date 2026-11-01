@@ -1,5 +1,6 @@
 #pragma once
 #include "CoreMinimal.h"
+#include "WowM2Cache.h"
 #include "WowCharacterTexture.h"
 #include "WowEquipmentManager.h"
 #include "WowSkeletalMeshBuilder.h"
@@ -19,6 +20,7 @@ class UWorld;
 class WOWASSETS_API FWowCharacterBuilder
 {
 public:
+    static FWowM2CacheStats GetParsedCacheStats();
     /** Race IDs from ChrRaces.dbc */
     enum class ERace : uint8
     {

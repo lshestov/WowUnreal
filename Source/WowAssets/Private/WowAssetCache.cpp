@@ -138,10 +138,8 @@ bool FWowAssetCache::IsOverBudget() const
 int64 FWowAssetCache::EstimateTextureMemory(UTexture2D* Tex)
 {
 	if (!Tex) return 0;
-	int32 W = Tex->GetSizeX();
-	int32 H = Tex->GetSizeY();
-	// Estimate: W * H * 4 bytes (RGBA) * 1.33 (mipmaps)
-	return (int64)(W * H * 4 * 1.33);
+    // Account for the actual compressed pixel format and mip chain.
+    return Tex->CalcTextureMemorySizeEnum(TMC_AllMips);
 }
 
 int64 FWowAssetCache::EstimateMeshMemory(UStaticMesh* Mesh)

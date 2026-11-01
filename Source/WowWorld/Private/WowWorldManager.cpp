@@ -902,7 +902,7 @@ void AWowWorldManager::FinalizeTileLoad(int32 TX, int32 TY, TSharedPtr<FAdtData>
     AWowTerrainTile* Tile = GetWorld()->SpawnActor<AWowTerrainTile>(AWowTerrainTile::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
     if (Tile)
     {
-        Tile->BuildFromAdtData(*AdtData, TX, TY, MpqManager.Get(), AssetCache.Get(), &SpawnedWmoIds,MoveTemp(Prepared));
+        Tile->BuildFromAdtData(*AdtData, TX, TY, MpqManager.Get(), AssetCache.Get(), &SpawnedWmoIds,MoveTemp(Prepared),FString::Printf(TEXT("terrain:v2:%s:%d:%d"),*MapName,TX,TY));
         if (TerrainRVT) Tile->ApplyRuntimeVirtualTexture(TerrainRVT);
         int64 Key = TileKey(TX, TY);
         LoadedTiles.Add(Key, Tile);

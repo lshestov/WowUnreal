@@ -1,4 +1,5 @@
 #include "WowCharacterBuilder.h"
+#include "WowM2Cache.h"
 #include "UObject/StrongObjectPtr.h"
 #include "Misc/ScopeExit.h"
 #include "WowSkeletalMeshBuilder.h"
@@ -40,8 +41,9 @@
 DEFINE_LOG_CATEGORY_STATIC(LogWowCharacter, Log, All);
 
 // Parsed M2 cache (shared with doodad manager via static)
-static TMap<FString, TSharedPtr<FM2Data>> CharM2Cache;
+static FWowM2Cache CharM2Cache(64ull*1024*1024);
 static FCriticalSection CharCacheLock;
+FWowM2CacheStats FWowCharacterBuilder::GetParsedCacheStats() {FScopeLock Lock(&CharCacheLock); return CharM2Cache.GetStats();}
 static TMap<FString, TWeakObjectPtr<USkeleton>> CharSkeletonCache;
 
 static TMap<FString, TArray<FGeosetSectionInfo>> CharGeosetCache;
@@ -650,11 +652,12 @@ AActor* FWowCharacterBuilder::SpawnCharacterWithEquipment(UWorld* World, FMpqMan
             FString NormPath = ModelPath.ToLower();
             NormPath.ReplaceInline(TEXT("/"), TEXT("\\"));
 
-            TSharedPtr<FM2Data> CharM2;
+            TSharedPtr<const FM2Data> CharM2;
+            if(auto* Controller=GetAnimationController(Actor)) CharM2=Controller->GetRuntimeModel();
             {
                 FScopeLock Lock(&CharCacheLock);
                 TSharedPtr<FM2Data>* Found = CharM2Cache.Find(NormPath);
-                if (Found) CharM2 = *Found;
+                if (!CharM2 && Found) CharM2 = *Found;
             }
 
             if (CharM2)

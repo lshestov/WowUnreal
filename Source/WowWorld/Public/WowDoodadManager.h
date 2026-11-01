@@ -1,5 +1,6 @@
 #pragma once
 #include "CoreMinimal.h"
+#include "WowM2Cache.h"
 
 class FMpqManager;
 class FWowAssetCache;
@@ -22,6 +23,7 @@ class WOWWORLD_API FWowDoodadManager
 public:
     /** Parse M2 data from MPQ (cached). Returns shared pointer to parsed data. */
     static TSharedPtr<FM2Data> GetOrParseM2(const FString& M2Path, FMpqManager* Mpq);
+    static FWowM2CacheStats GetParsedCacheStats();
 
     /** Spawn doodad instances for a tile as UStaticMeshComponents on the parent actor */
     static void SpawnDoodads(AActor* ParentActor, const TArray<FAdtDoodadPlacement>& Placements,
@@ -51,7 +53,7 @@ public:
 
 private:
     /** Cache of parsed M2 data (not UObjects, just geometry) */
-    static TMap<FString, TSharedPtr<FM2Data>> ParsedM2Cache;
+    static FWowM2Cache ParsedM2Cache;
     static FCriticalSection CacheLock;
 
     /** Cache of skeletons per M2 model (shared between mesh and animations) */

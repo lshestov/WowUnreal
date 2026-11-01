@@ -5,9 +5,12 @@
 #include "WowM2LightSubsystem.h"
 #include "WowWmoArea.h"
 #include "WowAssetCache.h"
+#include "WowDoodadManager.h"
+#include "WowCharacterBuilder.h"
 #include "Coord/WowCoordinate.h"
 #include "Formats/Dbc/DbcStore.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/InstancedStaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
@@ -17,6 +20,9 @@
 #include "Misc/FileHelper.h"
 #include "Serialization/JsonSerializer.h"
 #include "UObject/UObjectArray.h"
+#include "UObject/GarbageCollection.h"
+#include "Engine/Texture2D.h"
+#include "Materials/MaterialInterface.h"
 #include "UnrealClient.h"
 #include "RHI.h"
 #include "RHIStats.h"
@@ -55,6 +61,7 @@ void AWowPerformanceTestGameMode::SetupTestScene(UWorld* World,AWowWorldManager*
     if(!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Text),Root) || !Root.IsValid() || !Root->TryGetArrayField(TEXT("steps"),Entries) || Entries->IsEmpty())
     {Finish(false,TEXT("Invalid route")); return;}
     Steps=*Entries;
+    FCoreUObjectDelegates::GetPostGarbageCollect().AddWeakLambda(this,[this](){++GarbageCollections;});
     Frames=TEXT("phase,kind,elapsedSeconds,wallFrameMs,gameThreadMs,renderThreadMs,gpuMs,drawCalls,pendingTiles,pendingWmoGroups,pendingDoodadTiles,pendingLod1,preparedSlots\n");
     Sky=World->SpawnActor<AWowSkyManager>(); Sky->TimeOfDay=540; Sky->TimeSpeed=0;
     StartStep();
@@ -72,6 +79,7 @@ void AWowPerformanceTestGameMode::StartStep()
     WM->FollowStreamingActor(PC->GetPawn()); WM->EnableTerrainStreaming();
     if(Number(Step,TEXT("initial"),0)>0) WM->LoadTilesAroundPosition(From,2);
     Ordinary.Reset(); Capture.Reset(); PhaseStarted=FPlatformTime::Seconds(); IdleSince=ShotAt=0; ShotRequested=false;
+    DiagnosticCollected=false; BeforeCollectMiB=0;
     UE_LOG(LogWorldPerformance,Display,TEXT("WorldPerformance step=%s map=%u"),*Step->GetStringField(TEXT("name")),Map);
 }
 TSharedPtr<FJsonObject> AWowPerformanceTestGameMode::Snapshot() const
@@ -79,25 +87,38 @@ TSharedPtr<FJsonObject> AWowPerformanceTestGameMode::Snapshot() const
     auto O=MakeShared<FJsonObject>(); const auto Mem=FPlatformMemory::GetStats();
     O->SetNumberField(TEXT("workingSetMiB"),Mem.UsedPhysical/1048576.); O->SetNumberField(TEXT("privateMiB"),Mem.UsedVirtual/1048576.);
     O->SetNumberField(TEXT("uobjects"),GUObjectArray.GetObjectArrayNumMinusAvailable());
-    int32 Tiles=0,Sections=0,Slots=0,DoodadInstances=0,WmoCasters=0; int64 TextureBytes=0,MeshBytes=0;
+    int32 Tiles=0,Sections=0,Slots=0,DoodadInstances=0,WmoCasters=0,Reused=0; uint64 AlphaBytes=0;
+    TSet<const UTexture2D*> AlphaAtlases;
     TSet<const UStaticMesh*> Meshes; TSet<const UMaterialInterface*> Materials;
     for(TActorIterator<AActor> It(GetWorld());It;++It)
     {
         if(It->IsActorBeingDestroyed()) continue;
+        if(const auto* Tile=Cast<AWowTerrainTile>(*It); Tile && Tile->WasMeshReused()) ++Reused;
         TInlineComponentArray<UStaticMeshComponent*> Components(*It);
         for(auto* C:Components)
         {
             const UStaticMesh* M=C->GetStaticMesh(); if(!M) continue; Meshes.Add(M);
+            if(const auto* ISM=Cast<UInstancedStaticMeshComponent>(C)) DoodadInstances+=ISM->GetInstanceCount();
             if(C->GetName().StartsWith(TEXT("WmoGroup_")) && C->CastShadow) ++WmoCasters;
             if(It->IsA<AWowTerrainTile>() && C->GetName()==TEXT("TerrainMesh"))
             {
                 ++Tiles; Slots+=M->GetStaticMaterials().Num();
                 if(M->GetRenderData() && !M->GetRenderData()->LODResources.IsEmpty()) Sections+=M->GetRenderData()->LODResources[0].Sections.Num();
                 for(int32 I=0;I<C->GetNumMaterials();++I) Materials.Add(C->GetMaterial(I));
+                if(auto* Material=C->GetMaterial(0))
+                {UTexture* Texture=nullptr; if(Material->GetTextureParameterValue(FMaterialParameterInfo(TEXT("AlphaAtlas")),Texture)) if(const auto* Alpha=Cast<UTexture2D>(Texture)) AlphaAtlases.Add(Alpha);}
             }
         }
     }
     const auto Stats=CachedWorldManager->GetAssetCache()->GetStats();
+    for(const auto* Alpha:AlphaAtlases) AlphaBytes+=Alpha->CalcTextureMemorySizeEnum(TMC_AllMips);
+    const auto WorldCache=FWowDoodadManager::GetParsedCacheStats(),CharCache=FWowCharacterBuilder::GetParsedCacheStats();
+    O->SetNumberField(TEXT("worldParsedM2MiB"),WorldCache.Bytes/1048576.); O->SetNumberField(TEXT("worldParsedM2Entries"),WorldCache.Entries); O->SetNumberField(TEXT("worldParsedM2Evictions"),WorldCache.Evictions);
+    O->SetNumberField(TEXT("characterParsedM2MiB"),CharCache.Bytes/1048576.); O->SetNumberField(TEXT("characterParsedM2Entries"),CharCache.Entries);
+    O->SetNumberField(TEXT("terrainAlphaAtlasMiB"),AlphaBytes/1048576.); O->SetNumberField(TEXT("sourceTextureMipMiB"),Stats.EstimatedTextureMemory/1048576.);
+    O->SetNumberField(TEXT("doodadInstances"),DoodadInstances); O->SetNumberField(TEXT("reusedTerrainTiles"),Reused); O->SetNumberField(TEXT("garbageCollections"),GarbageCollections);
+    O->SetBoolField(TEXT("diagnosticCollection"),DiagnosticCollected); O->SetNumberField(TEXT("beforeCollectPrivateMiB"),BeforeCollectMiB);
+    O->SetNumberField(TEXT("peakPrivateMiB"),Mem.PeakUsedVirtual/1048576.);
     O->SetNumberField(TEXT("tiles"),Tiles); O->SetNumberField(TEXT("terrainSections"),Sections); O->SetNumberField(TEXT("terrainMaterialSlots"),Slots);
     O->SetNumberField(TEXT("terrainUniqueMaterials"),Materials.Num()); O->SetNumberField(TEXT("uniqueStaticMeshes"),Meshes.Num());
     O->SetNumberField(TEXT("wmoShadowCasters"),WmoCasters); O->SetNumberField(TEXT("wmoGroups"),CachedWorldManager->GetActiveWmoGroupCount());
@@ -135,6 +156,11 @@ void AWowPerformanceTestGameMode::Tick(float DT)
     if(Ready){if(!IdleSince) IdleSince=Now;} else IdleSince=0;
     if(!ShotRequested && Elapsed>=Duration && IdleSince && Now-IdleSince>=Number(Step,TEXT("settle"),2))
     {
+        if(Number(Step,TEXT("collect"),0)>0 && !DiagnosticCollected)
+        {
+            BeforeCollectMiB=FPlatformMemory::GetStats().UsedVirtual/1048576.; DiagnosticCollected=true; DiagnosticFrames=4;
+            CollectGarbage(RF_NoFlags); IdleSince=0; return;
+        }
         auto Row=Snapshot(); Row->SetStringField(TEXT("name"),Name); Row->SetNumberField(TEXT("secondsToSettled"),Elapsed); Row->SetObjectField(TEXT("ordinary"),Profile(Ordinary));
         Results.Add(MakeShared<FJsonValueObject>(Row));
         FScreenshotRequest::RequestScreenshot(FPaths::Combine(Output,Name+TEXT(".png")),false,false);

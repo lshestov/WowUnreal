@@ -87,6 +87,7 @@ template<typename T> struct TM2ParticleCurve
 {
     TArray<float> Times;
     TArray<T> Values;
+    SIZE_T GetAllocatedSize() const {return Times.GetAllocatedSize()+Values.GetAllocatedSize();}
     T Sample(float Time,const T& Default,bool Step=false) const
     {
         const int32 N=FMath::Min(Times.Num(),Values.Num());
@@ -106,6 +107,7 @@ struct WOWDATA_API FM2ParticleFloatTrack
     uint16 Interpolation=0;
     int16 GlobalSequence=-1;
     TArray<TM2ParticleCurve<float>> Sequences;
+    SIZE_T GetAllocatedSize() const {SIZE_T N=Sequences.GetAllocatedSize(); for(const auto& S:Sequences) N+=S.GetAllocatedSize(); return N;}
     float Sample(int32 Animation,float TimeMs,const TArray<uint32>& GlobalDurations,float Default=0) const;
 };
 
@@ -113,6 +115,7 @@ template<typename T> struct TM2AnimatedTrack
 {
     uint16 Interpolation=0; int16 GlobalSequence=-1;
     TArray<TM2ParticleCurve<T>> Sequences;
+    SIZE_T GetAllocatedSize() const {SIZE_T N=Sequences.GetAllocatedSize(); for(const auto& S:Sequences) N+=S.GetAllocatedSize(); return N;}
     T Sample(float TimeMs,const TArray<uint32>& Durations,const T& Default,int32 Animation=0) const
     {
         if(Sequences.IsEmpty()) return Default;
@@ -243,4 +246,5 @@ struct WOWDATA_API FM2Data
     bool HasBones() const { return Bones.Num() > 0; }
     bool HasAnimations() const { return Animations.Num() > 0; }
     bool HasAnimationData() const { return AnimationTracks.Num() > 0; }
+    SIZE_T GetAllocatedSize() const;
 };

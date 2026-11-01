@@ -1,5 +1,20 @@
 #include "Formats/M2Types.h"
 
+SIZE_T FM2Data::GetAllocatedSize() const
+{
+    SIZE_T N=sizeof(*this)+Cameras.GetAllocatedSize()+CollisionVertices.GetAllocatedSize()+CollisionIndices.GetAllocatedSize()+Vertices.GetAllocatedSize()+Indices.GetAllocatedSize()+TexturePaths.GetAllocatedSize()+TextureTypes.GetAllocatedSize()+RenderPasses.GetAllocatedSize()+Bones.GetAllocatedSize()+Animations.GetAllocatedSize()+AnimationTracks.GetAllocatedSize()+Attachments.GetAllocatedSize()+ParticleEmitters.GetAllocatedSize()+GlobalSequenceDurations.GetAllocatedSize()+Colors.GetAllocatedSize()+TextureWeights.GetAllocatedSize()+TextureTransforms.GetAllocatedSize()+Ribbons.GetAllocatedSize()+Lights.GetAllocatedSize()+LightBoneTracks.GetAllocatedSize()+Submeshes.GetAllocatedSize()+AttachmentLookup.GetAllocatedSize();
+    for(const auto& P:TexturePaths) N+=P.GetAllocatedSize();
+    for(const auto& A:AnimationTracks) {N+=A.BoneTracks.GetAllocatedSize(); for(const auto& B:A.BoneTracks) N+=B.TransTimestamps.GetAllocatedSize()+B.TransValues.GetAllocatedSize()+B.RotTimestamps.GetAllocatedSize()+B.RotValues.GetAllocatedSize()+B.ScaleTimestamps.GetAllocatedSize()+B.ScaleValues.GetAllocatedSize();}
+    for(const auto& C:Colors) N+=C.Color.GetAllocatedSize()+C.Alpha.GetAllocatedSize();
+    for(const auto& W:TextureWeights) N+=W.GetAllocatedSize();
+    for(const auto& T:TextureTransforms) N+=T.Translation.GetAllocatedSize()+T.Scale.GetAllocatedSize()+T.Rotation.GetAllocatedSize();
+    for(const auto& R:Ribbons) N+=R.Color.GetAllocatedSize()+R.Alpha.GetAllocatedSize()+R.Above.GetAllocatedSize()+R.Below.GetAllocatedSize()+R.Slot.GetAllocatedSize()+R.Visibility.GetAllocatedSize();
+    for(const auto& L:Lights) N+=L.AmbientColor.GetAllocatedSize()+L.DiffuseColor.GetAllocatedSize()+L.AmbientIntensity.GetAllocatedSize()+L.DiffuseIntensity.GetAllocatedSize()+L.AttenuationStart.GetAllocatedSize()+L.AttenuationEnd.GetAllocatedSize()+L.Visibility.GetAllocatedSize();
+    for(const auto& B:LightBoneTracks) N+=B.Translation.GetAllocatedSize()+B.Scale.GetAllocatedSize()+B.Rotation.GetAllocatedSize();
+    for(const auto& P:ParticleEmitters) N+=P.BlendingType.GetAllocatedSize()+P.SpeedTrack.GetAllocatedSize()+P.VariationTrack.GetAllocatedSize()+P.LatitudeTrack.GetAllocatedSize()+P.LongitudeTrack.GetAllocatedSize()+P.GravityTrack.GetAllocatedSize()+P.LifeTrack.GetAllocatedSize()+P.RateTrack.GetAllocatedSize()+P.WidthTrack.GetAllocatedSize()+P.LengthTrack.GetAllocatedSize()+P.ZSourceTrack.GetAllocatedSize()+P.VisibilityTrack.GetAllocatedSize()+P.ColorCurve.GetAllocatedSize()+P.AlphaCurve.GetAllocatedSize()+P.HeadCellCurve.GetAllocatedSize()+P.TailCellCurve.GetAllocatedSize()+P.ScaleCurve.GetAllocatedSize();
+    return N;
+}
+
 float FM2ParticleFloatTrack::Sample(int32 Animation,float TimeMs,const TArray<uint32>& GlobalDurations,float Default) const
 {
     if(Sequences.IsEmpty()) return Default;

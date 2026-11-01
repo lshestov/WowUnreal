@@ -1,0 +1,208 @@
+{
+  "steps": [
+    {
+      "name": "stress-initial-abbey",
+      "initial": 1,
+      "map": 0,
+      "position": [
+        -8930,
+        -117,
+        87
+      ],
+      "target": [
+        -8908,
+        -149,
+        91
+      ],
+      "duration": 8,
+      "settle": 2,
+      "collect": 1
+    },
+    {
+      "name": "stress-westfall-1",
+      "position": [
+        -10920,
+        1500,
+        120
+      ],
+      "target": [
+        -10980,
+        1500,
+        70
+      ],
+      "duration": 8,
+      "settle": 2
+    },
+    {
+      "name": "stress-abbey-1",
+      "position": [
+        -8930,
+        -117,
+        87
+      ],
+      "target": [
+        -8908,
+        -149,
+        91
+      ],
+      "duration": 8,
+      "settle": 2,
+      "collect": 1
+    },
+    {
+      "name": "stress-westfall-2",
+      "position": [
+        -10920,
+        1500,
+        120
+      ],
+      "target": [
+        -10980,
+        1500,
+        70
+      ],
+      "duration": 8,
+      "settle": 2
+    },
+    {
+      "name": "stress-abbey-2",
+      "position": [
+        -8930,
+        -117,
+        87
+      ],
+      "target": [
+        -8908,
+        -149,
+        91
+      ],
+      "duration": 8,
+      "settle": 2,
+      "collect": 1
+    },
+    {
+      "name": "stress-westfall-3",
+      "position": [
+        -10920,
+        1500,
+        120
+      ],
+      "target": [
+        -10980,
+        1500,
+        70
+      ],
+      "duration": 8,
+      "settle": 2
+    },
+    {
+      "name": "stress-abbey-3",
+      "position": [
+        -8930,
+        -117,
+        87
+      ],
+      "target": [
+        -8908,
+        -149,
+        91
+      ],
+      "duration": 8,
+      "settle": 2,
+      "collect": 1
+    },
+    {
+      "name": "stress-westfall-4",
+      "position": [
+        -10920,
+        1500,
+        120
+      ],
+      "target": [
+        -10980,
+        1500,
+        70
+      ],
+      "duration": 8,
+      "settle": 2
+    },
+    {
+      "name": "stress-abbey-4",
+      "position": [
+        -8930,
+        -117,
+        87
+      ],
+      "target": [
+        -8908,
+        -149,
+        91
+      ],
+      "duration": 8,
+      "settle": 2,
+      "collect": 1
+    },
+    {
+      "name": "stress-westfall-5",
+      "position": [
+        -10920,
+        1500,
+        120
+      ],
+      "target": [
+        -10980,
+        1500,
+        70
+      ],
+      "duration": 8,
+      "settle": 2
+    },
+    {
+      "name": "stress-abbey-5",
+      "position": [
+        -8930,
+        -117,
+        87
+      ],
+      "target": [
+        -8908,
+        -149,
+        91
+      ],
+      "duration": 8,
+      "settle": 2,
+      "collect": 1
+    },
+    {
+      "name": "stress-westfall-6",
+      "position": [
+        -10920,
+        1500,
+        120
+      ],
+      "target": [
+        -10980,
+        1500,
+        70
+      ],
+      "duration": 8,
+      "settle": 2
+    },
+    {
+      "name": "stress-abbey-6",
+      "position": [
+        -8930,
+        -117,
+        87
+      ],
+      "target": [
+        -8908,
+        -149,
+        91
+      ],
+      "duration": 8,
+      "settle": 2,
+      "collect": 1
+    }
+  ]
+}

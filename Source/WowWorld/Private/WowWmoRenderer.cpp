@@ -337,6 +337,9 @@ UStaticMesh* FWowWmoRenderer::CreateStaticMeshFromWmoGroup(
         return nullptr;
     }
 
+    const FString CacheKey=FString::Printf(TEXT("wmo:lit2:%s:%d"),*WmoPath.ToLower().Replace(TEXT("/"),TEXT("\\")),GroupIdx);
+    if(Cache) if(auto* Existing=Cache->FindMesh(CacheKey)) return Existing;
+
     UStaticMesh* SM = NewObject<UStaticMesh>();
     SM->CreateBodySetup();
     SM->GetBodySetup()->bNeverNeedsCookedCollisionData = true;
@@ -500,6 +503,7 @@ UStaticMesh* FWowWmoRenderer::CreateStaticMeshFromWmoGroup(
     SM->InitResources();
     for (FStaticMaterial& Mat : SM->GetStaticMaterials()) { Mat.UVChannelData.bInitialized = true; }
 
+    if(Cache) Cache->CacheMesh(CacheKey,SM);
     return SM;
 }
 
