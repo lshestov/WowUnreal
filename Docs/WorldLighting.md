@@ -161,4 +161,24 @@ existing warnings), no failures. `16-world-acceptance` repeats the nine-case,
 21-frame exterior/door/interior route with the M2 and shadow changes combined.
 Floor colours and doorway outdoor weight remain unchanged. Median game-thread
 cost is .49–.60 ms, GPU 1.55–1.97 ms in this offline scene. These measurements
-do not include networking or gameplay UI. Clean published recheck is pending.
+do not include networking or gameplay UI. The published recheck is recorded below.
+
+## Final published installation
+
+Implementation `670b291d3565ac7ae1803af3aa8f10cfef11f7ab` was rebuilt without
+local changes and installed. `16-published-regression` repeats all 175 checks:
+171 clean, the same four existing warnings, zero failures. The installed
+executable repeats three routes: `16-published-world` (21 PNGs),
+`16-published-shadow` (27) and `16-published-m2` (8). All 56 nonempty engine
+captures were individually inspected, including moving camera, day/night,
+sunset, door/interior, authored local falloff and unload/reload. Both numerical
+render verifiers pass again. Realtime shadow step p95 is .000115/.000118
+degrees by day/night; accelerated-clock held fraction is zero.
+
+Each route's `install-verification.json` checks 908 source files and 1,481
+tracked runtime inputs against the stage, no extra sources, all 47 package
+files against the installation, and three identical executable SHA256 values:
+`D4478E4B17E52B4954F1006931E70A40B3B785DC26B19BF58655DD8A525DD6D9`.
+The source is published and clean, no overlays are applied, all clients are
+closed. Verification used no server login, database operation or user
+character. The final plan/documentation update does not change runtime inputs.
