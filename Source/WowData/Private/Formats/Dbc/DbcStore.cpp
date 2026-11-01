@@ -104,7 +104,7 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
 
     if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\Light.dbc"), Parser))
     {
-        LightDbc.Load(Parser);
+        LightDbc.Load(Parser,&MapDbc);
         ++Loaded;
 
         for (int32 i = 0; i < FMath::Min(3, LightDbc.Num()); ++i)

@@ -64,6 +64,7 @@ struct WOWDATA_API FWmoGroupData
     uint32 Flags = 0;
     uint32 GroupId = 0;
     uint16 PortalStart = 0, PortalCount = 0;
+    uint16 TransitionBatchCount = 0, InteriorBatchCount = 0, ExteriorBatchCount = 0;
     FWmoLiquidData Liquid;
     bool bIsValid = false;
 };
@@ -73,8 +74,10 @@ struct WOWDATA_API FWmoRootData
     TArray<FWmoMaterial> Materials;
     uint32 NumGroups = 0;
     TArray<FBox> GroupBounds;
+    TArray<uint32> GroupFlags;
+    FColor AmbientColor = FColor::Black;
     uint32 RootId = 0;
-    struct FPortal { uint16 Start=0, Count=0; };
+    struct FPortal { uint16 Start=0, Count=0; FVector Normal=FVector::ZeroVector; float Distance=0; };
     struct FPortalRef { uint16 Portal=0, Group=0; int16 Side=0; };
     TArray<FVector> PortalVertices;
     TArray<FPortal> Portals;

@@ -4,6 +4,7 @@
 #include "Components/PrimitiveComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "ProceduralMeshComponent.h"
 
 namespace
 {
@@ -29,7 +30,8 @@ FWowWmoLocation UWowWmoAreaComponent::Locate(UWorld* World,const FVector& Positi
 {
     FWowWmoLocation Result; if(!World) return Result;
     TArray<FHitResult> Hits; const FCollisionObjectQueryParams Objects(ECC_WorldStatic); FCollisionQueryParams Query(SCENE_QUERY_STAT(WowWmoArea),true);
-    World->LineTraceMultiByObjectType(Hits,Position+FVector(0,0,10),Position-FVector(0,0,500),Objects,Query);
+    Query.bReturnFaceIndex=true;
+    World->LineTraceMultiByObjectType(Hits,Position+FVector(0,0,10),Position-FVector(0,0,1200),Objects,Query);
     double Best=MAX_dbl,Terrain=MAX_dbl;
     for(const auto& Hit:Hits)
     {
@@ -41,7 +43,28 @@ FWowWmoLocation UWowWmoAreaComponent::Locate(UWorld* World,const FVector& Positi
         for(int32 I=0;I<Meta->Groups.Num();++I) if(Meta->Groups[I].Collision.Get()==Component)
         {
             if(!Meta->Groups[I].Bounds.ExpandBy(.25).IsInsideOrOn(Meta->ToLocal(Position))) break;
-            Result=Meta->Location(I,Position,MapId); Best=Distance; break;
+            Result=Meta->Location(I,Position,MapId); Best=Distance;
+            const auto& Room=Meta->Groups[I];
+            Result.Lighting=Room.FallbackLight;
+            Result.OutdoorLight=Result.Indoors?0.f:1.f;
+            const auto* Proc=Cast<UProceduralMeshComponent>(Component);
+            const auto* Section=Proc?const_cast<UProceduralMeshComponent*>(Proc)->GetProcMeshSection(0):nullptr;
+            if(Section && Hit.FaceIndex>=0 && Section->ProcIndexBuffer.IsValidIndex(Hit.FaceIndex*3+2))
+            {
+                const int32 A=Section->ProcIndexBuffer[Hit.FaceIndex*3],B=Section->ProcIndexBuffer[Hit.FaceIndex*3+1],C=Section->ProcIndexBuffer[Hit.FaceIndex*3+2];
+                if(Room.Lighting.IsValidIndex(A) && Room.Lighting.IsValidIndex(B) && Room.Lighting.IsValidIndex(C))
+                {
+                    const FVector P=Component->GetComponentTransform().InverseTransformPosition(Hit.ImpactPoint);
+                    FVector W=FMath::ComputeBaryCentric2D(P,Section->ProcVertexBuffer[A].Position,Section->ProcVertexBuffer[B].Position,Section->ProcVertexBuffer[C].Position);
+                    if(!W.ContainsNaN())
+                    {
+                        W=W.ComponentMax(FVector::ZeroVector); W/=FMath::Max(SMALL_NUMBER,W.X+W.Y+W.Z);
+                        Result.Lighting=Room.Lighting[A]*W.X+Room.Lighting[B]*W.Y+Room.Lighting[C]*W.Z;
+                        Result.OutdoorLight=FMath::Clamp(Result.Lighting.A,0.f,1.f);
+                    }
+                }
+            }
+            break;
         }
     }
     return Terrain+2<Best?FWowWmoLocation():Result;

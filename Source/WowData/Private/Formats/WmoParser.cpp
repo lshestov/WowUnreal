@@ -173,6 +173,7 @@ FWmoRootData FWmoParser::ParseRoot(const TArray<uint8>& Data)
             /*nDoodads*/               ReadU32(Base, Off, DataSize);
             /*nSets*/                  ReadU32(Base, Off, DataSize);
             const uint32 AmbientBGRA = ReadU32(Base, Off, DataSize);
+            Result.AmbientColor = FColor((AmbientBGRA>>16)&255,(AmbientBGRA>>8)&255,AmbientBGRA&255,AmbientBGRA>>24);
             Result.RootId            = ReadU32(Base, Off, DataSize);
 
             // Bounding box: min (3 floats), max (3 floats)
@@ -194,13 +195,12 @@ FWmoRootData FWmoParser::ParseRoot(const TArray<uint8>& Data)
             Result.Flags = Flags;
 
             (void)nMaterials; // materials count comes from MOMT chunk size
-            (void)AmbientBGRA;
         }
         else if (ChunkMagic == WMO_MOGI)
         {
             if(ChunkSize%32==0 && ChunkSize/32<=4096) for(uint32 I=0;I<ChunkSize/32;++I)
             {
-                uint32 Off=ChunkStart+I*32; ReadU32(Base,Off,DataSize);
+                uint32 Off=ChunkStart+I*32; Result.GroupFlags.Add(ReadU32(Base,Off,DataSize));
                 const float X=ReadFloat(Base,Off,DataSize),Y=ReadFloat(Base,Off,DataSize),Z=ReadFloat(Base,Off,DataSize);
                 const float MX=ReadFloat(Base,Off,DataSize),MY=ReadFloat(Base,Off,DataSize),MZ=ReadFloat(Base,Off,DataSize);
                 Result.GroupBounds.Add(FBox(FVector(X,Y,Z),FVector(MX,MY,MZ)));
@@ -274,7 +274,12 @@ FWmoRootData FWmoParser::ParseRoot(const TArray<uint8>& Data)
         else if (ChunkMagic == MakeFourCC('T','P','O','M'))
         {
             uint32 Off=ChunkStart;
-            for(uint32 I=0;I<ChunkSize/20;++I) {FWmoRootData::FPortal P; P.Start=ReadU16(Base,Off,DataSize); P.Count=ReadU16(Base,Off,DataSize); Off+=16; Result.Portals.Add(P);}
+            for(uint32 I=0;I<ChunkSize/20;++I)
+            {
+                FWmoRootData::FPortal P; P.Start=ReadU16(Base,Off,DataSize); P.Count=ReadU16(Base,Off,DataSize);
+                const float X=ReadFloat(Base,Off,DataSize),Y=ReadFloat(Base,Off,DataSize),Z=ReadFloat(Base,Off,DataSize);
+                P.Normal=FVector(X,Y,Z); P.Distance=ReadFloat(Base,Off,DataSize); Result.Portals.Add(P);
+            }
         }
         else if (ChunkMagic == MakeFourCC('R','P','O','M'))
         {
@@ -366,9 +371,9 @@ FWmoGroupData FWmoParser::ParseGroup(const TArray<uint8>& Data)
 
             Result.PortalStart  = ReadU16(Base, Off, DataSize);
             Result.PortalCount  = ReadU16(Base, Off, DataSize);
-            /*transBatchCount*/   ReadU16(Base, Off, DataSize);
-            /*intBatchCount*/     ReadU16(Base, Off, DataSize);
-            /*extBatchCount*/     ReadU16(Base, Off, DataSize);
+            Result.TransitionBatchCount = ReadU16(Base, Off, DataSize);
+            Result.InteriorBatchCount = ReadU16(Base, Off, DataSize);
+            Result.ExteriorBatchCount = ReadU16(Base, Off, DataSize);
             /*padding*/           ReadU16(Base, Off, DataSize);
             // fogs[4]
             Off += 4;

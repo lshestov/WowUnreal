@@ -14,6 +14,8 @@ struct WOWWORLD_API FWowWmoLocation
     bool Indoors=false,Minimap=false,WholeMap=false;
     FVector LocalPosition=FVector::ZeroVector;
     FString ZoneName,SubzoneName;
+    FLinearColor Lighting=FLinearColor::Black;
+    float OutdoorLight=1;
 };
 struct WOWWORLD_API FWowWmoMapQuad
 {
@@ -34,6 +36,8 @@ public:
         uint16 PortalStart=0,PortalCount=0;
         FBox Bounds=FBox(ForceInit);
         TWeakObjectPtr<UPrimitiveComponent> Collision;
+        TArray<FLinearColor> Lighting;
+        FLinearColor FallbackLight=FLinearColor::Black;
     };
     FString Path;
     uint32 RootId=0,NameSet=0;

@@ -1,4 +1,10 @@
 #include "WowSkyManager.h"
+#include "WowWmoArea.h"
+#include "WowWmoLighting.h"
+#include "Components/PointLightComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/MeshComponent.h"
+#include "EngineUtils.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/SkyAtmosphereComponent.h"
 #include "Components/SkyLightComponent.h"
@@ -27,6 +33,61 @@
 #include "Materials/MaterialExpressionTextureCoordinate.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowSky, Log, All);
+
+void AWowSkyManager::EndPlay(const EEndPlayReason::Type Reason)
+{
+    for(auto& Pair:UnitLights) if(Pair.Value.IsValid()) Pair.Value->DestroyComponent();
+    UnitLights.Reset(); LightingSubjects.Reset(); Super::EndPlay(Reason);
+}
+
+void AWowSkyManager::UpdateInteriorUnits(float DeltaTime)
+{
+    SubjectRefresh-=DeltaTime;
+    const APawn* Pawn=UGameplayStatics::GetPlayerPawn(this,0); if(!Pawn) return;
+    const FVector Focus=Pawn->GetActorLocation();
+    if(SubjectRefresh<=0)
+    {
+        SubjectRefresh=1; LightingSubjects.Reset(); LightingCursor=0;
+        for(TActorIterator<AActor> It(GetWorld());It;++It)
+        {
+            if(FVector::DistSquared(It->GetActorLocation(),Focus)>FMath::Square(10000.)) continue;
+            auto* Mesh=It->FindComponentByClass<USkeletalMeshComponent>();
+            if(Mesh && Mesh->LightingChannels.bChannel1) LightingSubjects.Add(*It);
+        }
+        LightingSubjects.Sort([&](const auto& A,const auto& B){return FVector::DistSquared(A->GetActorLocation(),Focus)<FVector::DistSquared(B->GetActorLocation(),Focus);});
+        if(LightingSubjects.Num()>64) LightingSubjects.SetNum(64);
+        for(auto It=UnitLights.CreateIterator();It;++It) if(!It.Key().IsValid() || !LightingSubjects.Contains(It.Key()))
+            {if(It.Value().IsValid()) It.Value()->DestroyComponent(); It.RemoveCurrent();}
+    }
+    for(int32 N=0;N<FMath::Min(16,LightingSubjects.Num());++N)
+    {
+        if(LightingCursor>=LightingSubjects.Num()) LightingCursor=0;
+        auto Subject=LightingSubjects[LightingCursor++]; if(!Subject.IsValid()) continue;
+        const auto Room=UWowWmoAreaComponent::Locate(GetWorld(),Subject->GetActorLocation()+FVector(0,0,20),CurrentMapId);
+        const float Blend=Room.Indoors?1.f-Room.OutdoorLight:0.f;
+        const FLinearColor Ambient=FWowWmoLighting::UnitAmbient(Room.Lighting)*Blend;
+        TInlineComponentArray<UMeshComponent*> Meshes(Subject.Get());
+        for(auto* Mesh:Meshes) for(int32 I=0;I<Mesh->GetNumMaterials();++I)
+            if(auto* Material=Cast<UMaterialInstanceDynamic>(Mesh->GetMaterial(I))) Material->SetVectorParameterValue(TEXT("WowInteriorAmbient"),Ambient);
+        auto* Light=UnitLights.FindRef(Subject).Get();
+        if(Blend<=.001f || Room.Lighting.IsAlmostBlack()) {if(Light) Light->SetVisibility(false); continue;}
+        if(!Light)
+        {
+            Light=NewObject<UPointLightComponent>(Subject.Get(),TEXT("WowUnitInteriorLight")); Subject->AddInstanceComponent(Light);
+            Light->SetupAttachment(Subject->GetRootComponent()); Light->SetMobility(EComponentMobility::Movable);
+            Light->SetRelativeLocation(FVector(0,0,215)); Light->bUseInverseSquaredFalloff=false; Light->LightFalloffExponent=1;
+            Light->SetAttenuationRadius(500); Light->SetCastShadows(false); Light->SetLightingChannels(false,true,false);
+            Light->MaxDrawDistance=8000; Light->MaxDistanceFadeRange=1000; Light->ComponentTags.Add(TEXT("WowUnitInteriorLight")); Light->RegisterComponent();
+            UnitLights.Add(Subject,Light);
+        }
+        FLinearColor Color=FWowWmoLighting::UnitDiffuse(Room.Lighting); const float Bright=FMath::Max3(Color.R,Color.G,Color.B);
+        Color/=FMath::Max(1.f,Bright); Color.A=1;
+        // Original fixed interior direction (-.30822,-.30822,-.9), converted
+        // from movement coordinates to UE; independent of the unit's facing.
+        Light->SetWorldLocation(Subject->GetActorLocation()+FVector(.30822,-.30822,.9)*250);
+        Light->SetLightColor(Color); Light->SetIntensity(4.f*FMath::Max(1.f,Bright)*Blend); Light->SetVisibility(true);
+    }
+}
 
 AWowSkyManager::AWowSkyManager()
 {
@@ -668,6 +729,7 @@ void AWowSkyManager::LoadLightZones(int32 MapId)
 void AWowSkyManager::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+	UpdateInteriorUnits(DeltaTime);
 
 	if (TimeSpeed != 0.0f)
 	{
@@ -991,8 +1053,9 @@ float AWowSkyManager::InterpolateDbcFloat(uint32 ParamID, ELightFloatProperty Pr
 		HighIdx = 0;
 	}
 
-	float LowVal = Entry->Values[LowIdx];
-	float HighVal = Entry->Values[HighIdx];
+	const float Units=Property==FP_FogDistance?1.f/36.f:1.f;
+	float LowVal = Entry->Values[LowIdx]*Units;
+	float HighVal = Entry->Values[HighIdx]*Units;
 	uint32 LowTime = Entry->Times[LowIdx];
 	uint32 HighTime = Entry->Times[HighIdx];
 
@@ -1027,7 +1090,7 @@ FLinearColor AWowSkyManager::BlendZoneColor(ELightProperty Property, const FVect
 
 	for (const FLightDbcEntry* Light : MapLights)
 	{
-		if (Light->FalloffEnd == 0.0f)
+		if (Light->IsGlobal())
 		{
 			DefaultLight = Light;
 			continue;
@@ -1089,7 +1152,7 @@ float AWowSkyManager::BlendZoneFloat(ELightFloatProperty Property, const FVector
 
 	for (const FLightDbcEntry* Light : MapLights)
 	{
-		if (Light->FalloffEnd == 0.0f)
+		if (Light->IsGlobal())
 		{
 			DefaultLight = Light;
 			continue;

@@ -9,6 +9,7 @@ class USkyLightComponent;
 class UExponentialHeightFogComponent;
 class UStaticMeshComponent;
 class UMaterialInstanceDynamic;
+class UPointLightComponent;
 struct FLightDbcEntry;
 
 /**
@@ -23,6 +24,7 @@ public:
 	AWowSkyManager();
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaTime) override;
+	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 
 	/** Current time in minutes (0-1440, where 720 = noon) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Sky")
@@ -51,6 +53,11 @@ public:
 	void LoadLightZones(int32 MapId);
 
 private:
+	TArray<TWeakObjectPtr<AActor>> LightingSubjects;
+	TMap<TWeakObjectPtr<AActor>,TWeakObjectPtr<UPointLightComponent>> UnitLights;
+	int32 LightingCursor=0;
+	float SubjectRefresh=0;
+	void UpdateInteriorUnits(float DeltaTime);
 	UPROPERTY()
 	TObjectPtr<UDirectionalLightComponent> SunLight;
 
@@ -111,8 +118,8 @@ private:
 	// Each Light.dbc paramID maps to 18 sequential LightIntParams rows
 	enum ELightProperty : uint8
 	{
-		LP_GlobalAmbient = 0,
-		LP_GlobalDiffuse = 1,
+		LP_GlobalDiffuse = 0,
+		LP_GlobalAmbient = 1,
 		LP_SkyTopColor = 2,
 		LP_SkyMiddleColor = 3,
 		LP_SkyBand1 = 4,

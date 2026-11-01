@@ -1,8 +1,8 @@
 #include "WowWmoRenderer.h"
 #include "WowWmoArea.h"
+#include "WowWmoLighting.h"
 #include "ProceduralMeshComponent.h"
 #include "WowWorldCollision.h"
-#include "Components/PointLightComponent.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "WowRuntimeMeshMaterials.h"
 #include "WowWaterMaterial.h"
@@ -99,8 +99,7 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
     auto* Area=WmoActor->FindComponentByClass<UWowWmoAreaComponent>();
     const FVector UEPos=WmoActor->GetActorLocation();
 
-    int32 GroupsLoaded = 0, InteriorFills=0;
-    TInlineComponentArray<UPointLightComponent*> ExistingLights; WmoActor->GetComponents(ExistingLights); InteriorFills=ExistingLights.Num();
+    int32 GroupsLoaded = 0;
 
     // Load each group as UStaticMesh with Nanite support
     for (uint32 GroupIdx = FMath::Max(FirstGroup,0); GroupIdx < RootData.NumGroups && GroupIdx<uint64(FMath::Max(FirstGroup,0))+uint64(FMath::Max(GroupLimit,0)); ++GroupIdx)
@@ -123,7 +122,8 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
         auto& Room=Area->Groups[GroupIdx]; Room.Id=GroupData.GroupId; Room.Flags=GroupData.Flags; Room.Bounds=GroupData.BoundingBox;
         Room.PortalStart=GroupData.PortalStart; Room.PortalCount=GroupData.PortalCount;
         Room.Collision=FWowWorldCollision::AddWmo(RootComp, *FString::Printf(TEXT("WmoCollision_%u"), GroupIdx), GroupData);
-        if (InteriorFills<4 && AddInteriorFill(RootComp,GroupData)) ++InteriorFills;
+        Room.Lighting=FWowWmoLighting::Prepare(RootData,GroupData);
+        Room.FallbackLight=FLinearColor(RootData.AmbientColor.R/255.f,RootData.AmbientColor.G/255.f,RootData.AmbientColor.B/255.f);
 
         // Create UStaticMesh with Nanite for this group
         UStaticMesh* GroupMesh = CreateStaticMeshFromWmoGroup(GroupData, RootData, WmoPath, GroupIdx, Mpq, Cache);
@@ -318,28 +318,6 @@ TArray<int32> FWowWmoRenderer::GroupLoadOrder(const FWmoRootData& Root,const FVe
     TArray<int32> Order; for(uint32 I=0;I<Root.NumGroups && I<4096;++I) Order.Add(int32(I));
     Order.Sort([&](int32 A,int32 B) {const auto Distance=[&](int32 I){return Root.GroupBounds.IsValidIndex(I) && Root.GroupBounds[I].IsValid?Root.GroupBounds[I].ComputeSquaredDistanceToPoint(ModelPosition):MAX_dbl;}; const double DA=Distance(A),DB=Distance(B); return DA==DB?A<B:DA<DB;}); return Order;
 }
-UPointLightComponent* FWowWmoRenderer::AddInteriorFill(USceneComponent* Parent,const FWmoGroupData& Group)
-{
-    // MOGP Indoor and MOCV describe local ambient lighting. Keep the fill on
-    // characters only; architectural surfaces already carry their baked colors.
-    // Format reference: wowdev/pywowlib, file_formats/wmo_format_group.py.
-    if (!Parent || !(Group.Flags&0x2000) || Group.VertexColors.IsEmpty() || !Group.BoundingBox.IsValid) return nullptr;
-    FLinearColor Color=FLinearColor::Black;
-    for (const auto& Vertex:Group.VertexColors) Color+=FLinearColor(Vertex);
-    Color/=Group.VertexColors.Num(); Color=Color.GetClamped(.25f,.8f);
-    const FVector Center=Group.BoundingBox.GetCenter();
-    auto* Light=NewObject<UPointLightComponent>(Parent->GetOwner());
-    Light->SetupAttachment(Parent); Light->SetMobility(EComponentMobility::Movable);
-    Light->SetRelativeLocation(FVector(Center.Y,Center.X,Center.Z)*FWowCoordinate::SCALE);
-    Light->SetLightColor(Color); Light->SetIntensity(3.f);
-    Light->bUseInverseSquaredFalloff=false; Light->LightFalloffExponent=1;
-    Light->SetAttenuationRadius(FMath::Clamp(float(Group.BoundingBox.GetExtent().Size()*100),1000.f,3500.f));
-    Light->SetCastShadows(false); Light->SetLightingChannels(false,true,false);
-    Light->MaxDrawDistance=10000; Light->MaxDistanceFadeRange=1000;
-    Light->ComponentTags.Add(TEXT("WowInteriorFill")); Light->RegisterComponent();
-    return Light;
-}
-
 UStaticMesh* FWowWmoRenderer::CreateStaticMeshFromWmoGroup(
     const FWmoGroupData& GroupData, const FWmoRootData& RootData,
     const FString& WmoPath, int32 GroupIdx,
@@ -359,6 +337,7 @@ UStaticMesh* FWowWmoRenderer::CreateStaticMeshFromWmoGroup(
     Attributes.Register();
 
     const int32 NumVerts = GroupData.Vertices.Num();
+    const auto Lighting = FWowWmoLighting::Prepare(RootData,GroupData);
 
     TVertexAttributesRef<FVector3f> VertexPositions = Attributes.GetVertexPositions();
     TVertexInstanceAttributesRef<FVector3f> VertexInstanceNormals = Attributes.GetVertexInstanceNormals();
@@ -414,9 +393,9 @@ UStaticMesh* FWowWmoRenderer::CreateStaticMeshFromWmoGroup(
             : FVector2f(0, 0);
         VertexInstanceUVs.Set(InstID, 0, UV);
 
-        if (i < GroupData.VertexColors.Num())
+        if (Lighting.IsValidIndex(i))
         {
-            FLinearColor LC(GroupData.VertexColors[i]);
+            const FLinearColor& LC=Lighting[i];
             VertexInstanceColors[InstID] = FVector4f(LC.R, LC.G, LC.B, LC.A);
         }
         else VertexInstanceColors[InstID]=FVector4f(1,1,1,1);
@@ -482,9 +461,10 @@ UStaticMesh* FWowWmoRenderer::CreateStaticMeshFromWmoGroup(
                 {
                     UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, SM);
                     MID->SetTextureParameterValue(FName(TEXT("Layer0Texture")), Tex);
-                    const bool Baked=GroupData.VertexColors.Num()==GroupData.Vertices.Num();
-                    MID->SetScalarParameterValue(TEXT("BakedLightStrength"),Baked?.65f:0.f);
-                    MID->SetScalarParameterValue(TEXT("BakedFill"),Baked?.08f:0.f);
+                    const bool Baked=Lighting.Num()==GroupData.Vertices.Num();
+                    MID->SetScalarParameterValue(TEXT("BakedLightStrength"),Baked?1.f:0.f);
+                    MID->SetVectorParameterValue(TEXT("WmoAmbient"),(RootData.Flags&2) || GroupData.VertexColors.IsEmpty()?FLinearColor::Black:FLinearColor(RootData.AmbientColor.R/255.f,RootData.AmbientColor.G/255.f,RootData.AmbientColor.B/255.f));
+                    MID->SetScalarParameterValue(TEXT("Unlit"),(WmoMat.Flags&1)?1.f:0.f);
                     Mat = MID;
                 }
             }

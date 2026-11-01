@@ -33,5 +33,35 @@ Local original-client definitions are in `src/wowdecomp`, in particular:
 - `Engine/Source/Model2/M2Data.h::M2Light`, `M2Model.cpp::Animate*` and
   `M2Light.cpp`: light colour/intensity/visibility tracks and bone transforms.
 
-The remaining production changes and their acceptance evidence are recorded
-below as each lighting task is verified. The three plan items remain open.
+## WMO lighting, first verified cycle
+
+The loader now retains MOHD ambient, MOGI group flags, MOGP batch counts and
+MOPT portal planes. `FWowWmoLighting` follows the original alpha preparation
+and portal-distance falloff. The WMO material blends its baked emission with
+the outdoor lit contribution per vertex instead of relighting the entire room.
+Unlit material flags and rooms without MOCV have explicit fallbacks.
+
+Units sample the collision floor triangle with barycentric interpolation.
+The original 168/255 diffuse minimum and 96/255 ambient cap preserve the floor
+hue. Ambient is applied to the character material; a bounded character-only
+point supplies the fixed interior diffuse direction. That point is an Unreal
+rendering approximation of the original directional unit light, with a 500 cm
+radius. At most 64 nearby subjects are tracked, with 16 updates per sky tick;
+the old four broad room fills per building are removed. Doorway MOCV alpha
+fades the local contribution back to the outdoor DBC light.
+
+The DBC audit also corrected diffuse/ambient band indices and converted the
+36x east/height/south editor coordinates and radii to movement coordinates.
+Dungeon maps use the original zero-origin rule. Global rows are identified
+by their zero position. Fog-distance bands use their original 1/36 scale.
+
+Verification: `logs/wowunreal-ui-completion/14-wmo-ambient-tests/index.json`
+contains eight successful checks (one existing room/minimap warning, no
+failures). `logs/wowunreal-lighting/14-wmo-ambient/verification.json` records
+nine rendered cases and 21 inspected nonempty PNGs, with no material fallback
+or network login. The indoor floor sample is `(0.1323,0.1473,0.2862)`, outdoor
+weight 0; the doorway weight is 0.77035. All 590 WMO shadow casters remain.
+Median game-thread cost is 0.48–0.57 ms and GPU cost 1.56–1.97 ms in these
+offline scenes. The same route's baseline was 0.47–0.52 and 1.58–2.01 ms.
+This first cycle marks WMO lighting pending a published clean-build recheck.
+M2 emitters and the shadow-flicker diagnosis remain separate open items.

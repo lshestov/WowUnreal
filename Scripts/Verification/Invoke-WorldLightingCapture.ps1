@@ -27,6 +27,7 @@ try {
 $report=Get-Content "$output\runtime.json" -Raw|ConvertFrom-Json
 if(-not $report.passed){throw "Capture failed: $($report.failure)"}
 if(Select-String "$output\client.log" -Pattern 'Authenticating with|Connecting to auth|Entering world as|Fatal error:|Assertion failed:'){throw 'Unexpected network activity or fatal error'}
+if(Select-String "$output\client.log" -Pattern 'Failed to compile Material|invalid ShaderMap|Invalid shader map|will use default material'){throw 'Material/shader fallback invalidates this visual run'}
 $expected=Get-Content $Spec -Raw|ConvertFrom-Json
 $shots=0; foreach($case in $expected.cases){$shots+=if($case.shots){$case.shots}else{1}}
 if(@(Get-ChildItem -LiteralPath $output -Filter '*.png').Count -ne $shots){throw "Expected $shots PNGs"}

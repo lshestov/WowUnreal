@@ -119,6 +119,7 @@ void AWowLightingTestGameMode::Tick(float DT)
         Row->SetNumberField(TEXT("pendingWmoGroups"),CachedWorldManager->GetPendingWmoGroupCount());
         const auto L=UWowWmoAreaComponent::Locate(GetWorld(),Subject?Subject->GetActorLocation():P,0);
         Row->SetBoolField(TEXT("indoors"),L.Indoors); Row->SetNumberField(TEXT("group"),L.Group);
+        Row->SetStringField(TEXT("floorLight"),L.Lighting.ToString()); Row->SetNumberField(TEXT("outdoorLight"),L.OutdoorLight);
         int32 Points=0,ShadowCasters=0;
         for(TActorIterator<AActor> It(GetWorld());It;++It)
         {

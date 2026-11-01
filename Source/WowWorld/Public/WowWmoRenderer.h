@@ -4,7 +4,6 @@
 class FMpqManager;
 class FWowAssetCache;
 class UStaticMesh;
-class UPointLightComponent;
 class USceneComponent;
 struct FAdtWmoPlacement;
 struct FWmoGroupData;
@@ -25,7 +24,6 @@ public:
     /** Query the number of groups in a WMO root file without spawning anything. Returns 0 on failure. */
     static uint32 GetWmoGroupCount(const FString& WmoPath, FMpqManager* Mpq);
     static TArray<int32> GroupLoadOrder(const FWmoRootData& Root,const FVector& ModelPosition);
-    static UPointLightComponent* AddInteriorFill(USceneComponent* Parent,const FWmoGroupData& Group);
 
 private:
     /** Construct group filename from root WMO path and group index */
