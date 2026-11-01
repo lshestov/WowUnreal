@@ -1,0 +1,14 @@
+{
+  "map": 0,
+  "cases": [
+    {"name":"abbey-day-outdoor","position":[-8930,-117,87],"target":[-8908,-149,91],"subject":[-8926,-122,83],"time":540},
+    {"name":"abbey-day-door","position":[-8917,-134,86],"target":[-8900,-169,86],"subject":[-8910,-147,83],"time":540},
+    {"name":"abbey-day-interior","position":[-8908,-151,86],"target":[-8899,-171,86],"subject":[-8904,-160,83],"time":540},
+    {"name":"abbey-night-interior","position":[-8908,-151,86],"target":[-8899,-171,86],"subject":[-8904,-160,83],"time":1200},
+    {"name":"abbey-night-door","position":[-8917,-134,86],"target":[-8900,-169,86],"subject":[-8910,-147,83],"time":1200},
+    {"name":"abbey-night-outdoor","position":[-8930,-117,87],"target":[-8908,-149,91],"subject":[-8926,-122,83],"time":1200},
+    {"name":"abbey-shadow-near","position":[-8930,-117,87],"end":[-8929,-116,87],"target":[-8908,-149,88],"subject":[-8926,-122,83],"time":540,"shots":5,"interval":0.15},
+    {"name":"abbey-shadow-far","position":[-8990,-70,100],"end":[-8989,-69,100],"target":[-8908,-149,90],"subject":[-8926,-122,83],"time":540,"shots":5,"interval":0.15},
+    {"name":"abbey-shadow-sunset","position":[-8930,-117,87],"target":[-8908,-149,88],"subject":[-8926,-122,83],"time":1050,"timeSpeed":0.25,"shots":5,"interval":0.15}
+  ]
+}
