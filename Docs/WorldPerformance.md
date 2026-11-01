@@ -115,3 +115,41 @@ is 272.25/623.43 ms. Root/group WMO builds, LOD1 and full terrain mesh preparati
 remain synchronous. Private memory reaches 6,437.3 MiB before collection and
 5,285.2 MiB on the final return. These results justify a separate scheduling
 and geometry-preparation change rather than claiming an overall FPS win.
+
+## Bounded streaming, first verified cycle
+
+Terrain and LOD1 ADT parsing, topology, normals/UVs, alpha packing and collision
+arrays are prepared on workers without actor/UObject construction. The same
+four-slot limit covers active reads and completed results waiting for upload.
+Requests are nearest-first; obsolete map generations are discarded without
+waiting on the game thread. One heavy unit per engine frame rotates between
+terrain upload, one M2 model group, one WMO group, LOD1 upload, WDL and one WMO
+root. The previous 100-group cutoff no longer sends smaller buildings through
+an unbounded whole-building build. Root probing is budgeted as well as spawning.
+
+Initial collision readiness includes pending M2 model groups. The performance
+route additionally waits for LOD1/WDL queues to empty; it therefore does not
+obtain a quicker result by capturing an incomplete distant world. Debug-map
+queued loads still finish when camera streaming is disabled. Normal object
+scans return to their 10 Hz cadence when the queue is empty.
+
+`19-streaming-tests` passes 23 checks (21 clean, the two existing relevant
+warnings). The worker regression independently compares every generated
+position/UV and the original triangle/hole/collision counts. The accepted
+`19-root-jobs-existing` route has ten inspected, nonempty PNGs. Queue telemetry
+records at most four prepared/active results, and scope frame IDs verify one
+heavy terrain/M2/LOD1/WDL unit per engine frame. Initial terrain still has
+750 sections, 923 source textures and all 590 WMO shadow casters.
+
+Ordinary initial frame p99 falls from 270.26 to 61.65 ms; maximum from 569.73
+to 336.37 ms in these existing-project-directory runs. On the Elwynn crossing,
+maximum falls from 275.49 to 88.39 ms. Repeated Abbey-return maxima fall from
+543–548 to 89–97 ms. First Westfall settling improves 20.18→13.96 s; repeated
+Westfall settling 16.42→8.28/11.50 s. WMO creation p95/max is 14.18/94.21 ms,
+compared with 23.35/325.23 ms in the first original run. Initial fully settled
+time is still 15.05 s: total mesh construction work remains substantial.
+
+The shorter route finishes before the previous run's automatic collection
+window; private memory reaches 7,856.4 MiB. This is retained as an unresolved
+memory result. Repeated asset reconstruction and parsed-model cache ownership
+are the next changes, followed by a longer post-collection cycle test.

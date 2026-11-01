@@ -4,6 +4,7 @@
 #include "WowWorldCollision.h"
 #include "WowRuntimeMeshMaterials.h"
 #include "WowTerrainTile.h"
+#include "WowTerrainGeometry.h"
 #include "Mpq/MpqManager.h"
 #include "WowAssetCache.h"
 #include "Formats/AdtParser.h"
@@ -337,7 +338,7 @@ void AWowWorldManager::BeginPlay()
 {
     Super::BeginPlay();
     const TWeakObjectPtr<AWowWorldManager> Weak(this);
-    WmoTicker=FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([Weak](float){if(!Weak.IsValid()) return false; if(!Weak->bStreamingSuspended && Weak->bStreamingEnabled) Weak->UpdatePendingWmoLoads(); return true;}));
+    WmoTicker=FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([Weak](float){if(!Weak.IsValid()) return false; if(!Weak->bStreamingSuspended && Weak->MpqManager && Weak->MpqManager->IsInitialized()) Weak->PumpStreamingWork(); return true;}));
     const TCHAR* CmdLine = FCommandLine::Get();
     MpqManager = MakeUnique<FMpqManager>();
     AssetCache = MakeUnique<FWowAssetCache>();
@@ -580,7 +581,7 @@ bool AWowWorldManager::SelectMap(uint32 MapId)
     bStreamingSuspended=true; bStreamingEnabled=false; ++MapGeneration;
     // Old MPQ reads can finish in the background; their generation prevents
     // them from being finalized into this map without blocking the game thread.
-    PendingTileKeys.Reset(); InitialTileKeys.Reset(); InitialTilesQueued=InitialTilesLoaded=InitialObjectTiles=0; PendingWmoLoads.Reset(); WmoGroupCounts.Reset(); PendingObjectGroups=0;
+    PendingTileKeys.Reset(); PendingLod1Keys.Reset(); PendingWdlKeys.Reset(); PendingWdlTiles.Reset(); InitialTileKeys.Reset(); InitialTilesQueued=InitialTilesLoaded=InitialObjectTiles=0; PendingWmoLoads.Reset(); WmoGroupCounts.Reset(); PendingObjectGroups=0;
     if(IsValid(GlobalWmo)) GlobalWmo->Destroy(); GlobalWmo=nullptr;
     for(auto& Pair:LoadedTiles) if(IsValid(Pair.Value))
     {
@@ -688,10 +689,10 @@ void AWowWorldManager::Tick(float DT)
     FWowStreamingProfile Profile(TEXT("worldTick"));
     Super::Tick(DT);
 
-    // Always process completed async loads, even before streaming is enabled
-    ProcessPendingLoads();
+    // The core ticker also pumps queued debug-map loads when streaming is disabled
+    // Heavy work is round-robin pumped by the core ticker, one unit per frame.
     if(!bStreamingSuspended && bStreamingEnabled && MpqManager && MpqManager->IsInitialized())
-    {UpdateStreaming(); UpdateObjectStreaming();}
+    {UpdateStreaming();}
 
     if (bAutoWaitForInitialLoad && !bAutoTimerArmed)
     {
@@ -836,39 +837,55 @@ void AWowWorldManager::LoadTileAsync(int32 TX, int32 TY)
 
     UE_LOG(LogWowWorld, Log, TEXT("Async loading tile %d,%d"), TX, TY);
 
-    // Capture what we need for the background thread
-    FMpqManager* Mpq = MpqManager.Get();
-    FString Map = MapName;
-    bool bBigAlpha = WdtData ? WdtData->bUseBigAlpha : false;
-
     FPendingTileLoad Pending;
-    Pending.TX = TX;
-    Pending.TY = TY;
-    Pending.Generation=MapGeneration;
-    Pending.Future = Async(EAsyncExecution::ThreadPool, [Mpq, Map, TX, TY, bBigAlpha]() -> TSharedPtr<FAdtData>
-    {
-        FString AdtPath = FString::Printf(TEXT("World\\Maps\\%s\\%s_%d_%d.adt"), *Map, *Map, TX, TY);
-        TArray<uint8> AdtRaw;
-        if (!Mpq->ReadFile(AdtPath, AdtRaw))
-        {
-            UE_LOG(LogWowWorld, Warning, TEXT("Async: Failed to read ADT: %s"), *AdtPath);
-            return nullptr;
-        }
-
-        TSharedPtr<FAdtData> Result = MakeShared<FAdtData>(FAdtParser::Parse(AdtRaw, bBigAlpha));
-        if (!Result->bIsValid)
-        {
-            UE_LOG(LogWowWorld, Warning, TEXT("Async: Failed to parse ADT: %s"), *AdtPath);
-            return nullptr;
-        }
-
-        return Result;
-    });
-
+    Pending.TX=TX; Pending.TY=TY; Pending.Generation=MapGeneration;
     PendingLoads.Add(MoveTemp(Pending));
 }
 
-void AWowWorldManager::FinalizeTileLoad(int32 TX, int32 TY, TSharedPtr<FAdtData> AdtData)
+void AWowWorldManager::StartPendingTileLoads()
+{
+    // Ready results count against the same four-slot cap as active reads.
+    // Camera/map changes discard stale work without waiting on the game thread.
+    const FVector Focus=GetStreamingFocus(); const auto Tile=FWowCoordinate::WorldToTile(Focus);
+    for(int32 I=PendingLoads.Num()-1;I>=0;--I)
+    {
+        auto& P=PendingLoads[I];
+        const int32 Limit=P.Lod1?Lod1Radius+1:UnloadRadius;
+        const bool Far=GetTileDistance(Tile,P.TX,P.TY)>Limit && !InitialTileKeys.Contains(TileKey(P.TX,P.TY));
+        if(P.Generation!=MapGeneration || Far)
+        {
+            if(P.Generation==MapGeneration) (P.Lod1?PendingLod1Keys:PendingTileKeys).Remove(TileKey(P.TX,P.TY));
+            if(!P.Future.IsValid() || P.Future.IsReady()){if(P.Future.IsValid()) P.Future.Get(); PendingLoads.RemoveAt(I);}
+        }
+    }
+    int32 InFlight=0; for(const auto& P:PendingLoads) if(P.Future.IsValid()) ++InFlight;
+    while(InFlight<4)
+    {
+        int32 Best=INDEX_NONE; double Distance=MAX_dbl;
+        for(int32 I=0;I<PendingLoads.Num();++I)
+        {
+            const auto& P=PendingLoads[I]; if(P.Generation!=MapGeneration || P.Future.IsValid()) continue;
+            const double D=FVector::DistSquared2D(FWowCoordinate::TileToWorld(P.TX,P.TY),Focus)+(P.Lod1?1.e14:0);
+            if(D<Distance){Distance=D; Best=I;}
+        }
+        if(Best<0) break;
+        auto& P=PendingLoads[Best]; const int32 TX=P.TX,TY=P.TY; const bool Lod1=P.Lod1,BigAlpha=WdtData && WdtData->bUseBigAlpha;
+        FMpqManager* Mpq=MpqManager.Get(); const FString Map=MapName;
+        P.Future=Async(EAsyncExecution::ThreadPool,[Mpq,Map,TX,TY,Lod1,BigAlpha]()
+        {
+            FWowPreparedTile Result; TArray<uint8> Raw;
+            if(Mpq->ReadFile(FString::Printf(TEXT("World\\Maps\\%s\\%s_%d_%d.adt"),*Map,*Map,TX,TY),Raw))
+            {
+                auto Data=MakeShared<FAdtData>(FAdtParser::Parse(Raw,BigAlpha));
+                if(Data->bIsValid){Result.Geometry=MakeShared<FWowTerrainGeometry>(*Data,TX,TY,Lod1); Result.Data=MoveTemp(Data);}
+            }
+            return Result;
+        });
+        ++InFlight;
+    }
+}
+
+void AWowWorldManager::FinalizeTileLoad(int32 TX, int32 TY, TSharedPtr<FAdtData> AdtData,TSharedPtr<FWowTerrainGeometry> Prepared)
 {
     FWowStreamingProfile Profile(TEXT("finalizeTile"));
     if (!AdtData || IsTileLoaded(TX, TY))
@@ -884,10 +901,11 @@ void AWowWorldManager::FinalizeTileLoad(int32 TX, int32 TY, TSharedPtr<FAdtData>
     AWowTerrainTile* Tile = GetWorld()->SpawnActor<AWowTerrainTile>(AWowTerrainTile::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
     if (Tile)
     {
-        Tile->BuildFromAdtData(*AdtData, TX, TY, MpqManager.Get(), AssetCache.Get(), &SpawnedWmoIds);
+        Tile->BuildFromAdtData(*AdtData, TX, TY, MpqManager.Get(), AssetCache.Get(), &SpawnedWmoIds,MoveTemp(Prepared));
         if (TerrainRVT) Tile->ApplyRuntimeVirtualTexture(TerrainRVT);
         int64 Key = TileKey(TX, TY);
         LoadedTiles.Add(Key, Tile);
+        ObjectScanPending=true;
 
         // Track initial load progress
         if (InitialTileKeys.Contains(Key))
@@ -899,27 +917,77 @@ void AWowWorldManager::FinalizeTileLoad(int32 TX, int32 TY, TSharedPtr<FAdtData>
     }
 }
 
-void AWowWorldManager::ProcessPendingLoads()
+bool AWowWorldManager::ProcessPendingLoads(bool Lod1)
 {
-    int32 Finalized = 0;
-    for (int32 i = PendingLoads.Num() - 1; i >= 0; --i)
+    int32 Best=INDEX_NONE; double Distance=MAX_dbl; const FVector Focus=GetStreamingFocus();
+    for(int32 I=0;I<PendingLoads.Num();++I)
     {
-        FPendingTileLoad& Pending = PendingLoads[i];
-        if (Pending.Future.IsReady())
-        {
-            if(Pending.Generation!=MapGeneration) {Pending.Future.Get(); PendingLoads.RemoveAt(i); continue;}
-            if(Finalized>=1) continue;
-            TSharedPtr<FAdtData> Result = Pending.Future.Get();
-            int64 Key = TileKey(Pending.TX, Pending.TY);
-            PendingTileKeys.Remove(Key);
+        const auto& P=PendingLoads[I]; if(P.Generation!=MapGeneration || P.Lod1!=Lod1 || !P.Future.IsValid() || !P.Future.IsReady()) continue;
+        const double D=FVector::DistSquared2D(FWowCoordinate::TileToWorld(P.TX,P.TY),Focus);
+        if(D<Distance){Distance=D; Best=I;}
+    }
+    if(Best<0) return false;
+    auto& P=PendingLoads[Best]; const int32 TX=P.TX,TY=P.TY; auto Result=P.Future.Get();
+    (Lod1?PendingLod1Keys:PendingTileKeys).Remove(TileKey(TX,TY)); PendingLoads.RemoveAt(Best);
+    if(Result.Data)
+    {
+        if(Lod1){if(!IsTileLoaded(TX,TY) && !IsTilePending(TX,TY)) SpawnLod1Tile(TX,TY,*Result.Data,MoveTemp(Result.Geometry));}
+        else FinalizeTileLoad(TX,TY,MoveTemp(Result.Data),MoveTemp(Result.Geometry));
+    }
+    return true;
+}
 
-            if (Result)
-            {
-                FinalizeTileLoad(Pending.TX, Pending.TY, Result);
-                ++Finalized;
-            }
-            PendingLoads.RemoveAt(i);
-        }
+FVector AWowWorldManager::GetStreamingFocus() const
+{
+    FVector Position=FVector::ZeroVector; FRotator Rotation;
+    if(auto* PC=UGameplayStatics::GetPlayerController(this,0)) PC->GetPlayerViewPoint(Position,Rotation);
+    return StreamingPosition(Position);
+}
+int32 AWowWorldManager::GetPendingDoodadJobs() const
+{
+    int32 Count=0; for(const auto& P:LoadedTiles) if(IsValid(P.Value) && P.Value->HasPendingDoodads()) ++Count;
+    return Count;
+}
+int32 AWowWorldManager::GetPreparedTileCount() const
+{int32 Count=0; for(const auto& P:PendingLoads) if(P.Future.IsValid()) ++Count; return Count;}
+bool AWowWorldManager::IsInitialLoadComplete() const
+{
+    if(WdtData && (WdtData->Flags&1)) return WdtData->bIsValid && IsValid(GlobalWmo) && PendingWmoLoads.IsEmpty();
+    return InitialTilesQueued>0 && InitialTilesLoaded>=InitialTilesQueued && InitialObjectTiles>=InitialTilesQueued && PendingWmoLoads.IsEmpty() && GetPendingDoodadJobs()==0;
+}
+bool AWowWorldManager::IsStreamingWorkIdle() const
+{return PendingTileKeys.IsEmpty() && PendingLod1Keys.IsEmpty() && PendingWdlKeys.IsEmpty() && GetPendingWmoGroupCount()==0 && GetPendingDoodadJobs()==0;}
+bool AWowWorldManager::ProcessDoodadJob()
+{
+    AWowTerrainTile* Best=nullptr; double Distance=MAX_dbl; const FVector Focus=GetStreamingFocus();
+    for(const auto& Pair:LoadedTiles) if(IsValid(Pair.Value) && Pair.Value->HasPendingDoodads())
+    {
+        const double D=FVector::DistSquared2D(Pair.Value->GetActorLocation(),Focus);
+        if(D<Distance){Distance=D; Best=Pair.Value;}
+    }
+    return Best && Best->StreamNextDoodad();
+}
+bool AWowWorldManager::ProcessWdlJob()
+{
+    while(!PendingWdlTiles.IsEmpty())
+    {
+        const auto Point=PendingWdlTiles.Pop(EAllowShrinking::No); PendingWdlKeys.Remove(TileKey(Point.X,Point.Y));
+        const auto Focus=FWowCoordinate::WorldToTile(GetStreamingFocus());
+        if(GetTileDistance(Focus,Point.X,Point.Y)>WdlRadius || IsTileLoaded(Point.X,Point.Y) || IsTilePending(Point.X,Point.Y) || Lod1Tiles.Contains(TileKey(Point.X,Point.Y)) || WdlTiles.Contains(TileKey(Point.X,Point.Y))) continue;
+        SpawnWdlTile(Point.X,Point.Y); return true;
+    }
+    return false;
+}
+void AWowWorldManager::PumpStreamingWork()
+{
+    StartPendingTileLoads();
+    // One heavy unit per engine frame. Rotating classes prevents terrain,
+    // city rooms, foliage and distant terrain from starving one another.
+    for(int32 Attempt=0;Attempt<6;++Attempt)
+    {
+        const int32 Kind=NextWorkKind; NextWorkKind=(NextWorkKind+1)%6;
+        const bool Worked=Kind==0?ProcessPendingLoads():Kind==1?ProcessDoodadJob():Kind==2?UpdatePendingWmoLoads():Kind==3?ProcessPendingLoads(true):Kind==4?ProcessWdlJob():UpdateObjectStreaming();
+        if(Worked) return;
     }
 }
 
@@ -1047,10 +1115,14 @@ void AWowWorldManager::UpdateWdlStreaming(const FIntPoint& CameraTile)
 
     // Load WDL tiles in range (beyond LOD 0 radius, up to WdlRadius).
     // Throttle to 5 per call to avoid spawning 500+ tiles in one frame.
-    int32 WdlSpawned = 0;
-    for (int32 DX = -WdlRadius; DX <= WdlRadius && WdlSpawned < 5; ++DX)
+    PendingWdlTiles.RemoveAll([&](const FIntPoint& P)
     {
-        for (int32 DY = -WdlRadius; DY <= WdlRadius && WdlSpawned < 5; ++DY)
+        const bool Gone=GetTileDistance(CameraTile,P.X,P.Y)>WdlRadius || IsTileLoaded(P.X,P.Y) || IsTilePending(P.X,P.Y) || Lod1Tiles.Contains(TileKey(P.X,P.Y));
+        if(Gone) PendingWdlKeys.Remove(TileKey(P.X,P.Y)); return Gone;
+    });
+    for (int32 DX = -WdlRadius; DX <= WdlRadius; ++DX)
+    {
+        for (int32 DY = -WdlRadius; DY <= WdlRadius; ++DY)
         {
             int32 TX = CameraTile.X + DX;
             int32 TY = CameraTile.Y + DY;
@@ -1062,13 +1134,12 @@ void AWowWorldManager::UpdateWdlStreaming(const FIntPoint& CameraTile)
 
             // Skip tiles already loaded as WDL
             int64 Key = TileKey(TX, TY);
-            if (WdlTiles.Contains(Key)) continue;
+            if (WdlTiles.Contains(Key) || PendingWdlKeys.Contains(Key)) continue;
 
             // Must have WDL data for this tile
             if (!WdlData->HasTile(TX, TY)) continue;
 
-            SpawnWdlTile(TX, TY);
-            ++WdlSpawned;
+            if(!PendingWdlKeys.Contains(Key)) {PendingWdlKeys.Add(Key); PendingWdlTiles.Add(FIntPoint(TX,TY));}
         }
     }
 
@@ -1299,10 +1370,9 @@ void AWowWorldManager::UpdateLod1Streaming(const FIntPoint& CameraTile)
 
     // Load LOD 1 tiles in mid-range (beyond full-detail, within Lod1Radius).
     // Spawn up to 4 LOD1 tiles per tick for faster loading
-    int32 Lod1Spawned = 0;
-    for (int32 DX = -Lod1Radius; DX <= Lod1Radius && Lod1Spawned < 4; ++DX)
+    for (int32 DX = -Lod1Radius; DX <= Lod1Radius; ++DX)
     {
-        for (int32 DY = -Lod1Radius; DY <= Lod1Radius && Lod1Spawned < 4; ++DY)
+        for (int32 DY = -Lod1Radius; DY <= Lod1Radius; ++DY)
         {
             int32 Dist = FMath::Max(FMath::Abs(DX), FMath::Abs(DY));
             // Only LOD 1 range: beyond LoadRadius, within Lod1Radius
@@ -1317,10 +1387,12 @@ void AWowWorldManager::UpdateLod1Streaming(const FIntPoint& CameraTile)
             if (IsTileLoaded(TX, TY) || IsTilePending(TX, TY)) continue;
 
             int64 Key = TileKey(TX, TY);
-            if (Lod1Tiles.Contains(Key)) continue;
+            if (Lod1Tiles.Contains(Key) || PendingLod1Keys.Contains(Key)) continue;
 
-            SpawnLod1Tile(TX, TY);
-            ++Lod1Spawned;
+            if(!PendingLod1Keys.Contains(Key))
+            {
+                PendingLod1Keys.Add(Key); FPendingTileLoad Pending; Pending.TX=TX; Pending.TY=TY; Pending.Generation=MapGeneration; Pending.Lod1=true; PendingLoads.Add(MoveTemp(Pending));
+            }
         }
     }
 
@@ -1345,20 +1417,10 @@ void AWowWorldManager::UpdateLod1Streaming(const FIntPoint& CameraTile)
     }
 }
 
-void AWowWorldManager::SpawnLod1Tile(int32 TX, int32 TY)
+void AWowWorldManager::SpawnLod1Tile(int32 TX,int32 TY,const FAdtData& AdtData,TSharedPtr<FWowTerrainGeometry> Prepared)
 {
     FWowStreamingProfile Profile(TEXT("lod1"));
-    FString AdtPath = FString::Printf(TEXT("World\\Maps\\%s\\%s_%d_%d.adt"), *MapName, *MapName, TX, TY);
-    TArray<uint8> AdtRaw;
-    if (!MpqManager->ReadFile(AdtPath, AdtRaw))
-    {
-        return;
-    }
-
-    bool bBigAlpha = WdtData ? WdtData->bUseBigAlpha : false;
-    FAdtData AdtData = FAdtParser::Parse(AdtRaw, bBigAlpha);
-    if (!AdtData.bIsValid) return;
-
+    if(!Prepared || Lod1Tiles.Contains(TileKey(TX,TY))) return;
     FVector TileCenter = FWowCoordinate::TileToWorld(TX, TY);
 
     FActorSpawnParameters SpawnParams;
@@ -1371,89 +1433,20 @@ void AWowWorldManager::SpawnLod1Tile(int32 TX, int32 TY)
     Root->RegisterComponent();
     Lod1Actor->SetRootComponent(Root);
 
-    // Build LOD1 mesh with per-chunk base texture (no alpha blending, just primary texture)
-    FMeshDescription MeshDesc;
-    MeshDesc.SetNumUVChannels(2);
-    FStaticMeshAttributes SMAttributes(MeshDesc);
-    SMAttributes.Register();
-
-    TVertexAttributesRef<FVector3f> VertexPositions = SMAttributes.GetVertexPositions();
-    TVertexInstanceAttributesRef<FVector3f> VertexInstanceNormals = SMAttributes.GetVertexInstanceNormals();
-    TVertexInstanceAttributesRef<FVector3f> VertexInstanceTangents = SMAttributes.GetVertexInstanceTangents();
-    TVertexInstanceAttributesRef<float> VertexInstanceBinormalSigns = SMAttributes.GetVertexInstanceBinormalSigns();
-    TVertexInstanceAttributesRef<FVector2f> VertexInstanceUVs = SMAttributes.GetVertexInstanceUVs();
-
-    // Group chunks by their base texture to minimize material count
-    TMap<int32, TArray<int32>> TexToChunks;
-    for (int32 i = 0; i < 256; ++i)
-    {
-        int32 BaseTexIdx = (AdtData.Chunks[i].TextureIndices.Num() > 0)
-            ? AdtData.Chunks[i].TextureIndices[0] : -1;
-        TexToChunks.FindOrAdd(BaseTexIdx).Add(i);
-    }
-
+    auto& MeshDesc=Prepared->Mesh;
     TArray<UMaterialInterface*> SectionMaterials;
-    UMaterial* BaseMat = FWowTerrainMaterial::GetBaseMaterial();
-    int32 TotalChunks = 0;
-
-    for (auto& Pair : TexToChunks)
+    UMaterial* BaseMat=FWowTerrainMaterial::GetBaseMaterial();
+    const int32 TotalChunks=Prepared->Chunks;
+    for(int32 Representative:Prepared->Representatives)
     {
-        FPolygonGroupID PolyGroup = MeshDesc.CreatePolygonGroup();
-
-        for (int32 ChunkIdx : Pair.Value)
-        {
-            const FAdtChunkData& ChunkData = AdtData.Chunks[ChunkIdx];
-            FTerrainChunkMeshData MeshData = FTerrainMeshBuilder::BuildChunkMeshLOD1(ChunkData, TX, TY);
-            if (MeshData.Vertices.Num() == 0 || MeshData.Indices.Num() == 0) continue;
-
-            TArray<FVertexInstanceID> ChunkVertInstIDs;
-            ChunkVertInstIDs.SetNum(MeshData.Vertices.Num());
-
-            for (int32 v = 0; v < MeshData.Vertices.Num(); ++v)
-            {
-                const FVector& P = MeshData.Vertices[v];
-                FVertexID VertID = MeshDesc.CreateVertex();
-                VertexPositions[VertID] = FVector3f(P.X, P.Y, P.Z);
-
-                FVertexInstanceID InstID = MeshDesc.CreateVertexInstance(VertID);
-                ChunkVertInstIDs[v] = InstID;
-
-                FVector3f N = (v < MeshData.Normals.Num())
-                    ? FVector3f(MeshData.Normals[v]) : FVector3f(0, 0, 1);
-                N.Normalize();
-                VertexInstanceNormals[InstID] = N;
-
-                FVector3f T = FVector3f::CrossProduct(N, FVector3f(0, 1, 0));
-                if (T.SizeSquared() < 0.001f)
-                    T = FVector3f::CrossProduct(N, FVector3f(1, 0, 0));
-                T.Normalize();
-                VertexInstanceTangents[InstID] = T;
-                VertexInstanceBinormalSigns[InstID] = 1.0f;
-
-                FVector2f UV1 = (v < MeshData.TiledUVs.Num())
-                    ? FVector2f(MeshData.TiledUVs[v]) : FVector2f(0, 0);
-                VertexInstanceUVs.Set(InstID, 0, UV1); // Use tiled UVs for UV0 too
-                VertexInstanceUVs.Set(InstID, 1, UV1);
-            }
-
-            for (int32 t = 0; t < MeshData.Indices.Num(); t += 3)
-            {
-                TArray<FVertexInstanceID> TriVerts;
-                TriVerts.Add(ChunkVertInstIDs[MeshData.Indices[t]]);
-                TriVerts.Add(ChunkVertInstIDs[MeshData.Indices[t + 1]]);
-                TriVerts.Add(ChunkVertInstIDs[MeshData.Indices[t + 2]]);
-                MeshDesc.CreatePolygon(PolyGroup, TriVerts);
-            }
-
-            TotalChunks++;
-        }
-
+        const auto& Chunk=AdtData.Chunks[Representative];
+        const int32 BaseTexture=Chunk.TextureIndices.IsEmpty()?INDEX_NONE:Chunk.TextureIndices[0];
         // One MID per unique base texture
         UMaterialInstanceDynamic* MID = nullptr;
-        if (BaseMat && Pair.Key >= 0 && AdtData.TexturePaths.IsValidIndex(Pair.Key))
+        if (BaseMat && BaseTexture >= 0 && AdtData.TexturePaths.IsValidIndex(BaseTexture))
         {
             UTexture2D* Tex = FWowTerrainMaterial::LoadBlpTexture(
-                AdtData.TexturePaths[Pair.Key], MpqManager.Get(), AssetCache.Get());
+                AdtData.TexturePaths[BaseTexture], MpqManager.Get(), AssetCache.Get());
             if (Tex)
             {
                 MID = UMaterialInstanceDynamic::Create(BaseMat, Lod1Actor);
@@ -1468,14 +1461,14 @@ void AWowWorldManager::SpawnLod1Tile(int32 TX, int32 TY)
     {
         UStaticMesh* SM = NewObject<UStaticMesh>();
         FWowRuntimeMeshMaterials::Assign(SM, MeshDesc, SectionMaterials);
-        SM->bAllowCPUAccess = true;
+        SM->bAllowCPUAccess = false;
 
         TArray<const FMeshDescription*> MeshDescs;
         MeshDescs.Add(&MeshDesc);
         UStaticMesh::FBuildMeshDescriptionsParams Params;
         Params.bBuildSimpleCollision = false;
         Params.bFastBuild = true;
-        Params.bCommitMeshDescription = true;
+        Params.bCommitMeshDescription = false;
         SM->BuildFromMeshDescriptions(MeshDescs, Params);
         SM->NeverStream = true;
         SM->InitResources();
@@ -1540,11 +1533,13 @@ void AWowWorldManager::UpdateZoneAudio()
     }
 }
 
-void AWowWorldManager::UpdateObjectStreaming()
+bool AWowWorldManager::UpdateObjectStreaming()
 {
-    if(WdtData && (WdtData->Flags&1)) return;
+    if(!bStreamingEnabled) return false;
+    if(WdtData && (WdtData->Flags&1)) return false;
+    const double Now=FPlatformTime::Seconds(); if(!ObjectScanPending && Now<NextObjectScan) return false;
     APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
-    if (!PC) return;
+    if (!PC) return false;
 
     FVector CamLoc;
     FRotator CamRot;
@@ -1691,12 +1686,17 @@ void AWowWorldManager::UpdateObjectStreaming()
 
             // Large cities use the same renderer in a bounded, incremental job.
             const FString CountKey=WmoPath.ToLower();
+            const uint32* Known=WmoGroupCounts.Find(CountKey);
+            if(Known && (*Known==0 || ActiveWmoGroupCount+int32(*Known)>MaxActiveWmoGroups)) continue;
+            // Budget root reads too: querying every remaining root here used
+            // to bypass the one-object-start limit on the first scan.
+            if(WmosStarted>=1) {PendingObjectGroups+=Known?int32(*Known):1; continue;}
+            ++WmosStarted;
             if(!WmoGroupCounts.Contains(CountKey)) WmoGroupCounts.Add(CountKey,FWowWmoRenderer::GetWmoGroupCount(WmoPath,Tile->CachedMpq));
             const uint32 GroupCount=WmoGroupCounts[CountKey];
             if (GroupCount == 0) continue;
             // Check if adding this WMO would exceed the group limit
             if (ActiveWmoGroupCount + (int32)GroupCount > MaxActiveWmoGroups) continue;
-            if(WmosStarted>=1) {PendingObjectGroups+=int32(GroupCount); continue;}
 
             // Spawn it
             AActor* WmoActor=nullptr;
@@ -1720,11 +1720,12 @@ void AWowWorldManager::UpdateObjectStreaming()
                 Tile->SpawnedWmos.Add(Placement.UniqueId, WmoActor);
                 SpawnedWmoIds.Add(Placement.UniqueId);
                 ActiveWmoGroupCount += (int32)GroupCount;
-                ++WmosStarted;
             }
         }
     }
     InitialObjectTiles=PendingObjectGroups?0:InitialTilesLoaded;
+    ObjectScanPending=PendingObjectGroups>0; NextObjectScan=Now+.1;
+    return WmosStarted>0 || DoodadsStarted>0;
 }
 
 bool AWowWorldManager::LoadGlobalWmo(const FVector& Position)
@@ -1740,14 +1741,22 @@ bool AWowWorldManager::LoadGlobalWmo(const FVector& Position)
     FPendingWmoLoad Job; Job.Actor=GlobalWmo; Job.Path=WdtData->GlobalWmoPath; Job.Placement=Placement; Job.Root=Root; Job.Mpq=MpqManager.Get(); Job.Cache=AssetCache.Get(); Job.Order=FWowWmoRenderer::GroupLoadOrder(*Root,FVector(P.Y,P.X,P.Z)); PendingWmoLoads.Add(MoveTemp(Job));
     ActiveWmoGroupCount=Root->NumGroups; UE_LOG(LogWowWorld,Log,TEXT("Streaming global WMO %s (%u groups)"),*WdtData->GlobalWmoPath,Root->NumGroups); return true;
 }
-void AWowWorldManager::UpdatePendingWmoLoads()
+bool AWowWorldManager::UpdatePendingWmoLoads()
 {
     FWowStreamingProfile Profile(TEXT("wmoJob"));
     PendingWmoLoads.RemoveAll([](const auto& Job){return !Job.Actor.IsValid() || Job.Actor->IsActorBeingDestroyed() || Job.Next>=Job.Order.Num();});
-    if(PendingWmoLoads.IsEmpty()) return;
-    auto& Job=PendingWmoLoads[0]; const int32 Group=Job.Order[Job.Next++];
+    if(PendingWmoLoads.IsEmpty()) return false;
+    const FVector Focus=GetStreamingFocus(); int32 Best=0; double Distance=MAX_dbl;
+    for(int32 I=0;I<PendingWmoLoads.Num();++I)
+    {
+        const auto& J=PendingWmoLoads[I]; const FVector Local=J.Actor->GetActorTransform().InverseTransformPosition(Focus)/FWowCoordinate::SCALE;
+        const double D=J.Root?J.Root->BoundingBox.ComputeSquaredDistanceToPoint(FVector(Local.Y,Local.X,Local.Z)):0;
+        if(D<Distance){Distance=D; Best=I;}
+    }
+    auto& Job=PendingWmoLoads[Best]; const int32 Group=Job.Order[Job.Next++];
     FWowWmoRenderer::SpawnWmo(GetWorld(),Job.Path,Job.Placement,Job.Mpq,Job.Cache,Job.Actor.Get(),Job.Root.Get(),Group,1);
-    if(Job.Next>=Job.Order.Num()) {UE_LOG(LogWowWorld,Log,TEXT("Large WMO streaming complete: %s"),*Job.Path); PendingWmoLoads.RemoveAt(0);}
+    if(Job.Next>=Job.Order.Num()) {UE_LOG(LogWowWorld,Log,TEXT("Large WMO streaming complete: %s"),*Job.Path); PendingWmoLoads.RemoveAt(Best);}
+    return true;
 }
 void AWowWorldManager::SetupRuntimeVirtualTexture()
 {

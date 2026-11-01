@@ -21,16 +21,30 @@ def distribution(values):
 def summarize(path):
     result = json.loads((path / "verification.json").read_text(encoding="utf-8-sig"))
     groups = defaultdict(lambda: defaultdict(list))
+    queues = defaultdict(list)
     with (path / "frames.csv").open(encoding="utf-8-sig", newline="") as f:
         for row in csv.DictReader(f):
             for column in ("wallFrameMs", "gameThreadMs", "renderThreadMs", "gpuMs", "drawCalls"):
                 groups[row["kind"]][column].append(float(row[column]))
+            for column in ("preparedSlots", "pendingDoodadTiles", "pendingLod1"):
+                if column in row:
+                    queues[column].append(int(row[column]))
     result["allFrames"] = {kind: {col: distribution(v) for col, v in cols.items()}
                            for kind, cols in groups.items()}
     scopes = defaultdict(list)
     for stage, ms in re.findall(r"StreamPerf stage=(\w+) ms=([\d.]+)", (path / "client.log").read_text(encoding="utf-8-sig")):
         scopes[stage].append(float(ms))
     result["scopesMs"] = {stage: distribution(v) for stage, v in scopes.items()}
+    result["queueMaxima"] = {name: max(v) for name, v in queues.items()}
+    if result["queueMaxima"].get("preparedSlots", 0) > 4:
+        raise RuntimeError("More than four prepared/in-flight tile results")
+    per_frame = defaultdict(int)
+    for stage, frame in re.findall(r"StreamPerf stage=(finalizeTile|m2Instances|lod1|wdl) ms=[\d.]+ frame=(\d+)", (path / "client.log").read_text(encoding="utf-8-sig")):
+        per_frame[stage, frame] += 1
+        per_frame["all", frame] += 1
+    if any(count > 1 for count in per_frame.values()):
+        raise RuntimeError("More than one heavy unit of a kind in one engine frame")
+    result["oneHeavyUnitPerKindPerFrame"] = bool(per_frame)
     (path / "summary.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
     print(path.name, "cache:", result["cacheMode"])
     for step in result["steps"]:

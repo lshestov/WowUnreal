@@ -13,6 +13,6 @@ struct FWowStreamingProfile
     }
     ~FWowStreamingProfile()
     {
-        if(Started) UE_LOG(LogTemp,Display,TEXT("StreamPerf stage=%s ms=%.3f"),Stage,(FPlatformTime::Seconds()-Started)*1000.);
+        if(Started) UE_LOG(LogTemp,Display,TEXT("StreamPerf stage=%s ms=%.3f frame=%llu"),Stage,(FPlatformTime::Seconds()-Started)*1000.,IsInGameThread()?GFrameCounter:MAX_uint64);
     }
 };

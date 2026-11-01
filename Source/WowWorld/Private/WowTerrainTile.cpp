@@ -5,6 +5,7 @@
 #include "WowTerrainMeshBuilder.h"
 #include "WowTerrainMaterial.h"
 #include "WowTerrainBatch.h"
+#include "WowTerrainGeometry.h"
 #include "Formats/AdtTypes.h"
 #include "Coord/WowCoordinate.h"
 #include "WowDoodadManager.h"
@@ -37,7 +38,7 @@ UMaterialInterface* AWowTerrainTile::GetDefaultTerrainMaterial() const
     return DefaultMat.Get();
 }
 
-void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY, FMpqManager* Mpq, FWowAssetCache* Cache, TSet<uint32>* SpawnedWmoIds)
+void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY, FMpqManager* Mpq, FWowAssetCache* Cache, TSet<uint32>* SpawnedWmoIds,TSharedPtr<FWowTerrainGeometry> Prepared)
 {
     FWowStreamingProfile Profile(TEXT("terrainBuild"));
     TileCoord = FIntPoint(TX, TY);
@@ -52,115 +53,19 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
 
     UMaterialInterface* DefaultMat = GetDefaultTerrainMaterial();
 
-    // One section per ordered ground-texture set; alpha remains per chunk.
-    FMeshDescription MeshDesc;
-    // Must set UV channels before Register() so attributes are allocated correctly
-    MeshDesc.SetNumUVChannels(3); // UV0=local alpha, UV1=unchanged tiled, UV2=constant chunk cell
-    FStaticMeshAttributes Attributes(MeshDesc);
-    Attributes.Register();
-
-    TVertexAttributesRef<FVector3f> VertexPositions = Attributes.GetVertexPositions();
-    TVertexInstanceAttributesRef<FVector3f> VertexInstanceNormals = Attributes.GetVertexInstanceNormals();
-    TVertexInstanceAttributesRef<FVector3f> VertexInstanceTangents = Attributes.GetVertexInstanceTangents();
-    TVertexInstanceAttributesRef<float> VertexInstanceBinormalSigns = Attributes.GetVertexInstanceBinormalSigns();
-    TVertexInstanceAttributesRef<FVector2f> VertexInstanceUVs = Attributes.GetVertexInstanceUVs();
-
-    // Collect materials per section
+    auto Geometry=Prepared?MoveTemp(Prepared):MakeShared<FWowTerrainGeometry>(Data,TX,TY);
+    auto& MeshDesc=Geometry->Mesh;
+    const auto& CollisionVertices=Geometry->CollisionVertices;
+    const auto& CollisionIndices=Geometry->CollisionIndices;
     TArray<UMaterialInterface*> SectionMaterials;
-    const FWowTerrainBatch Batch(Data);
-    auto* AlphaAtlas=FWowTerrainMaterial::CreateAlphaAtlas(Data);
-    TArray<FPolygonGroupID> Groups;
-    for(int32 Representative:Batch.Representatives)
+    auto* AlphaAtlas=FWowTerrainMaterial::CreateAlphaAtlas(Data,&Geometry->AlphaPixels);
+    for(int32 Representative:Geometry->Representatives)
     {
-        Groups.Add(MeshDesc.CreatePolygonGroup());
         auto* Material=FWowTerrainMaterial::CreateBatchMaterial(Data.Chunks[Representative],Data,AlphaAtlas,Mpq,Cache,this);
         SectionMaterials.Add(Material?static_cast<UMaterialInterface*>(Material):DefaultMat);
     }
-    TArray<FVector> CollisionVertices;
-    TArray<int32> CollisionIndices;
-    int32 SectionIndex = 0;
-    int32 ChunksWithHeights = 0;
-    int32 ChunksSkipped = 0;
-    int32 ChunksTextured = 0;
 
-    for (int32 i = 0; i < 256; ++i)
-    {
-        const FAdtChunkData& Chunk = Data.Chunks[i];
-        FTerrainChunkMeshData MeshData = FTerrainMeshBuilder::BuildChunkMesh(Chunk, TX, TY);
-
-        if (MeshData.Vertices.Num() == 0 || MeshData.Indices.Num() == 0)
-        {
-            ChunksSkipped++;
-            continue;
-        }
-
-        // Check if this chunk has valid height variation
-        bool bHasHeights = false;
-        for (int32 h = 0; h < 145; h++)
-        {
-            if (Chunk.Heights[h] != 0.0f) { bHasHeights = true; break; }
-        }
-        if (bHasHeights) ChunksWithHeights++;
-
-        // Create a polygon group for this chunk (maps to a material slot)
-        const FPolygonGroupID PolyGroup = Groups[Batch.SectionForChunk[i]];
-        const int32 CollisionBase = CollisionVertices.Num();
-        CollisionVertices.Append(MeshData.Vertices);
-        for (int32 Index : MeshData.Indices) CollisionIndices.Add(CollisionBase + Index);
-
-        // Add vertices and vertex instances for this chunk
-        int32 BaseVertIndex = MeshDesc.Vertices().Num();
-        TArray<FVertexInstanceID> ChunkVertInstIDs;
-        ChunkVertInstIDs.SetNum(MeshData.Vertices.Num());
-
-        for (int32 v = 0; v < MeshData.Vertices.Num(); ++v)
-        {
-            const FVector& P = MeshData.Vertices[v];
-            FVertexID VertID = MeshDesc.CreateVertex();
-            VertexPositions[VertID] = FVector3f(P.X, P.Y, P.Z);
-
-            FVertexInstanceID InstID = MeshDesc.CreateVertexInstance(VertID);
-            ChunkVertInstIDs[v] = InstID;
-
-            FVector3f N = (v < MeshData.Normals.Num())
-                ? FVector3f(MeshData.Normals[v]) : FVector3f(0, 0, 1);
-            N.Normalize();
-            VertexInstanceNormals[InstID] = N;
-
-            FVector3f T = FVector3f::CrossProduct(N, FVector3f(0, 1, 0));
-            if (T.SizeSquared() < 0.001f)
-                T = FVector3f::CrossProduct(N, FVector3f(1, 0, 0));
-            T.Normalize();
-            VertexInstanceTangents[InstID] = T;
-            VertexInstanceBinormalSigns[InstID] = 1.0f;
-
-            FVector2f UV0 = (v < MeshData.UVs.Num())
-                ? FVector2f(MeshData.UVs[v]) : FVector2f(0, 0);
-            VertexInstanceUVs.Set(InstID, 0, UV0);
-
-            FVector2f UV1 = (v < MeshData.TiledUVs.Num())
-                ? FVector2f(MeshData.TiledUVs[v]) : FVector2f(0, 0);
-            VertexInstanceUVs.Set(InstID, 1, UV1);
-            VertexInstanceUVs.Set(InstID, 2, FVector2f(Chunk.IndexX,Chunk.IndexY));
-        }
-
-        // Create triangles for this chunk
-        for (int32 t = 0; t < MeshData.Indices.Num(); t += 3)
-        {
-            TArray<FVertexInstanceID> TriVerts;
-            TriVerts.Add(ChunkVertInstIDs[MeshData.Indices[t]]);
-            TriVerts.Add(ChunkVertInstIDs[MeshData.Indices[t + 1]]);
-            TriVerts.Add(ChunkVertInstIDs[MeshData.Indices[t + 2]]);
-            MeshDesc.CreatePolygon(PolyGroup, TriVerts);
-        }
-
-        // Determine material for this chunk
-        if(SectionMaterials[Batch.SectionForChunk[i]]!=DefaultMat) ++ChunksTextured;
-
-        SectionIndex++;
-    }
-
-    if (SectionIndex > 0)
+    if (Geometry->Chunks > 0)
     {
         // Build UStaticMesh from the mesh description
         UStaticMesh* SM = NewObject<UStaticMesh>();
@@ -214,7 +119,7 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
 
         ChunkMeshes.Add(MeshComp);
         UE_LOG(LogTerrainTile, Log, TEXT("Tile %d,%d: %d sections, %d textured, %d/%d have heights, %d skipped"),
-            TX, TY, SectionMaterials.Num(), ChunksTextured, ChunksWithHeights, 256 - ChunksSkipped, ChunksSkipped);
+            TX, TY, SectionMaterials.Num(), Geometry->TexturedChunks, Geometry->HeightChunks, Geometry->Chunks, 256-Geometry->Chunks);
     }
 
     // Spawn water meshes from MH2O data
@@ -251,13 +156,12 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
         }
     }
 
-    // Spawn doodads using HISMC instancing (batched per unique M2 model)
-    if (Data.DoodadPlacements.Num() > 0)
-    {
-        InstancedDoodads = FWowDoodadManager::SpawnDoodadsInstanced(
-            this, Data.DoodadPlacements, Data.DoodadPaths, Mpq, Cache);
-        bUsesInstancedDoodads = (InstancedDoodads.Num() > 0);
-    }
+    // Preserve every placement, but build only one model group per streaming job.
+    DoodadPlacements=Data.DoodadPlacements; DoodadPaths=Data.DoodadPaths;
+    bUsesInstancedDoodads=!DoodadPlacements.IsEmpty();
+    TMap<FString,TArray<FAdtDoodadPlacement>> ByModel;
+    for(const auto& P:DoodadPlacements) if(DoodadPaths.IsValidIndex(P.NameIndex) && !DoodadPaths[P.NameIndex].IsEmpty()) ByModel.FindOrAdd(DoodadPaths[P.NameIndex]).Add(P);
+    for(auto& Pair:ByModel) PendingDoodads.Add(MoveTemp(Pair.Value));
 
     // Store WMO placement data for distance-based streaming (doodads are now instanced)
     WmoPlacements = Data.WmoPlacements;
@@ -296,4 +200,12 @@ void AWowTerrainTile::ApplyRuntimeVirtualTexture(URuntimeVirtualTexture* RVT)
 
     UE_LOG(LogTerrainTile, Log, TEXT("Tile %d,%d: Applied RVT to %d chunk meshes"),
         TileCoord.X, TileCoord.Y, ChunkMeshes.Num());
+}
+
+bool AWowTerrainTile::StreamNextDoodad()
+{
+    if(PendingDoodads.IsEmpty() || !CachedMpq || !CachedCache) return false;
+    auto Placements=MoveTemp(PendingDoodads.Last()); PendingDoodads.Pop(EAllowShrinking::No);
+    for(auto* Component:FWowDoodadManager::SpawnDoodadsInstanced(this,Placements,DoodadPaths,CachedMpq,CachedCache)) InstancedDoodads.Add(Component);
+    return true;
 }

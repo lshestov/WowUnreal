@@ -35,9 +35,10 @@ UMaterial* FWowTerrainMaterial::GetBatchedMaterial()
     ensureMsgf(Material.IsValid(),TEXT("Missing cooked batched terrain material; run CreateTerrainBatchedMaterial.py"));
     return Material.Get();
 }
-UTexture2D* FWowTerrainMaterial::CreateAlphaAtlas(const FAdtData& Data)
+UTexture2D* FWowTerrainMaterial::CreateAlphaAtlas(const FAdtData& Data,const TArray<FColor>* Prepared)
 {
-    const auto Pixels=FWowTerrainBatch::AlphaPixels(Data);
+    const auto Owned=Prepared?TArray<FColor>():FWowTerrainBatch::AlphaPixels(Data);
+    const auto& Pixels=Prepared?*Prepared:Owned;
     auto* Texture=UTexture2D::CreateTransient(FWowTerrainBatch::AtlasPixels,FWowTerrainBatch::AtlasPixels,PF_B8G8R8A8);
     if(!Texture) return nullptr;
     Texture->SRGB=false; Texture->Filter=TF_Bilinear; Texture->NeverStream=true;

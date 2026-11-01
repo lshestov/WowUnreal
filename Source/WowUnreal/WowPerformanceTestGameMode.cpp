@@ -54,7 +54,7 @@ void AWowPerformanceTestGameMode::SetupTestScene(UWorld* World,AWowWorldManager*
     if(!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Text),Root) || !Root.IsValid() || !Root->TryGetArrayField(TEXT("steps"),Entries) || Entries->IsEmpty())
     {Finish(false,TEXT("Invalid route")); return;}
     Steps=*Entries;
-    Frames=TEXT("phase,kind,elapsedSeconds,wallFrameMs,gameThreadMs,renderThreadMs,gpuMs,drawCalls,pendingTiles,pendingWmoGroups\n");
+    Frames=TEXT("phase,kind,elapsedSeconds,wallFrameMs,gameThreadMs,renderThreadMs,gpuMs,drawCalls,pendingTiles,pendingWmoGroups,pendingDoodadTiles,pendingLod1,preparedSlots\n");
     Sky=World->SpawnActor<AWowSkyManager>(); Sky->TimeOfDay=540; Sky->TimeSpeed=0;
     StartStep();
 }
@@ -101,6 +101,9 @@ TSharedPtr<FJsonObject> AWowPerformanceTestGameMode::Snapshot() const
     O->SetNumberField(TEXT("terrainUniqueMaterials"),Materials.Num()); O->SetNumberField(TEXT("uniqueStaticMeshes"),Meshes.Num());
     O->SetNumberField(TEXT("wmoShadowCasters"),WmoCasters); O->SetNumberField(TEXT("wmoGroups"),CachedWorldManager->GetActiveWmoGroupCount());
     O->SetNumberField(TEXT("pendingTiles"),CachedWorldManager->GetPendingTileCount()); O->SetNumberField(TEXT("pendingWmoGroups"),CachedWorldManager->GetPendingWmoGroupCount());
+    O->SetNumberField(TEXT("pendingDoodadTiles"),CachedWorldManager->GetPendingDoodadJobs()); O->SetNumberField(TEXT("pendingLod1"),CachedWorldManager->GetPendingLod1Count());
+    O->SetNumberField(TEXT("lod1Tiles"),CachedWorldManager->GetLod1TileCount()); O->SetNumberField(TEXT("wdlTiles"),CachedWorldManager->GetWdlTileCount());
+    O->SetNumberField(TEXT("preparedSlots"),CachedWorldManager->GetPreparedTileCount());
     O->SetNumberField(TEXT("cachedTextures"),Stats.TextureCount); O->SetNumberField(TEXT("cachedMeshes"),Stats.MeshCount);
     O->SetNumberField(TEXT("estimatedAssetMiB"),Stats.TotalEstimatedMemory()/1048576.);
     if(auto* L=GetWorld()->GetSubsystem<UWowM2LightSubsystem>())
@@ -119,14 +122,14 @@ void AWowPerformanceTestGameMode::Tick(float DT)
     const double Game=FPlatformTime::ToMilliseconds(GGameThreadTime),Render=FPlatformTime::ToMilliseconds(GRenderThreadTime),Gpu=FPlatformTime::ToMilliseconds(RHIGetGPUFrameCycles());
     Samples.FindOrAdd(TEXT("wallFrameMs")).Add(WallMs); Samples.FindOrAdd(TEXT("gameThreadMs")).Add(Game);
     Samples.FindOrAdd(TEXT("renderThreadMs")).Add(Render); Samples.FindOrAdd(TEXT("gpuMs")).Add(Gpu); Samples.FindOrAdd(TEXT("drawCalls")).Add(GNumDrawCallsRHI[0]);
-    Frames+=FString::Printf(TEXT("%s,%s,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%d,%d\n"),*Name,DiagnosticFrames>0?TEXT("diagnostic"):TEXT("ordinary"),Now-PhaseStarted,WallMs,Game,Render,Gpu,GNumDrawCallsRHI[0],CachedWorldManager->GetPendingTileCount(),CachedWorldManager->GetPendingWmoGroupCount());
+    Frames+=FString::Printf(TEXT("%s,%s,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%d,%d,%d,%d,%d\n"),*Name,DiagnosticFrames>0?TEXT("diagnostic"):TEXT("ordinary"),Now-PhaseStarted,WallMs,Game,Render,Gpu,GNumDrawCallsRHI[0],CachedWorldManager->GetPendingTileCount(),CachedWorldManager->GetPendingWmoGroupCount(),CachedWorldManager->GetPendingDoodadJobs(),CachedWorldManager->GetPendingLod1Count(),CachedWorldManager->GetPreparedTileCount());
     if(DiagnosticFrames>0) --DiagnosticFrames;
     const double Elapsed=Now-PhaseStarted,Duration=Number(Step,TEXT("duration"),8);
     auto* PC=UGameplayStatics::GetPlayerController(this,0); APawn* Pawn=PC?PC->GetPawn():nullptr;
     if(!Pawn){Finish(false,TEXT("Camera lost")); return;}
     const FVector P=FMath::Lerp(From,To,FMath::Clamp(Elapsed/FMath::Max(.01,Duration),0.,1.));
     Pawn->SetActorLocation(P); PC->SetControlRotation((Target-P).Rotation());
-    const bool Ready=(!Number(Step,TEXT("initial"),0) || CachedWorldManager->IsInitialLoadComplete()) && !CachedWorldManager->GetPendingTileCount() && !CachedWorldManager->GetPendingWmoGroupCount() && FDbcStore::Get().IsDeferredLoaded();
+    const bool Ready=(!Number(Step,TEXT("initial"),0) || CachedWorldManager->IsInitialLoadComplete()) && CachedWorldManager->IsStreamingWorkIdle() && FDbcStore::Get().IsDeferredLoaded();
     if(Ready){if(!IdleSince) IdleSince=Now;} else IdleSince=0;
     if(!ShotRequested && Elapsed>=Duration && IdleSince && Now-IdleSince>=Number(Step,TEXT("settle"),2))
     {

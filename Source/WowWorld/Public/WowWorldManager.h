@@ -14,6 +14,13 @@
 class AWowTerrainTile;
 class URuntimeVirtualTexture;
 class URuntimeVirtualTextureComponent;
+struct FWowTerrainGeometry;
+
+struct FWowPreparedTile
+{
+    TSharedPtr<FAdtData> Data;
+    TSharedPtr<FWowTerrainGeometry> Geometry;
+};
 
 /** Result of an async tile load (MPQ read + ADT parse on background thread) */
 struct FPendingTileLoad
@@ -21,7 +28,8 @@ struct FPendingTileLoad
     int32 TX = 0;
     int32 TY = 0;
     uint32 Generation=0;
-    TFuture<TSharedPtr<FAdtData>> Future;
+    bool Lod1=false;
+    TFuture<FWowPreparedTile> Future;
 };
 struct FPendingWmoLoad
 {
@@ -69,7 +77,13 @@ public:
     int32 GetInitialTilesLoaded() const { return InitialTilesLoaded; }
 
     /** Whether all initially-queued tiles have finished loading */
-    bool IsInitialLoadComplete() const { if(WdtData && (WdtData->Flags&1)) return WdtData->bIsValid && IsValid(GlobalWmo) && PendingWmoLoads.IsEmpty(); return InitialTilesQueued > 0 && InitialTilesLoaded >= InitialTilesQueued && InitialObjectTiles>=InitialTilesQueued && PendingWmoLoads.IsEmpty(); }
+    bool IsInitialLoadComplete() const;
+    bool IsStreamingWorkIdle() const;
+    int32 GetPendingDoodadJobs() const;
+    int32 GetPendingLod1Count() const {return PendingLod1Keys.Num();}
+    int32 GetLod1TileCount() const {return Lod1Tiles.Num();}
+    int32 GetWdlTileCount() const {return WdlTiles.Num();}
+    int32 GetPreparedTileCount() const;
     int32 GetPendingWmoGroupCount() const {int32 Count=PendingObjectGroups; for(const auto& Job:PendingWmoLoads) if(Job.Actor.IsValid()) Count+=Job.Order.Num()-Job.Next; return Count;}
 
     /** Get the terrain RVT for mesh components to write to */
@@ -134,7 +148,7 @@ public:
 
     /** WMOs above this group count stream one group per world tick. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Streaming")
-    int32 MaxWmoGroupsPerObject = 100;
+    int32 MaxWmoGroupsPerObject = 0;
 
 private:
     bool bStreamingSuspended=false;
@@ -203,18 +217,22 @@ private:
 
     void LoadTile(int32 TX, int32 TY);
     void LoadTileAsync(int32 TX, int32 TY);
-    void FinalizeTileLoad(int32 TX, int32 TY, TSharedPtr<FAdtData> AdtData);
-    void ProcessPendingLoads();
+    void FinalizeTileLoad(int32 TX, int32 TY, TSharedPtr<FAdtData> AdtData,TSharedPtr<FWowTerrainGeometry> Prepared=nullptr);
+    void StartPendingTileLoads();
+    bool ProcessPendingLoads(bool Lod1=false);
+    void PumpStreamingWork();
+    bool ProcessDoodadJob();
+    bool ProcessWdlJob();
     void UnloadTile(int32 TX, int32 TY);
     void UpdateStreaming();
-    void UpdateObjectStreaming();
-    void UpdatePendingWmoLoads();
+    bool UpdateObjectStreaming();
+    bool UpdatePendingWmoLoads();
     bool LoadGlobalWmo(const FVector& Position);
     void UpdateZoneAudio();
     void UpdateWdlStreaming(const FIntPoint& CameraTile);
     void UpdateLod1Streaming(const FIntPoint& CameraTile);
     void SpawnWdlTile(int32 TX, int32 TY);
-    void SpawnLod1Tile(int32 TX, int32 TY);
+    void SpawnLod1Tile(int32 TX, int32 TY,const FAdtData& Data,TSharedPtr<FWowTerrainGeometry> Prepared);
     void SetupRuntimeVirtualTexture();
     void UpdateRVTBounds(const FIntPoint& CameraTile);
     bool IsTileLoaded(int32 TX, int32 TY) const;
@@ -230,4 +248,10 @@ private:
 
     /** Track tile keys that are in-flight to avoid duplicate requests */
     TSet<int64> PendingTileKeys;
+    TSet<int64> PendingLod1Keys, PendingWdlKeys;
+    TArray<FIntPoint> PendingWdlTiles;
+    int32 NextWorkKind=0;
+    bool ObjectScanPending=true;
+    double NextObjectScan=0;
+    FVector GetStreamingFocus() const;
 };

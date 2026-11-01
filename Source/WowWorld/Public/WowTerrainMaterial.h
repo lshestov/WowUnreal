@@ -29,7 +29,7 @@ public:
     /** Get or create the base terrain material (4-layer splat, uses UV0=alpha, UV1=texture) */
     static UMaterial* GetBaseMaterial();
     static UMaterial* GetBatchedMaterial();
-    static UTexture2D* CreateAlphaAtlas(const FAdtData& Data);
+    static UTexture2D* CreateAlphaAtlas(const FAdtData& Data,const TArray<FColor>* Prepared=nullptr);
     static UMaterialInstanceDynamic* CreateBatchMaterial(const FAdtChunkData& Chunk,const FAdtData& Data,
         UTexture2D* AlphaAtlas,FMpqManager* Mpq,FWowAssetCache* Cache,UObject* Outer);
 

@@ -10,6 +10,7 @@ class FWowAssetCache;
 class UInstancedStaticMeshComponent;
 class URuntimeVirtualTexture;
 class UStaticMeshComponent;
+struct FWowTerrainGeometry;
 
 UCLASS()
 class WOWWORLD_API AWowTerrainTile : public AActor
@@ -17,7 +18,9 @@ class WOWWORLD_API AWowTerrainTile : public AActor
     GENERATED_BODY()
 public:
     AWowTerrainTile();
-    void BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY, FMpqManager* Mpq, FWowAssetCache* Cache, TSet<uint32>* SpawnedWmoIds = nullptr);
+    void BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY, FMpqManager* Mpq, FWowAssetCache* Cache, TSet<uint32>* SpawnedWmoIds = nullptr,TSharedPtr<FWowTerrainGeometry> Prepared=nullptr);
+    bool HasPendingDoodads() const {return !PendingDoodads.IsEmpty();}
+    bool StreamNextDoodad();
     void ApplyRuntimeVirtualTexture(URuntimeVirtualTexture* RVT);
     FIntPoint GetTileCoord() const { return TileCoord; }
 
@@ -60,6 +63,7 @@ private:
     TArray<TObjectPtr<UStaticMeshComponent>> WaterMeshes;
 
     FIntPoint TileCoord;
+    TArray<TArray<FAdtDoodadPlacement>> PendingDoodads;
 
     UMaterialInterface* GetDefaultTerrainMaterial() const;
 };
