@@ -19,6 +19,7 @@ protected:
 private:
     UPROPERTY() TObjectPtr<AWowSkyManager> Sky;
     UPROPERTY() TObjectPtr<AActor> Subject;
+    UPROPERTY() TObjectPtr<AActor> Fixture;
     TArray<TSharedPtr<FJsonValue>> Cases, Results;
     TMap<FString,TArray<double>> Profile;
     FString Output;
@@ -27,6 +28,7 @@ private:
     bool Ready=false, Finished=false;
     FVector From=FVector::ZeroVector, To=FVector::ZeroVector;
     FVector Target=FVector::ZeroVector;
+    FVector PreviousSun=FVector::ZeroVector;
     void StartCase();
     void Finish(bool Passed, const FString& Reason=FString());
 };

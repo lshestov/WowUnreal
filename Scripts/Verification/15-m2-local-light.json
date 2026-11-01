@@ -1,0 +1,11 @@
+{
+  "map":0,
+  "cases":[
+    {"name":"camp-night-off","time":1200,"command":"wow.M2Lights.Enabled 0","position":[-8929,-119,85],"target":[-8926,-123,84],"subject":[-8926,-122,83],"model":"World\\Azeroth\\Elwynn\\PassiveDoodads\\Campfire\\ElwynnCampfire.m2","modelPosition":[-8926,-123.1,83],"settle":5},
+    {"name":"camp-night-on","time":1200,"command":"wow.M2Lights.Enabled 1","position":[-8929,-119,85],"target":[-8926,-123,84],"subject":[-8926,-122,83],"model":"World\\Azeroth\\Elwynn\\PassiveDoodads\\Campfire\\ElwynnCampfire.m2","modelPosition":[-8926,-123.1,83],"settle":5},
+    {"name":"camp-day-on","time":540,"position":[-8929,-119,85],"target":[-8926,-123,84],"subject":[-8926,-122,83],"model":"World\\Azeroth\\Elwynn\\PassiveDoodads\\Campfire\\ElwynnCampfire.m2","modelPosition":[-8926,-123.1,83]},
+    {"name":"camp-scaled-rotated","time":1200,"position":[-8929,-119,85],"target":[-8926,-123,84],"subject":[-8926,-122,83],"model":"World\\Azeroth\\Elwynn\\PassiveDoodads\\Campfire\\ElwynnCampfire.m2","modelPosition":[-8926,-123.1,83],"modelYaw":90,"modelScale":1.5,"duration":4,"shots":3,"interval":1},
+    {"name":"camp-unloaded","time":1200,"position":[-8929,-119,85],"target":[-8926,-123,84],"subject":[-8926,-122,83]},
+    {"name":"camp-reloaded","time":1200,"position":[-8929,-119,85],"target":[-8926,-123,84],"subject":[-8926,-122,83],"model":"World\\Azeroth\\Elwynn\\PassiveDoodads\\Campfire\\ElwynnCampfire.m2","modelPosition":[-8926,-123.1,83]}
+  ]
+}

@@ -207,6 +207,13 @@ static_assert(sizeof(FM2CameraRaw)==100);
 
 struct FM2ArrayRaw {uint32 Count,Offset;};
 struct FM2ParticleTrackRaw {uint16 Interpolation; int16 GlobalSequence; FM2ArrayRaw Times,Values;};
+struct FM2LightRaw
+{
+    uint16 Type; int16 Bone; float Position[3];
+    FM2ParticleTrackRaw AmbientColor,AmbientIntensity,DiffuseColor,DiffuseIntensity,AttenuationStart,AttenuationEnd,Visibility;
+};
+struct FM2LightQuatRaw {int16 X,Y,Z,W;};
+static_assert(sizeof(FM2LightRaw)==156);
 struct FM2ParticleCurveRaw {FM2ArrayRaw Times,Values;};
 struct FM2ColorRaw {FM2ParticleTrackRaw Color,Alpha;};
 struct FM2TransformRaw {FM2ParticleTrackRaw Translation,Rotation,Scale;};
@@ -284,14 +291,14 @@ template<typename Raw,typename Value,typename Convert> static bool ReadAnimated(
     TM2AnimatedTrack<Value> Parsed; Parsed.Interpolation=Src.Interpolation; Parsed.GlobalSequence=Src.GlobalSequence; Parsed.Sequences.SetNum(Src.Times.Count);
     for(uint32 I=0;I<Src.Times.Count;++I)
     {
-        if(Values[I].Count>4096 || Times[I].Count!=Values[I].Count) return false;
+        if(Values[I].Count>4096 || (Times[I].Count!=Values[I].Count && !(Times[I].Count==0 && Values[I].Count==1))) return false;
         const int64 Cost=int64(Values[I].Count)*(sizeof(Value)+sizeof(float)); if(Cost>Budget) return false; Budget-=Cost;
         const uint32* Timestamps=nullptr; const Raw* Keys=nullptr;
         if(!SafeRead(Base,Size,Times[I].Offset,Times[I].Count,Timestamps) || !SafeRead(Base,Size,Values[I].Offset,Values[I].Count,Keys)) return false;
         auto& Sequence=Parsed.Sequences[I];
         for(uint32 J=0;J<Values[I].Count;++J)
         {
-            const Value V=Make(Keys[J]); const float Time=float(Timestamps[J]);
+            const Value V=Make(Keys[J]); const float Time=Times[I].Count?float(Timestamps[J]):0;
             if(V.ContainsNaN() || (J && Time<Sequence.Times.Last())) return false;
             Sequence.Times.Add(Time); Sequence.Values.Add(V);
         }
@@ -324,6 +331,13 @@ template<typename Raw,typename Value,typename Convert> static bool ReadParticleC
 }
 
 // ── Implementation ──────────────────────────────────────────────────────────
+
+bool FM2Parser::HasLightTable(const TArray<uint8>& Data)
+{
+    if(Data.Num()<sizeof(FM2Header)) return false;
+    const auto* Header=reinterpret_cast<const FM2Header*>(Data.GetData());
+    return Header->Magic==0x3032444D && Header->Version==264 && Header->nLights>0;
+}
 
 FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinData)
 {
@@ -816,6 +830,45 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
     const uint32* GlobalDurations=nullptr;
     if(Header.nGlobalSequences<=4096 && SafeRead(M2Base,M2Size,Header.ofsGlobalSequences,Header.nGlobalSequences,GlobalDurations))
         Result.GlobalSequenceDurations.Append(GlobalDurations,Header.nGlobalSequences);
+    const FM2LightRaw* RawLights=nullptr;
+    int64 LightBudget=4*1024*1024;
+    if(Header.nLights<=64 && SafeRead(M2Base,M2Size,Header.ofsLights,Header.nLights,RawLights))
+    {
+        TSet<int32> LightBones;
+        const auto IdentityVector=[](const FVector3f& V){return V;};
+        for(uint32 I=0;I<Header.nLights;++I)
+        {
+            const auto& Raw=RawLights[I]; FM2Light Light; Light.Type=Raw.Type; Light.Bone=Raw.Bone;
+            Light.Position=FVector(Raw.Position[0],Raw.Position[1],Raw.Position[2]);
+            const auto Scalar=[&](const FM2ParticleTrackRaw& Src,FM2ParticleFloatTrack& Dst){return ReadParticleScalarTrack<float>(M2Base,M2Size,Src,Dst,LightBudget);};
+            const bool Valid=Light.Type<=1 && (Light.Bone==-1 || Result.Bones.IsValidIndex(Light.Bone)) && !Light.Position.ContainsNaN()
+                && ReadAnimated<FVector3f>(M2Base,M2Size,Raw.AmbientColor,Light.AmbientColor,LightBudget,IdentityVector)
+                && Scalar(Raw.AmbientIntensity,Light.AmbientIntensity)
+                && ReadAnimated<FVector3f>(M2Base,M2Size,Raw.DiffuseColor,Light.DiffuseColor,LightBudget,IdentityVector)
+                && Scalar(Raw.DiffuseIntensity,Light.DiffuseIntensity) && Scalar(Raw.AttenuationStart,Light.AttenuationStart)
+                && Scalar(Raw.AttenuationEnd,Light.AttenuationEnd)
+                && ReadParticleScalarTrack<uint8>(M2Base,M2Size,Raw.Visibility,Light.Visibility,LightBudget);
+            if(!Valid) {UE_LOG(LogM2,Warning,TEXT("Invalid or unsupported authored M2 light %u in %s"),I,*ModelName); continue;}
+            Result.Lights.Add(MoveTemp(Light));
+            int32 Bone=Raw.Bone;
+            for(int32 Depth=0;Result.Bones.IsValidIndex(Bone) && Depth<256 && !LightBones.Contains(Bone);++Depth)
+                {LightBones.Add(Bone); Bone=Result.Bones[Bone].ParentBone;}
+        }
+        if(RawBones && Result.Bones.Num()<=4096 && !LightBones.IsEmpty())
+        {
+            Result.LightBoneTracks.SetNum(Result.Bones.Num());
+            for(int32 Bone:LightBones)
+            {
+                const auto& Raw=RawBones[Bone]; auto& Tracks=Result.LightBoneTracks[Bone];
+                const auto Quat=[&](const FM2LightQuatRaw& Q){return FQuat4f(UnpackQuaternion(Q.X,Q.Y,Q.Z,Q.W).GetNormalized());};
+                const bool Valid=ReadAnimated<FVector3f>(M2Base,M2Size,*reinterpret_cast<const FM2ParticleTrackRaw*>(Raw.TransBlock),Tracks.Translation,LightBudget,IdentityVector)
+                    && ReadAnimated<FM2LightQuatRaw>(M2Base,M2Size,*reinterpret_cast<const FM2ParticleTrackRaw*>(Raw.RotBlock),Tracks.Rotation,LightBudget,Quat)
+                    && ReadAnimated<FVector3f>(M2Base,M2Size,*reinterpret_cast<const FM2ParticleTrackRaw*>(Raw.ScaleBlock),Tracks.Scale,LightBudget,IdentityVector);
+                if(!Valid) UE_LOG(LogM2,Warning,TEXT("Invalid or unsupported M2 light bone track %d in %s"),Bone,*ModelName);
+            }
+        }
+    }
+    else if(Header.nLights) UE_LOG(LogM2,Warning,TEXT("Invalid M2 light table in %s"),*ModelName);
     const FM2ParticleEmitterRaw* RawParticleEmitters = nullptr;
     int64 ParticleBudget=8*1024*1024;
     const auto Vector=[](const FVector3f& V){return V;};

@@ -86,3 +86,39 @@ The shadow audit also found that `SetupLoginScene` spawns an unmanaged fixed
 directional light in addition to the sky manager. Its effect and the sky's
 10 Hz rotation updates require the next shadow-specific reproduction; the
 offline WMO route uses the production sky manager without that login fill.
+
+## Authored world M2 lights
+
+M2 build-12340 light tables now retain both colour/intensity pairs, visibility,
+attenuation tracks, local position and parent bone. Stand-clip and global
+sequence clocks are independent; bone parents, pivots, rotations and scale
+are evaluated before the ADT or WMO instance transform. MODS/MODD/MODR select
+the original default and placed doodad sets. Models without a light table do
+not acquire invented lights. Point-light ambient is retained in data but is
+not added, matching the original `CM2Light::GxLightSet` point path.
+
+`UWowM2LightSubsystem` selects at most 32 nearby points within 150 m. Weak
+component ownership removes lights when a streamed instance unloads. WMO
+probes use spatial cells and at most one nearby model read/build per frame;
+far building decorations are not scanned every frame. Local lights do not
+cast additional shadows. Existing WMO baked interior emission stays intact.
+This work does not modify the completed spell-effect lifecycle.
+
+The cookable light function uses a valid authored start/end range when present,
+otherwise the original `(constant,linear,quadratic)=(0,.7,.03)` curve with a 1%
+finite cutoff and a fade over its last tenth. UE's native exponent is .0001,
+not zero: `LightData.ush` uses zero as its inverse-square sentinel. The tiny
+nonzero native curve avoids that path while leaving the authored function
+effectively unchanged. This is a deferred-renderer approximation, not a claim
+that UE's PBR response exactly matches the original fixed-function renderer.
+
+The real-data audit checks 612 models from the abbey, inn, Stormwind and nearby
+ADT regions, retaining all three light-bearing models and 7,242 WMO references.
+Seven lighting checks pass, including separate animation clocks and three
+unload/reload cycles. `15-m2-fixed` contains eight individually inspected
+captures. Its night on/off ROI changes 3,330 sampled pixels and increases mean
+red by 5.88/255. A 1.5x placement scales the campfire's 1.6667-yard radius to
+2.5 yards; unloading/reloading changes active points 3→2→3 and sources 7→6→7.
+Typical subsystem time is about .012 ms, compared with the rejected initial
+2.05 ms full-queue scan. Run `Scripts/Verification/Test-M2LightCapture.ps1`
+against a capture directory to repeat the integration checks.

@@ -24,6 +24,10 @@ struct WOWDATA_API FWowCoordinate
     static constexpr float MAP_ORIGIN = 32.0f * TILE_SIZE;
     static constexpr float SCALE = 100.0f;
 
+    /** M2/WMO model space to UE local space, including handedness. */
+    static FVector ModelToUE(const FVector& Position) {return FVector(Position.Y,Position.X,Position.Z)*SCALE;}
+    static FQuat ModelRotationToUE(const FQuat& Rotation) {return FQuat(-Rotation.Y,-Rotation.X,-Rotation.Z,Rotation.W).GetNormalized();}
+
     /** ADT center offset: tile (32,32) center in ADT coords, so UE (0,0) = map center.
      *  This keeps all coordinates within ~17km of origin for float precision. */
     static constexpr float ADT_CENTER_X = 32.0f * TILE_SIZE + TILE_SIZE * 0.5f;

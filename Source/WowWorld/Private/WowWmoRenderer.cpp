@@ -1,6 +1,7 @@
 #include "WowWmoRenderer.h"
 #include "WowWmoArea.h"
 #include "WowWmoLighting.h"
+#include "WowM2LightSubsystem.h"
 #include "ProceduralMeshComponent.h"
 #include "WowWorldCollision.h"
 #include "PhysicsEngine/BodySetup.h"
@@ -124,6 +125,12 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
         Room.Collision=FWowWorldCollision::AddWmo(RootComp, *FString::Printf(TEXT("WmoCollision_%u"), GroupIdx), GroupData);
         Room.Lighting=FWowWmoLighting::Prepare(RootData,GroupData);
         Room.FallbackLight=FLinearColor(RootData.AmbientColor.R/255.f,RootData.AmbientColor.G/255.f,RootData.AmbientColor.B/255.f);
+        if(auto* Lights=World->GetSubsystem<UWowM2LightSubsystem>()) for(uint16 Ref:GroupData.DoodadRefs)
+        {
+            if(!RootData.Doodads.IsValidIndex(Ref) || !RootData.IsDoodadInSet(Ref,Placement.DoodadSet) || Area->QueuedLightDoodads.Contains(Ref)) continue;
+            Area->QueuedLightDoodads.Add(Ref); const auto& D=RootData.Doodads[Ref];
+            if(!D.Path.IsEmpty()) Lights->QueueWmoModel(RootComp,D.Path,FTransform(FWowCoordinate::ModelRotationToUE(D.Rotation),FWowCoordinate::ModelToUE(D.Position),FVector(D.Scale)),Mpq,Cache);
+        }
 
         // Create UStaticMesh with Nanite for this group
         UStaticMesh* GroupMesh = CreateStaticMeshFromWmoGroup(GroupData, RootData, WmoPath, GroupIdx, Mpq, Cache);

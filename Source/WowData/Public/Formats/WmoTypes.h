@@ -65,6 +65,7 @@ struct WOWDATA_API FWmoGroupData
     uint32 GroupId = 0;
     uint16 PortalStart = 0, PortalCount = 0;
     uint16 TransitionBatchCount = 0, InteriorBatchCount = 0, ExteriorBatchCount = 0;
+    TArray<uint16> DoodadRefs;
     FWmoLiquidData Liquid;
     bool bIsValid = false;
 };
@@ -83,6 +84,24 @@ struct WOWDATA_API FWmoRootData
     TArray<FPortal> Portals;
     TArray<FPortalRef> PortalRefs;
     TArray<FString> DoodadPaths;
+    struct FDoodadSet {uint32 First=0,Count=0;};
+    struct FDoodad
+    {
+        FString Path;
+        uint32 NameOffset=0;
+        uint8 Flags=0;
+        FVector Position=FVector::ZeroVector;
+        FQuat Rotation=FQuat::Identity;
+        float Scale=1;
+        FColor Color=FColor::White;
+    };
+    TArray<FDoodadSet> DoodadSets;
+    TArray<FDoodad> Doodads;
+    bool IsDoodadInSet(int32 Index,int32 Selected) const
+    {
+        const auto Contains=[&](int32 Set){return DoodadSets.IsValidIndex(Set) && Index>=int64(DoodadSets[Set].First) && uint64(Index)<uint64(DoodadSets[Set].First)+DoodadSets[Set].Count;};
+        return Index>=0 && (Contains(0) || (Selected!=0 && Contains(Selected)));
+    }
     FBox BoundingBox = FBox(ForceInit);
     uint32 Flags = 0;
     bool bIsValid = false;

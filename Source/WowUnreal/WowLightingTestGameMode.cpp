@@ -2,12 +2,18 @@
 #include "WowWorldManager.h"
 #include "WowSkyManager.h"
 #include "WowWmoArea.h"
+#include "WowM2LightSubsystem.h"
+#include "WowDoodadManager.h"
 #include "WowCharacterBuilder.h"
 #include "Coord/WowCoordinate.h"
 #include "Formats/Dbc/DbcStore.h"
 #include "Components/PointLightComponent.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Engine/PostProcessVolume.h"
+#include "Engine/DirectionalLight.h"
+#include "Engine/StaticMeshActor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/Engine.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
@@ -31,7 +37,12 @@ TSharedPtr<FJsonObject> Stats(TArray<double> Values)
 {
     auto O=MakeShared<FJsonObject>(); Values.Sort(); double Sum=0; for(double V:Values) Sum+=V;
     O->SetNumberField(TEXT("samples"),Values.Num());
-    if(Values.Num()) {O->SetNumberField(TEXT("mean"),Sum/Values.Num()); O->SetNumberField(TEXT("median"),Values[Values.Num()/2]); O->SetNumberField(TEXT("p95"),Values[FMath::Min(Values.Num()-1,FMath::FloorToInt(Values.Num()*.95))]);}
+    if(Values.Num())
+    {
+        O->SetNumberField(TEXT("mean"),Sum/Values.Num()); O->SetNumberField(TEXT("median"),Values[Values.Num()/2]);
+        O->SetNumberField(TEXT("p95"),Values[FMath::Min(Values.Num()-1,FMath::FloorToInt(Values.Num()*.95))]);
+        O->SetNumberField(TEXT("max"),Values.Last()); O->SetNumberField(TEXT("zeroSamples"),Values.FilterByPredicate([](double V){return FMath::Abs(V)<1.e-7;}).Num());
+    }
     return O;
 }
 }
@@ -61,6 +72,12 @@ void AWowLightingTestGameMode::SetupTestScene(UWorld* World,AWowWorldManager* WM
     const FVector Start=Vector(Cases[0]->AsObject(),TEXT("position"));
     if(auto* PC=UGameplayStatics::GetPlayerController(this,0); PC && PC->GetPawn()) PC->GetPawn()->SetActorLocation(Start);
     Sky=World->SpawnActor<AWowSkyManager>(); Sky->CurrentMapId=uint32(Number(Root,TEXT("map"),0)); Sky->TimeSpeed=0;
+    if(Number(Root,TEXT("legacyLoginSun"),0)>0)
+    {
+        auto* Light=World->SpawnActor<ADirectionalLight>(ADirectionalLight::StaticClass(),FTransform(FRotator(-45,30,0),FVector::ZeroVector));
+        Light->GetLightComponent()->SetIntensity(3.14159f); Light->GetLightComponent()->SetLightColor(FLinearColor(1,.95,.85));
+    }
+    if(Root->HasField(TEXT("skyTickInterval"))) Sky->SetActorTickInterval(Number(Root,TEXT("skyTickInterval"),0));
     WM->EnableTerrainStreaming(); WM->LoadTilesAroundPosition(Start,2);
     UE_LOG(LogLightingCapture,Display,TEXT("LightingCapture loading map=%s cases=%d"),*WM->GetMapName(),Cases.Num());
 }
@@ -68,6 +85,20 @@ void AWowLightingTestGameMode::StartCase()
 {
     if(++Index>=Cases.Num()) {Finish(true); return;}
     const auto C=Cases[Index]->AsObject();
+    FString Command; if(C->TryGetStringField(TEXT("command"),Command)) GEngine->Exec(GetWorld(),*Command);
+    if(Fixture) {Fixture->Destroy(); Fixture=nullptr;}
+    FString ModelPath;
+    if(C->TryGetStringField(TEXT("model"),ModelPath))
+    {
+        const auto Model=FWowDoodadManager::GetOrParseM2(ModelPath,CachedWorldManager->GetMpqManager());
+        auto* Mesh=FWowDoodadManager::GetOrCreateStaticMesh(ModelPath,CachedWorldManager->GetMpqManager(),CachedWorldManager->GetAssetCache());
+        if(!Model || !Mesh) {Finish(false,TEXT("Cannot load authored fixture")); return;}
+        auto* Actor=GetWorld()->SpawnActor<AStaticMeshActor>(); Fixture=Actor;
+        Actor->GetStaticMeshComponent()->SetMobility(EComponentMobility::Movable); Actor->GetStaticMeshComponent()->SetStaticMesh(Mesh);
+        Actor->SetActorLocation(Vector(C,TEXT("modelPosition"))); Actor->SetActorRotation(FRotator(0,Number(C,TEXT("modelYaw"),0),0));
+        Actor->SetActorScale3D(FVector(Number(C,TEXT("modelScale"),1)));
+        GetWorld()->GetSubsystem<UWowM2LightSubsystem>()->RegisterModel(Actor->GetStaticMeshComponent(),Model);
+    }
     From=Vector(C,TEXT("position")); To=Vector(C,TEXT("end"),From); Target=Vector(C,TEXT("target"),From+FVector(100,0,0));
     Sky->TimeOfDay=Number(C,TEXT("time"),540); Sky->TimeSpeed=Number(C,TEXT("timeSpeed"),0);
     auto* PC=UGameplayStatics::GetPlayerController(this,0);
@@ -78,7 +109,7 @@ void AWowLightingTestGameMode::StartCase()
     if(Subject) Subject->SetActorLocation(P);
     CachedWorldManager->FollowStreamingActor(PC->GetPawn());
     PhaseStarted=FPlatformTime::Seconds(); NextShot=Number(C,TEXT("settle"),3)+(Number(C,TEXT("shots"),1)>1?.5:Number(C,TEXT("duration"),3));
-    Profile.Reset(); Shot=0;
+    Profile.Reset(); Shot=0; PreviousSun=FVector::ZeroVector;
     UE_LOG(LogLightingCapture,Display,TEXT("LightingCapture case=%s time=%.1f from=%s to=%s"),*C->GetStringField(TEXT("name")),Sky->TimeOfDay,*From.ToString(),*To.ToString());
 }
 void AWowLightingTestGameMode::Tick(float DT)
@@ -102,6 +133,14 @@ void AWowLightingTestGameMode::Tick(float DT)
         Profile.FindOrAdd(TEXT("gameThreadMs")).Add(FPlatformTime::ToMilliseconds(GGameThreadTime));
         Profile.FindOrAdd(TEXT("renderThreadMs")).Add(FPlatformTime::ToMilliseconds(GRenderThreadTime));
         Profile.FindOrAdd(TEXT("gpuMs")).Add(FPlatformTime::ToMilliseconds(RHIGetGPUFrameCycles()));
+        if(auto* Lights=GetWorld()->GetSubsystem<UWowM2LightSubsystem>()) Profile.FindOrAdd(TEXT("m2LightTickMs")).Add(Lights->GetTickMilliseconds());
+        TInlineComponentArray<UDirectionalLightComponent*> Directions(Sky);
+        for(auto* Light:Directions) if(Light->GetName()==TEXT("SunLight"))
+        {
+            const FVector Sun=Light->GetForwardVector();
+            if(!PreviousSun.IsZero()) Profile.FindOrAdd(TEXT("sunStepDegrees")).Add(FMath::RadiansToDegrees(FMath::Atan2(FVector::CrossProduct(Sun,PreviousSun).Length(),FVector::DotProduct(Sun,PreviousSun))));
+            PreviousSun=Sun;
+        }
     }
     if(Shot<Number(C,TEXT("shots"),1) && Elapsed>=NextShot)
     {
@@ -120,13 +159,29 @@ void AWowLightingTestGameMode::Tick(float DT)
         const auto L=UWowWmoAreaComponent::Locate(GetWorld(),Subject?Subject->GetActorLocation():P,0);
         Row->SetBoolField(TEXT("indoors"),L.Indoors); Row->SetNumberField(TEXT("group"),L.Group);
         Row->SetStringField(TEXT("floorLight"),L.Lighting.ToString()); Row->SetNumberField(TEXT("outdoorLight"),L.OutdoorLight);
-        int32 Points=0,ShadowCasters=0;
+        int32 Points=0,ShadowCasters=0,Directions=0; TArray<TSharedPtr<FJsonValue>> Authored;
         for(TActorIterator<AActor> It(GetWorld());It;++It)
         {
-            TInlineComponentArray<UPointLightComponent*> Lights(*It); for(auto* Light:Lights) if(Light->IsVisible()) ++Points;
+            TInlineComponentArray<UPointLightComponent*> Lights(*It); for(auto* Light:Lights) if(Light->IsVisible())
+            {
+                ++Points;
+                if(Light->ComponentHasTag(TEXT("WowAuthoredM2Light")))
+                {
+                    auto Entry=MakeShared<FJsonObject>(); Entry->SetStringField(TEXT("position"),FWowCoordinate::UEToWow(Light->GetComponentLocation()).ToString());
+                    Entry->SetNumberField(TEXT("radiusYards"),Light->AttenuationRadius/100); Entry->SetNumberField(TEXT("intensity"),Light->Intensity);
+                    Entry->SetBoolField(TEXT("falloffMaterial"),Light->LightFunctionMaterial!=nullptr); Authored.Add(MakeShared<FJsonValueObject>(Entry));
+                }
+            }
+            TInlineComponentArray<UDirectionalLightComponent*> Directional(*It); Directions+=Directional.Num();
             TInlineComponentArray<UPrimitiveComponent*> Meshes(*It); for(auto* Mesh:Meshes) if(Mesh->CastShadow && Mesh->GetName().StartsWith(TEXT("WmoGroup_"))) ++ShadowCasters;
         }
         Row->SetNumberField(TEXT("pointLights"),Points); Row->SetNumberField(TEXT("wmoShadowCasters"),ShadowCasters);
+        Row->SetNumberField(TEXT("directionalLights"),Directions); Row->SetArrayField(TEXT("authoredLights"),Authored);
+        if(auto* Lights=GetWorld()->GetSubsystem<UWowM2LightSubsystem>())
+        {
+            Row->SetNumberField(TEXT("m2Sources"),Lights->GetSourceCount()); Row->SetNumberField(TEXT("m2Active"),Lights->GetActiveCount());
+            Row->SetNumberField(TEXT("m2Pending"),Lights->GetPendingCount()); Row->SetNumberField(TEXT("m2MaxLoadMs"),Lights->GetMaxLoadMilliseconds());
+        }
         Results.Add(MakeShared<FJsonValueObject>(Row)); StartCase();
     }
 }

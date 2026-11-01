@@ -1,0 +1,12 @@
+{
+  "map": 0,
+  "legacyLoginSun": 1,
+  "skyTickInterval": 0.1,
+  "cases": [
+    {"name":"day-static","time":540,"position":[-8930,-117,87],"target":[-8908,-149,91],"subject":[-8926,-122,83],"settle":5,"duration":3,"shots":1},
+    {"name":"day-clock","time":540,"timeSpeed":1,"position":[-8930,-117,87],"target":[-8908,-149,91],"subject":[-8926,-122,83],"duration":3,"shots":5,"interval":0.1},
+    {"name":"day-distance","time":540,"position":[-8925,-128,86],"end":[-8960,-86,91],"target":[-8910,-145,91],"subject":[-8926,-122,83],"duration":4,"shots":5,"interval":0.7},
+    {"name":"night-static","time":1200,"position":[-8930,-117,87],"target":[-8908,-149,91],"subject":[-8926,-122,83],"duration":3,"shots":1},
+    {"name":"sunset-clock","time":1058,"timeSpeed":1,"position":[-8930,-117,87],"target":[-8908,-149,91],"subject":[-8926,-122,83],"duration":9,"shots":5,"interval":1.7}
+  ]
+}

@@ -43,6 +43,7 @@ public:
     uint32 RootId=0,NameSet=0;
     FBox Bounds=FBox(ForceInit);
     TArray<FGroup> Groups;
+    TSet<int32> QueuedLightDoodads;
     TArray<FVector> PortalVertices;
     TArray<FWmoRootData::FPortal> Portals;
     TArray<FWmoRootData::FPortalRef> PortalRefs;

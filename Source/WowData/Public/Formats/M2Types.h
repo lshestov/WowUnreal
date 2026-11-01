@@ -122,6 +122,19 @@ template<typename T> struct TM2AnimatedTrack
     }
 };
 struct FM2ModelColor {TM2AnimatedTrack<FVector3f> Color; FM2ParticleFloatTrack Alpha;};
+struct WOWDATA_API FM2Light
+{
+    uint16 Type=1;
+    int16 Bone=-1;
+    FVector Position=FVector::ZeroVector;
+    TM2AnimatedTrack<FVector3f> AmbientColor,DiffuseColor;
+    FM2ParticleFloatTrack AmbientIntensity,DiffuseIntensity,AttenuationStart,AttenuationEnd,Visibility;
+};
+struct FM2LightBoneTracks
+{
+    TM2AnimatedTrack<FVector3f> Translation,Scale;
+    TM2AnimatedTrack<FQuat4f> Rotation;
+};
 struct FM2TextureTransform {TM2AnimatedTrack<FVector3f> Translation,Scale; TM2AnimatedTrack<FQuat4f> Rotation;};
 struct FM2Ribbon
 {
@@ -220,6 +233,8 @@ struct WOWDATA_API FM2Data
     TArray<FM2ParticleFloatTrack> TextureWeights;
     TArray<FM2TextureTransform> TextureTransforms;
     TArray<FM2Ribbon> Ribbons;
+    TArray<FM2Light> Lights;
+    TArray<FM2LightBoneTracks> LightBoneTracks;
     TArray<FM2Submesh> Submeshes;          // geoset info from skin file
     TArray<int16> AttachmentLookup;        // attachment ID → index in Attachments
     uint32 NumBones = 0;

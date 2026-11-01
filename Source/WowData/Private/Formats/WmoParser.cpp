@@ -286,6 +286,27 @@ FWmoRootData FWmoParser::ParseRoot(const TArray<uint8>& Data)
             uint32 Off=ChunkStart;
             for(uint32 I=0;I<ChunkSize/8;++I) {FWmoRootData::FPortalRef P; P.Portal=ReadU16(Base,Off,DataSize); P.Group=ReadU16(Base,Off,DataSize); P.Side=int16(ReadU16(Base,Off,DataSize)); Off+=2; Result.PortalRefs.Add(P);}
         }
+        else if (ChunkMagic == WMO_MODS)
+        {
+            for(uint32 I=0;I<ChunkSize/32;++I)
+            {
+                uint32 Off=ChunkStart+I*32+20; FWmoRootData::FDoodadSet Set;
+                Set.First=ReadU32(Base,Off,DataSize); Set.Count=ReadU32(Base,Off,DataSize); Result.DoodadSets.Add(Set);
+            }
+        }
+        else if (ChunkMagic == WMO_MODD)
+        {
+            for(uint32 I=0;I<ChunkSize/40;++I)
+            {
+                uint32 Off=ChunkStart+I*40; FWmoRootData::FDoodad D;
+                const uint32 Name=ReadU32(Base,Off,DataSize); D.NameOffset=Name&0xFFFFFF; D.Flags=Name>>24;
+                const float X=ReadFloat(Base,Off,DataSize),Y=ReadFloat(Base,Off,DataSize),Z=ReadFloat(Base,Off,DataSize); D.Position=FVector(X,Y,Z);
+                const float QX=ReadFloat(Base,Off,DataSize),QY=ReadFloat(Base,Off,DataSize),QZ=ReadFloat(Base,Off,DataSize),QW=ReadFloat(Base,Off,DataSize);
+                D.Rotation=FQuat(QX,QY,QZ,QW); D.Scale=ReadFloat(Base,Off,DataSize);
+                const uint32 Color=ReadU32(Base,Off,DataSize); D.Color=FColor(Color>>16&255,Color>>8&255,Color&255,Color>>24);
+                Result.Doodads.Add(MoveTemp(D));
+            }
+        }
         else if (ChunkMagic == WMO_MODN)
         {
             // Doodad name string table
@@ -306,6 +327,13 @@ FWmoRootData FWmoParser::ParseRoot(const TArray<uint8>& Data)
         Offset = ChunkStart + ChunkSize;
     }
 
+    for(auto& D:Result.Doodads)
+    {
+        D.Path=ReadStringFromTable(DoodNameTable,DoodNameTableSize,D.NameOffset);
+        if(D.Path.EndsWith(TEXT(".mdx"),ESearchCase::IgnoreCase) || D.Path.EndsWith(TEXT(".mdl"),ESearchCase::IgnoreCase)) D.Path=D.Path.LeftChop(4)+TEXT(".m2");
+        if(!D.Rotation.ContainsNaN() && D.Rotation.SizeSquared()>SMALL_NUMBER) D.Rotation.Normalize(); else D.Path.Reset();
+        if(D.Position.ContainsNaN() || !FMath::IsFinite(D.Scale) || D.Scale<=0) D.Path.Reset();
+    }
     Result.bIsValid = true;
     UE_LOG(LogWmo, Log, TEXT("WMO root parsed: %d materials, %d groups, %d doodad paths"),
         Result.Materials.Num(), Result.NumGroups, Result.DoodadPaths.Num());
@@ -412,7 +440,11 @@ FWmoGroupData FWmoParser::ParseGroup(const TArray<uint8>& Data)
             break;
         }
 
-        if (ChunkMagic == WMO_MOPY)
+        if(ChunkMagic == MakeFourCC('R','D','O','M'))
+        {
+            uint32 Off=ChunkStart; for(uint32 I=0;I<ChunkSize/2;++I) Result.DoodadRefs.Add(ReadU16(Base,Off,DataSize));
+        }
+        else if (ChunkMagic == WMO_MOPY)
         {
             Result.TriangleMaterials.SetNum(ChunkSize / 2);
             for (uint32 I = 0; I < ChunkSize / 2; ++I)

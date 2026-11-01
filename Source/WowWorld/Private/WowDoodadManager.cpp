@@ -1,4 +1,5 @@
 #include "WowDoodadManager.h"
+#include "WowM2LightSubsystem.h"
 #include "WowWorldCollision.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "WowRuntimeMeshMaterials.h"
@@ -17,6 +18,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/World.h"
 #include "Engine/SkeletalMesh.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/Skeleton.h"
@@ -145,6 +147,7 @@ void FWowDoodadManager::SpawnDoodads(AActor* ParentActor, const TArray<FAdtDooda
         FRotator Rot = FWowCoordinate::WowRotationToUE(
             Placement.Rotation.X, Placement.Rotation.Y, Placement.Rotation.Z);
 
+        USceneComponent* LightAnchor=nullptr;
         if (ShouldUseSkeletalMesh(*M2Parsed))
         {
             // Animated M2 — use skeletal mesh with animations
@@ -161,6 +164,7 @@ void FWowDoodadManager::SpawnDoodads(AActor* ParentActor, const TArray<FAdtDooda
             SkelComp->SetWorldRotation(Rot);
             SkelComp->SetWorldScale3D(FVector(ScaleVal));
             SkelComp->RegisterComponent();
+            LightAnchor=SkelComp;
 
             // Play first animation if available
             FString NormPath = M2Path.ToLower();
@@ -187,7 +191,10 @@ void FWowDoodadManager::SpawnDoodads(AActor* ParentActor, const TArray<FAdtDooda
             MeshComp->SetWorldRotation(Rot);
             MeshComp->SetWorldScale3D(FVector(ScaleVal));
             MeshComp->RegisterComponent();
+            LightAnchor=MeshComp;
         }
+
+        if(LightAnchor) if(auto* Lights=ParentActor->GetWorld()->GetSubsystem<UWowM2LightSubsystem>()) Lights->RegisterModel(LightAnchor,M2Parsed);
 
         // Add particle effects if the M2 has particle emitters
         if (M2Parsed->ParticleEmitters.Num() > 0)
@@ -257,6 +264,7 @@ UStaticMeshComponent* FWowDoodadManager::SpawnSingleDoodad(
         TArray<int32> Indices;
         FWowWorldCollision::AppendM2(*Model, FTransform::Identity, Vertices, Indices);
         FWowWorldCollision::Create(MeshComp, TEXT("DoodadCollision"), Vertices, Indices);
+        if(auto* Lights=ParentActor->GetWorld()->GetSubsystem<UWowM2LightSubsystem>()) Lights->RegisterModel(MeshComp,Model);
     }
 
     return MeshComp;
@@ -633,6 +641,8 @@ TArray<UInstancedStaticMeshComponent*> FWowDoodadManager::SpawnDoodadsInstanced(
 
             FTransform InstanceTransform(Rot, UEPos, FVector(ScaleVal));
             ISM->AddInstance(InstanceTransform, /*bWorldSpace=*/true);
+            if(CollisionModel && !CollisionModel->Lights.IsEmpty()) if(auto* Lights=ParentActor->GetWorld()->GetSubsystem<UWowM2LightSubsystem>())
+                Lights->RegisterModel(ISM,CollisionModel,InstanceTransform.GetRelativeTransform(ISM->GetComponentTransform()));
             if (CollisionModel)
                 FWowWorldCollision::AppendM2(*CollisionModel,
                     InstanceTransform.GetRelativeTransform(ParentActor->GetRootComponent()->GetComponentTransform()), CollisionVertices, CollisionIndices);

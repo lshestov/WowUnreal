@@ -243,7 +243,7 @@ Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 
 ### P7: Effects & Polish
 - [ ] M2 ribbon emitters (weapon trails)
-- [ ] M2 light emitters (lanterns, spell glow)
+- [?] Authored world M2 light emitters: colour/intensity/range/visibility and bone/global tracks, selected WMO doodad sets and streamed ADT instances, bounded nearest-light rendering and owner cleanup. Seven lighting tests and eight inspected local-light captures pass; clean published recheck pending. Existing spell visuals remain separate. See Docs/WorldLighting.md.
 - [x] WMO interior lighting: original MOHD/MOCV colours, batch/portal transitions, floor-sampled unit ambient/diffuse and corrected outdoor Light.dbc bands/coordinates. Verified 172 regressions, two sets of 21 inspected day/night/moving-camera captures and clean published source/stage/package/runtime identity; see Docs/WorldLighting.md.
 - [x] Spell visuals (SpellVisual → SpellVisualKit → effect attachment chain)
   - [x] Add server-owned channel poses, StartAnimID intro-to-loop playback and an independent spell torso layer over locomotion. Original torso/head keybones and descendants select the mask after UE bone remapping; cast/counter/phase identity preserves clocks on refresh and rejects late completion. Cancellation, deadline expiry and death clear the layer. Verified: Windows builds, 170 regression checks, eight offline rendered scenarios repeated on clean published 8fd2705, 16 inspected captures, all 899 staged sources and three executable hashes matching. Servers and DB untouched. See [caster animations](Docs/CasterSpellAnimations.md).
