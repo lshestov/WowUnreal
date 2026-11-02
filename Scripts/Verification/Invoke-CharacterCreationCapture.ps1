@@ -26,9 +26,24 @@ if(Select-String "$output\client.log" -Pattern 'Authenticating with|Connecting t
 $expected=Get-Content $Spec -Raw|ConvertFrom-Json
 if(@(Get-ChildItem -LiteralPath $output -Filter '*.png').Count -ne $expected.cases.Count){throw 'Incomplete engine captures'}
 & "$Root\logs\wowunreal-ui-completion\Test-Captures.ps1" -RunPath $output -ReportPath "$output\captures.json"
+$calibrations=0
+foreach($case in $report.cases){
+    if(-not $case.grayCardSamples){continue}
+    $bitmap=[System.Drawing.Bitmap]::new((Join-Path $output ($case.name+'.png')))
+    try {
+        foreach($sample in $case.grayCardSamples){
+            $pixel=$bitmap.GetPixel([int][Math]::Round($sample.x),[int][Math]::Round($sample.y))
+            foreach($channel in @($pixel.R,$pixel.G,$pixel.B)){
+                if([Math]::Abs($channel-$sample.expected) -gt 8){throw "Incorrect linear-to-display colour: $($case.name), expected $($sample.expected), received $channel"}
+            }
+            ++$calibrations
+        }
+    } finally {$bitmap.Dispose()}
+}
+if($calibrations -ne 4*@($expected.cases|Where-Object {$_.calibrate}).Count){throw 'Incomplete rendered grey-card calibration'}
 [ordered]@{timestamp=[DateTimeOffset]::Now.ToString('o');commit=$provenance.commit;
     workingTreeModified=$provenance.workingTreeModified;runtimeInputsModified=$provenance.runtimeInputsModified;
     localDocumentation=$provenance.localDocumentation;sha256=$hash;networkLogin=$false;databaseAccess=$false;
-    spec=$Spec;specSha256=(Get-FileHash -LiteralPath $Spec).Hash;cases=$report.cases.Count;screenCycles=$report.screenCycles;directory=$output}|
+    spec=$Spec;specSha256=(Get-FileHash -LiteralPath $Spec).Hash;cases=$report.cases.Count;screenCycles=$report.screenCycles;graySamplesVerified=$calibrations;directory=$output}|
     ConvertTo-Json -Depth 8|Set-Content "$output\verification.json"
 Write-Host "PASS $Name : $($report.cases.Count) rendered cases, 12 cleaned screen cycles; client closed"

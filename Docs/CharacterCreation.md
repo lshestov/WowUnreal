@@ -15,6 +15,16 @@ horizontal FOV. Dragging rotates the character; the wheel changes bounded
 preview zoom. The isolated capture runs at 30 Hz. This is separate from the
 account-login background and music.
 
+Opaque and alpha-key background sections use depth-writing M2 materials;
+transparent effects retain their particle materials. Resolved skin triangle
+indices are remapped into compact section buffers instead of treating skin
+lookup ranges as direct M2 vertex ranges. This preserves the original ordering
+and geometry, including nonidentity lookups in the Blood Elf scene.
+
+The capture uses a linear floating-point target with gamma 1. Slate performs
+the display conversion once. Filmic tonemapping and bloom are disabled for
+the preview, preserving the source artwork's shadow detail and colour values.
+
 `RaceLights` comes from the original `GlueParent.lua`. Directional lights merge
 using `CM2Lighting::SetupSunlight`; the ambient term includes its residual energy
 and uses the existing character-material ambient parameter. Preview lights use
@@ -72,10 +82,13 @@ with the existing full UI/gameplay/rendering/lighting/performance regression
 and `WowUnreal.Login`.
 
 `Scripts/Verification/Invoke-CharacterCreationCapture.ps1 -Name <unique-name>`
-runs 35 rendered cases across every race/sex, multiple classes and boundary
+runs 36 rendered cases across every race/sex, multiple classes and boundary
 appearances, individual appearance/identity button presses, live GC checks, and twelve repeated close/open cycles with queued
 selection changes. Captures use `FScreenshotRequest`. Review every PNG after
 the wrapper exits; its report also validates nonempty unchanged images.
+A four-patch linear grey card checks the final screenshot against independent
+sRGB values (63, 128, 188, 255), with eight levels of tolerance per channel.
+This catches crushed shadows, double gamma and an invisible captured scene.
 
 `Invoke-CharacterCreationNative.py` creates a fresh owned account for a declared
 race/class/sex route. It presses the stock Slate controls, checks short-name,

@@ -18,7 +18,7 @@ class WOWASSETS_API UWowM2EmitterComponent : public USceneComponent
     GENERATED_BODY()
 public:
     UWowM2EmitterComponent();
-    bool Initialize(TSharedPtr<const FM2Data> InModel,FMpqManager* Mpq,FWowAssetCache* Cache,float EmitSeconds);
+    bool Initialize(TSharedPtr<const FM2Data> InModel,FMpqManager* Mpq,FWowAssetCache* Cache,float EmitSeconds,bool DepthGeometry=false);
     void StopEmitting();
     void ExtendEmission(double Deadline) {if(Emitting) EmitUntil=FMath::Max(EmitUntil,Deadline);}
     static float OneShotSeconds(const FM2Data& Data);
@@ -53,6 +53,7 @@ private:
     TArray<FTransform> BoneTransforms;
     TOptional<FTransform> CaptureView;
     TArray<int32> GeometryPasses,ActiveRibbons;
+    TArray<TArray<int32>> GeometryVertices,GeometryTriangles;
     struct FRibbonNode {FVector Position,Up; float Age=0;};
     TArray<TArray<FRibbonNode>> RibbonNodes;
     TArray<double> RibbonLastSpawn;

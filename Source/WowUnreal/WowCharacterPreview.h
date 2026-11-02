@@ -29,7 +29,7 @@ public:
     void ShowCharacter(uint8 Race,uint8 Gender);
     void ShowCreation(const FWowCharacterAppearance& Appearance);
     void ClearCharacter(bool ClearScene=true);
-    void EnableCreationScene() {bCreationScene=true;}
+    void EnableCreationScene();
     void SetOriginalLighting(const TArray<FWowCreationLight>& Lights);
     void SetViewAspect(float Aspect);
     void CaptureNow();

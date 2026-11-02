@@ -5,6 +5,7 @@
 #include "WowCharacterCreationTestGameMode.generated.h"
 class AWowCharacterPreview;
 class SWowCharacterCreateWidget;
+class UProceduralMeshComponent;
 UCLASS()
 class WOWUNREAL_API AWowCharacterCreationTestGameMode : public AWowTestGameMode
 {
@@ -21,6 +22,7 @@ private:
     void CloseScreen();
     void OpenScreen();
     UPROPERTY() TObjectPtr<AWowCharacterPreview> Preview;
+    UPROPERTY() TObjectPtr<UProceduralMeshComponent> CalibrationCard;
     TSharedPtr<SWowCharacterCreateWidget> Widget;
     TArray<TSharedPtr<FJsonValue>> Cases,Results;
     FString Output;

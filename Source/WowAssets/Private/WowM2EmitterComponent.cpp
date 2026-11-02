@@ -30,7 +30,7 @@ UWowM2EmitterComponent::UWowM2EmitterComponent()
 {
     PrimaryComponentTick.bCanEverTick=true; PrimaryComponentTick.TickGroup=TG_PostUpdateWork;
 }
-bool UWowM2EmitterComponent::Initialize(TSharedPtr<const FM2Data> InModel,FMpqManager* Mpq,FWowAssetCache* Cache,float EmitSeconds)
+bool UWowM2EmitterComponent::Initialize(TSharedPtr<const FM2Data> InModel,FMpqManager* Mpq,FWowAssetCache* Cache,float EmitSeconds,bool DepthGeometry)
 {
     if(!InModel || !Mpq || !Cache || !GetOwner() || !GetWorld()) return false;
     Model=MoveTemp(InModel); Random.Initialize(GetUniqueID());
@@ -49,9 +49,30 @@ bool UWowM2EmitterComponent::Initialize(TSharedPtr<const FM2Data> InModel,FMpqMa
     {
         const auto& Pass=Model->RenderPasses[I]; if(!Model->TexturePaths.IsValidIndex(Pass.TextureIndex) || !Model->Submeshes.IsValidIndex(Pass.SubmeshIndex)) continue;
         auto* Texture=ParticleTexture(Model->TexturePaths[Pass.TextureIndex],Mpq,Cache); if(!Texture) continue;
-        auto* Parent=LoadObject<UMaterial>(nullptr,Pass.BlendMode==3 || Pass.BlendMode==4?TEXT("/Game/Materials/M_WowParticleAdd"):TEXT("/Game/Materials/M_WowParticleAlpha")); if(!Parent) continue;
+        const TCHAR* MaterialPath=DepthGeometry && Pass.BlendMode==0?TEXT("/Game/Materials/M_WowM2Opaque"):
+            DepthGeometry && Pass.BlendMode==1?TEXT("/Game/Materials/M_WowM2Masked"):
+            Pass.BlendMode==3 || Pass.BlendMode==4?TEXT("/Game/Materials/M_WowParticleAdd"):TEXT("/Game/Materials/M_WowParticleAlpha");
+        auto* Parent=LoadObject<UMaterial>(nullptr,MaterialPath); if(!Parent) continue;
         auto* Material=UMaterialInstanceDynamic::Create(Parent,this); Material->SetTextureParameterValue(TEXT("ParticleTexture"),Texture); Material->SetScalarParameterValue(TEXT("IgnoreAlpha"),Pass.BlendMode==0 || Pass.BlendMode==3?1:0);
         GeometryPasses.Add(I); Textures.Add(Texture); Materials.Add(Material);
+        // Skin section vertex ranges address the skin lookup, while the parser
+        // resolves triangle indices to the M2 vertex array. Build a compact
+        // section from those resolved indices, including nonidentity lookups.
+        const auto& Section=Model->Submeshes[Pass.SubmeshIndex];
+        auto& Vertices=GeometryVertices.AddDefaulted_GetRef();
+        auto& Triangles=GeometryTriangles.AddDefaulted_GetRef();
+        TMap<int32,int32> Remap;
+        for(int32 Triangle=Section.StartTriangle;Triangle<int32(Section.StartTriangle)+Section.NumTriangles && Triangle+2<Model->Indices.Num();Triangle+=3)
+        {
+            const int32 A=Model->Indices[Triangle],B=Model->Indices[Triangle+1],C=Model->Indices[Triangle+2];
+            if(!Model->Vertices.IsValidIndex(A) || !Model->Vertices.IsValidIndex(B) || !Model->Vertices.IsValidIndex(C)) continue;
+            for(const int32 Index:{A,C,B})
+            {
+                auto* Local=Remap.Find(Index);
+                if(!Local) Local=&Remap.Add(Index,Vertices.Add(Index));
+                Triangles.Add(*Local);
+            }
+        }
     }
     for(int32 I=0;I<Model->Ribbons.Num();++I)
     {
@@ -153,7 +174,7 @@ void UWowM2EmitterComponent::RenderGeometry()
     for(int32 S=0;S<GeometryPasses.Num();++S)
     {
         const int32 Section=ActiveEmitters.Num()+S; if(!ModelVisible) {Mesh->SetMeshSectionVisible(Section,false); continue;}
-        const auto& Pass=Model->RenderPasses[GeometryPasses[S]]; const auto& Submesh=Model->Submeshes[Pass.SubmeshIndex];
+        const auto& Pass=Model->RenderPasses[GeometryPasses[S]];
         const auto& Durations=Model->GlobalSequenceDurations; FLinearColor Color=FLinearColor::White;
         if(Model->Colors.IsValidIndex(Pass.ColorIndex))
         {
@@ -161,9 +182,8 @@ void UWowM2EmitterComponent::RenderGeometry()
             Color=FLinearColor(RGB.X,RGB.Y,RGB.Z,SampleTrack(C.Alpha,1));
         }
         if(Model->TextureWeights.IsValidIndex(Pass.AlphaIndex)) Color.A*=SampleTrack(Model->TextureWeights[Pass.AlphaIndex],1);
-        const int32 Count=Submesh.NumVertices,Start=Submesh.StartVertex; if(Start+Count>Model->Vertices.Num()) continue;
         TArray<FVector> Positions,Normals; TArray<FVector2D> UV; TArray<FLinearColor> Colors; TArray<FProcMeshTangent> Tangents;
-        for(int32 I=Start;I<Start+Count;++I)
+        for(const int32 I:GeometryVertices[S])
         {
             const auto& Vertex=Model->Vertices[I]; const FVector Position=M2Vector(Vertex.Position);
             FVector Skinned=FVector::ZeroVector; float Weight=0;
@@ -183,13 +203,7 @@ void UWowM2EmitterComponent::RenderGeometry()
         if(Mesh->GetProcMeshSection(Section)) Mesh->UpdateMeshSection_LinearColor(Section,Positions,Normals,UV,Colors,Tangents,false);
         else
         {
-            TArray<int32> Indices;
-            for(int32 I=Submesh.StartTriangle;I<int32(Submesh.StartTriangle)+Submesh.NumTriangles && I+2<Model->Indices.Num();I+=3)
-            {
-                const int32 A=Model->Indices[I]-Start,B=Model->Indices[I+1]-Start,C=Model->Indices[I+2]-Start;
-                if(A>=0 && B>=0 && C>=0 && A<Count && B<Count && C<Count) Indices.Append({A,C,B});
-            }
-            Mesh->CreateMeshSection_LinearColor(Section,Positions,Indices,Normals,UV,Colors,Tangents,false,false); Mesh->SetMaterial(Section,Materials[Section]);
+            Mesh->CreateMeshSection_LinearColor(Section,Positions,GeometryTriangles[S],Normals,UV,Colors,Tangents,false,false); Mesh->SetMaterial(Section,Materials[Section]);
         }
     }
 }

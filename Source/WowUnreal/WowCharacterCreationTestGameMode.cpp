@@ -6,6 +6,7 @@
 #include "Formats/Dbc/DbcStore.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/GameViewportClient.h"
+#include "Engine/TextureRenderTarget2D.h"
 #include "Engine/Engine.h"
 #include "EngineUtils.h"
 #include "Misc/FileHelper.h"
@@ -18,6 +19,7 @@
 #include "Components/SceneCaptureComponent2D.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/Material.h"
+#include "ProceduralMeshComponent.h"
 
 AWowCharacterCreationTestGameMode::AWowCharacterCreationTestGameMode()
 { PrimaryActorTick.bCanEverTick=true; HUDClass=nullptr; }
@@ -40,11 +42,13 @@ void AWowCharacterCreationTestGameMode::OpenScreen()
 }
 void AWowCharacterCreationTestGameMode::CloseScreen()
 {
+    if(CalibrationCard) CalibrationCard->DestroyComponent(); CalibrationCard=nullptr;
     if(Widget && GEngine && GEngine->GameViewport) GEngine->GameViewport->RemoveViewportWidgetContent(Widget.ToSharedRef());
     Widget.Reset(); if(Preview) Preview->Destroy(); Preview=nullptr;
 }
 void AWowCharacterCreationTestGameMode::StartCase()
 {
+    if(CalibrationCard) CalibrationCard->DestroyComponent(); CalibrationCard=nullptr;
     if(++Index>=Cases.Num()) {CloseScreen(); Phase=4; Changed=FPlatformTime::Seconds();return;}
     const auto C=Cases[Index]->AsObject(); bool Reopen=false; C->TryGetBoolField(TEXT("reopen"),Reopen);
     if(Reopen || !Widget) {CloseScreen();OpenScreen();}
@@ -89,6 +93,24 @@ void AWowCharacterCreationTestGameMode::Tick(float DT)
         if(!Widget->IsAppearanceValid()) {Finish(false,TEXT("Invalid original appearance"));return;}
         if(!Preview->IsReady()) {if(Now-Changed>20) Finish(false,TEXT("No rendered model"));return;}
         if(Now-Changed<1) return;
+        bool Calibrate=false; Cases[Index]->AsObject()->TryGetBoolField(TEXT("calibrate"),Calibrate);
+        if(Calibrate && !CalibrationCard)
+        {
+            CalibrationCard=NewObject<UProceduralMeshComponent>(Preview); Preview->AddInstanceComponent(CalibrationCard);
+            CalibrationCard->SetupAttachment(Preview->CaptureComponent); CalibrationCard->RegisterComponent();
+            CalibrationCard->SetCollisionEnabled(ECollisionEnabled::NoCollision); CalibrationCard->SetCastShadow(false);
+            auto* Material=LoadObject<UMaterialInterface>(nullptr,TEXT("/Game/Materials/M_WowM2Opaque"));
+            int32 Section=0;
+            for(const float Gray:{.05f,.214041f,.5f,1.f})
+            {
+                const float Y=-8.f+Section*4.f;
+                const TArray<FVector> Positions={FVector(40,Y,9),FVector(40,Y+4,9),FVector(40,Y+4,13),FVector(40,Y,13)};
+                CalibrationCard->CreateMeshSection_LinearColor(Section,Positions,{0,1,2,0,2,3},{},{FVector2D(0),FVector2D(0),FVector2D(0),FVector2D(0)},
+                    {FLinearColor(Gray,Gray,Gray),FLinearColor(Gray,Gray,Gray),FLinearColor(Gray,Gray,Gray),FLinearColor(Gray,Gray,Gray)},{},false,false);
+                CalibrationCard->SetMaterial(Section++,Material);
+            }
+            Preview->CaptureComponent->ShowOnlyComponent(CalibrationCard);
+        }
         bool Collection=false;Cases[Index]->AsObject()->TryGetBoolField(TEXT("collect"),Collection);
         if(Collection) CollectGarbage(RF_NoFlags,true);
         auto* Animation=FWowCharacterBuilder::GetAnimationController(Preview->GetCharacterActor());
@@ -132,6 +154,20 @@ void AWowCharacterCreationTestGameMode::Tick(float DT)
         Row->SetBoolField(TEXT("stockIdentityControlsInvoked"),IdentityControls);
         Row->SetStringField(TEXT("sceneAmbient"),Preview->SceneAmbient.ToString());
         Row->SetNumberField(TEXT("viewLightMask"),Preview->CaptureComponent->ViewLightingChannels.GetMaskForStruct());
+        if(CalibrationCard)
+        {
+            const FIntPoint Size=GEngine->GameViewport->Viewport->GetSizeXY();
+            const double Projection=Size.X/(80.*FMath::Tan(FMath::DegreesToRadians(Preview->CaptureComponent->FOVAngle*.5f)));
+            TArray<TSharedPtr<FJsonValue>> Samples;
+            for(int32 I=0;I<4;++I)
+            {
+                const int32 Expected[]={63,128,188,255}; auto Sample=MakeShared<FJsonObject>();
+                Sample->SetNumberField(TEXT("x"),Size.X*.5+(-6+I*4)*Projection);
+                Sample->SetNumberField(TEXT("y"),Size.Y*.5-11*Projection);
+                Sample->SetNumberField(TEXT("expected"),Expected[I]); Samples.Add(MakeShared<FJsonValueObject>(Sample));
+            }
+            Row->SetArrayField(TEXT("grayCardSamples"),Samples);
+        }
         const auto& Flags=Preview->CaptureComponent->ShowFlags;
         Row->SetStringField(TEXT("lightingFlags"),FString::Printf(TEXT("lighting=%d direct=%d deferred=%d point=%d directional=%d function=%d shadows=%d"),Flags.Lighting,Flags.DirectLighting,Flags.DeferredLighting,Flags.PointLights,Flags.DirectionalLights,Flags.LightFunctions,Flags.DynamicShadows));
         TArray<TSharedPtr<FJsonValue>> Lights;

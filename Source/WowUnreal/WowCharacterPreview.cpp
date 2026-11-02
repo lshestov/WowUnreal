@@ -124,6 +124,20 @@ void AWowCharacterPreview::Setup(AWowWorldManager* Manager,int32 Width,int32 Hei
     RenderTarget->InitAutoFormat(Width,Height); RenderTarget->UpdateResourceImmediate(true);
     CaptureComponent->TextureTarget=RenderTarget;
 }
+void AWowCharacterPreview::EnableCreationScene()
+{
+    bCreationScene=true;
+    // Legacy Glue art is already authored for display. Keep the capture linear:
+    // Slate applies display gamma, and filmic grading otherwise crushes shadows.
+    CaptureComponent->ShowFlags.SetTonemapper(false);
+    CaptureComponent->ShowFlags.SetBloom(false);
+    if(RenderTarget)
+    {
+        RenderTarget->TargetGamma=1.f;
+        RenderTarget->InitCustomFormat(RenderTarget->SizeX,RenderTarget->SizeY,PF_FloatRGBA,true);
+        RenderTarget->UpdateResourceImmediate(true);
+    }
+}
 void AWowCharacterPreview::ShowCreation(const FWowCharacterAppearance& A)
 {
     FWowCharacterInfo C; C.Race=A.Race; C.Class=A.Class; C.Gender=A.Gender;
@@ -230,7 +244,7 @@ bool AWowCharacterPreview::SetupCreationScene()
     SceneRenderer->SetupAttachment(SceneActor->GetRootComponent());SceneRenderer->RegisterComponent();SceneRenderer->SetComponentTickInterval(1.f/30);
     SceneCamera=FWowCoordinate::ModelToUE(SceneModel->Cameras[0].Position);SceneTarget=FWowCoordinate::ModelToUE(SceneModel->Cameras[0].Target);
     PositionCamera();
-    if(!SceneRenderer->Initialize(SceneModel,WorldManager->GetMpqManager(),WorldManager->GetAssetCache(),60)) return false;
+    if(!SceneRenderer->Initialize(SceneModel,WorldManager->GetMpqManager(),WorldManager->GetAssetCache(),60,true)) return false;
     SceneStartedAt=FPlatformTime::Seconds();
     // GlueXML replaces directional lights but retains the scene's authored
     // point lights, including the lights that illuminate Night Elf faces.

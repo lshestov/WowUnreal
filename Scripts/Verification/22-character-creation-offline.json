@@ -270,6 +270,14 @@
       "gender": 1,
       "identityControls": true,
       "reopen": true
+    },
+    {
+      "name": "linear-gray-calibration",
+      "race": 6,
+      "class": 1,
+      "gender": 1,
+      "calibrate": true,
+      "reopen": true
     }
   ]
 }
