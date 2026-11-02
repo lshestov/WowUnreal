@@ -1083,7 +1083,8 @@ void AWowLoginController::ShowCharacterSelectScreen(const TArray<FWowCharacterIn
         if (World)
         {
             FActorSpawnParameters PreviewParams;
-            PreviewParams.Name = FName(TEXT("WowCharacterPreview"));
+            // A destroyed screen's actor can still exist until GC. Let the
+            // engine choose a unique name when returning from creation.
             CharacterPreview = World->SpawnActor<AWowCharacterPreview>(
                 AWowCharacterPreview::StaticClass(),
                 FVector::ZeroVector, FRotator::ZeroRotator, PreviewParams);
