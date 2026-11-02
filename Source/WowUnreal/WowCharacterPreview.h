@@ -28,6 +28,8 @@ public:
     void ShowCharacter(const FWowCharacterInfo& Character);
     void ShowCharacter(uint8 Race,uint8 Gender);
     void ShowCreation(const FWowCharacterAppearance& Appearance);
+    void ShowEmptyScene();
+    bool HasScene() const {return IsValid(SceneActor);}
     void ClearCharacter(bool ClearScene=true);
     void EnableCreationScene();
     void SetOriginalLighting(const TArray<FWowCreationLight>& Lights);

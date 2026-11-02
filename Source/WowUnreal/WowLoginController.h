@@ -64,6 +64,7 @@ private:
     void HandleBackToCharSelect();
     void HandleExpansionChanged(uint8 ExpansionIndex);
     void HandleCharacterHighlighted(int64 Guid);
+    void HandleDeleteCharacterRequest(int64 Guid);
 
     /** Initialize world systems when entering the game world */
     void InitializeWorldSystems();
@@ -119,6 +120,9 @@ private:
     /** Character creation state */
     bool bCharCreateSent = false;
     bool bCreationPending=false;
+    int64 HighlightedCharacterGuid=0;
+    bool bCharacterDeletePending=false;
+    double CharacterDeleteRequestedAt=0;
     double CreationRequestedAt=0;
     bool bAutoEnterAfterCreate = false;
 

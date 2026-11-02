@@ -269,6 +269,7 @@ void AWowLoginController::OnRealmList(const TArray<FWowRealmInfo>& Realms)
 void AWowLoginController::OnCharacterList(const TArray<FWowCharacterInfo>& Characters)
 {
     bCreationPending=false;
+    bCharacterDeletePending=false;
     UE_LOG(LogWowLogin, Log, TEXT("Received %d characters"), Characters.Num());
 
     FString CreationProbePath;
@@ -313,6 +314,8 @@ void AWowLoginController::OnCharacterList(const TArray<FWowCharacterInfo>& Chara
 void AWowLoginController::OnError(const FString& Msg)
 {
     bCreationPending=false;
+    bCharacterDeletePending=false;
+    if(CharSelectWidget) CharSelectWidget->CompleteDeletion(false,FString::Printf(TEXT("Connection error: %s"),*Msg));
     if (CharCreateWidget) CharCreateWidget->CompleteRequest(FString::Printf(TEXT("Connection error: %s"),*Msg));
     if (AutoLoginOptions.bEnabled && bAutoLoginSubmitted && !bWorldEntryComplete)
     {
@@ -325,6 +328,15 @@ void AWowLoginController::OnError(const FString& Msg)
 
 void AWowLoginController::OnCharCreateResult(uint8 ResultCode)
 {
+    if(bCharacterDeletePending)
+    {
+        const bool Success=ResultCode==0x47;
+        if(!Success) bCharacterDeletePending=false;
+        const FString Message=Success?TEXT("Character deleted. Refreshing the list..."):ResultCode==0x49?TEXT("This character is locked for transfer."):
+            ResultCode==0x4A?TEXT("Transfer guild leadership before deleting this character."):ResultCode==0x4B?TEXT("Transfer arena captaincy before deleting this character."):TEXT("Character deletion failed.");
+        if(CharSelectWidget) CharSelectWidget->CompleteDeletion(Success,Message);
+        return;
+    }
     bCreationPending=ResultCode==0x2F; ++CreationResultSerial; LastCreationResult=ResultCode;
     if (ResultCode == 0x2F)
     {
@@ -504,6 +516,8 @@ void AWowLoginController::HandleRealmSelected(int32 Index)
 
 void AWowLoginController::HandleCharacterSelected(int64 Guid)
 {
+    if(!ConnectionManager || ConnectionManager->GetState()!=EWowSessionState::WorldHaveCharList ||
+        !ConnectionManager->GetCachedCharacters().ContainsByPredicate([Guid](const auto& C){return C.Guid==Guid;})) return;
     SetStatusText(TEXT("Entering world..."));
 
     // Show loading screen (we don't know the map yet, so use 0)
@@ -538,11 +552,15 @@ void AWowLoginController::HandleBackToCharSelect()
 
 void AWowLoginController::HandleCharacterHighlighted(int64 Guid)
 {
-    if (CharacterPreview)
-    {
-        for (const auto& Character:ConnectionManager->GetCachedCharacters())
-            if (Character.Guid==Guid) {CharacterPreview->ShowCharacter(Character); break;}
-    }
+    HighlightedCharacterGuid=Guid;
+}
+void AWowLoginController::HandleDeleteCharacterRequest(int64 Guid)
+{
+    if(!CharSelectWidget || bCharacterDeletePending) return;
+    if(!ConnectionManager || ConnectionManager->GetState()!=EWowSessionState::WorldHaveCharList ||
+        !ConnectionManager->GetCachedCharacters().ContainsByPredicate([Guid](const auto& C){return C.Guid==Guid;}))
+    {CharSelectWidget->CompleteDeletion(false,TEXT("The character list changed. Reconnect and try again."));return;}
+    bCharacterDeletePending=true;CharacterDeleteRequestedAt=FPlatformTime::Seconds();ConnectionManager->DeleteCharacter(Guid);
 }
 
 void AWowLoginController::InitializeCinematics()
@@ -575,6 +593,11 @@ void AWowLoginController::InitializeCinematics()
 void AWowLoginController::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
+    if(bCharacterDeletePending && FPlatformTime::Seconds()-CharacterDeleteRequestedAt>30)
+    {
+        bCharacterDeletePending=false;ConnectionManager->Disconnect();ShowLoginScreen();
+        SetStatusText(TEXT("The server did not answer. Reconnect to check the character list. The deletion request was not sent again."));
+    }
     if (bCreationPending && CharCreateWidget && FPlatformTime::Seconds()-CreationRequestedAt>30)
     {
         bCreationPending=false;
@@ -1067,7 +1090,10 @@ void AWowLoginController::ShowCharacterSelectScreen(const TArray<FWowCharacterIn
     CharSelectWidget->OnCharacterSelected.BindUObject(this, &AWowLoginController::HandleCharacterSelected);
     CharSelectWidget->OnCreateCharacterRequest.BindUObject(this, &AWowLoginController::HandleCreateCharacterRequest);
     CharSelectWidget->OnCharacterHighlighted.BindUObject(this, &AWowLoginController::HandleCharacterHighlighted);
-    CharSelectWidget->PopulateCharacters(Characters);
+    CharSelectWidget->OnDeleteCharacterRequest.BindUObject(this,&AWowLoginController::HandleDeleteCharacterRequest);
+    CharSelectWidget->OnBackRequest.BindLambda([this]{ConnectionManager->Disconnect();ShowLoginScreen();});
+    CharSelectWidget->OnChangeRealmRequest.BindLambda([this]{ShowRealmSelectScreen(ConnectionManager->GetCachedRealms());});
+    CharSelectWidget->PopulateCharacters(Characters,HighlightedCharacterGuid);
     CurrentWidget = CharSelectWidget;
 
     if (GEngine && GEngine->GameViewport)
@@ -1090,17 +1116,13 @@ void AWowLoginController::ShowCharacterSelectScreen(const TArray<FWowCharacterIn
                 FVector::ZeroVector, FRotator::ZeroRotator, PreviewParams);
             if (CharacterPreview)
             {
-                CharacterPreview->Setup(WorldManager);
-                CharSelectWidget->SetPreviewRenderTarget(CharacterPreview->GetRenderTarget());
+                CharacterPreview->Setup(WorldManager,1024,768);
+                CharSelectWidget->SetPreview(CharacterPreview,ConnectionManager->GetRealmName());
             }
         }
     }
 
-    // Auto-highlight first character
-    if (Characters.Num() > 0 && CharacterPreview)
-    {
-        CharacterPreview->ShowCharacter(Characters[0]);
-    }
+    HighlightedCharacterGuid=CharSelectWidget->GetSelectedGuid();
 }
 
 void AWowLoginController::ShowCharacterCreateScreen()

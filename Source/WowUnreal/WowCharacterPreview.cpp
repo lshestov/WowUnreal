@@ -147,6 +147,11 @@ void AWowCharacterPreview::ShowCreation(const FWowCharacterAppearance& A)
 void AWowCharacterPreview::ShowCharacter(uint8 Race,uint8 Gender)
 { FWowCharacterInfo C; C.Race=Race; C.Class=1; C.Gender=Gender; Request(C,true); }
 void AWowCharacterPreview::ShowCharacter(const FWowCharacterInfo& Character) { Request(Character,false); }
+void AWowCharacterPreview::ShowEmptyScene()
+{
+    ClearCharacter(false);Requested=FWowCharacterInfo();Requested.Race=1;Requested.Class=1;ResetCamera();
+    if(bCreationScene && SetupCreationScene() && SceneActor) CaptureComponent->ShowOnlyActorComponents(SceneActor);
+}
 void AWowCharacterPreview::Request(const FWowCharacterInfo& Info,bool Starter)
 {
     const bool ChangedModel=Requested.Race!=Info.Race || Requested.Gender!=Info.Gender;
@@ -158,7 +163,7 @@ void AWowCharacterPreview::Tick(float DT)
     Super::Tick(DT);
     if (bPending && FDbcStore::Get().IsDeferredLoaded()) Rebuild();
     if(SceneRenderer) {SceneRenderer->ExtendEmission(FPlatformTime::Seconds()+60);UpdateSceneAttachment();UpdateSceneLights();}
-    if (IsReady()) CaptureNow();
+    if (IsReady() || (!bPending && SceneActor)) CaptureNow();
 }
 void AWowCharacterPreview::Rebuild()
 {
@@ -360,7 +365,7 @@ void AWowCharacterPreview::ClearCharacter(bool ClearScene)
 }
 void AWowCharacterPreview::CaptureNow()
 {
-    if (!IsActorBeingDestroyed() && CaptureComponent && RenderTarget && CurrentCharacterActor) CaptureComponent->CaptureScene();
+    if (!IsActorBeingDestroyed() && CaptureComponent && RenderTarget && (CurrentCharacterActor || SceneActor)) CaptureComponent->CaptureScene();
 }
 void AWowCharacterPreview::EndPlay(const EEndPlayReason::Type Reason)
 {
