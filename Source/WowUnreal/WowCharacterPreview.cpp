@@ -205,6 +205,7 @@ void AWowCharacterPreview::Rebuild()
     if (!Bounds.IsValid) Bounds=CurrentCharacterActor->GetComponentsBoundingBox(true);
     Focus=Bounds.GetCenter()-GetActorLocation();
     const FVector Extent=Bounds.GetExtent();
+    CloseFocusZ=Focus.Z+Extent.Z*.8;
     const float Aspect=float(RenderTarget->SizeX)/RenderTarget->SizeY;
     const float Tan=FMath::Tan(FMath::DegreesToRadians(CaptureComponent->FOVAngle*.5f));
     Distance=FMath::Max(Extent.Z*Aspect,FMath::Max(Extent.X,Extent.Y))/Tan*1.12f+Extent.X;
@@ -296,13 +297,15 @@ void AWowCharacterPreview::PositionCamera()
     if(bCreationScene && SceneModel && SceneModel->Cameras.Num())
     {
         const FVector Position=SceneCamera;
+        FVector Target=SceneTarget;
+        Target.Z=FMath::Lerp(SceneTarget.Z,CloseFocusZ,FMath::Clamp((1.f-ZoomFactor)/.35f,0.f,1.f));
         const float Aspect=float(RenderTarget->SizeX)/RenderTarget->SizeY;
         // Original GxuXformCreateProjection_SG converts its diagonal-like
         // stored angle to vertical FOV by dividing by sqrt(aspect^2+1).
         const float Vertical=SceneModel->Cameras[0].Fov/FMath::Sqrt(Aspect*Aspect+1);
         CaptureComponent->FOVAngle=FMath::Clamp(FMath::RadiansToDegrees(2*FMath::Atan(FMath::Tan(Vertical*.5f)*Aspect))*ZoomFactor,12.f,110.f);
         CaptureComponent->SetRelativeLocation(Position);
-        CaptureComponent->SetRelativeRotation((SceneTarget-Position).Rotation());
+        CaptureComponent->SetRelativeRotation((Target-Position).Rotation());
         if(SceneRenderer) SceneRenderer->SetCaptureView(CaptureComponent->GetComponentLocation(),CaptureComponent->GetComponentRotation());
         return;
     }

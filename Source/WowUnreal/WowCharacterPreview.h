@@ -73,5 +73,6 @@ private:
     bool bPending=false,bStarter=false;
     float Yaw=180,ZoomFactor=1,Distance=400;
     FVector Focus=FVector::ZeroVector;
+    double CloseFocusZ=0;
     uint32 Revision=0;
 };
