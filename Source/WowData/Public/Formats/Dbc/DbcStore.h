@@ -1,5 +1,6 @@
 #pragma once
 #include "CoreMinimal.h"
+#include <atomic>
 #include "Formats/Dbc/MapDbc.h"
 #include "Formats/Dbc/AreaTableDbc.h"
 #include "Formats/Dbc/LightDbc.h"
@@ -33,6 +34,7 @@
 #include "Formats/Dbc/CharHairGeosetsDbc.h"
 #include "Formats/Dbc/CharacterFacialHairStylesDbc.h"
 #include "Formats/Dbc/CharStartOutfitDbc.h"
+#include "Formats/Dbc/CharacterCreationDbc.h"
 #include "Formats/Dbc/TaxiNodesDbc.h"
 #include "Formats/Dbc/ItemUiDbc.h"
 #include "Formats/Dbc/MapUiDbc.h"
@@ -111,6 +113,7 @@ public:
     FCharHairGeosetsDbc& CharHairGeosets() { return CharHairGeosetsDbc; }
     FCharacterFacialHairStylesDbc& CharacterFacialHairStyles() { return CharacterFacialHairStylesDbc; }
     FCharStartOutfitDbc& CharStartOutfit() { return CharStartOutfitDbc; }
+    const FCharacterCreationDbc& CharacterCreation() const { return CharacterCreationDbc; }
     FTaxiNodesDbc& TaxiNodes() { return TaxiNodesDbc; }
 
     const FMapDbc& Maps() const { return MapDbc; }
@@ -149,9 +152,10 @@ public:
     const FTaxiNodesDbc& TaxiNodes() const { return TaxiNodesDbc; }
 
     bool IsLoaded() const { return bLoaded; }
-    bool IsDeferredLoaded() const { return bDeferredLoaded; }
+    bool IsDeferredLoaded() const { return bDeferredLoaded.load(std::memory_order_acquire); }
 
 private:
+    FCharacterCreationDbc CharacterCreationDbc;
     FMapDbc MapDbc;
     FAreaTableDbc AreaTableDbc;
     FLightDbc LightDbc;
@@ -203,5 +207,5 @@ private:
     TMap<uint32,FGlyph> GlyphProperties;
     TMap<uint32,FGlyphSlot> GlyphSlots;
     bool bLoaded = false;
-    bool bDeferredLoaded = false;
+    std::atomic<bool> bDeferredLoaded{false};
 };

@@ -48,6 +48,7 @@ public:
         uint32 HairStyle = 0;
         uint32 HairColor = 0;
         uint32 FacialHairStyle = 0;
+        uint32 ClassId = 0; // Eye geoset; zero when the model has no player class.
     };
 
     /**

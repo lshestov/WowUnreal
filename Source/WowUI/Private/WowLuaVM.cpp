@@ -123,10 +123,11 @@ void FWowLuaVM::InstallInstructionHook()
 
 // ── VM Lifecycle ─────────────────────────────────────────────────────────────────
 
-bool FWowLuaVM::Initialize()
+bool FWowLuaVM::Initialize(bool bGameplay)
 {
 #if HAS_LUA
 	if (L) Shutdown();
+	bGameplayVm=bGameplay;
 
 	// Create state with custom memory allocator
 	L = lua_newstate(LuaAlloc, this);
@@ -136,7 +137,7 @@ bool FWowLuaVM::Initialize()
 
 	luaL_openlibs(L);
 	SandboxGlobals();
-	RegisterWowApi();
+	if(bGameplayVm) RegisterWowApi();
 	InstallInstructionHook();
 	lua_gc(L, LUA_GCSETPAUSE, 110);
 	lua_gc(L, LUA_GCSETSTEPMUL, 300);
@@ -155,7 +156,7 @@ void FWowLuaVM::Shutdown()
 #if HAS_LUA
 	if (L)
 	{
-		FWowSavedVariables::SaveAll(L);
+		if(bGameplayVm) FWowSavedVariables::SaveAll(L);
 		lua_close(L);
 		L = nullptr;
 		MemoryUsed = 0;
@@ -167,7 +168,7 @@ void FWowLuaVM::Shutdown()
 void FWowLuaVM::SaveAllVariables()
 {
 #if HAS_LUA
-	if (L) FWowSavedVariables::SaveAll(L);
+	if (L && bGameplayVm) FWowSavedVariables::SaveAll(L);
 #endif
 }
 

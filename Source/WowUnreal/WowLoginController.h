@@ -39,6 +39,11 @@ public:
     TObjectPtr<AWowWorldManager> WorldManager;
 
 private:
+    friend struct FWowCharacterCreationProbe;
+    TSharedPtr<struct FWowCharacterCreationProbe> CreationProbe;
+    void TickCreationProbe();
+    uint32 CreationResultSerial=0;
+    uint8 LastCreationResult=0xff;
     void StopAutoLogin(const FString& Message);
     void UpdateWorldCapture();
     void OnWorldScreenshotProcessed();
@@ -58,7 +63,7 @@ private:
         uint8 Skin, uint8 Face, uint8 HairStyle, uint8 HairColor, uint8 FacialHair);
     void HandleBackToCharSelect();
     void HandleExpansionChanged(uint8 ExpansionIndex);
-    void HandleCharacterHighlighted(uint8 Race, uint8 Gender);
+    void HandleCharacterHighlighted(int64 Guid);
 
     /** Initialize world systems when entering the game world */
     void InitializeWorldSystems();
@@ -113,6 +118,8 @@ private:
 
     /** Character creation state */
     bool bCharCreateSent = false;
+    bool bCreationPending=false;
+    double CreationRequestedAt=0;
     bool bAutoEnterAfterCreate = false;
 
     /** Handle for login verify world delegate binding */

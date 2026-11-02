@@ -45,6 +45,7 @@ class WOWNETWORK_API UWowConnectionManager : public UObject
 {
     GENERATED_BODY()
 public:
+    uint32 GetCharacterCreateSendCount() const { return CharacterCreateSendCount; }
     UFUNCTION(BlueprintCallable) void Login(const FString& User, const FString& Pass, const FString& Server, int32 Port = 3724);
     UFUNCTION(BlueprintCallable) void SelectRealm(int32 Index);
     UFUNCTION(BlueprintCallable) void RequestCharacterList();
@@ -346,6 +347,8 @@ public:
     UPROPERTY(BlueprintAssignable) FOnWowError OnError;
     UPROPERTY(BlueprintAssignable) FOnCharCreateResult OnCharCreateResult;
 private:
+    bool bCharacterCreatePending=false;
+    uint32 CharacterCreateSendCount=0;
     uint8 NextSpellCastCount=0;
     TSet<uint32> RequestedItems;
     enum class ECursorPayloadType : uint8

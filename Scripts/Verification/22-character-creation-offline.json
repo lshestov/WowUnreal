@@ -1,0 +1,275 @@
+{
+  "cases": [
+    {
+      "name": "human-male",
+      "race": 1,
+      "gender": 0,
+      "class": 1,
+      "reopen": true,
+      "collect": true
+    },
+    {
+      "name": "human-female",
+      "race": 1,
+      "gender": 1,
+      "class": 1,
+      "reopen": false
+    },
+    {
+      "name": "orc-male",
+      "race": 2,
+      "gender": 0,
+      "class": 9,
+      "reopen": true
+    },
+    {
+      "name": "orc-female",
+      "race": 2,
+      "gender": 1,
+      "class": 9,
+      "reopen": false
+    },
+    {
+      "name": "dwarf-male",
+      "race": 3,
+      "gender": 0,
+      "class": 2,
+      "reopen": true
+    },
+    {
+      "name": "dwarf-female",
+      "race": 3,
+      "gender": 1,
+      "class": 2,
+      "reopen": false
+    },
+    {
+      "name": "nightelf-male",
+      "race": 4,
+      "gender": 0,
+      "class": 11,
+      "reopen": true
+    },
+    {
+      "name": "nightelf-female",
+      "race": 4,
+      "gender": 1,
+      "class": 11,
+      "reopen": false
+    },
+    {
+      "name": "undead-male",
+      "race": 5,
+      "gender": 0,
+      "class": 4,
+      "reopen": true
+    },
+    {
+      "name": "undead-female",
+      "race": 5,
+      "gender": 1,
+      "class": 4,
+      "reopen": false
+    },
+    {
+      "name": "tauren-male",
+      "race": 6,
+      "gender": 0,
+      "class": 7,
+      "reopen": true
+    },
+    {
+      "name": "tauren-female",
+      "race": 6,
+      "gender": 1,
+      "class": 7,
+      "reopen": false
+    },
+    {
+      "name": "gnome-male",
+      "race": 7,
+      "gender": 0,
+      "class": 8,
+      "reopen": true
+    },
+    {
+      "name": "gnome-female",
+      "race": 7,
+      "gender": 1,
+      "class": 8,
+      "reopen": false,
+      "collect": true
+    },
+    {
+      "name": "troll-male",
+      "race": 8,
+      "gender": 0,
+      "class": 3,
+      "reopen": true
+    },
+    {
+      "name": "troll-female",
+      "race": 8,
+      "gender": 1,
+      "class": 3,
+      "reopen": false
+    },
+    {
+      "name": "bloodelf-male",
+      "race": 10,
+      "gender": 0,
+      "class": 2,
+      "reopen": true
+    },
+    {
+      "name": "bloodelf-female",
+      "race": 10,
+      "gender": 1,
+      "class": 2,
+      "reopen": false
+    },
+    {
+      "name": "draenei-male",
+      "race": 11,
+      "gender": 0,
+      "class": 7,
+      "reopen": true
+    },
+    {
+      "name": "draenei-female",
+      "race": 11,
+      "gender": 1,
+      "class": 7,
+      "reopen": false
+    },
+    {
+      "name": "human-0-class1-last-close",
+      "race": 1,
+      "gender": 0,
+      "class": 1,
+      "last": true,
+      "zoom": 3,
+      "reopen": true
+    },
+    {
+      "name": "nightelf-1-class11-last-close",
+      "race": 4,
+      "gender": 1,
+      "class": 11,
+      "last": true,
+      "zoom": 3,
+      "reopen": true
+    },
+    {
+      "name": "tauren-1-class7-last-close",
+      "race": 6,
+      "gender": 1,
+      "class": 7,
+      "last": true,
+      "zoom": 3,
+      "reopen": true
+    },
+    {
+      "name": "undead-0-class4-last-close",
+      "race": 5,
+      "gender": 0,
+      "class": 4,
+      "last": true,
+      "zoom": 3,
+      "reopen": true
+    },
+    {
+      "name": "draenei-1-class7-last-close",
+      "race": 11,
+      "gender": 1,
+      "class": 7,
+      "last": true,
+      "zoom": 3,
+      "reopen": true
+    },
+    {
+      "name": "gnome-1-class8-last-close",
+      "race": 7,
+      "gender": 1,
+      "class": 8,
+      "last": true,
+      "zoom": 3,
+      "reopen": true,
+      "collect": true
+    },
+    {
+      "name": "human-1-class6-last-close",
+      "race": 1,
+      "gender": 1,
+      "class": 6,
+      "last": true,
+      "zoom": 3,
+      "reopen": true
+    },
+    {
+      "name": "bloodelf-0-class6-last-close",
+      "race": 10,
+      "gender": 0,
+      "class": 6,
+      "last": true,
+      "zoom": 3,
+      "reopen": true
+    },
+    {
+      "name": "human-control-baseline-close",
+      "race": 1,
+      "class": 1,
+      "gender": 0,
+      "zoom": 2,
+      "reopen": true
+    },
+    {
+      "name": "human-control-skin",
+      "race": 1,
+      "class": 1,
+      "gender": 0,
+      "option": 0,
+      "zoom": 2
+    },
+    {
+      "name": "human-control-face",
+      "race": 1,
+      "class": 1,
+      "gender": 0,
+      "option": 1,
+      "zoom": 2
+    },
+    {
+      "name": "human-control-hair-style",
+      "race": 1,
+      "class": 1,
+      "gender": 0,
+      "option": 2,
+      "zoom": 2
+    },
+    {
+      "name": "human-control-hair-color",
+      "race": 1,
+      "class": 1,
+      "gender": 0,
+      "option": 3,
+      "zoom": 2
+    },
+    {
+      "name": "human-control-facial-hair",
+      "race": 1,
+      "class": 1,
+      "gender": 0,
+      "option": 4,
+      "zoom": 2
+    },
+    {
+      "name": "stock-race-class-gender-controls",
+      "race": 11,
+      "class": 7,
+      "gender": 1,
+      "identityControls": true,
+      "reopen": true
+    }
+  ]
+}

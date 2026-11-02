@@ -96,6 +96,7 @@ TArray<FString> GetCandidateDirs(FWowEquipmentManager::EAttachmentPoint AttachPo
             TEXT("Item\\ObjectComponents\\Cloak\\")
         };
     case FWowEquipmentManager::EAttachmentPoint::Shield:
+    case FWowEquipmentManager::EAttachmentPoint::ShieldInHand:
         return {
             TEXT("Item\\ObjectComponents\\Shield\\"),
             TEXT("Item\\ObjectComponents\\Weapon\\")

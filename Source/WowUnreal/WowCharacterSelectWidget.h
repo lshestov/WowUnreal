@@ -6,7 +6,7 @@
 DECLARE_DELEGATE_OneParam(FOnCharacterSelected, int64 /*Guid*/);
 DECLARE_DELEGATE(FOnCreateCharacterRequest);
 DECLARE_DELEGATE_OneParam(FOnDeleteCharacterRequest, int64 /*Guid*/);
-DECLARE_DELEGATE_TwoParams(FOnCharacterHighlighted, uint8 /*Race*/, uint8 /*Gender*/);
+DECLARE_DELEGATE_OneParam(FOnCharacterHighlighted, int64 /*Guid*/);
 
 class UTextureRenderTarget2D;
 struct FSlateBrush;

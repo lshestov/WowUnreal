@@ -1,4 +1,5 @@
 #include "WowCharacterSelectWidget.h"
+#include "Widgets/Layout/SScaleBox.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Layout/SScrollBox.h"
@@ -165,8 +166,8 @@ void SWowCharacterSelectWidget::Construct(const FArguments& InArgs)
                     .HAlign(HAlign_Fill)
                     .VAlign(VAlign_Fill)
                     [
-                        SAssignNew(PreviewImage, SImage)
-                        .Visibility(EVisibility::Collapsed)
+                        SNew(SScaleBox).Stretch(EStretch::ScaleToFit)
+                        [SAssignNew(PreviewImage, SImage).Visibility(EVisibility::Collapsed)]
                     ]
 
                     // Placeholder text (shown when no preview)
@@ -208,8 +209,6 @@ void SWowCharacterSelectWidget::PopulateCharacters(const TArray<FWowCharacterInf
         FString DetailLine = FString::Printf(TEXT("Level %d %s %s"),
             C.Level, *GetRaceName(C.Race), *GetClassName(C.Class));
 
-        uint8 CharRace = C.Race;
-        uint8 CharGender = C.Gender;
 
         CharListBox->AddSlot().AutoHeight().Padding(0, 2)
         [
@@ -220,10 +219,10 @@ void SWowCharacterSelectWidget::PopulateCharacters(const TArray<FWowCharacterInf
             [
                 SNew(SButton)
                 .ButtonColorAndOpacity(WowCSUI::ListItem)
-                .OnClicked_Lambda([this, CharGuid, CharRace, CharGender]() -> FReply
+                .OnClicked_Lambda([this, CharGuid]() -> FReply
                 {
                     // First click highlights (shows preview), second click enters world
-                    OnCharacterHighlighted.ExecuteIfBound(CharRace, CharGender);
+                    OnCharacterHighlighted.ExecuteIfBound(CharGuid);
                     OnCharacterSelected.ExecuteIfBound(CharGuid);
                     return FReply::Handled();
                 })
@@ -262,7 +261,7 @@ void SWowCharacterSelectWidget::SetPreviewRenderTarget(UTextureRenderTarget2D* I
     {
         PreviewBrush = MakeShared<FSlateBrush>();
         PreviewBrush->SetResourceObject(InRenderTarget);
-        PreviewBrush->ImageSize = FVector2D(512, 768);
+        PreviewBrush->ImageSize = FVector2D(InRenderTarget->SizeX, InRenderTarget->SizeY);
         PreviewBrush->DrawAs = ESlateBrushDrawType::Image;
         PreviewBrush->Tiling = ESlateBrushTileType::NoTile;
 

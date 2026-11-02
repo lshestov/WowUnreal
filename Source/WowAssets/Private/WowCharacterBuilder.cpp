@@ -266,24 +266,26 @@ TMap<uint16, uint16> FWowCharacterBuilder::ComputeDefaultGeosets(const FWowChara
         uint16 HairVariant = 1; // Default: variant 1 = basic body
         if (HairEntry)
         {
-            HairVariant = static_cast<uint16>(FMath::Max(1u, HairEntry->GeosetID));
+            HairVariant = static_cast<uint16>(FMath::Max(1u,HairEntry->GeosetID));
             UE_LOG(LogWowCharacter, Log, TEXT("Hair geoset: Race=%d Gender=%d Style=%d → group 0 variant %d"),
                 Customization.RaceId, Customization.Gender, Customization.HairStyle, HairVariant);
         }
         Result.Add(0, HairVariant);
     }
 
-    // Groups 1, 2, 3 (Facial features): From CharacterFacialHairStyles DBC
-    // Group 1 = Geosets[0] (tusks/chin), Group 2 = Geosets[1], Group 3 = Geosets[2]
+    // Original SetBeardStyle: beard, moustache, sideburn, jewellery, eyes.
+    // Zero is an authored variant and must not be replaced with variant one.
     {
         const FCharacterFacialHairStylesDbcEntry* FacialEntry = Dbc.CharacterFacialHairStyles().GetByRaceGenderVariation(
             Customization.RaceId, Customization.Gender, Customization.FacialHairStyle);
 
         if (FacialEntry)
         {
-            Result.Add(1, static_cast<uint16>(FacialEntry->Geosets[0] > 0 ? FacialEntry->Geosets[0] : 1));
-            Result.Add(2, static_cast<uint16>(FacialEntry->Geosets[1] > 0 ? FacialEntry->Geosets[1] : 1));
-            Result.Add(3, static_cast<uint16>(FacialEntry->Geosets[2] > 0 ? FacialEntry->Geosets[2] : 1));
+            Result.Add(1, static_cast<uint16>(FacialEntry->Geosets[0]));
+            Result.Add(3, static_cast<uint16>(FacialEntry->Geosets[1]));
+            Result.Add(2, static_cast<uint16>(FacialEntry->Geosets[2]));
+            Result.Add(16,static_cast<uint16>(FacialEntry->Geosets[3]));
+            Result.Add(17,static_cast<uint16>(FacialEntry->Geosets[4]));
         }
         else
         {
@@ -306,7 +308,12 @@ TMap<uint16, uint16> FWowCharacterBuilder::ComputeDefaultGeosets(const FWowChara
     Result.Add(15, 1); // Cape
 
     for (uint16 g = 16; g <= 18; ++g)
-        Result.Add(g, 1);
+        if(!Result.Contains(g)) Result.Add(g, 1);
+    bool EyeGlow=Customization.ClassId==6;
+    for(const auto& Face:Dbc.CharSections().GetAll())
+        if(Face.RaceID==Customization.RaceId && Face.SexID==Customization.Gender && Face.Type==1 &&
+            Face.Variation==Customization.FaceVariation && Face.Color==Customization.SkinColor && (Face.Flags&4)) {EyeGlow=true;break;}
+    if(EyeGlow) Result.Add(17,3); // Original GeosRenderPrep, geoset 1703.
 
     return Result;
 }
@@ -645,7 +652,8 @@ AActor* FWowCharacterBuilder::SpawnCharacterWithEquipment(UWorld* World, FMpqMan
     // Attach equipment
     if (Params.Equipment.Num() > 0)
     {
-        USkeletalMeshComponent* MeshComp = Actor->FindComponentByClass<USkeletalMeshComponent>();
+        auto* Animation = GetAnimationController(Actor);
+        USkeletalMeshComponent* MeshComp = Animation ? Animation->GetModelMesh() : Actor->FindComponentByClass<USkeletalMeshComponent>();
         if (MeshComp)
         {
             // Get the character's M2 data for attachment point bone lookup

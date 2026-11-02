@@ -20,6 +20,7 @@ public:
      *  11=Helmet, 12=Back, 26=RightBackSheath */
     enum class EAttachmentPoint : uint32
     {
+        ShieldInHand = 0,   // LEFT_WRIST — shield drawn in the character screen
         RightHand = 1,       // RIGHT_PALM — main-hand weapon grip
         LeftHand = 2,        // LEFT_PALM — off-hand weapon grip
         RightShoulder = 5,

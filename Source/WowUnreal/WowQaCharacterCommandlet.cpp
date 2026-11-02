@@ -29,7 +29,14 @@ int32 UWowQaCharacterCommandlet::Main(const FString& Params)
     double ExpectedNumber=0; Config->TryGetNumberField(TEXT("guid"),ExpectedNumber);
     if(ExpectedNumber<0 || ExpectedNumber>MAX_uint32 || FMath::FloorToDouble(ExpectedNumber)!=ExpectedNumber) return 1;
     const uint64 Expected=uint64(ExpectedNumber); if(Mode!=TEXT("prepare") && !Expected) return 1;
-    double ClassNumber=8; Config->TryGetNumberField(TEXT("class"),ClassNumber); if(ClassNumber!=1 && ClassNumber!=5 && ClassNumber!=8) return 1;
+    double ClassNumber=8,RaceNumber=1,GenderNumber=0;
+    Config->TryGetNumberField(TEXT("class"),ClassNumber);Config->TryGetNumberField(TEXT("race"),RaceNumber);Config->TryGetNumberField(TEXT("gender"),GenderNumber);
+    const TSet<double> Classes={1,2,3,4,5,6,7,8,9,11},Races={1,2,3,4,5,6,7,8,10,11};
+    if(!Classes.Contains(ClassNumber) || !Races.Contains(RaceNumber) || (GenderNumber!=0 && GenderNumber!=1)) return 1;
+    // Preparation/disbanding keeps the original bounded Human QA recipes.
+    // Deletion also accepts a UI-created participant, requiring an exact
+    // race/class/gender match in addition to the registration/name/GUID guards.
+    if(Mode!=TEXT("delete") && ((ClassNumber!=1 && ClassNumber!=5 && ClassNumber!=8) || RaceNumber!=1 || GenderNumber!=0)) return 1;
     FString GuildName; double GuildNumber=0; TSet<uint64> Owned;
     const bool ArenaDisband=Mode==TEXT("disband_arena");
     if(Mode==TEXT("disband") || ArenaDisband)
@@ -64,6 +71,7 @@ int32 UWowQaCharacterCommandlet::Main(const FString& Params)
             if(Characters.Num()==1)
             {
                 Guid=uint64(Characters[0].Guid); if(Expected && Guid!=Expected) break;
+                if(Characters[0].Class!=uint8(ClassNumber) || Characters[0].Race!=uint8(RaceNumber) || Characters[0].Gender!=uint8(GenderNumber)) break;
                 if(Mode==TEXT("prepare")) {Result=TEXT("prepared"); break;}
                 if(Mode==TEXT("disband") || ArenaDisband) {if(!Entering) {Entering=true; Client->EnterWorld(int64(Guid));}}
                 else if(!Deleting) {Deleting=true; Client->DeleteCharacter(int64(Guid));}

@@ -16,46 +16,25 @@ bool FCharStartOutfitDbc::Load(const FDbcParser& Parser)
         FCharStartOutfitDbcEntry E;
         E.ID = Parser.GetUInt(i, 0);
 
-        // Try packed format first (WoW 3.3.5 format: Race/Class/Gender packed into col 1)
-        uint32 PackedCol = Parser.GetUInt(i, 1);
-        E.RaceID = PackedCol & 0xFF;         // byte 0
-        E.ClassID = (PackedCol >> 8) & 0xFF; // byte 1
-        E.GenderID = (PackedCol >> 16) & 0xFF; // byte 2
-
-        // If packed extraction gives invalid values, try regular column layout
-        if (E.RaceID == 0 || E.ClassID == 0)
+        // 3.3.5a: four packed bytes, then 24 item IDs, display IDs and inventory types.
+        if (Parser.GetRecordSize() != 296) return false;
+        const uint32 Packed = Parser.GetUInt(i, 1);
+        E.RaceID = Packed & 0xff;
+        E.ClassID = (Packed >> 8) & 0xff;
+        E.GenderID = (Packed >> 16) & 0xff;
+        E.OutfitID = Packed >> 24;
+        for (int32 j = 0; j < 24; ++j)
         {
-            // Fall back to non-packed format: col 1=Race, col 2=Class, col 3=Gender
-            E.RaceID = Parser.GetUInt(i, 1);
-            E.ClassID = Parser.GetUInt(i, 2);
-            E.GenderID = Parser.GetUInt(i, 3);
-
-            // Columns 2-25: ItemId (not needed for our use case)
-            // Columns 26-49: ItemDisplayId
-            // Columns 50-73: ItemInventorySlot
-            for (int32 j = 0; j < 24; ++j)
-            {
-                E.ItemDisplayIds[j] = static_cast<int32>(Parser.GetUInt(i, 26 + j));
-                E.ItemInventorySlots[j] = static_cast<int32>(Parser.GetUInt(i, 50 + j));
-            }
-        }
-        else
-        {
-            // Packed format: col 1 = packed Race/Class/Gender
-            // Columns 2-25: ItemDisplayId
-            // Columns 26-49: ItemInventorySlot
-            for (int32 j = 0; j < 24; ++j)
-            {
-                E.ItemDisplayIds[j] = static_cast<int32>(Parser.GetUInt(i, 2 + j));
-                E.ItemInventorySlots[j] = static_cast<int32>(Parser.GetUInt(i, 26 + j));
-            }
+            E.ItemIds[j] = static_cast<int32>(Parser.GetUInt(i, 2 + j));
+            E.ItemDisplayIds[j] = static_cast<int32>(Parser.GetUInt(i, 26 + j));
+            E.ItemInventorySlots[j] = static_cast<int32>(Parser.GetUInt(i, 50 + j));
         }
 
         IdIndex.Add(E.ID, Entries.Num());
 
         // Create lookup key for race/class/gender combination
         FString RCGKey = FString::Printf(TEXT("%d_%d_%d"), E.RaceID, E.ClassID, E.GenderID);
-        RaceClassGenderIndex.Add(RCGKey, Entries.Num());
+        if (E.OutfitID == 0) RaceClassGenderIndex.Add(RCGKey, Entries.Num());
 
         Entries.Add(MoveTemp(E));
     }

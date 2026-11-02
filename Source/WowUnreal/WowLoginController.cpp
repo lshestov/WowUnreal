@@ -268,8 +268,11 @@ void AWowLoginController::OnRealmList(const TArray<FWowRealmInfo>& Realms)
 
 void AWowLoginController::OnCharacterList(const TArray<FWowCharacterInfo>& Characters)
 {
+    bCreationPending=false;
     UE_LOG(LogWowLogin, Log, TEXT("Received %d characters"), Characters.Num());
 
+    FString CreationProbePath;
+    if (FParse::Value(FCommandLine::Get(),TEXT("charactercreationprobe="),CreationProbePath)) bAutoLoginActive=false;
     // Auto-enter world with first character when -autologin is active
     // Skip if -createchar is set — we'll enter after creation completes
     if (bAutoLoginActive
@@ -309,6 +312,8 @@ void AWowLoginController::OnCharacterList(const TArray<FWowCharacterInfo>& Chara
 
 void AWowLoginController::OnError(const FString& Msg)
 {
+    bCreationPending=false;
+    if (CharCreateWidget) CharCreateWidget->CompleteRequest(FString::Printf(TEXT("Connection error: %s"),*Msg));
     if (AutoLoginOptions.bEnabled && bAutoLoginSubmitted && !bWorldEntryComplete)
     {
         StopAutoLogin(Msg);
@@ -320,10 +325,12 @@ void AWowLoginController::OnError(const FString& Msg)
 
 void AWowLoginController::OnCharCreateResult(uint8 ResultCode)
 {
+    bCreationPending=ResultCode==0x2F; ++CreationResultSerial; LastCreationResult=ResultCode;
     if (ResultCode == 0x2F)
     {
         UE_LOG(LogWowLogin, Log, TEXT("Character created successfully"));
-        SetStatusText(TEXT("Character created!"));
+        SetStatusText(TEXT("Character created! Refreshing character list..."));
+        if (CharCreateWidget) CharCreateWidget->CompleteRequest(TEXT("Character created! Refreshing character list..."),true);
         // ConnectionManager auto-refreshes char list → OnCharacterList will navigate back
 
         // If -createchar was used, auto-login with the newly created character
@@ -337,26 +344,34 @@ void AWowLoginController::OnCharCreateResult(uint8 ResultCode)
         FString ErrMsg;
         switch (ResultCode)
         {
-        case 0x30: ErrMsg = TEXT("Name already in use"); break;
-        case 0x31: ErrMsg = TEXT("Server disabled"); break;
-        case 0x32: ErrMsg = TEXT("Creation failed"); break;
-        case 0x33: ErrMsg = TEXT("Disabled"); break;
-        case 0x34: ErrMsg = TEXT("Can't create on PvP realm"); break;
-        case 0x50: ErrMsg = TEXT("Invalid name"); break;
-        case 0x51: ErrMsg = TEXT("Name too short"); break;
-        case 0x52: ErrMsg = TEXT("Name too long"); break;
-        case 0x53: ErrMsg = TEXT("Name contains invalid characters"); break;
-        case 0x54: ErrMsg = TEXT("Name has mixed languages"); break;
-        case 0x55: ErrMsg = TEXT("Name is profane"); break;
-        case 0x56: ErrMsg = TEXT("Name is reserved"); break;
-        case 0x57: ErrMsg = TEXT("Invalid apostrophe"); break;
-        case 0x58: ErrMsg = TEXT("Multiple apostrophes"); break;
-        case 0x59: ErrMsg = TEXT("Three consecutive letters"); break;
-        case 0x5A: ErrMsg = TEXT("Invalid space"); break;
-        case 0x5D: ErrMsg = TEXT("Name contains numbers or special chars"); break;
+        case 0x30: ErrMsg=TEXT("Server could not create the character"); break;
+        case 0x31: ErrMsg=TEXT("Character creation failed"); break;
+        case 0x32: ErrMsg=TEXT("Name already in use"); break;
+        case 0x33: ErrMsg=TEXT("Character creation disabled"); break;
+        case 0x34: ErrMsg=TEXT("Opposing factions are not allowed on this PvP realm"); break;
+        case 0x35: ErrMsg=TEXT("Realm character limit reached"); break;
+        case 0x36: ErrMsg=TEXT("Account character limit reached"); break;
+        case 0x37: ErrMsg=TEXT("Realm queue prevents creation"); break;
+        case 0x38: ErrMsg=TEXT("Creation is limited to existing players"); break;
+        case 0x39: case 0x3a: ErrMsg=TEXT("Required expansion is unavailable"); break;
+        case 0x3b: ErrMsg=TEXT("Death Knight requires a higher level character on this realm"); break;
+        case 0x3c: ErrMsg=TEXT("Death Knight limit reached"); break;
+        case 0x3e: ErrMsg=TEXT("This race/class is restricted by the server"); break;
+        case 0x58: case 0x59: ErrMsg=TEXT("Please enter a valid name"); break;
+        case 0x5a: ErrMsg=TEXT("Name too short"); break;
+        case 0x5b: ErrMsg=TEXT("Name too long"); break;
+        case 0x5c: ErrMsg=TEXT("Name contains invalid characters"); break;
+        case 0x5d: ErrMsg=TEXT("Name has mixed languages"); break;
+        case 0x5e: ErrMsg=TEXT("Name is profane"); break;
+        case 0x5f: ErrMsg=TEXT("Name is reserved"); break;
+        case 0x60: case 0x61: ErrMsg=TEXT("Invalid apostrophes in name"); break;
+        case 0x62: ErrMsg=TEXT("Name contains three consecutive letters"); break;
+        case 0x63: case 0x64: ErrMsg=TEXT("Invalid spaces in name"); break;
+        case 0x65: case 0x66: ErrMsg=TEXT("Invalid sequence of Russian characters"); break;
         default: ErrMsg = FString::Printf(TEXT("Creation failed (0x%02X)"), ResultCode); break;
         }
         SetStatusText(FString::Printf(TEXT("Error: %s"), *ErrMsg));
+        if(CharCreateWidget) CharCreateWidget->CompleteRequest(FString::Printf(TEXT("Error: %s"),*ErrMsg));
     }
 }
 
@@ -511,6 +526,8 @@ void AWowLoginController::HandleCreateCharacterRequest()
 void AWowLoginController::HandleCharacterCreated(const FString& Name, uint8 Race, uint8 Class, uint8 Gender,
     uint8 Skin, uint8 Face, uint8 HairStyle, uint8 HairColor, uint8 FacialHair)
 {
+    if (!CharCreateWidget || !ConnectionManager || bCreationPending) return;
+    bCreationPending=true; CreationRequestedAt=FPlatformTime::Seconds();
     ConnectionManager->CreateCharacter(Name, Race, Class, Gender, Skin, Face, HairStyle, HairColor, FacialHair);
 }
 
@@ -519,11 +536,12 @@ void AWowLoginController::HandleBackToCharSelect()
     ShowCharacterSelectScreen(ConnectionManager->GetCachedCharacters());
 }
 
-void AWowLoginController::HandleCharacterHighlighted(uint8 Race, uint8 Gender)
+void AWowLoginController::HandleCharacterHighlighted(int64 Guid)
 {
     if (CharacterPreview)
     {
-        CharacterPreview->ShowCharacter(Race, Gender);
+        for (const auto& Character:ConnectionManager->GetCachedCharacters())
+            if (Character.Guid==Guid) {CharacterPreview->ShowCharacter(Character); break;}
     }
 }
 
@@ -557,6 +575,12 @@ void AWowLoginController::InitializeCinematics()
 void AWowLoginController::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
+    if (bCreationPending && CharCreateWidget && FPlatformTime::Seconds()-CreationRequestedAt>30)
+    {
+        bCreationPending=false;
+        ConnectionManager->Disconnect(); ShowLoginScreen();
+        SetStatusText(TEXT("The server did not answer. Reconnect to check whether the character was created. The request was not sent again."));
+    }
 
     if (bWaitingForInitialLoad)
     {
@@ -567,6 +591,7 @@ void AWowLoginController::Tick(float DeltaTime)
         TryFinalizeGroundSnap();
     }
     UpdateWorldCapture();
+    TickCreationProbe();
 }
 
 void AWowLoginController::StopAutoLogin(const FString& Message)
@@ -942,6 +967,7 @@ void AWowLoginController::HandleExpansionChanged(uint8 ExpansionIndex)
 
 void AWowLoginController::ClearCurrentScreen()
 {
+    if(CharCreateWidget && FSlateApplication::IsInitialized()) FSlateApplication::Get().ReleaseAllPointerCapture();
     if (LoadingScreenWidget.IsValid())
     {
         LoadingScreenWidget->SetBackgroundImage(nullptr);
@@ -1072,7 +1098,7 @@ void AWowLoginController::ShowCharacterSelectScreen(const TArray<FWowCharacterIn
     // Auto-highlight first character
     if (Characters.Num() > 0 && CharacterPreview)
     {
-        CharacterPreview->ShowCharacter(Characters[0].Race, Characters[0].Gender);
+        CharacterPreview->ShowCharacter(Characters[0]);
     }
 }
 
@@ -1080,7 +1106,13 @@ void AWowLoginController::ShowCharacterCreateScreen()
 {
     ClearCurrentScreen();
 
+    bCreationPending=false;
     CharCreateWidget = SNew(SWowCharacterCreateWidget);
+    if (WorldManager)
+    {
+        CharacterPreview=GetWorld()->SpawnActor<AWowCharacterPreview>();
+        if(CharacterPreview) {CharacterPreview->Setup(WorldManager,1024,768); CharacterPreview->EnableCreationScene(); CharCreateWidget->SetPreview(CharacterPreview);}
+    }
     CharCreateWidget->OnCharacterCreated.BindUObject(this, &AWowLoginController::HandleCharacterCreated);
     CharCreateWidget->OnBackToCharSelect.BindUObject(this, &AWowLoginController::HandleBackToCharSelect);
     CurrentWidget = CharCreateWidget;
@@ -1088,6 +1120,7 @@ void AWowLoginController::ShowCharacterCreateScreen()
     if (GEngine && GEngine->GameViewport)
     {
         GEngine->GameViewport->AddViewportWidgetContent(CurrentWidget.ToSharedRef(), 100);
+        ApplyWowLoginUiInputMode(UGameplayStatics::GetPlayerController(this,0),CurrentWidget);
     }
 }
 

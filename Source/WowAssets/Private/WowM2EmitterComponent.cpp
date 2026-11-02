@@ -130,9 +130,11 @@ void UWowM2EmitterComponent::AnimateBones(float TimeMs)
         }
         if(Bone.Flags&0x48)
         {
-            FVector Camera; FRotator View; if(auto* PC=GetWorld()->GetFirstPlayerController())
+            FVector Camera; FRotator View; if(CaptureView.IsSet() || GetWorld()->GetFirstPlayerController())
             {
-                PC->GetPlayerViewPoint(Camera,View); const FVector Pivot=M2Vector(Bone.PivotPoint);
+                if(CaptureView.IsSet()) {Camera=CaptureView->GetLocation();View=CaptureView->Rotator();}
+                else GetWorld()->GetFirstPlayerController()->GetPlayerViewPoint(Camera,View);
+                const FVector Pivot=M2Vector(Bone.PivotPoint);
                 FVector Direction=GetComponentTransform().InverseTransformPosition(Camera)-Pivot;
                 if(Bone.Flags&0x40) Direction.Z=0;
                 if(!Direction.IsNearlyZero())
@@ -290,6 +292,7 @@ void UWowM2EmitterComponent::Render()
     if(!Mesh || !Model) return;
     const double Began=FPlatformTime::Seconds();
     FVector Camera=FVector::ZeroVector; FRotator View=FRotator::ZeroRotator; if(auto* PC=GetWorld()->GetFirstPlayerController()) PC->GetPlayerViewPoint(Camera,View);
+    if(CaptureView.IsSet()) {Camera=CaptureView->GetLocation();View=CaptureView->Rotator();}
     const FVector Right=FRotationMatrix(View).GetUnitAxis(EAxis::Y),Up=FRotationMatrix(View).GetUnitAxis(EAxis::Z);
     const FTransform Transform=GetComponentTransform(); const float SizeScale=Transform.GetScale3D().GetAbsMax()*FWowCoordinate::SCALE;
     for(int32 S=0;S<ActiveEmitters.Num();++S)

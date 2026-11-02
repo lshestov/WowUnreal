@@ -8,6 +8,8 @@ struct FCharStartOutfitDbcEntry
     uint32 RaceID = 0;        // col 1 or extracted from packed col 1
     uint32 ClassID = 0;       // col 2 or extracted from packed col 1
     uint32 GenderID = 0;      // col 3 or extracted from packed col 1
+    uint32 OutfitID = 0;
+    int32 ItemIds[24] = {};
     int32 ItemDisplayIds[24] = {};      // ItemDisplayId[24] (WoW 3.3.5)
     int32 ItemInventorySlots[24] = {};  // ItemInventorySlot[24] (WoW 3.3.5)
 };

@@ -472,6 +472,11 @@ void FDbcStore::LoadDeferred(FMpqManager& Mpq)
         }
     }
 
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\CharBaseInfo.dbc"), Parser))
+        CharacterCreationDbc.LoadBase(Parser);
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\ChrClasses.dbc"), Parser))
+        CharacterCreationDbc.LoadClasses(Parser);
+
     if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\CharStartOutfit.dbc"), Parser))
     {
         CharStartOutfitDbc.Load(Parser);
@@ -549,6 +554,6 @@ void FDbcStore::LoadDeferred(FMpqManager& Mpq)
         for(uint32 I=0;I<Parser.GetRecordCount();++I) { FCurrency C; C.Item=Parser.GetUInt(I,1); C.Category=Parser.GetUInt(I,2); C.Bit=Parser.GetUInt(I,3); if(C.Bit>0 && C.Bit<=64) UiCurrencies.Add(C); }
     }
     ItemUiDbc.Load(Mpq);
-    bDeferredLoaded = true;
+    bDeferredLoaded.store(true,std::memory_order_release);
     UE_LOG(LogDbcStore, Log, TEXT("DbcStore: loaded %d/19 deferred DBC tables (Tier 2)"), Loaded);
 }

@@ -27,6 +27,8 @@ public:
     int32 GetParticleCount() const {return Particles.Num();}
     int32 GetEmitterCount() const {return ActiveEmitters.Num();}
     double GetRenderMilliseconds() const {return RenderMilliseconds;}
+    FTransform GetModelBoneTransform(int32 Bone) const {return BoneTransforms.IsValidIndex(Bone)?BoneTransforms[Bone]:FTransform::Identity;}
+    void SetCaptureView(const FVector& Position,const FRotator& Rotation) {CaptureView=FTransform(Rotation,Position);}
     virtual void TickComponent(float Delta,ELevelTick Type,FActorComponentTickFunction* Function) override;
     virtual void OnComponentDestroyed(bool Hierarchy) override;
 private:
@@ -49,6 +51,7 @@ private:
     bool LoopAnimation=false;
     int32 PerEmitterCapacity=0;
     TArray<FTransform> BoneTransforms;
+    TOptional<FTransform> CaptureView;
     TArray<int32> GeometryPasses,ActiveRibbons;
     struct FRibbonNode {FVector Position,Up; float Age=0;};
     TArray<TArray<FRibbonNode>> RibbonNodes;

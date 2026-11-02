@@ -8,7 +8,8 @@ class WOWUI_API FWowLuaVM
 public:
     FWowLuaVM();
     ~FWowLuaVM();
-    bool Initialize();
+    /** Data-only VMs do not register gameplay APIs or save addon variables. */
+    bool Initialize(bool bGameplay = true);
     void Shutdown();
     /** Save all addon SavedVariables to disk */
     void SaveAllVariables();
@@ -39,6 +40,7 @@ private:
     void InstallInstructionHook();
 
     lua_State* L = nullptr;
+    bool bGameplayVm = true;
 
     // Memory sandbox
     SIZE_T MemoryUsed = 0;

@@ -24,13 +24,18 @@ bool FDbcParser::Parse(const TArray<uint8>& Data)
 
 uint32 FDbcParser::GetUInt(uint32 Rec, uint32 Fld) const
 {
-    if (!bIsValid || Rec >= RecordCount || Fld >= FieldCount) return 0;
+    if (!bIsValid || Rec >= RecordCount || Fld >= FieldCount || uint64(Fld) * 4 + 4 > RecordSize) return 0;
     return *reinterpret_cast<const uint32*>(RecordData + Rec * RecordSize + Fld * 4);
+}
+
+uint8 FDbcParser::GetByte(uint32 Rec, uint32 Offset) const
+{
+    return bIsValid && Rec < RecordCount && Offset < RecordSize ? RecordData[Rec * RecordSize + Offset] : 0;
 }
 
 float FDbcParser::GetFloat(uint32 Rec, uint32 Fld) const
 {
-    if (!bIsValid || Rec >= RecordCount || Fld >= FieldCount) return 0.f;
+    if (!bIsValid || Rec >= RecordCount || Fld >= FieldCount || uint64(Fld) * 4 + 4 > RecordSize) return 0.f;
     return *reinterpret_cast<const float*>(RecordData + Rec * RecordSize + Fld * 4);
 }
 
