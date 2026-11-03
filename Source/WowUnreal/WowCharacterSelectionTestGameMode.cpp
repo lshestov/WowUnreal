@@ -104,11 +104,17 @@ bool AWowCharacterSelectionTestGameMode::VerifyActions()
         break;
     case 12: if(DeleteCount || Widget->IsDeleteDialogOpen() || !Widget->PressStockControl(TEXT("Delete"))) return false;Widget->SetDeleteConfirmationText(TEXT("DELETE"));break;
     case 13:
+        if(!Widget->FocusStockControl(TEXT("Dismiss"))) return false;
+        Widget->OnPreviewKeyDown(FGeometry(),FKeyEvent(EKeys::Enter,FModifierKeysState(),0,false,0,0));
+        if(DeleteCount || Widget->IsDeleteDialogOpen()) return false;
+        break;
+    case 14: if(!Widget->PressStockControl(TEXT("Delete"))) return false;Widget->SetDeleteConfirmationText(TEXT("DELETE"));break;
+    case 15:
         if(!Widget->PressStockControl(TEXT("ConfirmDelete")) || DeleteCount!=1 || DeletedGuid!=Guid || Widget->PressStockControl(TEXT("ConfirmDelete")) || Widget->EnterSelected()) return false;
         break;
-    case 14: Widget->CompleteDeletion(false,TEXT("Deletion failed"));break;
-    case 15: if(!Widget->PressStockControl(TEXT("Dismiss"))) return false;Widget->PopulateCharacters({});DeleteCount=0;break;
-    case 16:
+    case 16: Widget->CompleteDeletion(false,TEXT("Deletion failed"));break;
+    case 17: if(!Widget->PressStockControl(TEXT("Dismiss"))) return false;Widget->PopulateCharacters({});DeleteCount=0;break;
+    case 18:
         if(Widget->EnterSelected() || Widget->PressStockControl(TEXT("Delete")) || !Widget->PressStockControl(TEXT("Create")) || CreateCount!=1) return false;
         Widget->PopulateCharacters(Roster,ActionInitialGuid);CreateCount=0;ActionsVerified=true;break;
     }
@@ -126,7 +132,7 @@ void AWowCharacterSelectionTestGameMode::Tick(float DT)
         if(Now-Changed<(!ActionsVerified && ActionStep>0?.1:1.)) return;
         if(!ActionsVerified && Roster.Num()>1){if(!VerifyActions()){Finish(false,FString::Printf(TEXT("Selection input/confirmation guards failed at step %d (enter=%d delete=%d create=%d)"),ActionStep,EnterCount,DeleteCount,CreateCount));return;}Changed=Now;return;}
         FString Modal;Cases[Index]->AsObject()->TryGetStringField(TEXT("modal"),Modal);
-        if(Modal==TEXT("delete")){Widget->PressStockControl(TEXT("Delete"));Widget->SetDeleteConfirmationText(TEXT("DELE"));}
+        if(Modal==TEXT("delete")){FString Confirmation=TEXT("DELE");Cases[Index]->AsObject()->TryGetStringField(TEXT("confirmation"),Confirmation);Widget->PressStockControl(TEXT("Delete"));Widget->SetDeleteConfirmationText(Confirmation);}
         else if(Modal==TEXT("error")) Widget->CompleteDeletion(false,TEXT("This character is a Guild Master and cannot be deleted until the rank is transferred to another character."));
         CollectGarbage(RF_NoFlags,true);Phase=2;Changed=Now;return;
     }

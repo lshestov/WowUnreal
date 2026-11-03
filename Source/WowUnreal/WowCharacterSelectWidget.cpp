@@ -3,6 +3,7 @@
 #include "WowCharacterCreationArt.h"
 #include "WowWorldManager.h"
 #include "WowBackdropWidget.h"
+#include "WowTextBlock.h"
 #include "Formats/Dbc/DbcStore.h"
 #include "Widgets/Layout/SDPIScaler.h"
 #include "Widgets/Layout/SConstraintCanvas.h"
@@ -86,14 +87,11 @@ bool SWowCharacterSelectWidget::EnterSelected()
     if(bBusy || DeleteGuid || !Selected() || !OnCharacterSelected.IsBound()) return false;
     bBusy=true;OnCharacterSelected.Execute(SelectedGuid);return true;
 }
-TSharedRef<SWidget> SWowCharacterSelectWidget::Backdrop(float Width,float Height,bool CharacterList)
+TSharedRef<SWidget> SWowCharacterSelectWidget::Backdrop(const FWowBackdrop& D)
 {
     auto* W=NewObject<UWowBackdropWidget>();Backdrops.Add(TStrongObjectPtr<UWowBackdropWidget>(W));
-    FWowBackdrop D;D.BgFile=CharacterList?TEXT("Interface\\Glues\\Common\\Glue-Tooltip-Background"):TEXT("Interface\\Tooltips\\UI-Tooltip-Background");D.EdgeFile=TEXT("Interface\\Glues\\Common\\Glue-Tooltip-Border");
-    D.EdgeSize=16;D.TileSize=16;D.Tile=true;D.InsetLeft=10;D.InsetRight=5;D.InsetTop=4;D.InsetBottom=9;
-    if(CharacterList){D.Color=FLinearColor(.09f,.09f,.19f,.85f);D.BorderColor=FLinearColor(.5f,.5f,.5f,1);}
     W->Configure(D,Cast<UTexture2D>(Art->Brush(D.BgFile)->GetResourceObject()),Cast<UTexture2D>(Art->Brush(D.EdgeFile)->GetResourceObject()),1);
-    return SNew(SBox).WidthOverride(Width).HeightOverride(Height)[W->TakeWidget()];
+    return W->TakeWidget();
 }
 void SWowCharacterSelectWidget::BuildStockLayout()
 {
@@ -105,9 +103,14 @@ void SWowCharacterSelectWidget::BuildStockLayout()
     auto Click=[&](FName Name,const FString& Key,FOnClicked Action,int32 FontSize=12)
     {auto B=SNew(SButton).ButtonStyle(Art->Button(TEXT("Interface\\Glues\\Common\\Glue-Panel-Button"),true)).ContentPadding(0).HAlign(HAlign_Center).VAlign(VAlign_Center).OnClicked(Action)[Label(Key,FontSize)];StockControls.Add(Name,B);return B;};
     auto Enabled=[&](TSharedRef<SWidget> W){return SNew(SBox).IsEnabled_Lambda([this]{return !bBusy && !DeleteGuid;})[W];};
-    Canvas->AddSlot().Anchors(FAnchors(0,0,1,1)).Offset(FMargin(0))[SNew(SSelectionViewport).Preview(Preview.Get()).IsEnabled_Lambda([this]{return !bBusy && !DeleteGuid;})];
+    // The modal intercepts input. Disabling the image would also gray out the
+    // original animated scene through Slate's disabled paint effect.
+    Canvas->AddSlot().Anchors(FAnchors(0,0,1,1)).Offset(FMargin(0))[SNew(SSelectionViewport).Preview(Preview.Get())];
     Put(SNew(SImage).Image(Art->Brush(TEXT("Interface\\Glues\\Common\\Glues-WoW-WotLKLogo"))).Visibility(EVisibility::HitTestInvisible),3,7,256,128);
-    auto CharacterPanel=Backdrop(260,654,true);CharacterPanel->SetVisibility(EVisibility::HitTestInvisible);Put(CharacterPanel,-265,15,260,654,1);
+    FWowBackdrop ListBackdrop;ListBackdrop.BgFile=TEXT("Interface\\Glues\\Common\\Glue-Tooltip-Background");ListBackdrop.EdgeFile=TEXT("Interface\\Glues\\Common\\Glue-Tooltip-Border");
+    ListBackdrop.EdgeSize=16;ListBackdrop.TileSize=16;ListBackdrop.Tile=true;ListBackdrop.InsetLeft=10;ListBackdrop.InsetRight=5;ListBackdrop.InsetTop=4;ListBackdrop.InsetBottom=9;
+    ListBackdrop.Color=FLinearColor(.09f,.09f,.19f,.85f);ListBackdrop.BorderColor=FLinearColor(.5f,.5f,.5f,1);
+    auto CharacterPanel=Backdrop(ListBackdrop);CharacterPanel->SetVisibility(EVisibility::HitTestInvisible);Put(CharacterPanel,-265,15,260,654,1);
     const auto RealmFont=Font(18);FString DisplayRealm=RealmName;const auto Measure=FSlateApplication::Get().GetRenderer()->GetFontMeasureService();
     if(Measure->Measure(RealmName,RealmFont).X>240)
     {
@@ -155,24 +158,51 @@ void SWowCharacterSelectWidget::BuildStockLayout()
     auto Delete=Click(TEXT("Delete"),TEXT("DELETE_CHARACTER"),FOnClicked::CreateLambda([this]{OpenDeleteDialog();return FReply::Handled();}));
     Delete->SetEnabled(TAttribute<bool>::CreateLambda([this]{return !bBusy && !DeleteGuid && Selected() && OnDeleteCharacterRequest.IsBound();}));Put(Delete,-295,-60,165,35,1,1);
     DeleteStyle=MakeShared<FEditableTextBoxStyle>(FCoreStyle::Get().GetWidgetStyle<FEditableTextBoxStyle>("NormalEditableTextBox"));FSlateBrush Empty;Empty.DrawAs=ESlateBrushDrawType::NoDrawType;
-    DeleteStyle->SetBackgroundImageNormal(Empty).SetBackgroundImageHovered(Empty).SetBackgroundImageFocused(Empty).SetPadding(FMargin(8,3));
-    auto Confirm=Click(TEXT("ConfirmDelete"),TEXT("DELETE_CHARACTER"),FOnClicked::CreateLambda([this]{ConfirmDelete();return FReply::Handled();}));
+    DeleteStyle->SetBackgroundImageNormal(Empty).SetBackgroundImageHovered(Empty).SetBackgroundImageFocused(Empty).SetPadding(FMargin(0));
+    const FString PanelBase=TEXT("Interface\\Glues\\Common\\Glue-Panel-Button");
+    DialogButtonStyle=MakeShared<FButtonStyle>(*Art->Button(PanelBase,true));
+    DialogButtonStyle->SetDisabled(*Art->Brush(PanelBase+TEXT("-Disabled"),FVector2f(0),FVector2f(.578125f,.75f)));
+    auto Confirm=Click(TEXT("ConfirmDelete"),TEXT("OKAY"),FOnClicked::CreateLambda([this]{ConfirmDelete();return FReply::Handled();}),15);
+    Confirm->SetButtonStyle(DialogButtonStyle.Get());Confirm->SetContentPadding(FMargin(0,0,0,4));
+    Confirm->SetContent(SNew(STextBlock).Text(FText::FromString(Art->String(TEXT("OKAY")))).Font(Font(15)).ShadowOffset(FVector2D(1,1))
+        .ColorAndOpacity_Lambda([this,Gold]{return CanConfirmDelete()?Gold:FLinearColor(.5f,.5f,.5f); }));
     Confirm->SetEnabled(TAttribute<bool>::CreateLambda([this]{return CanConfirmDelete();}));
     Confirm->SetVisibility(TAttribute<EVisibility>::CreateLambda([this]{return DeleteGuid?EVisibility::Visible:EVisibility::Collapsed;}));
-    auto Dismiss=Click(TEXT("Dismiss"),TEXT("CANCEL"),FOnClicked::CreateLambda([this]{DeleteGuid=0;Status.Reset();return FReply::Handled();}));
+    auto Dismiss=Click(TEXT("Dismiss"),TEXT("CANCEL"),FOnClicked::CreateLambda([this]{DeleteGuid=0;Status.Reset();return FReply::Handled();}),15);
+    Dismiss->SetButtonStyle(DialogButtonStyle.Get());Dismiss->SetContentPadding(FMargin(0,0,0,4));
     Dismiss->SetContent(SNew(STextBlock).Text_Lambda([this]{return FText::FromString(Art->String(DeleteGuid?TEXT("CANCEL"):TEXT("OKAY")));})
-        .Font(Font(12)).ColorAndOpacity(Gold).ShadowOffset(FVector2D(1,1)).Justification(ETextJustify::Center));
+        .Font(Font(15)).ColorAndOpacity(Gold).ShadowOffset(FVector2D(1,1)).Justification(ETextJustify::Center));
     Dismiss->SetEnabled(TAttribute<bool>::CreateLambda([this]{return !bBusy;}));
-    auto Dialog=SNew(SOverlay)+SOverlay::Slot()[Backdrop(430,210)]
-        +SOverlay::Slot().Padding(24,18,24,65)[SNew(STextBlock).Font(Font(14)).AutoWrapText(true).Justification(ETextJustify::Center).ColorAndOpacity(Gold).Text_Lambda([this]{return FText::FromString(Status);})]
-        +SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Bottom).Padding(0,0,0,53)
-            [SNew(SBox).WidthOverride(220).HeightOverride(34).Visibility_Lambda([this]{return DeleteGuid?EVisibility::Visible:EVisibility::Collapsed;})
-                [SNew(SOverlay)+SOverlay::Slot()[Backdrop(220,34)]+SOverlay::Slot()[SAssignNew(DeleteBox,SEditableTextBox).Style(DeleteStyle.Get()).Font(Art->Font(14)).ForegroundColor(FLinearColor::White)]]]
-        +SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Bottom).Padding(0,0,0,12)
-            [SNew(SHorizontalBox)+SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(165).HeightOverride(30)[Confirm]]
-            +SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(120).HeightOverride(30)[Dismiss]]];
-    auto Modal=SNew(SOverlay)+SOverlay::Slot()[SNew(SBorder).BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox")).BorderBackgroundColor(FLinearColor(0,0,0,.25f)).OnMouseButtonDown_Lambda([](const FGeometry&,const FPointerEvent&){return FReply::Handled();})]
-        +SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Center)[SNew(SBox).WidthOverride(430).HeightOverride(210)[Dialog]];
+    // CharacterDeleteBackground / CharacterDeleteDialog_OnShow from GlueXML.
+    FWowBackdrop DialogBackdrop;DialogBackdrop.BgFile=TEXT("Interface\\DialogFrame\\UI-DialogBox-Background");DialogBackdrop.EdgeFile=TEXT("Interface\\DialogFrame\\UI-DialogBox-Border");
+    DialogBackdrop.Tile=true;DialogBackdrop.TileSize=32;DialogBackdrop.EdgeSize=32;DialogBackdrop.InsetLeft=11;DialogBackdrop.InsetRight=12;DialogBackdrop.InsetTop=12;DialogBackdrop.InsetBottom=11;
+    auto Dialog=SNew(SConstraintCanvas);
+    Dialog->AddSlot().Anchors(FAnchors(0,0,1,1)).Offset(FMargin(0))[Backdrop(DialogBackdrop)];
+    DialogTitle.Reset(NewObject<UWowTextBlock>());DialogTitle->InitializeLabel(nullptr,1);DialogTitle->SetFont(Font(18));DialogTitle->SetColorAndOpacity(Gold);
+    DialogTitle->SetJustification(ETextJustify::Center);DialogTitle->SetVerticalJustification(TEXT("TOP"));DialogTitle->SetWrapTextAt(400);DialogTitle->SetShadowOffset(FVector2D(2,2));DialogTitle->SetPixelSpacing(2);
+    DialogTitleSlate=DialogTitle->TakeWidget();
+    Dialog->AddSlot().Anchors(FAnchors(.5f,0)).Alignment(FVector2D(.5f,0)).AutoSize(true).Offset(FMargin(0,16,0,0))
+        [SNew(SBox).WidthOverride_Lambda([this]{return DeleteGuid?400.f:450.f;})[DialogTitleSlate.ToSharedRef()]];
+    Dialog->AddSlot().Anchors(FAnchors(.5f,0)).Alignment(FVector2D(.5f,0)).AutoSize(true)
+        .Offset_Lambda([this]{return FMargin(0,36+DialogTitleSlate->GetDesiredSize().Y,0,0);})
+        [SNew(SBox).WidthOverride(400).Visibility_Lambda([this]{return DeleteGuid?EVisibility::Visible:EVisibility::Collapsed;})
+            [SAssignNew(DialogInstructions,STextBlock).Text(FText::FromString(Art->String(TEXT("CONFIRM_CHAR_DELETE_INSTRUCTIONS")))).Font(Font(12)).WrapTextAt(400).Justification(ETextJustify::Center).ColorAndOpacity(Gold).ShadowOffset(FVector2D(1,1))]];
+    Dialog->AddSlot().Anchors(FAnchors(0,.5f)).Alignment(FVector2D(0,.5f)).Offset(FMargin(24,-10,48,48))
+        [SNew(SImage).Image(Art->Brush(TEXT("Interface\\DialogFrame\\UI-Dialog-Icon-AlertNew"))).Visibility_Lambda([this]{return DeleteGuid?EVisibility::HitTestInvisible:EVisibility::Collapsed;})];
+    auto Edit=SNew(SConstraintCanvas);
+    Edit->AddSlot().Alignment(FVector2D::ZeroVector).Offset(FMargin(-10,0,75,32))[SNew(SImage).Image(Art->Brush(TEXT("Interface\\ChatFrame\\UI-ChatInputBorder-Left"),FVector2f(0),FVector2f(.29296875f,1)))];
+    Edit->AddSlot().Alignment(FVector2D::ZeroVector).Offset(FMargin(65,0,75,32))[SNew(SImage).Image(Art->Brush(TEXT("Interface\\ChatFrame\\UI-ChatInputBorder-Right"),FVector2f(.70703125f,0),FVector2f(1)))];
+    Edit->AddSlot().Anchors(FAnchors(0,0,1,1)).Offset(FMargin(0))
+        [SAssignNew(DeleteBox,SEditableTextBox).Style(DeleteStyle.Get()).Font(Font(15)).ForegroundColor(FLinearColor::White)
+            .OnVerifyTextChanged_Lambda([](const FText& Text,FText&){return Text.ToString().Len()<=32;})];
+    Dialog->AddSlot().Anchors(FAnchors(.5f,0)).Alignment(FVector2D(.5f,0))
+        .Offset_Lambda([this]{return FMargin(0,41+DialogTitleSlate->GetDesiredSize().Y+DialogInstructions->GetDesiredSize().Y,130,32);})
+        [SNew(SBox).Visibility_Lambda([this]{return DeleteGuid?EVisibility::Visible:EVisibility::Collapsed;})[Edit]];
+    Dialog->AddSlot().Anchors(FAnchors(.5f,1)).Alignment(FVector2D::ZeroVector).Offset(FMargin(-226,-56,220,40))[Confirm];
+    Dialog->AddSlot().Anchors(FAnchors(.5f,1)).Alignment(FVector2D::ZeroVector).Offset_Lambda([this]{return FMargin(DeleteGuid?7:-110,-56,220,40);})[Dismiss];
+    UpdateDialogText();DialogInstructions->SlatePrepass(1);
+    auto Modal=SNew(SOverlay)+SOverlay::Slot()[SNew(SBorder).BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox")).BorderBackgroundColor(FLinearColor(0,0,0,0)).OnMouseButtonDown_Lambda([](const FGeometry&,const FPointerEvent&){return FReply::Handled();})]
+        +SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Center)[SNew(SBox).WidthOverride(512).HeightOverride_Lambda([this]{return DialogHeight();})[Dialog]];
     Modal->SetVisibility(TAttribute<EVisibility>::CreateLambda([this]{return Status.IsEmpty()?EVisibility::Collapsed:EVisibility::Visible;}));
     Canvas->AddSlot().Anchors(FAnchors(0,0,1,1)).Offset(FMargin(0))[Modal];
     ChildSlot[SNew(SDPIScaler).DPIScale_Lambda([this]{return GetCachedGeometry().GetLocalSize().Y>0?float(GetCachedGeometry().GetLocalSize().Y/768):1.f;})[Canvas]];
@@ -181,19 +211,29 @@ void SWowCharacterSelectWidget::OpenDeleteDialog()
 {
     if(bBusy || DeleteGuid || !Selected() || !OnDeleteCharacterRequest.IsBound()) return;
     const auto C=*Selected();DeleteGuid=C.Guid;DeleteBox->SetText(FText::GetEmpty());
-    FString Format=Art->String(TEXT("CONFIRM_CHAR_DELETE")).Replace(TEXT("|cffffffff"),TEXT("")).Replace(TEXT("|r"),TEXT(""));
+    FString Format=Art->String(TEXT("CONFIRM_CHAR_DELETE"));
     const int32 NameAt=Format.Find(TEXT("%s"));if(NameAt!=INDEX_NONE) Format=Format.Left(NameAt)+C.Name+Format.Mid(NameAt+2);
-    Status=Format.Replace(TEXT("%d"),*FString::FromInt(C.Level)).Replace(TEXT("%s"),*FDbcStore::Get().CharacterCreation().ClassName(C.Class))+TEXT("\n\n")+Art->String(TEXT("CONFIRM_CHAR_DELETE_INSTRUCTIONS"));
+    Status=Format.Replace(TEXT("%d"),*FString::FromInt(C.Level)).Replace(TEXT("%s"),*FDbcStore::Get().CharacterCreation().ClassName(C.Class));UpdateDialogText();
     FSlateApplication::Get().SetKeyboardFocus(DeleteBox,EFocusCause::SetDirectly);
 }
 bool SWowCharacterSelectWidget::CanConfirmDelete() const {return !bBusy && DeleteGuid && SelectedGuid==DeleteGuid && Selected() && OnDeleteCharacterRequest.IsBound() && DeleteBox && Art && !Art->String(TEXT("DELETE_CONFIRM_STRING")).IsEmpty() && DeleteBox->GetText().ToString().Equals(Art->String(TEXT("DELETE_CONFIRM_STRING")),ESearchCase::IgnoreCase);}
 void SWowCharacterSelectWidget::ConfirmDelete()
 {
-    if(!CanConfirmDelete()) return;const int64 Guid=DeleteGuid;DeleteGuid=0;bBusy=true;Status=Art->String(TEXT("CHAR_DELETE_IN_PROGRESS"));OnDeleteCharacterRequest.ExecuteIfBound(Guid);
+    if(!CanConfirmDelete()) return;const int64 Guid=DeleteGuid;DeleteGuid=0;bBusy=true;Status=Art->String(TEXT("CHAR_DELETE_IN_PROGRESS"));UpdateDialogText();OnDeleteCharacterRequest.ExecuteIfBound(Guid);
 }
 void SWowCharacterSelectWidget::SetDeleteConfirmationText(const FString& Text) {if(DeleteBox && DeleteGuid) DeleteBox->SetText(FText::FromString(Text));}
-void SWowCharacterSelectWidget::CompleteDeletion(bool Success,const FString& Message) {if(!Success) bBusy=false;DeleteGuid=0;Status=Message;}
-void SWowCharacterSelectWidget::SetStatusText(const FString& Text) {Status=Text;}
+void SWowCharacterSelectWidget::CompleteDeletion(bool Success,const FString& Message) {if(!Success) bBusy=false;DeleteGuid=0;Status=Message;UpdateDialogText();}
+void SWowCharacterSelectWidget::SetStatusText(const FString& Text) {Status=Text;UpdateDialogText();}
+void SWowCharacterSelectWidget::UpdateDialogText()
+{
+    if(!DialogTitle.IsValid() || !DialogTitleSlate) return;
+    DialogTitle->SetWrapTextAt(DeleteGuid?400:450);DialogTitle->SetText(FText::FromString(Status));DialogTitleSlate->SlatePrepass(1);
+}
+float SWowCharacterSelectWidget::DialogHeight() const
+{
+    const float Title=DialogTitleSlate?DialogTitleSlate->GetDesiredSize().Y:0;
+    return DeleteGuid?135+Title+(DialogInstructions?DialogInstructions->GetDesiredSize().Y:0):80+Title;
+}
 bool SWowCharacterSelectWidget::PressStockControl(FName Name,bool DoubleClick)
 {
     const auto KeepAlive=AsShared();if(bBusy || (DeleteGuid && Name!=TEXT("ConfirmDelete") && Name!=TEXT("Dismiss")) || (!DeleteGuid && !Status.IsEmpty() && Name!=TEXT("Dismiss"))) return false;
@@ -201,11 +241,23 @@ bool SWowCharacterSelectWidget::PressStockControl(FName Name,bool DoubleClick)
     if(DoubleClick){const FPointerEvent E(0,FVector2D::ZeroVector,FVector2D::ZeroVector,TSet<FKey>{EKeys::LeftMouseButton},EKeys::LeftMouseButton,0,FModifierKeysState());B->OnMouseButtonDoubleClick(B->GetCachedGeometry(),E);return true;}
     const FKeyEvent E(EKeys::SpaceBar,FModifierKeysState(),0,false,0,0);B->OnKeyDown(B->GetCachedGeometry(),E);B->OnKeyUp(B->GetCachedGeometry(),E);return true;
 }
+bool SWowCharacterSelectWidget::FocusStockControl(FName Name)
+{
+    const auto* Weak=StockControls.Find(Name);const auto B=Weak?Weak->Pin():nullptr;
+    if(!B || !B->IsEnabled() || B->GetVisibility()!=EVisibility::Visible) return false;
+    FSlateApplication::Get().SetKeyboardFocus(B,EFocusCause::Navigation);return B->HasKeyboardFocus();
+}
 FReply SWowCharacterSelectWidget::OnPreviewKeyDown(const FGeometry&,const FKeyEvent& E)
 {
     if(bBusy) return FReply::Handled();
     if(E.GetKey()==EKeys::Escape){if(DeleteGuid || !Status.IsEmpty()){DeleteGuid=0;Status.Reset();}else OnBackRequest.ExecuteIfBound();return FReply::Handled();}
-    if(E.GetKey()==EKeys::Enter){if(DeleteGuid) ConfirmDelete();else if(Status.IsEmpty()) EnterSelected();return FReply::Handled();}
+    if(E.GetKey()==EKeys::Enter)
+    {
+        const auto* Weak=StockControls.Find(TEXT("Dismiss"));const auto Dismiss=Weak?Weak->Pin():nullptr;
+        if(DeleteGuid && Dismiss && Dismiss->HasKeyboardFocus()){DeleteGuid=0;Status.Reset();}
+        else if(DeleteGuid) ConfirmDelete();else if(Status.IsEmpty()) EnterSelected();else Status.Reset();
+        return FReply::Handled();
+    }
     if(!DeleteGuid && Status.IsEmpty() && (E.GetKey()==EKeys::Up || E.GetKey()==EKeys::Down) && CachedCharacters.Num())
     {const int32 Index=CachedCharacters.IndexOfByPredicate([this](const auto& C){return C.Guid==SelectedGuid;});HighlightCharacter(CachedCharacters[FMath::Clamp(Index+(E.GetKey()==EKeys::Down?1:-1),0,CachedCharacters.Num()-1)].Guid);return FReply::Handled();}
     return FReply::Unhandled();

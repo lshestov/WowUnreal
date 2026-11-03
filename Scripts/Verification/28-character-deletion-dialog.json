@@ -1,0 +1,9 @@
+{"cases":[
+ {"name":"selection","race":1,"gender":0,"count":4,"realm":"AzerothCore"},
+ {"name":"delete-empty","race":1,"gender":0,"count":4,"realm":"AzerothCore","modal":"delete","confirmation":""},
+ {"name":"delete-partial","race":1,"gender":0,"count":4,"realm":"AzerothCore","modal":"delete","confirmation":"DELE"},
+ {"name":"delete-ready","race":1,"gender":0,"count":4,"realm":"AzerothCore","modal":"delete","confirmation":"DELETE"},
+ {"name":"delete-deathknight","race":1,"gender":1,"class":6,"modal":"delete","confirmation":"DELETE"},
+ {"name":"delete-draenei","race":11,"gender":1,"single":true,"modal":"delete","confirmation":""},
+ {"name":"delete-rejected","race":6,"gender":1,"modal":"error"}
+]}

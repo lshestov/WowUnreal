@@ -3,6 +3,7 @@
 #include "Widgets/SCompoundWidget.h"
 #include "WowSessionState.h"
 #include "UObject/StrongObjectPtr.h"
+#include "WowTextBlock.h"
 
 DECLARE_DELEGATE_OneParam(FOnCharacterSelected,int64);
 DECLARE_DELEGATE(FOnCreateCharacterRequest);
@@ -13,6 +14,8 @@ class FWowCharacterCreationArt;
 class UWowBackdropWidget;
 class SButton;
 class SEditableTextBox;
+class STextBlock;
+struct FWowBackdrop;
 struct FEditableTextBoxStyle;
 
 /** Stock Wrath selection layout, backed by the current server enumeration. */
@@ -30,6 +33,7 @@ public:
     bool HighlightCharacter(int64 Guid);
     bool EnterSelected();
     bool PressStockControl(FName Name,bool DoubleClick=false);
+    bool FocusStockControl(FName Name);
     int64 GetSelectedGuid() const {return SelectedGuid;}
     bool IsDeleteDialogOpen() const {return DeleteGuid!=0;}
     bool IsSubmitting() const {return bBusy;}
@@ -48,13 +52,19 @@ private:
     void ConfirmDelete();
     bool CanConfirmDelete() const;
     const FWowCharacterInfo* Selected() const;
-    TSharedRef<SWidget> Backdrop(float Width,float Height,bool CharacterList=false);
+    TSharedRef<SWidget> Backdrop(const FWowBackdrop& Definition);
+    void UpdateDialogText();
+    float DialogHeight() const;
     TWeakObjectPtr<AWowCharacterPreview> Preview;
     TUniquePtr<FWowCharacterCreationArt> Art;
     TArray<TStrongObjectPtr<UWowBackdropWidget>> Backdrops;
     TSharedPtr<SEditableTextBox> DeleteBox;
     TSharedPtr<FEditableTextBoxStyle> DeleteStyle;
     TSharedPtr<FButtonStyle> RotationStyle;
+    TSharedPtr<FButtonStyle> DialogButtonStyle;
+    TStrongObjectPtr<UWowTextBlock> DialogTitle;
+    TSharedPtr<SWidget> DialogTitleSlate;
+    TSharedPtr<STextBlock> DialogInstructions;
     TMap<FName,TWeakPtr<SButton>> StockControls;
     TArray<FWowCharacterInfo> CachedCharacters;
     FString RealmName,Status;

@@ -29,6 +29,17 @@ preserved across list refreshes while the GUID remains present. Empty lists
 disable entry/deletion and a full ten-character list hides Create.
 
 Deletion uses the original confirmation text and localized DELETE keyword.
+The window follows `CharacterDeleteDialog` and `CharacterDeleteDialog_OnShow`:
+512 source units wide, content-driven height, tiled `UI-DialogBox-Background`,
+32-unit `UI-DialogBox-Border`, the 48-unit warning icon, native colour markup
+in the 400-unit prompt, a separate small instruction, a 130x32 edit box with
+the two original chat-input border textures, and 220x40 Okay/Cancel buttons.
+The Okay button uses the original disabled texture until the keyword matches.
+The modal captures input across the screen without adding a dark overlay.
+The scene image remains enabled so Slate does not dim it. Enter on the focused
+Cancel button cancels even when the DELETE keyword is already valid.
+`28-character-deletion-dialog.json` captures empty/partial/valid keywords,
+different scenes, the selected character line and the server-rejection dialog.
 The dialog retains the exact selected GUID, prevents selection changes and
 requires a nonempty matching keyword. Confirming locks the screen before
 dispatch; duplicate actions are rejected. The controller validates membership
