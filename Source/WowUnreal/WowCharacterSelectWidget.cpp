@@ -169,7 +169,7 @@ void SWowCharacterSelectWidget::BuildStockLayout()
             [SNew(SBox).WidthOverride(220).HeightOverride(34).Visibility_Lambda([this]{return DeleteGuid?EVisibility::Visible:EVisibility::Collapsed;})
                 [SNew(SOverlay)+SOverlay::Slot()[Backdrop(220,34)]+SOverlay::Slot()[SAssignNew(DeleteBox,SEditableTextBox).Style(DeleteStyle.Get()).Font(Art->Font(14)).ForegroundColor(FLinearColor::White)]]]
         +SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Bottom).Padding(0,0,0,12)
-            [SNew(SHorizontalBox)+SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(130).HeightOverride(30)[Confirm]]
+            [SNew(SHorizontalBox)+SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(165).HeightOverride(30)[Confirm]]
             +SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(120).HeightOverride(30)[Dismiss]]];
     auto Modal=SNew(SOverlay)+SOverlay::Slot()[SNew(SBorder).BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox")).BorderBackgroundColor(FLinearColor(0,0,0,.25f)).OnMouseButtonDown_Lambda([](const FGeometry&,const FPointerEvent&){return FReply::Handled();})]
         +SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Center)[SNew(SBox).WidthOverride(430).HeightOverride(210)[Dialog]];
