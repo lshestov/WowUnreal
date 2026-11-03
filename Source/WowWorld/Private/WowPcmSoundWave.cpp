@@ -15,5 +15,6 @@ int32 UWowPcmSoundWave::GeneratePCMData(uint8* Destination,int32 SamplesNeeded)
     // The mixer requests a complete render quantum even across the end of a
     // finite sound. Returning zero makes it repeatedly request the same buffer.
     if(Written<Wanted) FMemory::Memzero(Destination+Written,Wanted-Written);
+    GeneratedBytes+=Written;
     return Wanted;
 }

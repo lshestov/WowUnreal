@@ -11,6 +11,7 @@ class WOWWORLD_API UWowPcmSoundWave : public USoundWaveProcedural
 public:
     TSharedPtr<const TArray<uint8>,ESPMode::ThreadSafe> Pcm;
     bool bRepeat=false;
+    TAtomic<uint64> GeneratedBytes{0};
     virtual int32 GeneratePCMData(uint8* Destination,int32 SamplesNeeded) override;
 private:
     int32 Offset=0;

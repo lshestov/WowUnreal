@@ -1,6 +1,7 @@
 #pragma once
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Async/Future.h"
 #include "WowAudioManager.generated.h"
 
 class USoundWave;
@@ -19,6 +20,14 @@ public:
     AWowAudioManager();
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
+    virtual void EndPlay(const EEndPlayReason::Type Reason) override;
+    void SetGlueMode(bool Enabled);
+    void PlayGlueEffect(uint32 SoundEntryId);
+    void StopGlueEffects();
+    bool IsGlueMusicPlaying() const;
+    uint64 GetGlueGeneratedBytes() const;
+    float GetMusicGain() const;
+    int32 GetGlueEffectCount() const {return GlueEffects.Num();}
 
     /** Set the MPQ manager for loading audio files */
     void SetMpqManager(FMpqManager* InMpq) { Mpq = InMpq; }
@@ -54,6 +63,7 @@ public:
     float CrossfadeDuration = 3.0f;
 
 private:
+    friend class FIdleWowGlueAudio;
     FMpqManager* Mpq = nullptr;
 
     /** Load an audio file from MPQ into a USoundWave */
@@ -68,6 +78,7 @@ private:
     /** Start playing ambient sounds for the current zone */
     void UpdateAmbience();
     void ApplyVolumes();
+    void UpdateGlue();
 
     /** Current zone/area */
     uint32 CurrentZoneId = 0;
@@ -96,4 +107,12 @@ private:
         uint16 Channels=0;
     };
     TMap<FString,FDecodedSound> SoundCache;
+    static FDecodedSound DecodeSound(const TArray<uint8>& Raw);
+    TFuture<FDecodedSound> GlueDecode;
+    FString GlueMusicName,GlueMusicPath;
+    bool bGlueMode=false,bGlueRequested=false;
+    float GlueMusicGain=1,GlueAmbienceGain=1;
+    UPROPERTY() TArray<TObjectPtr<UAudioComponent>> GlueEffects;
+    TArray<double> GlueEffectDeadlines;
+    TArray<float> GlueEffectGains;
 };

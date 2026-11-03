@@ -6,5 +6,6 @@ public class WowWorld : ModuleRules
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
         PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "WowData", "WowAssets", "MeshDescription", "StaticMeshDescription", "ProceduralMeshComponent" });
         PrivateDependencyModuleNames.Add("AudioExtensions");
+        AddEngineThirdPartyPrivateStaticDependencies(Target,"dr_libs");
     }
 }
