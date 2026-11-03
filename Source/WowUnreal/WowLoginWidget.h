@@ -2,11 +2,18 @@
 #include "CoreMinimal.h"
 #include "Widgets/SCompoundWidget.h"
 #include "WowExpansionTypes.h"
+#include "Styling/SlateTypes.h"
+#include "UObject/StrongObjectPtr.h"
 
 DECLARE_DELEGATE_FourParams(FOnLoginSubmit, const FString& /*Server*/, int32 /*Port*/, const FString& /*User*/, const FString& /*Pass*/);
 DECLARE_DELEGATE_OneParam(FOnExpansionChanged, uint8 /*ExpansionIndex*/);
 
 class UMediaTexture;
+class AWowLoginScene;
+class AWowAudioManager;
+class FMpqManager;
+class FWowCharacterCreationArt;
+class UWowBackdropWidget;
 struct FSlateBrush;
 
 /**
@@ -21,6 +28,11 @@ public:
     SLATE_END_ARGS()
 
     void Construct(const FArguments& InArgs);
+    SWowLoginWidget();
+    virtual ~SWowLoginWidget();
+    void SetScene(AWowLoginScene* Scene,FMpqManager* Mpq,AWowAudioManager* Audio);
+    bool PressStockControl(FName Name);
+    virtual FReply OnPreviewKeyDown(const FGeometry&,const FKeyEvent&) override;
     void SetStatusText(const FString& Text);
 
     /** Prefill the login fields */
@@ -38,6 +50,17 @@ public:
     EWowExpansion GetCurrentExpansion() const { return CurrentExpansion; }
 
 private:
+    void BuildStockLayout();
+    TUniquePtr<FWowCharacterCreationArt> Art;
+    TWeakObjectPtr<AWowLoginScene> Scene;
+    TWeakObjectPtr<AWowAudioManager> Audio;
+    TArray<TStrongObjectPtr<UWowBackdropWidget>> Backdrops;
+    TSharedPtr<FButtonStyle> BlueButton;
+    TSharedPtr<FCheckBoxStyle> GlueCheck;
+    TSharedPtr<FSliderStyle> GlueSlider;
+    FEditableTextBoxStyle StockEditStyle;
+    TMap<FName,TWeakPtr<SButton>> StockControls;
+    bool bOptions=false,bBusy=false;
     FReply OnLoginClicked();
     void SetExpansion(EWowExpansion Expansion);
 

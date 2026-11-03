@@ -13,6 +13,9 @@
 #include "WowSpellMissile.h"
 #include "WowPlayerCharacter.h"
 #include "WowM2EmitterComponent.h"
+#include "WowLoginScene.h"
+#include "WowCharacterPreview.h"
+#include "WowAudioManager.h"
 #include "ProceduralMeshComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "EngineUtils.h"
@@ -334,6 +337,15 @@ struct FWowGameplayProbe
             C.GameplayProbePointer=Point; C.UIManager->GetFrameManager()->UpdateMouseHover(Point.X,Point.Y); Done=true;
         }
         else if(Op==TEXT("wait_character_select")) Done=Connection->GetState()==EWowSessionState::WorldHaveCharList;
+        else if(Op==TEXT("assert_lobby_lifecycle"))
+        {
+            int32 LoginScenes=0,Previews=0,AudioOwners=0;AWowAudioManager* Audio=nullptr;
+            for(TActorIterator<AWowLoginScene> It(C.GetWorld());It;++It) ++LoginScenes;
+            for(TActorIterator<AWowCharacterPreview> It(C.GetWorld());It;++It) ++Previews;
+            for(TActorIterator<AWowAudioManager> It(C.GetWorld());It;++It){++AudioOwners;Audio=*It;}
+            Done=LoginScenes==Step->GetIntegerField(TEXT("loginScenes")) && Previews==Step->GetIntegerField(TEXT("previews")) && AudioOwners==1 &&
+                Audio && Audio->IsGlueMusicPlaying()==Step->GetBoolField(TEXT("glueMusic")) && Audio->GetGlueEffectCount()==0;
+        }
         else if(Op==TEXT("enter_character"))
         {
             for(const auto& Character:Connection->GetCachedCharacters()) if(Character.Name==Spec->GetStringField(TEXT("character"))) { Connection->EnterWorld(Character.Guid); Done=true; break; }

@@ -11,6 +11,7 @@ class AWowAudioManager;
 class UWowUIManager;
 class FWowCinematicManager;
 class AWowCharacterPreview;
+class AWowLoginScene;
 class SWowLoginWidget;
 class SWowRealmSelectWidget;
 class SWowCharacterSelectWidget;
@@ -39,6 +40,7 @@ public:
     TObjectPtr<AWowWorldManager> WorldManager;
 
 private:
+    friend class AWowLoginTestGameMode;
     friend struct FWowCharacterCreationProbe;
     TSharedPtr<struct FWowCharacterCreationProbe> CreationProbe;
     void TickCreationProbe();
@@ -105,6 +107,9 @@ private:
 
     /** Cinematic manager for login screen backgrounds (owned, cleaned up in EndPlay) */
     FWowCinematicManager* CinematicManager = nullptr;
+    UPROPERTY() TObjectPtr<AWowLoginScene> LoginScene;
+    UPROPERTY() TObjectPtr<AWowAudioManager> MenuAudio;
+    void EnsureMenuAudio();
 
     /** Character preview for 3D model display in character select */
     UPROPERTY()

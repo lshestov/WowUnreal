@@ -1,0 +1,7 @@
+{"steps":[
+  {"at":3,"action":"capture","capture":"01-login"},
+  {"at":8,"action":"capture","capture":"02-arrival"},
+  {"at":12,"action":"options","capture":"03-options"},
+  {"at":13,"action":"options"},
+  {"at":14,"action":"invalid","capture":"04-invalid"}
+]}
