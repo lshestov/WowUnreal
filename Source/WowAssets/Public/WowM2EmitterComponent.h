@@ -29,6 +29,11 @@ public:
     double GetRenderMilliseconds() const {return RenderMilliseconds;}
     FTransform GetModelBoneTransform(int32 Bone) const {return BoneTransforms.IsValidIndex(Bone)?BoneTransforms[Bone]:FTransform::Identity;}
     void SetCaptureView(const FVector& Position,const FRotator& Rotation) {CaptureView=FTransform(Rotation,Position);}
+    // Opt-in source material combiners, lighting and larger bounded weather
+    // budget for the full-screen login model. Spell/character callers retain
+    // their existing material path and particle budgets.
+    void ConfigureGlueScene() {bGlueScene=true;}
+    void SetGlueLighting(FLinearColor Ambient,FLinearColor Diffuse,FVector Direction) {GlueAmbient=Ambient;GlueDiffuse=Diffuse;GlueDirection=Direction;}
     virtual void TickComponent(float Delta,ELevelTick Type,FActorComponentTickFunction* Function) override;
     virtual void OnComponentDestroyed(bool Hierarchy) override;
 private:
@@ -49,6 +54,9 @@ private:
     double RenderMilliseconds=0;
     bool Emitting=true;
     bool LoopAnimation=false;
+    bool bGlueScene=false;
+    FLinearColor GlueAmbient=FLinearColor::White,GlueDiffuse=FLinearColor::Black;
+    FVector GlueDirection=FVector::DownVector;
     int32 PerEmitterCapacity=0;
     TArray<FTransform> BoneTransforms;
     TOptional<FTransform> CaptureView;
@@ -66,6 +74,7 @@ private:
     void AnimateBones(float TimeMs);
     void RenderGeometry();
     UPROPERTY() TObjectPtr<UProceduralMeshComponent> Mesh;
+    UPROPERTY() TArray<TObjectPtr<UProceduralMeshComponent>> SectionMeshes;
     UPROPERTY() TArray<TObjectPtr<UTexture2D>> Textures;
     UPROPERTY() TArray<TObjectPtr<UMaterialInstanceDynamic>> Materials;
     void Emit(int32 Index,float TimeMs);

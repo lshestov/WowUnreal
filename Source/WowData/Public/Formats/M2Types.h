@@ -18,6 +18,10 @@ struct WOWDATA_API FM2RenderPass
     uint16 BlendMode = 0;
     uint16 Flags = 0;
     int16 ColorIndex=-1,AlphaIndex=-1,TransformIndex=-1;
+    uint16 TextureCount=1,SecondaryTextureIndex=0,TexCoord=0,SecondaryTexCoord=0;
+    int16 SecondaryTransformIndex=-1;
+    uint8 Combiner=1,SecondaryCombiner=1;
+    int8 PriorityPlane=0;
 };
 
 struct WOWDATA_API FM2Bone
@@ -52,6 +56,7 @@ struct WOWDATA_API FM2AnimKeyframe
 // Animation track for one bone across one animation sequence
 struct WOWDATA_API FM2BoneTrack
 {
+    int16 TranslationGlobal=-1,RotationGlobal=-1,ScaleGlobal=-1;
     TArray<uint32> TransTimestamps;
     TArray<FVector> TransValues;
     TArray<uint32> RotTimestamps;
@@ -215,14 +220,50 @@ struct WOWDATA_API FM2Submesh
 
 struct WOWDATA_API FM2Data
 {
-    struct FCamera {int32 Type=-1; float Fov=0; FVector Position=FVector::ZeroVector,Target=FVector::ZeroVector;};
+    // Camera keys are M2SplineKey<T> triples even for linear interpolation.
+    template<typename T> struct TSplineTrack
+    {
+        uint16 Interpolation=0; int16 GlobalSequence=-1;
+        struct FKey {T Value{},In{},Out{};};
+        struct FSequence {TArray<uint32> Times;TArray<FKey> Keys;};
+        TArray<FSequence> Sequences;
+        SIZE_T GetAllocatedSize() const {SIZE_T N=Sequences.GetAllocatedSize();for(const auto& S:Sequences) N+=S.Times.GetAllocatedSize()+S.Keys.GetAllocatedSize();return N;}
+        T Sample(float Time,const TArray<uint32>& Durations,const T& Default,int32 Animation=0) const
+        {
+            if(Sequences.IsEmpty() || !FMath::IsFinite(Time)) return Default;
+            if(Durations.IsValidIndex(GlobalSequence) && Durations[GlobalSequence]) Time=FMath::Fmod(Time,float(Durations[GlobalSequence]));
+            if(GlobalSequence>=0 || !Sequences.IsValidIndex(Animation)) Animation=0;
+            const auto& S=Sequences[Animation];const int32 N=FMath::Min(S.Times.Num(),S.Keys.Num());
+            if(!N) return Default;if(N==1 || Time<=S.Times[0]) return S.Keys[0].Value;
+            if(Time>=S.Times[N-1]) return S.Keys[N-1].Value;
+            int32 A=0,B=N-1;while(B-A>1){const int32 M=(A+B)/2;if(S.Times[M]<=Time) A=M;else B=M;}
+            const float T0=(Time-S.Times[A])/FMath::Max(1.f,float(S.Times[B]-S.Times[A]));
+            const auto& K=S.Keys[A];const auto& L=S.Keys[B];
+            if(!Interpolation) return K.Value;
+            if(Interpolation==1) return FMath::Lerp(K.Value,L.Value,T0);
+            const float U=1-T0,TT=T0*T0;
+            if(Interpolation==2) return K.Value*(2*TT*T0-3*TT+1)+K.Out*(TT*T0-2*TT+T0)+L.Value*(-2*TT*T0+3*TT)+L.In*(TT*T0-TT);
+            return K.Value*(U*U*U)+K.Out*(3*U*U*T0)+L.In*(3*U*TT)+L.Value*(TT*T0);
+        }
+    };
+    struct FCamera
+    {
+        int32 Type=-1;float Fov=0;
+        FVector Position=FVector::ZeroVector,Target=FVector::ZeroVector;
+        float NearClip=0,FarClip=0;
+        FVector PositionPivot=FVector::ZeroVector,TargetPivot=FVector::ZeroVector;
+        TSplineTrack<FVector> PositionTrack,TargetTrack;TSplineTrack<float> RollTrack;
+    };
     TArray<FCamera> Cameras;
+    struct FEvent {FString Token;uint32 Data=0,Bone=0;FVector Position=FVector::ZeroVector;int16 GlobalSequence=-1;TArray<TArray<uint32>> Times;};
+    TArray<FEvent> Events;
     TArray<FVector> CollisionVertices;
     TArray<uint16> CollisionIndices;
     TArray<FM2Vertex> Vertices;
     TArray<uint16> Indices;
     TArray<FString> TexturePaths;
     TArray<uint32> TextureTypes;  // M2 texture type per index (0=filename, 1=skin, 6=hair, etc.)
+    TArray<uint32> TextureFlags;
     TArray<FM2RenderPass> RenderPasses;
     FBox BoundingBox = FBox(ForceInit);
     float BoundingSphereRadius = 0.0f;

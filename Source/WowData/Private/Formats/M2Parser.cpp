@@ -332,6 +332,36 @@ template<typename Raw,typename Value,typename Convert> static bool ReadParticleC
 
 // ── Implementation ──────────────────────────────────────────────────────────
 
+template<typename T,int32 Width> static bool ReadCameraTrack(const uint8* Base,int32 Size,const uint8* Raw,FM2Data::TSplineTrack<T>& Out)
+{
+    FM2ParticleTrackRaw Header;FMemory::Memcpy(&Header,Raw,sizeof(Header));
+    if(Header.Interpolation>3 || Header.Times.Count!=Header.Values.Count || Header.Times.Count>64) return false;
+    const FM2ArrayRaw *Times=nullptr,*Values=nullptr;
+    if(!SafeRead(Base,Size,Header.Times.Offset,Header.Times.Count,Times) || !SafeRead(Base,Size,Header.Values.Offset,Header.Values.Count,Values)) return false;
+    FM2Data::TSplineTrack<T> Parsed;Parsed.Interpolation=Header.Interpolation;Parsed.GlobalSequence=Header.GlobalSequence;
+    for(uint32 I=0;I<Header.Times.Count;++I)
+    {
+        if(Times[I].Count!=Values[I].Count || Times[I].Count>4096) return false;
+        const uint32* Stamp=nullptr;const float* Keys=nullptr;
+        if(!SafeRead(Base,Size,Times[I].Offset,Times[I].Count,Stamp) || !SafeRead(Base,Size,Values[I].Offset,Values[I].Count*Width*3,Keys)) return false;
+        auto& S=Parsed.Sequences.AddDefaulted_GetRef();
+        for(uint32 J=0;J<Times[I].Count;++J)
+        {
+            if(J && Stamp[J]<Stamp[J-1]) return false;
+            typename FM2Data::TSplineTrack<T>::FKey K;
+            T* Parts[]={&K.Value,&K.In,&K.Out};
+            for(int32 P=0;P<3;++P)
+            {
+                const float* V=Keys+(J*3+P)*Width;
+                for(int32 C=0;C<Width;++C) if(!FMath::IsFinite(V[C])) return false;
+                if constexpr(Width==3) *Parts[P]=FVector(V[0],V[1],V[2]);else *Parts[P]=V[0];
+            }
+            S.Times.Add(Stamp[J]);S.Keys.Add(K);
+        }
+    }
+    Out=MoveTemp(Parsed);return true;
+}
+
 bool FM2Parser::HasLightTable(const TArray<uint8>& Data)
 {
     if(Data.Num()<sizeof(FM2Header)) return false;
@@ -378,26 +408,50 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
     Result.BoundingSphereRadius = Header.BoundingSphereRadius;
     Result.NumBones = Header.nBones;
 
-    // Portraits use the model's authored camera at the beginning of Stand.
-    // Camera spline values are offsets from the two pivots, not world positions.
-    const auto CameraOffset=[&](const uint8* Track)
-    {
-        uint32 Count=0,Offset=0; FMemory::Memcpy(&Count,Track+12,4); FMemory::Memcpy(&Offset,Track+16,4);
-        const uint32* Arrays=nullptr; const float* Key=nullptr;
-        if(!Count || Count>4096 || !SafeRead(M2Base,M2Size,Offset,Count*2,Arrays) || !Arrays[0] ||
-            !SafeRead(M2Base,M2Size,Arrays[1],9,Key)) return FVector::ZeroVector;
-        const FVector Value(Key[0],Key[1],Key[2]); return Value.ContainsNaN()?FVector::ZeroVector:Value;
-    };
     const FM2CameraRaw* Cameras=nullptr;
     if(Header.nCameras<=64 && SafeRead(M2Base,M2Size,Header.ofsCameras,Header.nCameras,Cameras))
         for(uint32 I=0;I<Header.nCameras;++I)
         {
             const auto& Raw=Cameras[I]; FM2Data::FCamera View;
-            View.Type=Raw.Type; View.Fov=Raw.Fov;
-            View.Position=FVector(Raw.Position[0],Raw.Position[1],Raw.Position[2])+CameraOffset(Raw.PositionTrack);
-            View.Target=FVector(Raw.Target[0],Raw.Target[1],Raw.Target[2])+CameraOffset(Raw.TargetTrack);
+            View.Type=Raw.Type;View.Fov=Raw.Fov;View.NearClip=Raw.NearClip;View.FarClip=Raw.FarClip;
+            View.PositionPivot=FVector(Raw.Position[0],Raw.Position[1],Raw.Position[2]);View.TargetPivot=FVector(Raw.Target[0],Raw.Target[1],Raw.Target[2]);
+            // Portraits historically accept a readable first value even when
+            // the optional time table is absent. Keep that static fallback;
+            // only validated complete tracks may animate the Glue camera.
+            const auto FirstValue=[&](const uint8* Track)
+            {
+                FM2ParticleTrackRaw H;FMemory::Memcpy(&H,Track,sizeof(H));
+                const FM2ArrayRaw* Arrays=nullptr;const float* Key=nullptr;
+                if(!H.Values.Count || H.Values.Count>64 || !SafeRead(M2Base,M2Size,H.Values.Offset,H.Values.Count,Arrays) ||
+                    !Arrays[0].Count || !SafeRead(M2Base,M2Size,Arrays[0].Offset,9,Key)) return FVector::ZeroVector;
+                const FVector V(Key[0],Key[1],Key[2]);return V.ContainsNaN()?FVector::ZeroVector:V;
+            };
+            const bool PositionValid=ReadCameraTrack<FVector,3>(M2Base,M2Size,Raw.PositionTrack,View.PositionTrack);
+            const bool TargetValid=ReadCameraTrack<FVector,3>(M2Base,M2Size,Raw.TargetTrack,View.TargetTrack);
+            ReadCameraTrack<float,1>(M2Base,M2Size,Raw.RollTrack,View.RollTrack);
+            View.Position=View.PositionPivot+(PositionValid?View.PositionTrack.Sample(0,Result.GlobalSequenceDurations,FVector::ZeroVector):FirstValue(Raw.PositionTrack));
+            View.Target=View.TargetPivot+(TargetValid?View.TargetTrack.Sample(0,Result.GlobalSequenceDurations,FVector::ZeroVector):FirstValue(Raw.TargetTrack));
             if(FMath::IsFinite(View.Fov) && View.Fov>0 && View.Fov<PI && !View.Position.ContainsNaN() &&
                 !View.Target.ContainsNaN() && FVector::DistSquared(View.Position,View.Target)>SMALL_NUMBER) Result.Cameras.Add(View);
+        }
+
+    // M2Event has a timestamp-only track (not a value track).
+    const uint8* EventTable=nullptr;
+    if(Header.nEvents<=1024 && SafeRead(M2Base,M2Size,Header.ofsEvents,Header.nEvents*36,EventTable))
+        for(uint32 I=0;I<Header.nEvents;++I)
+        {
+            const auto* Raw=EventTable+I*36;FM2Data::FEvent E;
+            ANSICHAR Token[5];FMemory::Memcpy(Token,Raw,4);Token[4]=0;E.Token=ANSI_TO_TCHAR(Token);
+            FMemory::Memcpy(&E.Data,Raw+4,4);FMemory::Memcpy(&E.Bone,Raw+8,4);
+            const float* P=reinterpret_cast<const float*>(Raw+12);E.Position=FVector(P[0],P[1],P[2]);
+            FMemory::Memcpy(&E.GlobalSequence,Raw+26,2);uint32 Count=0,Offset=0;FMemory::Memcpy(&Count,Raw+28,4);FMemory::Memcpy(&Offset,Raw+32,4);
+            const FM2ArrayRaw* Arrays=nullptr;if(Count>64 || !SafeRead(M2Base,M2Size,Offset,Count,Arrays)) continue;
+            bool Valid=true;for(uint32 S=0;S<Count;++S)
+            {
+                const uint32* Times=nullptr;if(Arrays[S].Count>4096 || !SafeRead(M2Base,M2Size,Arrays[S].Offset,Arrays[S].Count,Times)){Valid=false;break;}
+                auto& Dest=E.Times.AddDefaulted_GetRef();if(Arrays[S].Count) Dest.Append(Times,Arrays[S].Count);
+            }
+            if(Valid) Result.Events.Add(MoveTemp(E));
         }
 
     // Dedicated simplified collision data, not the visible leaves/cloth mesh.
@@ -529,6 +583,7 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
 
                 // Parse translation block
                 const FAnimBlock* TransBlock = reinterpret_cast<const FAnimBlock*>(Bone.TransBlock);
+                Track.TranslationGlobal=TransBlock->GlobalSequence;
                 if (TransBlock->nTimestampArrays > animIdx && TransBlock->nValueArrays > animIdx)
                 {
                     const FSubArrayHeader* TimestampHeaders = nullptr;
@@ -565,6 +620,7 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
 
                 // Parse rotation block
                 const FAnimBlock* RotBlock = reinterpret_cast<const FAnimBlock*>(Bone.RotBlock);
+                Track.RotationGlobal=RotBlock->GlobalSequence;
                 if (RotBlock->nTimestampArrays > animIdx && RotBlock->nValueArrays > animIdx)
                 {
                     const FSubArrayHeader* TimestampHeaders = nullptr;
@@ -605,6 +661,7 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
 
                 // Parse scale block
                 const FAnimBlock* ScaleBlock = reinterpret_cast<const FAnimBlock*>(Bone.ScaleBlock);
+                Track.ScaleGlobal=ScaleBlock->GlobalSequence;
                 if (ScaleBlock->nTimestampArrays > animIdx && ScaleBlock->nValueArrays > animIdx)
                 {
                     const FSubArrayHeader* TimestampHeaders = nullptr;
@@ -655,10 +712,12 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
     {
         Result.TexturePaths.SetNum(Header.nTextures);
         Result.TextureTypes.SetNum(Header.nTextures);
+        Result.TextureFlags.SetNum(Header.nTextures);
         for (uint32 i = 0; i < Header.nTextures; i++)
         {
             const FM2TextureEntry& Tex = TexEntries[i];
             Result.TextureTypes[i] = Tex.Type;
+            Result.TextureFlags[i] = Tex.Flags;
             if (Tex.Type == 0 && Tex.NameLength > 1)
             {
                 // Type 0 = filename-based texture
@@ -778,14 +837,24 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
         FM2RenderPass& Pass = Result.RenderPasses[i];
 
         Pass.SubmeshIndex = TU.SkinSectionIndex; Pass.ColorIndex=TU.ColorIndex;
+        Pass.PriorityPlane=TU.PriorityPlane;
+        Pass.TextureCount=FMath::Clamp<uint16>(TU.OpCount,1,2);
         const int16* Lookup=nullptr;
         if(SafeRead(M2Base,M2Size,Header.ofsTransLookup,Header.nTransLookup,Lookup) && TU.TransparencyComboIndex<Header.nTransLookup) Pass.AlphaIndex=Lookup[TU.TransparencyComboIndex];
         if(SafeRead(M2Base,M2Size,Header.ofsTexAnimLookup,Header.nTexAnimLookup,Lookup) && TU.TexAnimComboIndex<Header.nTexAnimLookup) Pass.TransformIndex=Lookup[TU.TexAnimComboIndex];
+        if(Lookup && uint32(TU.TexAnimComboIndex)+1<Header.nTexAnimLookup) Pass.SecondaryTransformIndex=Lookup[TU.TexAnimComboIndex+1];
+        const uint16* Coords=nullptr;
+        if(SafeRead(M2Base,M2Size,Header.ofsTexUnits,Header.nTexUnits,Coords))
+        {
+            if(TU.TexCoordComboIndex<Header.nTexUnits) Pass.TexCoord=Coords[TU.TexCoordComboIndex];
+            if(uint32(TU.TexCoordComboIndex)+1<Header.nTexUnits) Pass.SecondaryTexCoord=Coords[TU.TexCoordComboIndex+1];
+        }
 
         // Resolve texture index through the texture lookup table
         if (TU.TextureComboIndex < static_cast<uint16>(TexLookup.Num()))
         {
             Pass.TextureIndex = TexLookup[TU.TextureComboIndex];
+            if(TexLookup.IsValidIndex(TU.TextureComboIndex+1)) Pass.SecondaryTextureIndex=TexLookup[TU.TextureComboIndex+1];
         }
         else
         {
@@ -797,6 +866,15 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
         {
             Pass.Flags     = RenderFlags[TU.RenderFlagsIndex].Flags;
             Pass.BlendMode = RenderFlags[TU.RenderFlagsIndex].BlendMode;
+        }
+        // CM2Shared::SubstituteSimpleShaders: flag 8 adds a combiner table
+        // after the ordinary 304-byte header. ShaderId then indexes that table.
+        Pass.Combiner=Pass.BlendMode==0?0:1;
+        const FM2ArrayRaw* ComboHeader=nullptr;const uint16* Combos=nullptr;
+        if((Header.GlobalFlags&8) && SafeRead(M2Base,M2Size,304,1,ComboHeader) && ComboHeader->Count<=65536 && SafeRead(M2Base,M2Size,ComboHeader->Offset,ComboHeader->Count,Combos))
+        {
+            if(TU.ShaderId>=0 && uint32(TU.ShaderId)<ComboHeader->Count && Pass.BlendMode!=0) Pass.Combiner=Combos[TU.ShaderId]&7;
+            if(TU.ShaderId>=0 && uint32(TU.ShaderId+1)<ComboHeader->Count) Pass.SecondaryCombiner=Combos[TU.ShaderId+1]&7;
         }
     }
 

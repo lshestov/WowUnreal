@@ -4,6 +4,9 @@ SIZE_T FM2Data::GetAllocatedSize() const
 {
     SIZE_T N=sizeof(*this)+Cameras.GetAllocatedSize()+CollisionVertices.GetAllocatedSize()+CollisionIndices.GetAllocatedSize()+Vertices.GetAllocatedSize()+Indices.GetAllocatedSize()+TexturePaths.GetAllocatedSize()+TextureTypes.GetAllocatedSize()+RenderPasses.GetAllocatedSize()+Bones.GetAllocatedSize()+Animations.GetAllocatedSize()+AnimationTracks.GetAllocatedSize()+Attachments.GetAllocatedSize()+ParticleEmitters.GetAllocatedSize()+GlobalSequenceDurations.GetAllocatedSize()+Colors.GetAllocatedSize()+TextureWeights.GetAllocatedSize()+TextureTransforms.GetAllocatedSize()+Ribbons.GetAllocatedSize()+Lights.GetAllocatedSize()+LightBoneTracks.GetAllocatedSize()+Submeshes.GetAllocatedSize()+AttachmentLookup.GetAllocatedSize();
     for(const auto& P:TexturePaths) N+=P.GetAllocatedSize();
+    N+=TextureFlags.GetAllocatedSize()+Events.GetAllocatedSize();
+    for(const auto& C:Cameras) N+=C.PositionTrack.GetAllocatedSize()+C.TargetTrack.GetAllocatedSize()+C.RollTrack.GetAllocatedSize();
+    for(const auto& E:Events){N+=E.Token.GetAllocatedSize()+E.Times.GetAllocatedSize();for(const auto& S:E.Times) N+=S.GetAllocatedSize();}
     for(const auto& A:AnimationTracks) {N+=A.BoneTracks.GetAllocatedSize(); for(const auto& B:A.BoneTracks) N+=B.TransTimestamps.GetAllocatedSize()+B.TransValues.GetAllocatedSize()+B.RotTimestamps.GetAllocatedSize()+B.RotValues.GetAllocatedSize()+B.ScaleTimestamps.GetAllocatedSize()+B.ScaleValues.GetAllocatedSize();}
     for(const auto& C:Colors) N+=C.Color.GetAllocatedSize()+C.Alpha.GetAllocatedSize();
     for(const auto& W:TextureWeights) N+=W.GetAllocatedSize();

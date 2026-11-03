@@ -15,14 +15,14 @@
 namespace
 {
 FVector M2Vector(const FVector& V) {return FVector(V.Y,V.X,V.Z)*FWowCoordinate::SCALE;}
-UTexture2D* ParticleTexture(const FString& Path,FMpqManager* Mpq,FWowAssetCache* Cache)
+UTexture2D* ParticleTexture(const FString& Path,FMpqManager* Mpq,FWowAssetCache* Cache,int32 Wrap=-1,bool LegacyColor=false)
 {
-    const FString Key=TEXT("particle:")+Path.ToLower().Replace(TEXT("/"),TEXT("\\"));
+    const FString Key=FString::Printf(TEXT("particle:%d:%d:"),Wrap,int32(LegacyColor))+Path.ToLower().Replace(TEXT("/"),TEXT("\\"));
     if(auto* Existing=Cache->FindTexture(Key)) return Existing;
     TArray<uint8> Raw; if(!Mpq->ReadFile(Path,Raw)) return nullptr;
     const auto Blp=FBlpParser::Parse(Raw); if(!Blp.bIsValid) return nullptr;
     auto* Texture=FWowTextureFactory::CreateTexture(Blp,MakeUniqueObjectName(GetTransientPackage(),UTexture2D::StaticClass(),TEXT("M2ParticleTexture")).ToString());
-    if(Texture) Cache->CacheTexture(Key,Texture); return Texture;
+    if(Texture){Texture->SRGB=!LegacyColor;if(Wrap>=0){Texture->AddressX=(Wrap&1)?TA_Wrap:TA_Clamp;Texture->AddressY=(Wrap&2)?TA_Wrap:TA_Clamp;}if(LegacyColor || Wrap>=0) Texture->UpdateResource();Cache->CacheTexture(Key,Texture);} return Texture;
 }
 }
 
@@ -39,7 +39,7 @@ bool UWowM2EmitterComponent::Initialize(TSharedPtr<const FM2Data> InModel,FMpqMa
         const auto& E=Model->ParticleEmitters[I];
         if((E.EmitterType!=1 && E.EmitterType!=2) || !(E.Flags&0x60000) || E.BlendMode<2 || E.BlendMode>4 || !Model->TexturePaths.IsValidIndex(E.Texture)) continue;
         const auto& Path=Model->TexturePaths[E.Texture]; if(Path.IsEmpty()) continue;
-        auto* Texture=ParticleTexture(Path,Mpq,Cache); if(!Texture) continue;
+        auto* Texture=ParticleTexture(Path,Mpq,Cache,-1,bGlueScene); if(!Texture) continue;
         const TCHAR* MaterialPath=E.BlendMode==2?TEXT("/Game/Materials/M_WowParticleAlpha"):TEXT("/Game/Materials/M_WowParticleAdd");
         auto* Parent=LoadObject<UMaterial>(nullptr,MaterialPath); if(!Parent) continue;
         auto* Material=UMaterialInstanceDynamic::Create(Parent,this); Material->SetTextureParameterValue(TEXT("ParticleTexture"),Texture); Material->SetScalarParameterValue(TEXT("IgnoreAlpha"),E.BlendMode==3?1:0);
@@ -48,12 +48,21 @@ bool UWowM2EmitterComponent::Initialize(TSharedPtr<const FM2Data> InModel,FMpqMa
     for(int32 I=0;I<Model->RenderPasses.Num();++I)
     {
         const auto& Pass=Model->RenderPasses[I]; if(!Model->TexturePaths.IsValidIndex(Pass.TextureIndex) || !Model->Submeshes.IsValidIndex(Pass.SubmeshIndex)) continue;
-        auto* Texture=ParticleTexture(Model->TexturePaths[Pass.TextureIndex],Mpq,Cache); if(!Texture) continue;
-        const TCHAR* MaterialPath=DepthGeometry && Pass.BlendMode==0?TEXT("/Game/Materials/M_WowM2Opaque"):
+        auto* Texture=ParticleTexture(Model->TexturePaths[Pass.TextureIndex],Mpq,Cache,bGlueScene && Model->TextureFlags.IsValidIndex(Pass.TextureIndex)?Model->TextureFlags[Pass.TextureIndex]:-1,bGlueScene); if(!Texture) continue;
+        const TCHAR* MaterialPath=bGlueScene?(Pass.BlendMode==0?TEXT("/Game/Materials/M_WowGlueOpaque"):Pass.BlendMode==1?TEXT("/Game/Materials/M_WowGlueMasked"):Pass.BlendMode==3 || Pass.BlendMode==4?TEXT("/Game/Materials/M_WowGlueAdd"):TEXT("/Game/Materials/M_WowGlueAlpha")):
+            DepthGeometry && Pass.BlendMode==0?TEXT("/Game/Materials/M_WowM2Opaque"):
             DepthGeometry && Pass.BlendMode==1?TEXT("/Game/Materials/M_WowM2Masked"):
             Pass.BlendMode==3 || Pass.BlendMode==4?TEXT("/Game/Materials/M_WowParticleAdd"):TEXT("/Game/Materials/M_WowParticleAlpha");
-        auto* Parent=LoadObject<UMaterial>(nullptr,MaterialPath); if(!Parent) continue;
+        const FString GluePath=bGlueScene?FString(MaterialPath)+((Pass.Flags&4)?TEXT("TwoSided"):TEXT(""))+((Pass.Flags&8)?TEXT("NoDepth"):TEXT("")):FString();
+        auto* Parent=LoadObject<UMaterial>(nullptr,bGlueScene?*GluePath:MaterialPath); if(!Parent) continue;
         auto* Material=UMaterialInstanceDynamic::Create(Parent,this); Material->SetTextureParameterValue(TEXT("ParticleTexture"),Texture); Material->SetScalarParameterValue(TEXT("IgnoreAlpha"),Pass.BlendMode==0 || Pass.BlendMode==3?1:0);
+        if(bGlueScene)
+        {
+            Material->SetScalarParameterValue(TEXT("Combiner"),Pass.Combiner);Material->SetScalarParameterValue(TEXT("SecondCombiner"),Pass.SecondaryCombiner);
+            if(Pass.TextureCount==2 && Model->TexturePaths.IsValidIndex(Pass.SecondaryTextureIndex))
+                if(auto* Second=ParticleTexture(Model->TexturePaths[Pass.SecondaryTextureIndex],Mpq,Cache,Model->TextureFlags.IsValidIndex(Pass.SecondaryTextureIndex)?Model->TextureFlags[Pass.SecondaryTextureIndex]:3,true))
+                {Material->SetTextureParameterValue(TEXT("SecondTexture"),Second);Material->SetScalarParameterValue(TEXT("UseSecond"),1);Textures.Add(Second);}
+        }
         GeometryPasses.Add(I); Textures.Add(Texture); Materials.Add(Material);
         // Skin section vertex ranges address the skin lookup, while the parser
         // resolves triangle indices to the M2 vertex array. Build a compact
@@ -66,7 +75,10 @@ bool UWowM2EmitterComponent::Initialize(TSharedPtr<const FM2Data> InModel,FMpqMa
         {
             const int32 A=Model->Indices[Triangle],B=Model->Indices[Triangle+1],C=Model->Indices[Triangle+2];
             if(!Model->Vertices.IsValidIndex(A) || !Model->Vertices.IsValidIndex(B) || !Model->Vertices.IsValidIndex(C)) continue;
-            for(const int32 Index:{A,C,B})
+            // Original Glue batches cull clockwise source faces. The model
+            // coordinate reflection already changes their winding for UE.
+            const int32 Corners[]={A,bGlueScene?B:C,bGlueScene?C:B};
+            for(const int32 Index:Corners)
             {
                 auto* Local=Remap.Find(Index);
                 if(!Local) Local=&Remap.Add(Index,Vertices.Add(Index));
@@ -84,10 +96,32 @@ bool UWowM2EmitterComponent::Initialize(TSharedPtr<const FM2Data> InModel,FMpqMa
     }
     RibbonNodes.SetNum(ActiveRibbons.Num()); RibbonLastSpawn.Init(-1,ActiveRibbons.Num());
     if(ActiveEmitters.IsEmpty() && GeometryPasses.IsEmpty() && ActiveRibbons.IsEmpty()) return false;
-    PerEmitterCapacity=FMath::Min(128,512/FMath::Max(1,ActiveEmitters.Num())); Accumulators.Init(0,ActiveEmitters.Num()); Particles.Reserve(512);
+    PerEmitterCapacity=bGlueScene?FMath::Min(512,8192/FMath::Max(1,ActiveEmitters.Num())):FMath::Min(128,512/FMath::Max(1,ActiveEmitters.Num())); Accumulators.Init(0,ActiveEmitters.Num()); Particles.Reserve(bGlueScene?8192:512);
     Mesh=NewObject<UProceduralMeshComponent>(GetOwner()); GetOwner()->AddInstanceComponent(Mesh); Mesh->SetupAttachment(this);
     Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision); Mesh->SetCastShadow(false); Mesh->SetCanEverAffectNavigation(false); Mesh->RegisterComponent();
     Mesh->SetVisibleInRayTracing(false); Mesh->bAffectDistanceFieldLighting=false; Mesh->bAffectDynamicIndirectLighting=false;
+    if(bGlueScene)
+    {
+        // CM2Scene orders translucent geometry AND emitters by the authored
+        // priority plane, then by depth. A single UE primitive sorts all its
+        // sections together and incorrectly paints the sky over fog/dragon.
+        TMap<int32,UProceduralMeshComponent*> Planes;Planes.Add(0,Mesh);
+        const int32 Count=ActiveEmitters.Num()+GeometryPasses.Num()+ActiveRibbons.Num();
+        for(int32 S=0;S<Count;++S)
+        {
+            const int32 Priority=S<ActiveEmitters.Num()?Model->ParticleEmitters[ActiveEmitters[S]].Priority:
+                S<ActiveEmitters.Num()+GeometryPasses.Num()?Model->RenderPasses[GeometryPasses[S-ActiveEmitters.Num()]].PriorityPlane:0;
+            auto** Existing=Planes.Find(Priority);UProceduralMeshComponent* Draw=Existing?*Existing:nullptr;
+            if(!Draw)
+            {
+                Draw=NewObject<UProceduralMeshComponent>(GetOwner());GetOwner()->AddInstanceComponent(Draw);Draw->SetupAttachment(this);
+                Draw->SetCollisionEnabled(ECollisionEnabled::NoCollision);Draw->SetCastShadow(false);Draw->SetCanEverAffectNavigation(false);
+                Draw->SetVisibleInRayTracing(false);Draw->bAffectDistanceFieldLighting=false;Draw->bAffectDynamicIndirectLighting=false;
+                Draw->TranslucencySortPriority=Priority;Draw->RegisterComponent();Planes.Add(Priority,Draw);
+            }
+            SectionMeshes.Add(Draw);
+        }
+    }
     if(GetAttachParent()) AddTickPrerequisiteComponent(GetAttachParent());
     StartedAt=LastAt=FPlatformTime::Seconds(); EmitUntil=StartedAt+FMath::Clamp(EmitSeconds>0?EmitSeconds:60.f,.01f,60.f);
     LoopAnimation=EmitSeconds>OneShotSeconds(*Model)+.1f; Emitting=true; AnimateBones(0); Render(); return true;
@@ -143,9 +177,10 @@ void UWowM2EmitterComponent::AnimateBones(float TimeMs)
         if(Animation && Animation->BoneTracks.IsValidIndex(I))
         {
             const auto& Track=Animation->BoneTracks[I]; const auto Lerp=[](const FVector& A,const FVector& B,float T){return FMath::Lerp(A,B,T);};
-            const FVector Translation=SampleBone(Track.TransTimestamps,Track.TransValues,TimeMs,FVector::ZeroVector,Lerp);
-            const FVector Scale=SampleBone(Track.ScaleTimestamps,Track.ScaleValues,TimeMs,FVector::OneVector,Lerp);
-            const FQuat R=SampleBone(Track.RotTimestamps,Track.RotValues,TimeMs,FQuat::Identity,[](const FQuat& A,const FQuat& B,float T){return FQuat::Slerp(A,B,T).GetNormalized();});
+            const auto TrackTime=[&](int16 G){return bGlueScene && Model->GlobalSequenceDurations.IsValidIndex(G) && Model->GlobalSequenceDurations[G]?FMath::Fmod(ModelAgeMs,float(Model->GlobalSequenceDurations[G])):TimeMs;};
+            const FVector Translation=SampleBone(Track.TransTimestamps,Track.TransValues,TrackTime(Track.TranslationGlobal),FVector::ZeroVector,Lerp);
+            const FVector Scale=SampleBone(Track.ScaleTimestamps,Track.ScaleValues,TrackTime(Track.ScaleGlobal),FVector::OneVector,Lerp);
+            const FQuat R=SampleBone(Track.RotTimestamps,Track.RotValues,TrackTime(Track.RotationGlobal),FQuat::Identity,[](const FQuat& A,const FQuat& B,float T){return FQuat::Slerp(A,B,T).GetNormalized();});
             const FQuat Rotation(-R.Y,-R.X,-R.Z,R.W); const FVector Pivot=M2Vector(Bone.PivotPoint);
             Local=FTransform(Rotation,Pivot+M2Vector(Translation)-Rotation.RotateVector(Pivot*FVector(Scale.Y,Scale.X,Scale.Z)),FVector(Scale.Y,Scale.X,Scale.Z));
         }
@@ -173,37 +208,61 @@ void UWowM2EmitterComponent::RenderGeometry()
 {
     for(int32 S=0;S<GeometryPasses.Num();++S)
     {
-        const int32 Section=ActiveEmitters.Num()+S; if(!ModelVisible) {Mesh->SetMeshSectionVisible(Section,false); continue;}
+        const int32 Section=ActiveEmitters.Num()+S;auto* Draw=SectionMeshes.IsValidIndex(Section)?SectionMeshes[Section].Get():Mesh.Get();
+        if(!ModelVisible){Draw->SetMeshSectionVisible(Section,false);continue;}
         const auto& Pass=Model->RenderPasses[GeometryPasses[S]];
-        const auto& Durations=Model->GlobalSequenceDurations; FLinearColor Color=FLinearColor::White;
+        const auto& Durations=Model->GlobalSequenceDurations;FLinearColor Color=FLinearColor::White;
         if(Model->Colors.IsValidIndex(Pass.ColorIndex))
         {
-            const auto& C=Model->Colors[Pass.ColorIndex]; const auto RGB=C.Color.Sample(C.Color.GlobalSequence>=0?ModelAgeMs:AnimationTimeMs,Durations,FVector3f(1),AnimationIndex);
+            const auto& C=Model->Colors[Pass.ColorIndex];const auto RGB=C.Color.Sample(C.Color.GlobalSequence>=0?ModelAgeMs:AnimationTimeMs,Durations,FVector3f(1),AnimationIndex);
             Color=FLinearColor(RGB.X,RGB.Y,RGB.Z,SampleTrack(C.Alpha,1));
         }
         if(Model->TextureWeights.IsValidIndex(Pass.AlphaIndex)) Color.A*=SampleTrack(Model->TextureWeights[Pass.AlphaIndex],1);
-        TArray<FVector> Positions,Normals; TArray<FVector2D> UV; TArray<FLinearColor> Colors; TArray<FProcMeshTangent> Tangents;
+        TArray<FVector> Positions,Normals;TArray<FVector2D> UV,UV1,EmptyUV;TArray<FLinearColor> Colors;TArray<FProcMeshTangent> Tangents;
         for(const int32 I:GeometryVertices[S])
         {
-            const auto& Vertex=Model->Vertices[I]; const FVector Position=M2Vector(Vertex.Position);
-            FVector Skinned=FVector::ZeroVector; float Weight=0;
+            const auto& Vertex=Model->Vertices[I];const FVector Position=M2Vector(Vertex.Position),Normal(Vertex.Normal.Y,Vertex.Normal.X,Vertex.Normal.Z);
+            FVector Skinned=FVector::ZeroVector,SkinnedNormal=FVector::ZeroVector;float Weight=0;
             for(int32 J=0;J<4;++J) if(Vertex.BoneWeights[J] && BoneTransforms.IsValidIndex(Vertex.BoneIndices[J]))
-            {const float W=Vertex.BoneWeights[J]/255.f; Skinned+=BoneTransforms[Vertex.BoneIndices[J]].TransformPosition(Position)*W; Weight+=W;}
-            Positions.Add(Weight>0?Skinned/Weight:Position); Normals.Add(FVector(Vertex.Normal.Y,Vertex.Normal.X,Vertex.Normal.Z)); FVector2D TexCoord=Vertex.TexCoord;
-            if(Model->TextureTransforms.IsValidIndex(Pass.TransformIndex))
             {
-                const auto& T=Model->TextureTransforms[Pass.TransformIndex];
-                const auto Translate=T.Translation.Sample(T.Translation.GlobalSequence>=0?ModelAgeMs:AnimationTimeMs,Durations,FVector3f::ZeroVector,AnimationIndex),Scale=T.Scale.Sample(T.Scale.GlobalSequence>=0?ModelAgeMs:AnimationTimeMs,Durations,FVector3f(1),AnimationIndex);
-                const auto Q=T.Rotation.Sample(T.Rotation.GlobalSequence>=0?ModelAgeMs:AnimationTimeMs,Durations,FQuat4f::Identity,AnimationIndex).GetNormalized();
-                const auto P=Q.RotateVector(FVector3f((TexCoord.X-.5f)*Scale.X,(TexCoord.Y-.5f)*Scale.Y,0))+Translate;
-                TexCoord=FVector2D(P.X+.5f,P.Y+.5f);
+                const float W=Vertex.BoneWeights[J]/255.f;const auto& Bone=BoneTransforms[Vertex.BoneIndices[J]];
+                Skinned+=Bone.TransformPosition(Position)*W;SkinnedNormal+=Bone.TransformVectorNoScale(Normal)*W;Weight+=W;
             }
-            UV.Add(TexCoord); Colors.Add(Color);
+            const FVector P=Weight>0?Skinned/Weight:Position,N=Weight>0?SkinnedNormal.GetSafeNormal():Normal;
+            Positions.Add(P);Normals.Add(bGlueScene?N:Normal);
+            auto TexCoord=[&](uint16 Coord,int16 Index)
+            {
+                FVector2D Tex=Coord==1?Vertex.TexCoord2:Vertex.TexCoord;
+                if(bGlueScene && Coord>2 && CaptureView.IsSet())
+                {
+                    const FVector Eye=GetComponentTransform().InverseTransformPosition(CaptureView->GetLocation());
+                    const FVector V=(Eye-P).GetSafeNormal(),R=2*FVector::DotProduct(N,V)*N-V;
+                    const FVector Right=CaptureView->GetRotation().GetRightVector(),Up=CaptureView->GetRotation().GetUpVector(),Forward=CaptureView->GetRotation().GetForwardVector();
+                    const float X=FVector::DotProduct(R,Right),Y=FVector::DotProduct(R,Up),Z=FVector::DotProduct(R,Forward);
+                    const float D=2*FMath::Sqrt(X*X+Y*Y+(Z+1)*(Z+1));Tex=FVector2D(.5f+X/FMath::Max(.001f,D),.5f-Y/FMath::Max(.001f,D));
+                }
+                if(Model->TextureTransforms.IsValidIndex(Index))
+                {
+                    const auto& T=Model->TextureTransforms[Index];
+                    const auto Translate=T.Translation.Sample(T.Translation.GlobalSequence>=0?ModelAgeMs:AnimationTimeMs,Durations,FVector3f::ZeroVector,AnimationIndex),Scale=T.Scale.Sample(T.Scale.GlobalSequence>=0?ModelAgeMs:AnimationTimeMs,Durations,FVector3f(1),AnimationIndex);
+                    const auto Q=T.Rotation.Sample(T.Rotation.GlobalSequence>=0?ModelAgeMs:AnimationTimeMs,Durations,FQuat4f::Identity,AnimationIndex).GetNormalized();
+                    const auto Value=Q.RotateVector(FVector3f((Tex.X-.5f)*Scale.X,(Tex.Y-.5f)*Scale.Y,0))+Translate;Tex=FVector2D(Value.X+.5f,Value.Y+.5f);
+                }
+                return Tex;
+            };
+            UV.Add(TexCoord(bGlueScene?Pass.TexCoord:0,Pass.TransformIndex));
+            if(bGlueScene) UV1.Add(TexCoord(Pass.SecondaryTexCoord,Pass.SecondaryTransformIndex));
+            FLinearColor C=Color;
+            if(bGlueScene && !(Pass.Flags&1))
+            {
+                const auto Lit=(GlueAmbient+GlueDiffuse*FMath::Max(0.f,FVector::DotProduct(N,-GlueDirection))).GetClamped();C.R*=Lit.R;C.G*=Lit.G;C.B*=Lit.B;
+            }
+            Colors.Add(C);
         }
-        if(Mesh->GetProcMeshSection(Section)) Mesh->UpdateMeshSection_LinearColor(Section,Positions,Normals,UV,Colors,Tangents,false);
+        if(Draw->GetProcMeshSection(Section)) Draw->UpdateMeshSection_LinearColor(Section,Positions,Normals,UV,UV1,EmptyUV,EmptyUV,Colors,Tangents,false);
         else
         {
-            Mesh->CreateMeshSection_LinearColor(Section,Positions,GeometryTriangles[S],Normals,UV,Colors,Tangents,false,false); Mesh->SetMaterial(Section,Materials[Section]);
+            Draw->CreateMeshSection_LinearColor(Section,Positions,GeometryTriangles[S],Normals,UV,UV1,EmptyUV,EmptyUV,Colors,Tangents,false,false);Draw->SetMaterial(Section,Materials[Section]);
         }
     }
 }
@@ -311,6 +370,7 @@ void UWowM2EmitterComponent::Render()
     const FTransform Transform=GetComponentTransform(); const float SizeScale=Transform.GetScale3D().GetAbsMax()*FWowCoordinate::SCALE;
     for(int32 S=0;S<ActiveEmitters.Num();++S)
     {
+        auto* Draw=SectionMeshes.IsValidIndex(S)?SectionMeshes[S].Get():Mesh.Get();
         const auto& E=Model->ParticleEmitters[ActiveEmitters[S]]; const int32 Rows=FMath::Clamp(int32(E.Rows),1,256),Cols=FMath::Clamp(int32(E.Cols),1,256);
         TArray<FVector> Vertices,Normals; TArray<FVector2D> UV; TArray<FLinearColor> Colors; TArray<FProcMeshTangent> Tangents;
         Vertices.SetNumZeroed(PerEmitterCapacity*8); Normals.Init(FVector::UpVector,Vertices.Num()); UV.SetNumZeroed(Vertices.Num()); Colors.Init(FLinearColor::Transparent,Vertices.Num());
@@ -341,11 +401,11 @@ void UWowM2EmitterComponent::Render()
             }
             ++Slot;
         }
-        if(Mesh->GetProcMeshSection(S)) Mesh->UpdateMeshSection_LinearColor(S,Vertices,Normals,UV,Colors,Tangents,false);
+        if(Draw->GetProcMeshSection(S)) Draw->UpdateMeshSection_LinearColor(S,Vertices,Normals,UV,Colors,Tangents,false);
         else
         {
             TArray<int32> Indices; for(int32 I=0;I<PerEmitterCapacity*2;++I) {const int32 V=I*4; Indices.Append({V,V+1,V+2,V+2,V+1,V+3});}
-            Mesh->CreateMeshSection_LinearColor(S,Vertices,Indices,Normals,UV,Colors,Tangents,false,false); Mesh->SetMaterial(S,Materials[S]);
+            Draw->CreateMeshSection_LinearColor(S,Vertices,Indices,Normals,UV,Colors,Tangents,false,false); Draw->SetMaterial(S,Materials[S]);
         }
     }
     RenderGeometry(); RenderRibbons();
@@ -353,5 +413,9 @@ void UWowM2EmitterComponent::Render()
 }
 void UWowM2EmitterComponent::OnComponentDestroyed(bool Hierarchy)
 {
+    TSet<UProceduralMeshComponent*> Retired;
+    for(auto& Draw:SectionMeshes) if(IsValid(Draw) && Draw!=Mesh && !Retired.Contains(Draw))
+    {Retired.Add(Draw);Draw->DestroyComponent();}
+    SectionMeshes.Reset();
     if(IsValid(Mesh)) Mesh->DestroyComponent(); Mesh=nullptr; Super::OnComponentDestroyed(Hierarchy);
 }
