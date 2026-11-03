@@ -78,10 +78,13 @@ void SWowLoginWidget::BuildStockLayout()
     Put(Click(TEXT("Options"),Art->String(TEXT("OPTIONS")),FOnClicked::CreateLambda([this]{bOptions=!bOptions;BuildStockLayout();return FReply::Handled();}),12),-155,-219,150,38,1,1);
     Put(Click(TEXT("Quit"),Art->String(TEXT("QUIT")),FOnClicked::CreateLambda([]{FPlatformMisc::RequestExit(false);return FReply::Handled();}),12),-155,-67,150,38,1,1);
     // Connection/expansion controls remain available inside Options.
-    auto ServerField=Field(ServerBox,Server,false);ServerField->SetVisibility(bOptions?EVisibility::Visible:EVisibility::Collapsed);Put(ServerField,-420,-294,260,37,1,1);
+    // Keep the options controls between the centered login button and the
+    // right-side buttons even at the original 1024x768 viewport.
+    constexpr float PanelLeft=-385,PanelWidth=210;
+    auto ServerField=Field(ServerBox,Server,false);ServerField->SetVisibility(bOptions?EVisibility::Visible:EVisibility::Collapsed);Put(ServerField,PanelLeft,-294,PanelWidth,37,1,1);
     if(bOptions)
     {
-        Put(Label(TEXT("Login server"),12),-420,-320,260,24,1,1);
+        Put(Label(TEXT("Login server"),12),PanelLeft,-320,PanelWidth,24,1,1);
         const TCHAR* Titles[]={TEXT("Classic"),TEXT("The Burning Crusade"),TEXT("Wrath of the Lich King")};
         for(uint8 I=0;I<3;++I) Put(Click(FName(*FString::Printf(TEXT("Expansion_%u"),I)),Titles[I],FOnClicked::CreateLambda([this,I]{SetExpansion(EWowExpansion(I));return FReply::Handled();}),12),-330+I*220,140,220,38,.5f,0);
         if(!GlueCheck) GlueCheck=MakeShared<FCheckBoxStyle>();
@@ -89,14 +92,14 @@ void SWowLoginWidget::BuildStockLayout()
         GlueCheck->SetUncheckedImage(*Up).SetUncheckedHoveredImage(*Up).SetUncheckedPressedImage(*Art->Brush(TEXT("Interface\\Buttons\\UI-CheckBox-Down")));
         GlueCheck->SetCheckedImage(*Checked).SetCheckedHoveredImage(*Checked).SetCheckedPressedImage(*Checked);
         auto Check=[&](const TCHAR* Name,const FString& Text){return SNew(SCheckBox).Style(GlueCheck.Get()).IsChecked_Lambda([this,Name]{FString V;return Audio.IsValid() && Audio->GetUiOption(Name,V) && V==TEXT("1")?ECheckBoxState::Checked:ECheckBoxState::Unchecked;}).OnCheckStateChanged_Lambda([this,Name](ECheckBoxState S){if(Audio.IsValid()) Audio->SetUiOption(Name,S==ECheckBoxState::Checked?TEXT("1"):TEXT("0"));})[Label(Text,12)];};
-        Put(Check(TEXT("sound_enablemusic"),Art->String(TEXT("ENABLE_MUSIC"))),-420,-252,250,28,1,1);
+        Put(Check(TEXT("sound_enablemusic"),Art->String(TEXT("ENABLE_MUSIC"))),PanelLeft,-252,PanelWidth,28,1,1);
         if(!GlueSlider) GlueSlider=MakeShared<FSliderStyle>();FSlateBrush NoBar;NoBar.DrawAs=ESlateBrushDrawType::NoDrawType;
         GlueSlider->SetNormalBarImage(NoBar).SetHoveredBarImage(NoBar).SetDisabledBarImage(NoBar);
         FSlateBrush Thumb=*Art->Brush(TEXT("Interface\\Buttons\\UI-SliderBar-Button-Horizontal"));Thumb.ImageSize=FVector2D(32,32);
         GlueSlider->SetNormalThumbImage(Thumb).SetHoveredThumbImage(Thumb).SetDisabledThumbImage(Thumb);
         FWowBackdrop SliderBack;SliderBack.BgFile=TEXT("Interface\\Buttons\\UI-SliderBar-Background");SliderBack.EdgeFile=TEXT("Interface\\Buttons\\UI-SliderBar-Border");SliderBack.Tile=true;SliderBack.TileSize=8;SliderBack.EdgeSize=8;SliderBack.InsetLeft=3;SliderBack.InsetRight=3;SliderBack.InsetTop=6;SliderBack.InsetBottom=6;
-        Put(Backdrop(SliderBack),-420,-215,250,17,1,1);
-        Put(SNew(SSlider).Style(GlueSlider.Get()).Value_Lambda([this]{return Audio.IsValid()?Audio->MusicVolume:.5f;}).OnValueChanged_Lambda([this](float V){if(Audio.IsValid()) Audio->SetUiOption(TEXT("sound_musicvolume"),FString::SanitizeFloat(V));}),-420,-222,250,32,1,1);
+        Put(Backdrop(SliderBack),PanelLeft,-215,PanelWidth,17,1,1);
+        Put(SNew(SSlider).Style(GlueSlider.Get()).Value_Lambda([this]{return Audio.IsValid()?Audio->MusicVolume:.5f;}).OnValueChanged_Lambda([this](float V){if(Audio.IsValid()) Audio->SetUiOption(TEXT("sound_musicvolume"),FString::SanitizeFloat(V));}),PanelLeft,-222,PanelWidth,32,1,1);
     }
     else ServerBox->SetVisibility(EVisibility::Collapsed);
     ChildSlot[SNew(SDPIScaler).DPIScale_Lambda([this]{return GetCachedGeometry().GetLocalSize().Y>0?float(GetCachedGeometry().GetLocalSize().Y/768):1.f;})[Canvas]];
