@@ -34,6 +34,7 @@ public:
     bool EnterSelected();
     bool PressStockControl(FName Name,bool DoubleClick=false);
     bool FocusStockControl(FName Name);
+    bool HoverStockControl(FName Name,bool Hover);
     int64 GetSelectedGuid() const {return SelectedGuid;}
     bool IsDeleteDialogOpen() const {return DeleteGuid!=0;}
     bool IsSubmitting() const {return bBusy;}

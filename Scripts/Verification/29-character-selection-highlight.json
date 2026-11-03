@@ -1,0 +1,7 @@
+{"cases":[
+ {"name":"selected-first","race":1,"gender":0,"sameAppearance":true,"count":4,"selection":0,"realm":"AzerothCore"},
+ {"name":"selected-middle","race":1,"gender":0,"sameAppearance":true,"count":4,"selection":2,"realm":"AzerothCore"},
+ {"name":"selected-last","race":1,"gender":0,"sameAppearance":true,"selection":9,"realm":"AzerothCore"},
+ {"name":"selected-and-hovered","race":1,"gender":0,"sameAppearance":true,"count":4,"selection":2,"hover":0,"realm":"AzerothCore"},
+ {"name":"highlight-with-dialog","race":1,"gender":0,"sameAppearance":true,"count":4,"selection":2,"modal":"delete","confirmation":"","realm":"AzerothCore"}
+]}

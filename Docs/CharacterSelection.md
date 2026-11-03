@@ -15,6 +15,12 @@ regions, including the transparent margins of the original button textures.
 Selection text uses the original 15/12 Glue style sizes with a black
 outline and explicit line heights; Enter World retains the larger label. Long realm names are
 shortened against measured font width, with the full name in the tooltip.
+The original 256x74 additive selection texture is aligned to contain all three
+rendered text lines, including the location. Selected and hovered rows use the
+same artwork; hovering another row leaves the selected row highlighted.
+`29-character-selection-highlight.json` uses identical synthetic appearances
+to compare first/middle/last selection and actual Slate hover without changing
+the background scene or contacting a server.
 
 The selected character uses the same original race/class M2 scene and corrected
 depth/linear-colour capture as character creation. Gnomes share the Dwarf scene,

@@ -38,9 +38,10 @@ void AWowCharacterSelectionTestGameMode::OpenNextCase()
     const uint8 Races[]={1,2,3,4,5,6,7,8,10,11},Classes[]={1,9,2,11,4,7,8,3,2,7};
     const uint32 Zones[]={1519,14,1,1657,1497,215,1,14,3430,3524};
     const TCHAR* Names[]={TEXT("Aldren"),TEXT("Tharok"),TEXT("Brundin"),TEXT("Lunara"),TEXT("Morven"),TEXT("Tashira"),TEXT("Fizzwick"),TEXT("Zulani"),TEXT("Kaelora"),TEXT("Velenna")};
+    bool SameAppearance=false;Case->TryGetBoolField(TEXT("sameAppearance"),SameAppearance);
     for(int32 I=0;I<10;++I)
     {
-        FWowCharacterAppearance A;A.Race=Races[I];A.Class=Classes[I];A.Gender=I%2;
+        FWowCharacterAppearance A;A.Race=SameAppearance?Case->GetIntegerField(TEXT("race")):Races[I];A.Class=SameAppearance?1:Classes[I];A.Gender=SameAppearance?Case->GetIntegerField(TEXT("gender")):I%2;
         if(Case->GetIntegerField(TEXT("race"))==A.Race)
         {
             A.Gender=Case->GetIntegerField(TEXT("gender"));double Class=0;if(Case->TryGetNumberField(TEXT("class"),Class)) A.Class=Class;
@@ -58,9 +59,10 @@ void AWowCharacterSelectionTestGameMode::OpenNextCase()
         Roster.Add(C);
     }
     const auto* Found=Roster.FindByPredicate([&](const auto& C){return C.Race==Case->GetIntegerField(TEXT("race"));});
-    const int64 Guid=Found?Found->Guid:0;bool Empty=false,Single=false;Case->TryGetBoolField(TEXT("empty"),Empty);Case->TryGetBoolField(TEXT("single"),Single);
+    int64 Guid=Found?Found->Guid:0;bool Empty=false,Single=false;Case->TryGetBoolField(TEXT("empty"),Empty);Case->TryGetBoolField(TEXT("single"),Single);
     if(Single && Found){const auto Copy=*Found;Roster={Copy};}if(Empty) Roster.Reset();
     double Count=0;if(Case->TryGetNumberField(TEXT("count"),Count)) Roster.SetNum(FMath::Clamp(int32(Count),0,Roster.Num()));
+    double Selection=0;if(Case->TryGetNumberField(TEXT("selection"),Selection) && Roster.IsValidIndex(int32(Selection))) Guid=Roster[int32(Selection)].Guid;
     Preview=GetWorld()->SpawnActor<AWowCharacterPreview>();Preview->Setup(CachedWorldManager,1024,768);
     Widget=SNew(SWowCharacterSelectWidget);Widget->OnCharacterSelected.BindLambda([this](int64 G){++EnterCount;EnterGuid=G;});
     Widget->OnDeleteCharacterRequest.BindLambda([this](int64 G){++DeleteCount;DeletedGuid=G;});Widget->OnCreateCharacterRequest.BindLambda([this]{++CreateCount;});
@@ -132,6 +134,8 @@ void AWowCharacterSelectionTestGameMode::Tick(float DT)
         if(Now-Changed<(!ActionsVerified && ActionStep>0?.1:1.)) return;
         if(!ActionsVerified && Roster.Num()>1){if(!VerifyActions()){Finish(false,FString::Printf(TEXT("Selection input/confirmation guards failed at step %d (enter=%d delete=%d create=%d)"),ActionStep,EnterCount,DeleteCount,CreateCount));return;}Changed=Now;return;}
         FString Modal;Cases[Index]->AsObject()->TryGetStringField(TEXT("modal"),Modal);
+        double Hover=0;if(Cases[Index]->AsObject()->TryGetNumberField(TEXT("hover"),Hover) && Roster.IsValidIndex(int32(Hover)))
+            if(!Widget->HoverStockControl(FName(*FString::Printf(TEXT("Character_%lld"),Roster[int32(Hover)].Guid)),true)){Finish(false,TEXT("Native row hover failed"));return;}
         if(Modal==TEXT("delete")){FString Confirmation=TEXT("DELE");Cases[Index]->AsObject()->TryGetStringField(TEXT("confirmation"),Confirmation);Widget->PressStockControl(TEXT("Delete"));Widget->SetDeleteConfirmationText(Confirmation);}
         else if(Modal==TEXT("error")) Widget->CompleteDeletion(false,TEXT("This character is a Guild Master and cannot be deleted until the rank is transferred to another character."));
         CollectGarbage(RF_NoFlags,true);Phase=2;Changed=Now;return;

@@ -125,7 +125,7 @@ void SWowCharacterSelectWidget::BuildStockLayout()
         const auto C=CachedCharacters[I];const FName Key(*FString::Printf(TEXT("Character_%lld"),C.Guid));
         auto Highlight=SNew(SImage).Image(Art->Brush(TEXT("Interface\\Glues\\CharacterSelect\\Glue-CharacterSelect-Highlight"),FVector2f(0),FVector2f(1),ESlateBrushMirrorType::NoMirror,true))
             .Visibility_Lambda([this,Guid=C.Guid,Key]{const auto* Weak=StockControls.Find(Key);const auto B=Weak?Weak->Pin():nullptr;return SelectedGuid==Guid || (B && B->IsHovered())?EVisibility::HitTestInvisible:EVisibility::Collapsed;});
-        Put(Highlight,-261,80+I*57,256,74,1);
+        Put(Highlight,-261,84+I*57,256,74,1);
         const auto& D=FDbcStore::Get();const FString Class=D.CharacterCreation().ClassName(C.Class);
         const FString Info=Art->String(TEXT("CHARACTER_SELECT_INFO")).Replace(TEXT("%d"),*FString::FromInt(C.Level)).Replace(TEXT("%s"),*Class);const auto* Area=D.AreaTable().GetById(C.ZoneId);
         auto Row=SNew(SSelectionRow).OnClicked_Lambda([this,Guid=C.Guid]{HighlightCharacter(Guid);return FReply::Handled();})
@@ -246,6 +246,16 @@ bool SWowCharacterSelectWidget::FocusStockControl(FName Name)
     const auto* Weak=StockControls.Find(Name);const auto B=Weak?Weak->Pin():nullptr;
     if(!B || !B->IsEnabled() || B->GetVisibility()!=EVisibility::Visible) return false;
     FSlateApplication::Get().SetKeyboardFocus(B,EFocusCause::Navigation);return B->HasKeyboardFocus();
+}
+bool SWowCharacterSelectWidget::HoverStockControl(FName Name,bool Hover)
+{
+    if(bBusy || DeleteGuid || !Status.IsEmpty()) return false;
+    const auto* Weak=StockControls.Find(Name);const auto B=Weak?Weak->Pin():nullptr;
+    if(!B || !B->IsEnabled() || B->GetVisibility()!=EVisibility::Visible) return false;
+    const auto& G=B->GetCachedGeometry();const FVector2D Position=G.LocalToAbsolute(G.GetLocalSize()*.5);
+    const FPointerEvent E(0,Position,Position,TSet<FKey>{},EKeys::Invalid,0,FModifierKeysState());
+    if(Hover) B->OnMouseEnter(G,E);else B->OnMouseLeave(E);
+    return B->IsHovered()==Hover;
 }
 FReply SWowCharacterSelectWidget::OnPreviewKeyDown(const FGeometry&,const FKeyEvent& E)
 {
