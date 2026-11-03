@@ -1,0 +1,10 @@
+{"cases":[
+ {"name":"full-human","race":1,"gender":0},
+ {"name":"full-nightelf","race":4,"gender":1},
+ {"name":"four-characters","race":1,"gender":0,"count":4,"realm":"AzerothCore"},
+ {"name":"long-realm","race":1,"gender":0,"realm":"Idle WoW - Very Long Realm Name For Layout Review"},
+ {"name":"nine-characters","race":10,"gender":1,"count":9},
+ {"name":"single-character","race":11,"gender":1,"single":true},
+ {"name":"empty-account","race":1,"gender":0,"empty":true},
+ {"name":"delete-confirmation","race":1,"gender":0,"modal":"delete"}
+]}

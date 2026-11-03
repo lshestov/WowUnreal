@@ -48,12 +48,13 @@ private:
     void ConfirmDelete();
     bool CanConfirmDelete() const;
     const FWowCharacterInfo* Selected() const;
-    TSharedRef<SWidget> Backdrop(float Width,float Height);
+    TSharedRef<SWidget> Backdrop(float Width,float Height,bool CharacterList=false);
     TWeakObjectPtr<AWowCharacterPreview> Preview;
     TUniquePtr<FWowCharacterCreationArt> Art;
     TArray<TStrongObjectPtr<UWowBackdropWidget>> Backdrops;
     TSharedPtr<SEditableTextBox> DeleteBox;
     TSharedPtr<FEditableTextBoxStyle> DeleteStyle;
+    TSharedPtr<FButtonStyle> RotationStyle;
     TMap<FName,TWeakPtr<SButton>> StockControls;
     TArray<FWowCharacterInfo> CachedCharacters;
     FString RealmName,Status;

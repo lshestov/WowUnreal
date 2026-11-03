@@ -60,10 +60,12 @@ void AWowCharacterSelectionTestGameMode::OpenNextCase()
     const auto* Found=Roster.FindByPredicate([&](const auto& C){return C.Race==Case->GetIntegerField(TEXT("race"));});
     const int64 Guid=Found?Found->Guid:0;bool Empty=false,Single=false;Case->TryGetBoolField(TEXT("empty"),Empty);Case->TryGetBoolField(TEXT("single"),Single);
     if(Single && Found){const auto Copy=*Found;Roster={Copy};}if(Empty) Roster.Reset();
+    double Count=0;if(Case->TryGetNumberField(TEXT("count"),Count)) Roster.SetNum(FMath::Clamp(int32(Count),0,Roster.Num()));
     Preview=GetWorld()->SpawnActor<AWowCharacterPreview>();Preview->Setup(CachedWorldManager,1024,768);
     Widget=SNew(SWowCharacterSelectWidget);Widget->OnCharacterSelected.BindLambda([this](int64 G){++EnterCount;EnterGuid=G;});
     Widget->OnDeleteCharacterRequest.BindLambda([this](int64 G){++DeleteCount;DeletedGuid=G;});Widget->OnCreateCharacterRequest.BindLambda([this]{++CreateCount;});
-    Widget->PopulateCharacters(Roster,Guid);Widget->SetPreview(Preview,TEXT("Idle WoW"));GEngine->GameViewport->AddViewportWidgetContent(Widget.ToSharedRef(),100);
+    FString Realm=TEXT("Idle WoW");Case->TryGetStringField(TEXT("realm"),Realm);
+    Widget->PopulateCharacters(Roster,Guid);Widget->SetPreview(Preview,Realm);GEngine->GameViewport->AddViewportWidgetContent(Widget.ToSharedRef(),100);
     Phase=1;Changed=FPlatformTime::Seconds();
 }
 bool AWowCharacterSelectionTestGameMode::VerifyActions()

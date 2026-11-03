@@ -7,6 +7,15 @@ character name and Enter World at the bottom, rotation arrows, Create, Delete,
 Change Realm and Back. Artwork, fonts and localized strings are loaded from
 the user's MPQs. No game assets are shipped in this repository.
 
+The character list includes the original tiled Glue tooltip background and
+border, with an 85% opaque blue tint. Realm text occupies a separate clipped
+line above Change Realm. List rows and Create stay inside that panel. The
+character name, Enter World and rotation buttons occupy separate vertical
+regions, including the transparent margins of the original button textures.
+Selection text uses the original 15/12 Glue style sizes with a black
+outline and explicit line heights; Enter World retains the larger label. Long realm names are
+shortened against measured font width, with the full name in the tooltip.
+
 The selected character uses the same original race/class M2 scene and corrected
 depth/linear-colour capture as character creation. Gnomes share the Dwarf scene,
 Trolls share Orc and Death Knights use their class scene. The full enumeration
@@ -38,3 +47,9 @@ delegates: no login, server entry, deletion or database access occurs. Captures
 use `FScreenshotRequest`, with source/executable provenance, nonempty-image
 hashes, enum appearance/equipment checks, GC checks and repeated screen cleanup.
 Review each PNG before accepting an installed build.
+
+For layout review, pass `-Spec Scripts/Verification/27-character-selection-layout.json`
+and `-ResX`/`-ResY` to the capture script. Review 1280x900, 1280x720 and 1024x768:
+full, four- and nine-character lists, bright/dark scenes, a long realm name, a single
+character, an empty account and the confirmation dialog. The wrapper rejects
+captures whose actual viewport dimensions differ from the requested size.

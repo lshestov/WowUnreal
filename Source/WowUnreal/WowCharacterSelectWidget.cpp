@@ -15,6 +15,8 @@
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/Texture2D.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Rendering/SlateRenderer.h"
+#include "Fonts/FontMeasure.h"
 
 namespace
 {
@@ -84,11 +86,12 @@ bool SWowCharacterSelectWidget::EnterSelected()
     if(bBusy || DeleteGuid || !Selected() || !OnCharacterSelected.IsBound()) return false;
     bBusy=true;OnCharacterSelected.Execute(SelectedGuid);return true;
 }
-TSharedRef<SWidget> SWowCharacterSelectWidget::Backdrop(float Width,float Height)
+TSharedRef<SWidget> SWowCharacterSelectWidget::Backdrop(float Width,float Height,bool CharacterList)
 {
     auto* W=NewObject<UWowBackdropWidget>();Backdrops.Add(TStrongObjectPtr<UWowBackdropWidget>(W));
-    FWowBackdrop D;D.BgFile=TEXT("Interface\\Tooltips\\UI-Tooltip-Background");D.EdgeFile=TEXT("Interface\\Glues\\Common\\Glue-Tooltip-Border");
+    FWowBackdrop D;D.BgFile=CharacterList?TEXT("Interface\\Glues\\Common\\Glue-Tooltip-Background"):TEXT("Interface\\Tooltips\\UI-Tooltip-Background");D.EdgeFile=TEXT("Interface\\Glues\\Common\\Glue-Tooltip-Border");
     D.EdgeSize=16;D.TileSize=16;D.Tile=true;D.InsetLeft=10;D.InsetRight=5;D.InsetTop=4;D.InsetBottom=9;
+    if(CharacterList){D.Color=FLinearColor(.09f,.09f,.19f,.85f);D.BorderColor=FLinearColor(.5f,.5f,.5f,1);}
     W->Configure(D,Cast<UTexture2D>(Art->Brush(D.BgFile)->GetResourceObject()),Cast<UTexture2D>(Art->Brush(D.EdgeFile)->GetResourceObject()),1);
     return SNew(SBox).WidthOverride(Width).HeightOverride(Height)[W->TakeWidget()];
 }
@@ -97,40 +100,56 @@ void SWowCharacterSelectWidget::BuildStockLayout()
     StockControls.Reset();Backdrops.Reset();const FLinearColor Gold(1,.82f,0);auto Canvas=SNew(SConstraintCanvas);
     auto Put=[&](TSharedRef<SWidget> W,float X,float Y,float Width,float Height,float AX=0,float AY=0)
     {Canvas->AddSlot().Anchors(FAnchors(AX,AY)).Alignment(FVector2D::ZeroVector).Offset(FMargin(X,Y,Width,Height))[W];};
-    auto Label=[&](const FString& Key,int32 Size=13){return SNew(STextBlock).Text(FText::FromString(Art->String(Key))).Font(Art->Font(Size)).ColorAndOpacity(Gold).ShadowOffset(FVector2D(1,1)).Justification(ETextJustify::Center);};
-    auto Click=[&](FName Name,const FString& Key,FOnClicked Action)
-    {auto B=SNew(SButton).ButtonStyle(Art->Button(TEXT("Interface\\Glues\\Common\\Glue-Panel-Button"),true)).ContentPadding(0).HAlign(HAlign_Center).VAlign(VAlign_Center).OnClicked(Action)[Label(Key)];StockControls.Add(Name,B);return B;};
+    auto Font=[this](int32 Size){auto F=Art->Font(Size);F.Size=Size;F.OutlineSettings=FFontOutlineSettings(1);return F;};
+    auto Label=[&](const FString& Key,int32 Size=12){return SNew(STextBlock).Text(FText::FromString(Art->String(Key))).Font(Font(Size)).ColorAndOpacity(Gold).ShadowOffset(FVector2D(1,1)).Justification(ETextJustify::Center);};
+    auto Click=[&](FName Name,const FString& Key,FOnClicked Action,int32 FontSize=12)
+    {auto B=SNew(SButton).ButtonStyle(Art->Button(TEXT("Interface\\Glues\\Common\\Glue-Panel-Button"),true)).ContentPadding(0).HAlign(HAlign_Center).VAlign(VAlign_Center).OnClicked(Action)[Label(Key,FontSize)];StockControls.Add(Name,B);return B;};
     auto Enabled=[&](TSharedRef<SWidget> W){return SNew(SBox).IsEnabled_Lambda([this]{return !bBusy && !DeleteGuid;})[W];};
     Canvas->AddSlot().Anchors(FAnchors(0,0,1,1)).Offset(FMargin(0))[SNew(SSelectionViewport).Preview(Preview.Get()).IsEnabled_Lambda([this]{return !bBusy && !DeleteGuid;})];
     Put(SNew(SImage).Image(Art->Brush(TEXT("Interface\\Glues\\Common\\Glues-WoW-WotLKLogo"))).Visibility(EVisibility::HitTestInvisible),3,7,256,128);
-    Put(SNew(STextBlock).Text(FText::FromString(RealmName)).Font(Art->Font(18)).ColorAndOpacity(FLinearColor(.5f,.5f,.5f)).Justification(ETextJustify::Center),-257,25,244,25,1);
-    Put(Enabled(Click(TEXT("ChangeRealm"),TEXT("CHANGE_REALM"),FOnClicked::CreateLambda([this]{OnChangeRealmRequest.ExecuteIfBound();return FReply::Handled();}))),-217,40,164,33,1);
+    auto CharacterPanel=Backdrop(260,654,true);CharacterPanel->SetVisibility(EVisibility::HitTestInvisible);Put(CharacterPanel,-265,15,260,654,1);
+    const auto RealmFont=Font(18);FString DisplayRealm=RealmName;const auto Measure=FSlateApplication::Get().GetRenderer()->GetFontMeasureService();
+    if(Measure->Measure(RealmName,RealmFont).X>240)
+    {
+        const FString Ellipsis=TEXT("\u2026");const int32 Width=FMath::FloorToInt(240-Measure->Measure(Ellipsis,RealmFont).X);
+        DisplayRealm=RealmName.Left(Measure->FindLastWholeCharacterIndexBeforeOffset(RealmName,RealmFont,Width)+1)+Ellipsis;
+    }
+    Put(SNew(STextBlock).Text(FText::FromString(DisplayRealm)).ToolTipText(FText::FromString(RealmName)).Font(RealmFont).ColorAndOpacity(FLinearColor(.5f,.5f,.5f)).Justification(ETextJustify::Center)
+        .Clipping(EWidgetClipping::ClipToBounds),-257,22,244,24,1);
+    Put(Enabled(Click(TEXT("ChangeRealm"),TEXT("CHANGE_REALM"),FOnClicked::CreateLambda([this]{OnChangeRealmRequest.ExecuteIfBound();return FReply::Handled();}))),-217,52,164,26,1);
     for(int32 I=0;I<CachedCharacters.Num();++I)
     {
         const auto C=CachedCharacters[I];const FName Key(*FString::Printf(TEXT("Character_%lld"),C.Guid));
         auto Highlight=SNew(SImage).Image(Art->Brush(TEXT("Interface\\Glues\\CharacterSelect\\Glue-CharacterSelect-Highlight"),FVector2f(0),FVector2f(1),ESlateBrushMirrorType::NoMirror,true))
             .Visibility_Lambda([this,Guid=C.Guid,Key]{const auto* Weak=StockControls.Find(Key);const auto B=Weak?Weak->Pin():nullptr;return SelectedGuid==Guid || (B && B->IsHovered())?EVisibility::HitTestInvisible:EVisibility::Collapsed;});
-        Put(Highlight,-261,72+I*57,256,74,1);
+        Put(Highlight,-261,80+I*57,256,74,1);
         const auto& D=FDbcStore::Get();const FString Class=D.CharacterCreation().ClassName(C.Class);
         const FString Info=Art->String(TEXT("CHARACTER_SELECT_INFO")).Replace(TEXT("%d"),*FString::FromInt(C.Level)).Replace(TEXT("%s"),*Class);const auto* Area=D.AreaTable().GetById(C.ZoneId);
         auto Row=SNew(SSelectionRow).OnClicked_Lambda([this,Guid=C.Guid]{HighlightCharacter(Guid);return FReply::Handled();})
             .OnActivate_Lambda([this,Guid=C.Guid]{HighlightCharacter(Guid);EnterSelected();return FReply::Handled();})
-            [SNew(SVerticalBox)+SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Text(FText::FromString(C.Name)).Font(Art->Font(13)).ColorAndOpacity(Gold).ShadowOffset(FVector2D(1,1))]
-            +SVerticalBox::Slot().AutoHeight().Padding(0,1)[SNew(STextBlock).Text(FText::FromString(Info)).Font(Art->Font(12)).ColorAndOpacity(FLinearColor::White).ShadowOffset(FVector2D(1,1))]
-            +SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Text(FText::FromString(Area?Area->Name:FString())).Font(Art->Font(12)).ColorAndOpacity(FLinearColor(.5f,.5f,.5f)).ShadowOffset(FVector2D(1,1))]];
-        StockControls.Add(Key,Row);Put(Enabled(Row),-241,85+I*57,217,50,1);
+            [SNew(SVerticalBox)+SVerticalBox::Slot().AutoHeight()[SNew(SBox).HeightOverride(20).VAlign(VAlign_Center)[SNew(STextBlock).Text(FText::FromString(C.Name)).Font(Font(15)).ColorAndOpacity(Gold).ShadowOffset(FVector2D(1,1))]]
+            +SVerticalBox::Slot().AutoHeight()[SNew(SBox).HeightOverride(16).VAlign(VAlign_Center)[SNew(STextBlock).Text(FText::FromString(Info)).Font(Font(12)).ColorAndOpacity(FLinearColor::White).ShadowOffset(FVector2D(1,1))]]
+            +SVerticalBox::Slot().AutoHeight()[SNew(SBox).HeightOverride(16).VAlign(VAlign_Center)[SNew(STextBlock).Text(FText::FromString(Area?Area->Name:FString())).Font(Font(12)).ColorAndOpacity(FLinearColor(.5f,.5f,.5f)).ShadowOffset(FVector2D(1,1))]]];
+        StockControls.Add(Key,Row);Put(Enabled(Row),-241,93+I*57,217,52,1);
     }
     auto Create=Click(TEXT("Create"),TEXT("CREATE_NEW_CHARACTER"),FOnClicked::CreateLambda([this]{OnCreateCharacterRequest.ExecuteIfBound();return FReply::Handled();}));
-    Create->SetVisibility(TAttribute<EVisibility>::CreateLambda([this]{return CachedCharacters.Num()<10?EVisibility::Visible:EVisibility::Collapsed;}));Put(Enabled(Create),-235,597,200,45,1);
-    Put(SNew(STextBlock).Text_Lambda([this]{const auto* C=Selected();return FText::FromString(C?C->Name:FString());}).Font(Art->Font(22)).ColorAndOpacity(Gold).ShadowOffset(FVector2D(1,1)).Justification(ETextJustify::Center),-260,-131,520,31,.5f,1);
-    auto Enter=Click(TEXT("EnterWorld"),TEXT("ENTER_WORLD"),FOnClicked::CreateLambda([this]{EnterSelected();return FReply::Handled();}));
-    Enter->SetEnabled(TAttribute<bool>::CreateLambda([this]{return !bBusy && !DeleteGuid && Selected();}));Put(Enter,-100,-90,200,60,.5f,1);
+    Create->SetVisibility(TAttribute<EVisibility>::CreateLambda([this]{return CachedCharacters.Num()<10?EVisibility::Visible:EVisibility::Collapsed;}));Put(Enabled(Create),-235,616,200,38,1);
+    Put(SNew(STextBlock).Text_Lambda([this]{const auto* C=Selected();return FText::FromString(C?C->Name:FString());}).Font(Font(17)).ColorAndOpacity(Gold).ShadowOffset(FVector2D(1,1)).Justification(ETextJustify::Center),-260,-147,520,31,.5f,1);
+    auto Enter=Click(TEXT("EnterWorld"),TEXT("ENTER_WORLD"),FOnClicked::CreateLambda([this]{EnterSelected();return FReply::Handled();}),15);
+    Enter->SetEnabled(TAttribute<bool>::CreateLambda([this]{return !bBusy && !DeleteGuid && Selected();}));Put(Enter,-100,-110,200,60,.5f,1);
+    const FString RotationBase=TEXT("Interface\\Glues\\CharacterCreate\\UI-RotationRight-Big");
+    RotationStyle=MakeShared<FButtonStyle>(*Art->Button(RotationBase));
+    // Remove transparent texture padding from the button's layout/hit area.
+    const FVector2f RotationMin(9.f/64,10.f/64),RotationMax(55.f/64,55.f/64);
+    RotationStyle->SetNormal(*Art->Brush(RotationBase+TEXT("-Up"),RotationMin,RotationMax));
+    RotationStyle->SetHovered(RotationStyle->Normal).SetDisabled(RotationStyle->Normal);
+    RotationStyle->SetPressed(*Art->Brush(RotationBase+TEXT("-Down"),RotationMin,RotationMax));
     for(int32 Direction:{-1,1})
     {
-        auto B=SNew(SButton).ButtonStyle(Art->Button(TEXT("Interface\\Glues\\CharacterCreate\\UI-RotationRight-Big"))).ContentPadding(0)
+        auto B=SNew(SButton).ButtonStyle(RotationStyle.Get()).ContentPadding(0)
             .OnClicked_Lambda([this,Direction]{if(Preview.IsValid()) Preview->Rotate(Direction*20);return FReply::Handled();});
         if(Direction<0){B->SetRenderTransformPivot(FVector2D(.5,.5));B->SetRenderTransform(FSlateRenderTransform(FScale2D(-1,1)));}
-        Put(Enabled(B),Direction<0?-40:-9,-59,50,50,.5f,1);
+        Put(Enabled(B),Direction<0?-39:3,-42,36,35,.5f,1);
     }
     Put(Enabled(Click(TEXT("Back"),TEXT("BACK"),FOnClicked::CreateLambda([this]{OnBackRequest.ExecuteIfBound();return FReply::Handled();}))),-130,-60,100,35,1,1);
     auto Delete=Click(TEXT("Delete"),TEXT("DELETE_CHARACTER"),FOnClicked::CreateLambda([this]{OpenDeleteDialog();return FReply::Handled();}));
@@ -142,10 +161,10 @@ void SWowCharacterSelectWidget::BuildStockLayout()
     Confirm->SetVisibility(TAttribute<EVisibility>::CreateLambda([this]{return DeleteGuid?EVisibility::Visible:EVisibility::Collapsed;}));
     auto Dismiss=Click(TEXT("Dismiss"),TEXT("CANCEL"),FOnClicked::CreateLambda([this]{DeleteGuid=0;Status.Reset();return FReply::Handled();}));
     Dismiss->SetContent(SNew(STextBlock).Text_Lambda([this]{return FText::FromString(Art->String(DeleteGuid?TEXT("CANCEL"):TEXT("OKAY")));})
-        .Font(Art->Font(13)).ColorAndOpacity(Gold).ShadowOffset(FVector2D(1,1)).Justification(ETextJustify::Center));
+        .Font(Font(12)).ColorAndOpacity(Gold).ShadowOffset(FVector2D(1,1)).Justification(ETextJustify::Center));
     Dismiss->SetEnabled(TAttribute<bool>::CreateLambda([this]{return !bBusy;}));
     auto Dialog=SNew(SOverlay)+SOverlay::Slot()[Backdrop(430,210)]
-        +SOverlay::Slot().Padding(24,18,24,65)[SNew(STextBlock).Font(Art->Font(14)).AutoWrapText(true).Justification(ETextJustify::Center).ColorAndOpacity(Gold).Text_Lambda([this]{return FText::FromString(Status);})]
+        +SOverlay::Slot().Padding(24,18,24,65)[SNew(STextBlock).Font(Font(14)).AutoWrapText(true).Justification(ETextJustify::Center).ColorAndOpacity(Gold).Text_Lambda([this]{return FText::FromString(Status);})]
         +SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Bottom).Padding(0,0,0,53)
             [SNew(SBox).WidthOverride(220).HeightOverride(34).Visibility_Lambda([this]{return DeleteGuid?EVisibility::Visible:EVisibility::Collapsed;})
                 [SNew(SOverlay)+SOverlay::Slot()[Backdrop(220,34)]+SOverlay::Slot()[SAssignNew(DeleteBox,SEditableTextBox).Style(DeleteStyle.Get()).Font(Art->Font(14)).ForegroundColor(FLinearColor::White)]]]
