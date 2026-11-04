@@ -3,10 +3,12 @@
 Unit portraits retain the original M2 camera position, target and field of
 view. A model-space camera fixed on the reference pose could lose the face
 when the live world actor bowed, cast, attacked or fell. The portrait renderer
-now maps both authored camera points from the head's complete reference-bone
-hierarchy into the animated WowPortraitHead socket transform before applying
-the body's world transform. Translation, rotation and scale therefore remain
-relative to the same head; the scene capture still renders current appearance.
+maps both authored camera points from the head in the first Stand frame to the
+current animated WowPortraitHead socket before applying the body transform.
+For Wolf.m2 the standing head is about 0.2 model units lower than its bind
+pose. The original camera already accounts for that displacement. Tracking
+starts at Stand so the ears and muzzle remain in frame. Models without a Stand
+clip use their reference pose.
 
 Models without a head socket or matching reference bone retain their authored
 camera. Full-body character and dress-up views keep their own framing logic.

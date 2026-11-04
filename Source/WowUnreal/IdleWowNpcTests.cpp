@@ -2,6 +2,7 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/Texture2D.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Materials/MaterialInterface.h"
 #include "Formats/Dbc/DbcStore.h"
@@ -115,7 +116,7 @@ bool FIdleWowNpcModels::RunTest(const FString& Parameters)
     FWowAssetCache Cache;
     UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
     GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
-    for (uint32 Display : {3275u, 3276u, 31049u})
+    for (uint32 Display : {3275u, 3276u, 31048u, 31049u})
     {
         const FVector Location(12345, 23456, 789);
         AActor* Actor = FWowCharacterBuilder::SpawnCreatureByDisplayId(World, &Mpq, &Cache, Display, Location, FRotator(0, 35, 0));
@@ -132,6 +133,22 @@ bool FIdleWowNpcModels::RunTest(const FString& Parameters)
         TestNotNull(TEXT("NPC model has real geometry"), Mesh->GetSkeletalMeshAsset()->GetResourceForRendering());
         UTexture* Texture = nullptr;
         TestTrue(TEXT("NPC section has a resolved skin texture"), Mesh->GetMaterial(0)->GetTextureParameterValue(FMaterialParameterInfo(TEXT("BaseTexture")), Texture) && Texture);
+        if (Display == 31048)
+        {
+            TestEqual(TEXT("Diseased wolf has separate fur and body layers"), Mesh->GetNumMaterials(), 2);
+            const TCHAR* Expected[] = {TEXT("WolfSkinDiseasedAlpha.blp"), TEXT("WolfSkinDiseased.blp")};
+            for (int32 Slot = 0; Slot < UE_ARRAY_COUNT(Expected); ++Slot)
+            {
+                UTexture* Bound = nullptr;
+                const auto* Material = Mesh->GetMaterial(Slot);
+                if (!TestTrue(TEXT("CreatureDisplayInfo replacement is bound to its M2 layer"), Material &&
+                    Material->GetTextureParameterValue(FMaterialParameterInfo(TEXT("BaseTexture")), Bound) &&
+                    Bound && Bound->GetName().EndsWith(Expected[Slot]))) continue;
+                const auto* Skin = Cast<UTexture2D>(Bound);
+                TestTrue(TEXT("Original wolf skin has all nine sampling levels"), Skin && Skin->GetNumMips() == 9 &&
+                    Skin->Filter == TF_Trilinear);
+            }
+        }
         auto* Controller = FWowCharacterBuilder::GetAnimationController(Actor);
         if (!TestNotNull(TEXT("NPC native animation controller"), Controller)) continue;
         TestTrue(TEXT("NPC has an available walking clip"), Controller->PlayAnimationById(EWowAnimId::Walk));

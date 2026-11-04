@@ -116,6 +116,7 @@ struct FWowRichLabelState
     float Scale=0;
     float Wrap=-1;
     bool AutoWrap=false;
+    ETextOverflowPolicy Overflow=ETextOverflowPolicy::Clip;
     ETextJustify::Type Justification=ETextJustify::Left;
     TArray<FSlateBrush> Brushes;
     TArray<int16> Baselines;
@@ -218,6 +219,7 @@ void UWowTextBlock::RefreshRichStyle(float Scale)
     }
     if(RichState->Wrap!=GetWrapTextAt()) { RichState->Wrap=GetWrapTextAt(); RichWidget->SetWrapTextAt(RichState->Wrap); }
     if(RichState->AutoWrap!=GetAutoWrapText()) { RichState->AutoWrap=GetAutoWrapText(); RichWidget->SetAutoWrapText(RichState->AutoWrap); }
+    if(RichState->Overflow!=GetTextOverflowPolicy()) { RichState->Overflow=GetTextOverflowPolicy(); RichWidget->SetOverflowPolicy(RichState->Overflow); }
     if(RichState->Justification!=LabelJustification) { RichState->Justification=LabelJustification; RichWidget->SetJustification(LabelJustification); }
 }
 void UWowTextBlock::SetVerticalJustification(const FString& Value)

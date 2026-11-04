@@ -77,7 +77,7 @@ public:
     /** Wire entity events from the packet handler (call after setting ConnectionManager) */
     void BindEntityEvents();
     void PrepareCharacterSelect();
-    bool ConfigureNpcCapture(uint32 DisplayId);
+    bool ConfigureNpcCapture(uint32 DisplayId, uint64 Guid = 0);
     void LogNpcCapture() const;
     void LogHudCapture() const;
     void InteractWithTarget();

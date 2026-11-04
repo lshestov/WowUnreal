@@ -106,7 +106,7 @@ void FWowFontManager::Shutdown()
 	}
 }
 
-FSlateFontInfo FWowFontManager::GetFont(const FString& WowFontName, int32 Size) const
+FSlateFontInfo FWowFontManager::GetFont(const FString& WowFontName, float Size) const
 {
 	if (!bInitialized)
 	{
@@ -135,7 +135,7 @@ FSlateFontInfo FWowFontManager::GetFont(const FString& WowFontName, int32 Size) 
 	return CreateFontFromFile(*FilePath, Size);
 }
 
-FSlateFontInfo FWowFontManager::GetDefaultFont(int32 Size) const
+FSlateFontInfo FWowFontManager::GetDefaultFont(float Size) const
 {
 	if (!bInitialized)
 	{
@@ -183,14 +183,14 @@ bool FWowFontManager::ExtractFont(FMpqManager* Mpq, const FString& MpqPath, cons
 	return true;
 }
 
-FSlateFontInfo FWowFontManager::CreateFontFromFile(const FString& FilePath, int32 Size) const
+FSlateFontInfo FWowFontManager::CreateFontFromFile(const FString& FilePath, float Size) const
 {
 	// Create a font info using UE5.7's new API
 	FSlateFontInfo FontInfo;
 
 	// Set the size first
 	// WoW specifies pixel heights; Slate font sizes are typographic points.
-	FontInfo.Size = FMath::Max(1,FMath::RoundToInt(Size*.75f));
+	FontInfo.Size = FMath::Max(1.f,Size*.75f);
 
 	// Create a composite font with the TTF file
 	TSharedPtr<FCompositeFont> CompositeFont = MakeShared<FCompositeFont>();
@@ -210,7 +210,7 @@ FSlateFontInfo FWowFontManager::CreateFontFromFile(const FString& FilePath, int3
 	FontInfo.CompositeFont = CompositeFont;
 	FontInfo.TypefaceFontName = FName(*FontName);
 
-	UE_LOG(LogWowFont, Verbose, TEXT("Created font info: %s (size %d) from file: %s"),
+	UE_LOG(LogWowFont, Verbose, TEXT("Created font info: %s (size %.2f) from file: %s"),
 		*FontName, Size, *FilePath);
 
 	return FontInfo;

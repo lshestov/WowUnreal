@@ -24,7 +24,8 @@ public:
     void SetAssets(class FMpqManager* InMpq,class FWowAssetCache* InCache) { Mpq=InMpq; Cache=InCache; }
     void Tick(UWorld* World);
     /** Move an authored model-space portrait view with its animated head. */
-    static bool TrackPortraitHead(const FReferenceSkeleton& Skeleton,FName Bone,const FTransform& AnimatedHead,FVector& Position,FVector& Target);
+    static bool TrackPortraitHead(const FReferenceSkeleton& Skeleton,FName Bone,const FTransform& AnimatedHead,FVector& Position,FVector& Target,
+        TConstArrayView<FTransform> StandPose={});
 private:
     struct FSlot;
     FWowFrameManager& Frames;

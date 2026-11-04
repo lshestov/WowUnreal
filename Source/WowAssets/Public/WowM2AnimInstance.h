@@ -29,6 +29,8 @@ public:
     bool HasM2SpellAnimation() const { return SpellTrackIndex != INDEX_NONE; }
     int32 GetSpellTorsoBoneCount() const;
     void SampleLocalPose(TArray<FTransform>& OutPose) const;
+    /** Authored portrait cameras frame the first Stand pose, which can differ from the bind pose. */
+    const TArray<FTransform>& GetPortraitStandPose();
     virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
 protected:
@@ -38,6 +40,7 @@ protected:
 private:
     TSharedPtr<const FM2Data> Model;
     TArray<FTransform> ReferencePose;
+    TArray<FTransform> PortraitStandPose;
     TArray<int32> ModelBoneIndices;
     TArray<FTransform> BlendFromPose;
     int32 TrackIndex = INDEX_NONE;

@@ -819,12 +819,27 @@ void FWowEventSystem::RegisterFontDefinition(FWowLuaVM* VM,FWowFontManager* Font
     if(!Definition.FontInherits.IsEmpty())
     {
         lua_getglobal(L,TCHAR_TO_UTF8(*Definition.FontInherits));
-        if(lua_istable(L,-1)) for(const char* Key:{"__fontPath","__fontSize","__fontFlags","__textColorR","__textColorG","__textColorB","__textColorA","__justifyH","__justifyV"}) { lua_getfield(L,-1,Key); lua_setfield(L,Font,Key); }
+        if(lua_istable(L,-1)) for(const char* Key:{"__fontPath","__fontSize","__fontFlags","__textColorR","__textColorG","__textColorB","__textColorA","__justifyH","__justifyV",
+            "__shadowX","__shadowY","__shadowR","__shadowG","__shadowB","__shadowA"}) { lua_getfield(L,-1,Key); lua_setfield(L,Font,Key); }
         lua_pop(L,1);
     }
     if(!Definition.FontFile.IsEmpty()) { lua_pushstring(L,TCHAR_TO_UTF8(*Definition.FontFile)); lua_setfield(L,Font,"__fontPath"); }
     if(Fonts || Definition.FontHeight>0) { lua_pushnumber(L,Definition.FontHeight>0?Definition.FontHeight:Fonts->GetFontSize(Definition.FontName)); lua_setfield(L,Font,"__fontSize"); }
     if(!Definition.FontFlags.IsEmpty()) { lua_pushstring(L,TCHAR_TO_UTF8(*Definition.FontFlags)); lua_setfield(L,Font,"__fontFlags"); }
+    if(Definition.FontShadowOffset.IsSet())
+    {
+        const auto Offset=Definition.FontShadowOffset.GetValue();
+        lua_pushnumber(L,Offset.X); lua_setfield(L,Font,"__shadowX");
+        lua_pushnumber(L,Offset.Y); lua_setfield(L,Font,"__shadowY");
+    }
+    if(Definition.FontShadowColor.IsSet())
+    {
+        const auto Color=Definition.FontShadowColor.GetValue();
+        lua_pushnumber(L,Color.R); lua_setfield(L,Font,"__shadowR");
+        lua_pushnumber(L,Color.G); lua_setfield(L,Font,"__shadowG");
+        lua_pushnumber(L,Color.B); lua_setfield(L,Font,"__shadowB");
+        lua_pushnumber(L,Color.A); lua_setfield(L,Font,"__shadowA");
+    }
     if(!Definition.FontJustifyH.IsEmpty()) { lua_pushstring(L,TCHAR_TO_UTF8(*Definition.FontJustifyH)); lua_setfield(L,Font,"__justifyH"); }
     if(!Definition.FontJustifyV.IsEmpty()) { lua_pushstring(L,TCHAR_TO_UTF8(*Definition.FontJustifyV)); lua_setfield(L,Font,"__justifyV"); }
     if(Definition.FontColor.IsSet())

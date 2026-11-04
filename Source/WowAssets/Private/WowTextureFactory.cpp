@@ -1,9 +1,10 @@
 #include "WowTextureFactory.h"
 #include "Engine/Texture2D.h"
+#include "TextureResource.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowTexture, Log, All);
 
-UTexture2D* FWowTextureFactory::CreateTexture(const FBlpTexture& BlpData, const FString& Name)
+UTexture2D* FWowTextureFactory::CreateTexture(const FBlpTexture& BlpData, const FString& Name, bool bUseAuthoredMips)
 {
     if (!BlpData.bIsValid || BlpData.MipLevels.Num() == 0) return nullptr;
 
@@ -20,7 +21,11 @@ UTexture2D* FWowTextureFactory::CreateTexture(const FBlpTexture& BlpData, const 
             return nullptr;
     }
 
-    UTexture2D* Tex = UTexture2D::CreateTransient(BlpData.Width, BlpData.Height, PF, *Name);
+    const auto& Mip0 = BlpData.MipLevels[0];
+    const uint64 BaseBytes = GPixelFormats[PF].Get2DImageSizeInBytes(BlpData.Width, BlpData.Height);
+    if (!BaseBytes || BaseBytes > uint64(Mip0.Data.Num())) return nullptr;
+    UTexture2D* Tex = UTexture2D::CreateTransient(BlpData.Width, BlpData.Height, PF, *Name,
+        TConstArrayView64<uint8>(Mip0.Data.GetData(), int64(BaseBytes)));
     if (!Tex)
     {
         UE_LOG(LogWowTexture, Error, TEXT("CreateTransient failed for '%s' (%dx%d %s)"),
@@ -28,19 +33,24 @@ UTexture2D* FWowTextureFactory::CreateTexture(const FBlpTexture& BlpData, const 
         return nullptr;
     }
 
-    Tex->Filter = TF_Bilinear;
     Tex->SRGB = true;
     Tex->NeverStream = true;
-
-    // For DXT formats, ensure dimensions are at least 4x4 (block-compressed requirement)
-    const FBlpMipLevel& Mip0 = BlpData.MipLevels[0];
-
-    void* TexData = Tex->GetPlatformData()->Mips[0].BulkData.Lock(LOCK_READ_WRITE);
-    if (TexData)
+    auto& Mips = Tex->GetPlatformData()->Mips;
+    for (int32 Level = 1; bUseAuthoredMips && Level < BlpData.MipLevels.Num(); ++Level)
     {
-        FMemory::Memcpy(TexData, Mip0.Data.GetData(), Mip0.Data.Num());
-        Tex->GetPlatformData()->Mips[0].BulkData.Unlock();
+        const auto& Prior = BlpData.MipLevels[Level-1];
+        const auto& Source = BlpData.MipLevels[Level];
+        if ((Prior.Width == 1 && Prior.Height == 1) || Source.Width != FMath::Max(1u, Prior.Width / 2)
+            || Source.Height != FMath::Max(1u, Prior.Height / 2)) break;
+        const uint64 Bytes = GPixelFormats[PF].Get2DImageSizeInBytes(Source.Width, Source.Height);
+        if (!Bytes || Bytes > uint64(Source.Data.Num())) break;
+        auto* Mip = new FTexture2DMipMap(Source.Width, Source.Height, 1);
+        Mips.Add(Mip);
+        Mip->BulkData.Lock(LOCK_READ_WRITE);
+        FMemory::Memcpy(Mip->BulkData.Realloc(Bytes), Source.Data.GetData(), Bytes);
+        Mip->BulkData.Unlock();
     }
+    Tex->Filter = Mips.Num() > 1 ? TF_Trilinear : TF_Bilinear;
     Tex->UpdateResource();
 
     UE_LOG(LogWowTexture, Verbose, TEXT("Created texture '%s': %dx%d %s (%d bytes)"),

@@ -477,7 +477,11 @@ void FWowFrameManager::ApplyElementAnchors(UWidget* Widget, UCanvasPanel* Parent
         // A horizontal text constraint still needs its natural wrapped height.
         // Treating an unspecified height as zero erased quest descriptions.
         const auto* Label=Cast<UWowTextBlock>(Text);
-        Text->SetWrapTextAt(Width>0 && (!Label || Label->CanWordWrap())?Width*UIScale:0);
+        // A bounded nameplate-sized FontString fits one line. Slate otherwise
+        // expands a wrapped target name past its XML height into the HP bar.
+        const bool SingleLine=Width>0 && Height>0 && Height*UIScale < Text->GetFont().Size*2.f;
+        Text->SetWrapTextAt(Width>0 && !SingleLine && (!Label || Label->CanWordWrap())?Width*UIScale:0);
+        Text->SetTextOverflowPolicy(SingleLine?ETextOverflowPolicy::Ellipsis:ETextOverflowPolicy::Clip);
         if(auto* Rich=Cast<UWowTextBlock>(Text)) Rich->RefreshRichStyle(UIScale);
         Text->TakeWidget()->Invalidate(EInvalidateWidgetReason::Prepass);
         Text->ForceLayoutPrepass(); const auto Desired=Text->GetDesiredSize()/UIScale;

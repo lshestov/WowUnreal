@@ -482,13 +482,13 @@ void AWowViewerGameMode::PopulateUITestScene()
     constexpr uint32 WolfEntry=69;
     auto& Wolf=Entities.PromoteToTyped(0xF130000045000001ull,WowTypeMask::UNIT);
     Wolf.Entry=WolfEntry;
-    Wolf.SetField(UnitField::DISPLAYID,604); Wolf.SetField(UnitField::NATIVEDISPLAYID,604);
+    Wolf.SetField(UnitField::DISPLAYID,31048); Wolf.SetField(UnitField::NATIVEDISPLAYID,31048);
     Wolf.SetField(UnitField::FACTIONTEMPLATE,7); // neutral creature faction
     Wolf.SetField(UnitField::LEVEL,2);
     Wolf.SetField(UnitField::HEALTH,55); Wolf.SetField(UnitField::MAXHEALTH,55);
     Wolf.Movement.Position=FWowCoordinate::UEToWow(FVector(310,110,4));
     Wolf.Movement.Orientation=PI*.8;
-    Handler.CreatureNameCache.Add(WolfEntry,TEXT("Young Wolf"));
+    Handler.CreatureNameCache.Add(WolfEntry,TEXT("Diseased Timber Wolf"));
     Handler.CreatureTypes.Add(WolfEntry,1); // Beast, as supplied by SMSG_CREATURE_QUERY_RESPONSE.
 
     Entities.OnEntityCreated.Broadcast(Player);

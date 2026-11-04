@@ -56,6 +56,7 @@ void UWowM2AnimInstance::InitializeModel(TSharedPtr<const FM2Data> InModel)
     Model = MoveTemp(InModel);
     TrackIndex = INDEX_NONE;
     ReferencePose.Reset();
+    PortraitStandPose.Reset();
     ModelBoneIndices.Reset();
     BlendFromPose.Reset();
     StopM2SpellAnimation(true);
@@ -247,6 +248,12 @@ void UWowM2AnimInstance::SampleClip(int32 Clip,float Time,TArray<FTransform>& Ou
             OutPose[Bone].SetScale3D(FVector(S.Y, S.X, S.Z));
         }
     }
+}
+
+const TArray<FTransform>& UWowM2AnimInstance::GetPortraitStandPose()
+{
+    if (PortraitStandPose.IsEmpty()) SampleClip(FindClip(0), 0.f, PortraitStandPose);
+    return PortraitStandPose;
 }
 
 void UWowM2AnimInstance::SampleLocalPose(TArray<FTransform>& OutPose) const

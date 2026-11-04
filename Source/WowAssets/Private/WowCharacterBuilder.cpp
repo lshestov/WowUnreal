@@ -179,9 +179,11 @@ UTexture2D* LoadBlpTexture(FMpqManager* Mpq, FWowAssetCache* Cache, const FStrin
         return nullptr;
     }
 
+    // The same BLP can also be loaded as a single-level interface image.
+    const FString CacheKey = TEXT("ModelSkin_") + TexturePath;
     if (Cache)
     {
-        if (UTexture2D* Cached = Cache->FindTexture(TexturePath))
+        if (UTexture2D* Cached = Cache->FindTexture(CacheKey))
         {
             return Cached;
         }
@@ -199,10 +201,10 @@ UTexture2D* LoadBlpTexture(FMpqManager* Mpq, FWowAssetCache* Cache, const FStrin
         return nullptr;
     }
 
-    UTexture2D* Texture = FWowTextureFactory::CreateTexture(BlpData, TexturePath);
+    UTexture2D* Texture = FWowTextureFactory::CreateTexture(BlpData, CacheKey, true);
     if (Texture && Cache)
     {
-        Cache->CacheTexture(TexturePath, Texture);
+        Cache->CacheTexture(CacheKey, Texture);
     }
     return Texture;
 }

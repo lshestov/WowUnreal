@@ -300,6 +300,14 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 		EventSystem->EndOnLoadBatch();
 	}
 
+    // The stock name is centred over a slightly wider painted strip. Use its
+    // available width so Slate's glyph advances don't cut off the two ends.
+    if (FrameManager && FrameManager->GetNamedFontString(TEXT("TargetFrameTextureFrameName")))
+    {
+        const float StripWidth=FrameManager->GetRegionSize(TEXT("TargetFrameNameBackground")).X;
+        if (StripWidth>4) FrameManager->SetRegionSize(TEXT("TargetFrameTextureFrameName"),StripWidth-4,-1);
+    }
+
 	UE_LOG(LogWowUIManager, Log, TEXT("FrameXML: processed %d directives, created %d frames"),
 		FrameXmlDirectives.Num(), FrameCount);
 

@@ -1667,23 +1667,20 @@ static int LF_FontStringSetFont(lua_State* L)
 	lua_pushstring(L, Flags);
 	lua_setfield(L, 1, "__fontFlags");
 
-	if (UTextBlock* TextBlock = GetTextBlockWidgetForTable(L, 1))
-	{
-		FSlateFontInfo FontInfo = TextBlock->GetFont();
-		const auto* C=WowLuaApi::GetContext(L); FontInfo.Size = FMath::Max(1,FMath::RoundToInt(FontSize*.75f*(C && C->FrameManager?C->FrameManager->GetUIScale():1)));
-		if(C && C->FrameManager) if(auto* Fonts=C->FrameManager->GetFontManager(); Fonts && Fonts->IsInitialized()) FontInfo=Fonts->GetFont(UTF8_TO_TCHAR(FontPath),FMath::RoundToInt(FontSize*C->FrameManager->GetUIScale()));
-		TextBlock->SetFont(FontInfo);
-	}
 	const auto* C=WowLuaApi::GetContext(L);
-    const auto FontForEditor=[&](FSlateFontInfo Info)
+    const FString FontFlags=UTF8_TO_TCHAR(Flags);
+    const auto RenderFont=[&](FSlateFontInfo Info)
     {
         const float Scale=C && C->FrameManager?C->FrameManager->GetUIScale():1;
         Info.Size=FMath::Max(1,FMath::RoundToInt(FontSize*.75f*Scale));
-        if(C && C->FrameManager) if(const auto* Fonts=C->FrameManager->GetFontManager(); Fonts && Fonts->IsInitialized()) Info=Fonts->GetFont(UTF8_TO_TCHAR(FontPath),FMath::RoundToInt(FontSize*Scale));
+        if(C && C->FrameManager) if(const auto* Fonts=C->FrameManager->GetFontManager(); Fonts && Fonts->IsInitialized()) Info=Fonts->GetFont(UTF8_TO_TCHAR(FontPath),FontSize*Scale);
+        const int32 Width=FontFlags.Contains(TEXT("THICKOUTLINE"))?2:FontFlags.Contains(TEXT("OUTLINE"))?1:0;
+        Info.OutlineSettings.OutlineSize=FMath::RoundToInt(Width*Scale);
         return Info;
     };
-    if(auto* Edit=GetEditBoxWidgetForTable(L)) { auto Style=Edit->GetWidgetStyle(); Style.SetFont(FontForEditor(Style.TextStyle.Font)); Edit->SetWidgetStyle(Style); }
-    if(auto* Edit=GetMultiLineEditor(L)) { auto Style=Edit->WidgetStyle; Style.SetFont(FontForEditor(Style.Font)); Edit->SetWidgetStyle(Style); }
+    if(auto* Text=GetTextBlockWidgetForTable(L,1)) Text->SetFont(RenderFont(Text->GetFont()));
+    if(auto* Edit=GetEditBoxWidgetForTable(L)) { auto Style=Edit->GetWidgetStyle(); Style.SetFont(RenderFont(Style.TextStyle.Font)); Edit->SetWidgetStyle(Style); }
+    if(auto* Edit=GetMultiLineEditor(L)) { auto Style=Edit->WidgetStyle; Style.SetFont(RenderFont(Style.Font)); Edit->SetWidgetStyle(Style); }
     if(C && C->FrameManager) C->FrameManager->SetMessageFont(GetFrameHandle(L),UTF8_TO_TCHAR(FontPath),FontSize);
 
 	return 0;
@@ -2456,26 +2453,26 @@ static int LF_GetValue(lua_State* L)
 static int LF_SetStatusBarTexture(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
-	// Even if no texture is specified, ensure the bar has a solid fill brush
-	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-	if (Ctx && Ctx->FrameManager)
+	auto* Ctx = WowLuaApi::GetContext(L);
+	auto* Bar = Ctx && Ctx->FrameManager ? Ctx->FrameManager->GetStatusBarWidget(GetFrameHandle(L)) : nullptr;
+	if (!Bar) return 0;
+	FSlateBrush Brush;
+	Brush.DrawAs = ESlateBrushDrawType::NoDrawType;
+	if (lua_isstring(L, 2))
 	{
-		int64 Handle = GetFrameHandle(L);
-		UProgressBar* ProgressBar = Ctx->FrameManager->GetStatusBarWidget(Handle);
-		if (ProgressBar)
+		if (auto* Texture = Ctx->FrameManager->LoadUITexture(UTF8_TO_TCHAR(lua_tostring(L, 2))))
 		{
-			// Ensure the progress bar has a solid fill brush
-			FProgressBarStyle BarStyle = ProgressBar->GetWidgetStyle();
-			FSlateBrush FillBrush = BarStyle.FillImage;
-			if (FillBrush.DrawAs == ESlateBrushDrawType::NoDrawType)
-			{
-				FillBrush.DrawAs = ESlateBrushDrawType::Box;
-				FillBrush.SetResourceObject(nullptr); // solid color brush
-				BarStyle.SetFillImage(FillBrush);
-				ProgressBar->SetWidgetStyle(BarStyle);
-			}
+			Brush.DrawAs = ESlateBrushDrawType::Image;
+			Brush.SetResourceObject(Texture);
 		}
 	}
+	else if (lua_istable(L, 2))
+	{
+		if (const auto* Image = GetTextureImage(L, 2)) Brush = Image->GetBrush();
+	}
+	auto Style = Bar->GetWidgetStyle();
+	Style.SetFillImage(Brush);
+	Bar->SetWidgetStyle(Style);
 	return 0;
 }
 static int LF_SetStatusBarColor(lua_State* L)
@@ -2500,17 +2497,6 @@ static int LF_SetStatusBarColor(lua_State* L)
 		UProgressBar* ProgressBar = Ctx->FrameManager->GetStatusBarWidget(Handle);
 		if (ProgressBar)
 		{
-			// Ensure the progress bar has a solid fill brush
-			FProgressBarStyle BarStyle = ProgressBar->GetWidgetStyle();
-			FSlateBrush FillBrush = BarStyle.FillImage;
-			if (FillBrush.DrawAs == ESlateBrushDrawType::NoDrawType)
-			{
-				FillBrush.DrawAs = ESlateBrushDrawType::Box;
-				FillBrush.SetResourceObject(nullptr); // solid color brush
-				BarStyle.SetFillImage(FillBrush);
-				ProgressBar->SetWidgetStyle(BarStyle);
-			}
-
 			FLinearColor Color(R, G, B, A);
 			ProgressBar->SetFillColorAndOpacity(Color);
 		}
@@ -2629,7 +2615,7 @@ static int LF_SetFontObject(lua_State* L)
         lua_getfield(L,2,"__fontSize"); const float Size=luaL_optnumber(L,-1,Fonts?Fonts->GetFontSize(Name):12); lua_pop(L,1);
         const float Scale=C && C->FrameManager?C->FrameManager->GetUIScale():1;
         lua_getfield(L,2,"__fontPath"); const FString Path=UTF8_TO_TCHAR(luaL_optstring(L,-1,TCHAR_TO_UTF8(*Name))); lua_pop(L,1);
-        if(Fonts) Text->SetFont(Fonts->GetFont(Path,FMath::RoundToInt(Size*Scale)));
+        if(Fonts) Text->SetFont(Fonts->GetFont(Path,Size*Scale));
         else { auto Info=Text->GetFont(); Info.Size=FMath::Max(1,FMath::RoundToInt(Size*Scale*.75f)); Text->SetFont(Info); }
         FLinearColor Color; float* Components[]={&Color.R,&Color.G,&Color.B,&Color.A}; const char* Keys[]={"__textColorR","__textColorG","__textColorB","__textColorA"};
         for(int32 I=0;I<4;++I) { lua_getfield(L,2,Keys[I]); *Components[I]=luaL_optnumber(L,-1,1); lua_pop(L,1); }

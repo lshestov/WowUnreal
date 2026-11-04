@@ -558,6 +558,13 @@ struct FWowGameplayProbe
             Done=FFileHelper::SaveStringToFile(Text,*(Output/(Step->GetStringField(TEXT("name"))+TEXT(".json"))));
         }
         else if (Op==TEXT("interact")) { C.InteractWithTarget(); Done=true; }
+        else if(Op==TEXT("inspect_target_model"))
+        {
+            const auto* Unit=Handler.EntityManager.FindUnit(C.TargetGuid);
+            const uint32 Display=Step->GetIntegerField(TEXT("display"));
+            Done=Unit && Display && C.ConfigureNpcCapture(Display,C.TargetGuid);
+            if(Done) C.LogNpcCapture();
+        }
         else if(Op==TEXT("frame_camera_target"))
         {
             auto* Pawn=Cast<AWowPlayerCharacter>(C.GetPawn()); const auto* Actor=C.SpawnedEntityActors.Find(C.TargetGuid);

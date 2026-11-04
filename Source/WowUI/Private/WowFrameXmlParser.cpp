@@ -15,9 +15,18 @@ DEFINE_LOG_CATEGORY_STATIC(LogWowXml, Log, All);
 static bool IsFrameTypeTag(const FString& Tag);
 static FWowFrameDef ParseFrameNode(const FXmlNode* Node);
 static FWowTextureElement ParseTextureNode(const FXmlNode* Node);
+static FLinearColor ParseColor(const FXmlNode* Node);
 
 namespace
 {
+FString FontFlagsFromXml(FString Flags, const FString& Outline, bool Monochrome)
+{
+    if (Outline.Equals(TEXT("NORMAL"), ESearchCase::IgnoreCase)) Flags += TEXT(" OUTLINE");
+    if (Outline.Equals(TEXT("THICK"), ESearchCase::IgnoreCase)) Flags += TEXT(" THICKOUTLINE");
+    if (Monochrome) Flags += TEXT(" MONOCHROME");
+    return Flags.TrimStartAndEnd();
+}
+
 FString NormalizeWowPath(const FString& InPath)
 {
 	FString Normalized = InPath;
@@ -225,7 +234,15 @@ TArray<FWowXmlDirective> ParseXmlWithFXmlFallback(const FString& XmlContent, con
 				Dir.FontHeight = FCString::Atof(*FontHeightAttr);
 			}
 
-			Dir.FontFlags = Child->GetAttribute(TEXT("flags"));
+			Dir.FontFlags = FontFlagsFromXml(Child->GetAttribute(TEXT("flags")), Child->GetAttribute(TEXT("outline")),
+                Child->GetAttribute(TEXT("monochrome")).ToBool());
+            if (const auto* Shadow=Child->FindChildNode(TEXT("Shadow")))
+            {
+                if (const auto* Offset=Shadow->FindChildNode(TEXT("Offset")))
+                    if (const auto* Size=Offset->FindChildNode(TEXT("AbsDimension")))
+                        Dir.FontShadowOffset=FVector2D(FCString::Atof(*Size->GetAttribute(TEXT("x"))), FCString::Atof(*Size->GetAttribute(TEXT("y"))));
+                if (const auto* Color=Shadow->FindChildNode(TEXT("Color"))) Dir.FontShadowColor=ParseColor(Color);
+            }
             Dir.FontJustifyH=Child->GetAttribute(TEXT("justifyH")); Dir.FontJustifyV=Child->GetAttribute(TEXT("justifyV"));
 			if(const auto* Color=Child->FindChildNode(TEXT("Color")))
 			{
@@ -1153,6 +1170,11 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 			Def.DisabledTextureName = UTF8_TO_TCHAR(Child.attribute("name").as_string());
 			Def.DisabledTextureParentKey = UTF8_TO_TCHAR(Child.attribute("parentKey").as_string());
 		}
+		else if (Tag == TEXT("BarTexture"))
+			Def.BarTexture = UTF8_TO_TCHAR(Child.attribute("file").as_string());
+		else if (Tag == TEXT("BarColor"))
+			Def.BarColor = FLinearColor(Child.attribute("r").as_float(1), Child.attribute("g").as_float(1),
+				Child.attribute("b").as_float(1), Child.attribute("a").as_float(1));
 		else if (Tag == TEXT("ThumbTexture"))
 		{
             pugi::xml_document Document; auto Frame=Document.append_child("Frame");
@@ -1379,6 +1401,10 @@ static FWowFrameDef ParseFrameNode(const FXmlNode* Node)
 			Def.DisabledTextureName = Child->GetAttribute(TEXT("name"));
 			Def.DisabledTextureParentKey = Child->GetAttribute(TEXT("parentKey"));
 		}
+		else if (Tag.Equals(TEXT("BarTexture"), ESearchCase::IgnoreCase))
+			Def.BarTexture = Child->GetAttribute(TEXT("file"));
+		else if (Tag.Equals(TEXT("BarColor"), ESearchCase::IgnoreCase))
+			Def.BarColor = ParseColor(Child);
 		else if (Tag.Equals(TEXT("ThumbTexture"), ESearchCase::IgnoreCase))
 		{
 			auto Thumb=ParseTextureNode(Child); Thumb.bSliderThumb=true; if(Thumb.Name.IsEmpty()) Thumb.Name=TEXT("$parentThumbTexture"); InlineTextures.Add(Thumb);
@@ -1514,7 +1540,15 @@ TArray<FWowXmlDirective> FWowFrameXmlParser::ParseXml(const TArray<uint8>& Data,
 			Dir.FontName = UTF8_TO_TCHAR(Child.attribute("name").as_string());
 			Dir.FontInherits = UTF8_TO_TCHAR(Child.attribute("inherits").as_string());
 			Dir.FontFile = UTF8_TO_TCHAR(Child.attribute("font").as_string());
-			Dir.FontFlags = UTF8_TO_TCHAR(Child.attribute("flags").as_string());
+			Dir.FontFlags = FontFlagsFromXml(UTF8_TO_TCHAR(Child.attribute("flags").as_string()),
+                UTF8_TO_TCHAR(Child.attribute("outline").as_string()), Child.attribute("monochrome").as_bool());
+            if (const auto Shadow=Child.child("Shadow"))
+            {
+                if (const auto Size=Shadow.child("Offset").child("AbsDimension"))
+                    Dir.FontShadowOffset=FVector2D(Size.attribute("x").as_float(),Size.attribute("y").as_float());
+                if (const auto Color=Shadow.child("Color"))
+                    Dir.FontShadowColor=FLinearColor(Color.attribute("r").as_float(),Color.attribute("g").as_float(),Color.attribute("b").as_float(),Color.attribute("a").as_float(1));
+            }
             Dir.FontJustifyH=UTF8_TO_TCHAR(Child.attribute("justifyH").as_string()); Dir.FontJustifyV=UTF8_TO_TCHAR(Child.attribute("justifyV").as_string());
 			Dir.FontHeight = Child.attribute("height").as_float(0.0f);
 			if(const auto Color=Child.child("Color")) Dir.FontColor=FLinearColor(Color.attribute("r").as_float(1),Color.attribute("g").as_float(1),Color.attribute("b").as_float(1),Color.attribute("a").as_float(1));

@@ -103,6 +103,7 @@ void CancelAura(lua_State* L,bool Form)
     for(const auto& Aura:Player->Auras) if(Aura.bActive && !(Aura.Flags&0x80) && (!Aura.DurationMs || Aura.UpdatedAt+Aura.RemainingMs/1000.>FPlatformTime::Seconds()))
     {
         const auto* Spell=FDbcStore::Get().Spells().GetById(Aura.SpellId); if(!Spell) continue;
+        if(!Form && !Spell->HasVisibleAuraIcon()) continue;
         if(ByIndex && Rank.Contains(TEXT("PLAYER")) && Aura.CasterGuid!=Player->Guid) continue;
         bool Match=ByIndex?--Index==0:!Form && Spell->SpellName.Equals(Name,ESearchCase::IgnoreCase) && (Rank.IsEmpty() || Spell->Rank.Equals(Rank,ESearchCase::IgnoreCase));
         if(Form) for(uint32 Type:Spell->EffectApplyAuraName) Match|=Type==36;

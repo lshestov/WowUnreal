@@ -16,6 +16,10 @@ struct FSpellDbcEntry
     uint32 AttributesEx5;
     uint32 AttributesEx6;
     uint32 AttributesEx7;
+    bool HasVisibleAuraIcon() const
+    {
+        return !(Attributes & 0x80) && !(AttributesEx & 0x10000000); // DO_NOT_DISPLAY / NO_AURA_ICON
+    }
     uint64 Stances;
     uint64 StancesNot;
     uint32 Targets;

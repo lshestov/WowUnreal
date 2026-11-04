@@ -164,6 +164,35 @@ bool FHudInlineXmlScript::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudUnitBarArt,"WowUnreal.Hud.StockUnitBarArt",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudUnitBarArt::RunTest(const FString&)
+{
+    FString DataPath; FMpqManager Mpq;
+    if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),DataPath) || !Mpq.Initialize(DataPath)) return false;
+    FHudFixture F; FWowAssetCache Cache; F.Frames.SetMpqManager(&Mpq); F.Frames.SetAssetCache(&Cache);
+    const FString File=TEXT("Interface\\FrameXML\\PlayerFrame.xml");
+    TArray<uint8> Bytes; if(!Mpq.ReadFile(File,Bytes)) return false;
+    for(const auto& Directive:FWowFrameXmlParser::ParseXml(Bytes,File))
+    {
+        if(Directive.FrameDef.Name!=TEXT("PlayerFrame")) continue;
+        const auto* Mana=Directive.FrameDef.Children.FindByPredicate([](const FWowFrameDef& Child){return Child.Name==TEXT("PlayerFrameManaBar");});
+        if(!TestNotNull(TEXT("Stock player mana-bar declaration"),Mana)) return false;
+        auto Template=*Mana;
+        Template.Name=TEXT("StockManaTemplate"); Template.bVirtual=true; Template.Scripts.Reset(); Template.Inherits.Empty();
+        F.Frames.CreateFrame(Template);
+        TestTrue(TEXT("Instance inherits the XML bar art and blue tint"),F.Lua.ExecuteString(TEXT("PreviewMana=CreateFrame('StatusBar','PreviewMana',UIParent,'StockManaTemplate'); local r,g,b=PreviewMana:GetStatusBarColor(); assert(r==0 and g==0 and b==1)")));
+        auto* Bar=F.Frames.GetStatusBarWidget(F.Frames.FindFrame(TEXT("PreviewMana")));
+        if(!TestNotNull(TEXT("UMG bar"),Bar)) return false;
+        auto* Stock=F.Frames.LoadUITexture(TEXT("Interface\\TargetingFrame\\UI-StatusBar"));
+        TestTrue(TEXT("MPQ bar texture is the fill brush without additional insets"),Stock && Stock==Bar->GetWidgetStyle().FillImage.GetResourceObject() && Bar->GetBorderPadding().IsZero());
+        TestTrue(TEXT("Remove brush, then set its tint independently"),F.Lua.ExecuteString(TEXT("PreviewMana:SetStatusBarTexture(nil); PreviewMana:SetStatusBarColor(0,1,0)")));
+        TestEqual(TEXT("Recoloring a cleared bar does not restore a white rectangle"),Bar->GetWidgetStyle().FillImage.DrawAs.GetValue(),ESlateBrushDrawType::NoDrawType);
+        TestTrue(TEXT("Lua can restore the same native bar texture"),F.Lua.ExecuteString(TEXT("PreviewMana:SetStatusBarTexture([[Interface\\TargetingFrame\\UI-StatusBar]])")) && Bar->GetWidgetStyle().FillImage.GetResourceObject()==Stock);
+        return true;
+    }
+    AddError(TEXT("Original PlayerFrame missing")); return false;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudStockChatFont, "WowUnreal.Hud.StockChatFont",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FHudStockChatFont::RunTest(const FString&)
@@ -183,9 +212,7 @@ bool FHudStockChatFont::RunTest(const FString&)
         if (!TestTrue(*Path, Mpq.ReadFile(Path, Bytes))) return false;
         for (const auto& Def : FWowFrameXmlParser::ParseXml(Bytes, Path))
         {
-            if (Def.Type == FWowXmlDirective::EType::Font &&
-                (Def.FontName == TEXT("NumberFont_Shadow_Med") || Def.FontName == TEXT("ChatFontNormal") ||
-                 Def.FontName == TEXT("SystemFont_Shadow_Med1") || Def.FontName == TEXT("GameFontNormal")))
+            if (Def.Type == FWowXmlDirective::EType::Font)
                 FWowEventSystem::RegisterFontDefinition(&F.Lua, &Fonts, Def);
             if (Def.Type == FWowXmlDirective::EType::Frame && Def.FrameDef.Name == TEXT("ChatFrameTemplate"))
                 F.Frames.CreateFrame(Def.FrameDef);
@@ -193,6 +220,22 @@ bool FHudStockChatFont::RunTest(const FString&)
     }
     TestEqual(TEXT("Other stock UI labels keep their own font"), Fonts.GetFont(TEXT("GameFontNormal")).TypefaceFontName, FName(TEXT("FRIZQT__")));
     TestEqual(TEXT("Native lookup inherits the chat face"), Fonts.GetFont(TEXT("ChatFontNormal")).TypefaceFontName, FName(TEXT("ARIALN")));
+    if (!TestTrue(TEXT("Unit name, level and HP text inherit their stock TTF, height and effects"),F.Lua.ExecuteString(TEXT(R"LUA(
+        local owner=CreateFrame('Frame','StockUnitTextProbe',UIParent)
+        owner:SetSize(160,100); owner:SetPoint('CENTER')
+        local name=owner:CreateFontString('StockUnitName',nil,'GameFontNormalSmall')
+        name:SetPoint('CENTER'); name:SetSize(100,10); name:SetText('Diseased Timber Wolf')
+        local file,size=name:GetFont(); assert(file:upper()=='FONTS\\FRIZQT__.TTF' and size==10)
+        local x,y=name:GetShadowOffset(); assert(x==1 and y==-1)
+        local hp=owner:CreateFontString('StockUnitHealthText',nil,'TextStatusBarText')
+        local path,height,flags=hp:GetFont(); assert(path:upper()=='FONTS\\FRIZQT__.TTF' and height==10 and flags=='OUTLINE')
+    )LUA")))) return false;
+    F.Frames.RefreshLayout();
+    const auto* Name=F.Frames.GetNamedFontString(TEXT("StockUnitName"));
+    const auto* Hp=F.Frames.GetNamedFontString(TEXT("StockUnitHealthText"));
+    TestTrue(TEXT("The unit name uses its native face and stays on a single line"), Name && Name->GetFont().TypefaceFontName==FName(TEXT("FRIZQT__")) &&
+        Name->GetWrapTextAt()==0 && Name->GetTextOverflowPolicy()==ETextOverflowPolicy::Ellipsis);
+    TestTrue(TEXT("The HP font has an actual rendered outline"),Hp && Hp->GetFont().OutlineSettings.OutlineSize==1);
     if (!TestTrue(TEXT("The chat frame inherits the MPQ face and height before its first message"), F.Lua.ExecuteString(TEXT(R"LUA(
         function ChatFrame_OnLoad() end
         local frame=CreateFrame("ScrollingMessageFrame","StockChatProbe",UIParent,"ChatFrameTemplate")
@@ -205,7 +248,7 @@ bool FHudStockChatFont::RunTest(const FString&)
     if (!TestTrue(TEXT("An actual scrolling-message row is present"), State && !State->Widgets.IsEmpty() && State->Widgets[0].IsValid())) return false;
     const auto* Row=State->Widgets[0].Get();
     TestEqual(TEXT("The visible row uses the extracted narrow typeface"), Row->GetFont().TypefaceFontName, FName(TEXT("ARIALN")));
-    TestTrue(TEXT("Fourteen native pixels become eleven Slate points at unit scale"), Row->GetFont().Size==11);
+    TestTrue(TEXT("Fourteen native pixels keep their exact size in Slate points"), Row->GetFont().Size==10.5f);
     F.Lua.ExecuteString(TEXT("local file,_,flags=StockChatProbe:GetFont(); StockChatProbe:SetFont(file,20,flags)"));
     TestTrue(TEXT("Changing chat font size also updates a line already on screen"), Row->GetFont().TypefaceFontName==FName(TEXT("ARIALN")) && Row->GetFont().Size==15);
     return true;
@@ -1257,12 +1300,14 @@ bool FHudInventoryItems::RunTest(const FString&)
     Connection->PacketHandler.ActionButtons.SetNumZeroed(144); Connection->PacketHandler.ActionButtons[0]=(128u<<24)|1367;
     F.Context.ConnectionManager=Connection.Get(); F.Context.EntityManager=&Entities;
     Player.SetField(UnitField::BYTES_0,(1u<<24)|(1u<<8)|1u);
+    Player.Auras[0].bActive=true; Player.Auras[0].SpellId=71764; Player.Auras[0].Flags=0x09; Player.Auras[0].CasterGuid=1;
     Player.Auras[5].bActive=true; Player.Auras[5].SpellId=6673; Player.Auras[5].Flags=0x39; Player.Auras[5].CasterGuid=1; Player.Auras[5].Charges=3;
     Player.Auras[5].DurationMs=120000; Player.Auras[5].RemainingMs=90000; Player.Auras[5].UpdatedAt=FPlatformTime::Seconds();
     Player.Auras[31].bActive=true; Player.Auras[31].SpellId=772; Player.Auras[31].Flags=0x81; Player.Auras[31].CasterGuid=2;
     Connection->PacketHandler.KnownSpells.Append({6603,78,6673,2457});
     Player.SetField(PlayerField::SKILL_INFO,95); Player.SetField(PlayerField::SKILL_INFO+1,(100u<<16)|80u); Player.SetField(PlayerField::SKILL_INFO+2,(2u<<16)|3u);
     TestTrue(TEXT("Sparse auras and spellbook pages use actual server spells and DBC icons"),F.Lua.ExecuteString(TEXT(R"LUA(
+        assert(UnitBuff('player','Diseased')==nil and UnitAura('player','Diseased')==nil)
         assert(select(11,UnitBuff('player',1))==6673 and select(11,UnitDebuff('player',1))==772)
         assert(select(11,UnitAura('player',1,'HARMFUL'))==772 and UnitBuff('player',2)==nil)
         local _,_,icon,stacks,_,duration,expiration,caster=UnitBuff('player',1)
@@ -2057,6 +2102,14 @@ bool FHudPortraitTracking::RunTest(const FString&)
     const FVector AuthoredPosition(90,20,175),AuthoredTarget(10,20,175);
     FVector Position=AuthoredPosition,Target=AuthoredTarget;
     TestTrue(TEXT("A resting head retains the authored portrait view"),FWowUiModelRenderer::TrackPortraitHead(Skeleton,TEXT("head"),FTransform(FVector(10,20,170)),Position,Target) && Position.Equals(AuthoredPosition) && Target.Equals(AuthoredTarget));
+    // Creature portrait cameras are authored against the standing animation.
+    // Applying the bind-to-Stand offset a second time cuts off a wolf's ears.
+    auto StandPose=Skeleton.GetRefBonePose();
+    StandPose[1].AddToTranslation(FVector(0,0,-20));
+    Position=AuthoredPosition; Target=AuthoredTarget;
+    TestTrue(TEXT("A lowered standing head leaves the authored camera and target in place"),
+        FWowUiModelRenderer::TrackPortraitHead(Skeleton,TEXT("head"),FTransform(FVector(10,20,150)),Position,Target,StandPose)
+        && Position.Equals(AuthoredPosition) && Target.Equals(AuthoredTarget));
     Position=AuthoredPosition; Target=AuthoredTarget;
     const FTransform Bow(FRotator(0,90,0),FVector(-35,45,90),FVector(2));
     FWowUiModelRenderer::TrackPortraitHead(Skeleton,TEXT("head"),Bow,Position,Target);

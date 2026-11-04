@@ -75,6 +75,7 @@ bool FIdleWowRuntimeAnimations::RunTest(const FString& Parameters)
         auto& Track = Clip.BoneTracks[0];
         Track.TransTimestamps = {0, 100, 1000};
         Track.TransValues = {FVector::ZeroVector, FVector(10, 0, 0), FVector::ZeroVector};
+        if (Id==0) Track.TransValues[0].Z=-.25f; // Stand lowers the head relative to the bind pose.
         Track.RotTimestamps = {0, 1000};
         Track.RotValues = {FQuat::Identity, FQuat(FVector::UpVector, PI / 2)};
         Data->AnimationTracks.Add(MoveTemp(Clip));
@@ -104,6 +105,9 @@ bool FIdleWowRuntimeAnimations::RunTest(const FString& Parameters)
     }
     const int32 Bone = Mesh->GetRefSkeleton().FindBoneIndex(FWowSkeletalMeshBuilder::GetBoneName(0));
     Instance->NativeUpdateAnimation(0.55f);
+    const auto& Stand=Instance->GetPortraitStandPose();
+    TestTrue(TEXT("The portrait baseline samples the first Stand key independently of live playback"),
+        Stand.IsValidIndex(Bone) && Stand[Bone].GetTranslation().Equals(Mesh->GetRefSkeleton().GetRefBonePose()[Bone].GetTranslation()+FVector(0,0,-25),.01));
     TArray<FTransform> Pose;
     Instance->SampleLocalPose(Pose);
     TestTrue(TEXT("Nonuniform timestamps are interpolated in milliseconds, with mapped local pivot"),

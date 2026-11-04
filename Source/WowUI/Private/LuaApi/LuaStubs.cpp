@@ -1113,7 +1113,7 @@ static int PushUnitAura(lua_State* L,const char* DefaultFilter)
         if(!A.bActive || !A.SpellId || bool(A.Flags&0x80)!=Harmful) continue;
         if(PlayerOnly && (!C || !C->EntityManager || A.CasterGuid!=C->EntityManager->LocalPlayerGuid)) continue;
         if(A.DurationMs && A.UpdatedAt+A.RemainingMs/1000.0<=Now) continue;
-        const auto* Spell=FDbcStore::Get().Spells().GetById(A.SpellId); if(!Spell) continue;
+        const auto* Spell=FDbcStore::Get().Spells().GetById(A.SpellId); if(!Spell || !Spell->HasVisibleAuraIcon()) continue;
         if(ByName && !Spell->SpellName.Equals(Name,ESearchCase::IgnoreCase)) continue;
         if(--Wanted!=0) continue;
         const auto* Icon=FDbcStore::Get().SpellIcons().GetById(Spell->SpellIconID);

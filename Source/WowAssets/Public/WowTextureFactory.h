@@ -5,5 +5,5 @@ class UTexture2D;
 class WOWASSETS_API FWowTextureFactory
 {
 public:
-    static UTexture2D* CreateTexture(const FBlpTexture& BlpData, const FString& Name = TEXT("WowTex"));
+    static UTexture2D* CreateTexture(const FBlpTexture& BlpData, const FString& Name = TEXT("WowTex"), bool bUseAuthoredMips = false);
 };

@@ -15,13 +15,15 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowNpcCapture, Log, All);
 
-bool AWowGameplayController::ConfigureNpcCapture(uint32 DisplayId)
+bool AWowGameplayController::ConfigureNpcCapture(uint32 DisplayId, uint64 Guid)
 {
     if (!ConnectionManager) return false;
     double Nearest = TNumericLimits<double>::Max();
     const bool bPreferMoving = FParse::Param(FCommandLine::Get(), TEXT("capturenpcmoving"));
+    NpcCaptureTarget.Reset();
     for (const auto& Pair : SpawnedEntityActors)
     {
+        if (Guid && Pair.Key != Guid) continue;
         const auto* Entity = ConnectionManager->PacketHandler.EntityManager.Find(Pair.Key);
         AActor* Actor = Pair.Value;
         if (!Entity || Entity->IsPlayer() || !IsValid(Actor)) continue;
@@ -32,7 +34,7 @@ bool AWowGameplayController::ConfigureNpcCapture(uint32 DisplayId)
         if (Distance < Nearest) { Nearest = Distance; NpcCaptureTarget = Actor; }
     }
     if (!NpcCaptureTarget.IsValid()) return false;
-    NpcCaptureCamera = GetWorld()->SpawnActor<ACameraActor>();
+    if (!NpcCaptureCamera.IsValid()) NpcCaptureCamera = GetWorld()->SpawnActor<ACameraActor>();
     if (!NpcCaptureCamera.IsValid()) return false;
     NpcCaptureCamera->GetCameraComponent()->SetFieldOfView(50);
     UpdateNpcCaptureCamera();

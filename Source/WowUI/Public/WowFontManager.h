@@ -22,10 +22,10 @@ public:
 	void Shutdown();
 
 	/** Get a font info for a WoW font name and size */
-	FSlateFontInfo GetFont(const FString& WowFontName, int32 Size = 12) const;
+	FSlateFontInfo GetFont(const FString& WowFontName, float Size = 12) const;
 
 	/** Get the default UI font */
-	FSlateFontInfo GetDefaultFont(int32 Size = 12) const;
+	FSlateFontInfo GetDefaultFont(float Size = 12) const;
 
 	/** Register a WoW font name mapping from FrameXML */
 	void RegisterFontMapping(const FString& WowFontName, const FString& InheritsFrom, int32 DefaultSize, const FString& FontFile = FString());
@@ -39,7 +39,7 @@ private:
 	bool ExtractFont(FMpqManager* Mpq, const FString& MpqPath, const FString& LocalPath);
 
 	/** Create a font info from a local TTF file path */
-	FSlateFontInfo CreateFontFromFile(const FString& FilePath, int32 Size) const;
+	FSlateFontInfo CreateFontFromFile(const FString& FilePath, float Size) const;
 
 	/** Set up the default WoW font mappings */
 	void SetupFontMappings();

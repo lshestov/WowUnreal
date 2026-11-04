@@ -731,6 +731,8 @@ void FWowFrameManager::MergeTemplate(FWowFrameDef& Target, const FWowFrameDef& T
     if(!(Target.SliderProperties&4) && (Template.SliderProperties&4)) Target.DefaultValue=Template.DefaultValue;
     if(!(Target.SliderProperties&8) && (Template.SliderProperties&8)) Target.ValueStep=Template.ValueStep;
     Target.SliderProperties|=Template.SliderProperties;
+	if(Target.BarTexture.IsEmpty()) Target.BarTexture=Template.BarTexture;
+	if(!Target.BarColor.IsSet()) Target.BarColor=Template.BarColor;
 }
 
 FWowFrameDef FWowFrameManager::ResolveInherits(const FWowFrameDef& Def) const
@@ -1044,7 +1046,7 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 				// Try to get the font based on inheritance or use default
 				FString FontName = FS.Inherits.IsEmpty() ? TEXT("GameFontNormal") : FS.Inherits;
 				// Scale font size with UI scale for proper sizing
-				int32 ScaledFontSize = FMath::RoundToInt((FS.FontHeight>0?FS.FontHeight:FontManager->GetFontSize(FontName)) * UIScale);
+				const float ScaledFontSize = (FS.FontHeight>0?FS.FontHeight:FontManager->GetFontSize(FontName)) * UIScale;
 				FontInfo = FontManager->GetFont(FontName, ScaledFontSize);
 			}
 			else
@@ -1440,21 +1442,20 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 	if (Def.Type == EWowFrameType::StatusBar)
 	{
 		UProgressBar* Bar = NewObject<UProgressBar>(Widget);
-		// Transparent style by default — Lua will set fill color via :SetStatusBarColor()
-		// Remove the default UE grey background/border
+		// FrameXML draws the border and background in separate regions.
 		FSlateBrush EmptyBrush;
 		EmptyBrush.DrawAs = ESlateBrushDrawType::NoDrawType;
 
-		// Create solid fill brush so the bar is actually visible
 		FSlateBrush FillBrush;
-		FillBrush.DrawAs = ESlateBrushDrawType::Box;
-		FillBrush.SetResourceObject(nullptr); // solid color brush
+		FillBrush.DrawAs = ESlateBrushDrawType::Image;
+		if (!Def.BarTexture.IsEmpty()) FillBrush.SetResourceObject(LoadUITexture(Def.BarTexture));
 
 		FProgressBarStyle BarStyle;
 		BarStyle.SetBackgroundImage(EmptyBrush);
-		BarStyle.SetFillImage(FillBrush); // Set the fill brush to solid
+		BarStyle.SetFillImage(FillBrush);
 		Bar->SetWidgetStyle(BarStyle);
-		Bar->SetFillColorAndOpacity(FLinearColor::Green); // default, Lua will override
+		Bar->SetBorderPadding(FVector2D::ZeroVector);
+		Bar->SetFillColorAndOpacity(Def.BarColor.Get(Def.BarTexture.IsEmpty() ? FLinearColor::Green : FLinearColor::White));
 		Bar->SetPercent(0.0f);
 		UCanvasPanel* CanvasPanel = Cast<UCanvasPanel>(Widget);
 		UCanvasPanelSlot* BarSlot = CanvasPanel ? CanvasPanel->AddChildToCanvas(Bar) : nullptr;
@@ -2086,7 +2087,7 @@ void FWowFrameManager::DrawMessages(int64 Handle,double Now)
 	const int32 FirstFontRow = State.AppliedFontScale == UIScale ? Existing : 0;
 	if (FirstFontRow < State.Widgets.Num())
 	{
-		const int32 Pixels = FMath::Max(1,FMath::RoundToInt(FontHeight*UIScale));
+		const float Pixels = FMath::Max(1.f,FontHeight*UIScale);
 		FSlateFontInfo Font = GetDefault<UTextBlock>()->GetFont();
 		if (FontManager) Font = FontName.IsEmpty() ? FontManager->GetDefaultFont(Pixels) : FontManager->GetFont(FontName,Pixels);
 		else Font.Size = FMath::Max(1,FMath::RoundToInt(Pixels*.75f));
@@ -2948,11 +2949,16 @@ void FWowFrameManager::TooltipUpdateDisplay(int64 TooltipHandle)
 		{
 			Text=CreateTextBlock(Canvas); Canvas->AddChildToCanvas(Text);
 			NamedFontStringWidgets.Add(Name,Text); RegionOwners.Add(Name,Prefix);
-			if(EventSystem) EventSystem->CreateTextureRegionGlobal(Name,TooltipHandle,TEXT("FontString"));
+			const FString Style = Line == 1 ? TEXT("GameTooltipHeaderText") : TEXT("GameTooltipText");
+			if(FontManager) Text->SetFont(FontManager->GetFont(Style,FMath::RoundToInt(FontManager->GetFontSize(Style)*UIScale)));
+			if(EventSystem)
+			{
+				EventSystem->CreateTextureRegionGlobal(Name,TooltipHandle,TEXT("FontString"));
+				EventSystem->ApplyRegionFont(Name,Style);
+			}
 		}
 		if(Text)
 		{
-			if(FontManager) Text->SetFont(FontManager->GetDefaultFont(FMath::Max(1,FMath::RoundToInt(12*UIScale))));
 			Text->SetJustification(Right?ETextJustify::Right:ETextJustify::Left);
 			if(auto* Slot=Cast<UCanvasPanelSlot>(Text->Slot))
 			{
