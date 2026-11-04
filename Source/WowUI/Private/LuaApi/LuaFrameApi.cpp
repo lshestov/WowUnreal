@@ -7,6 +7,7 @@
 #include "WowEventSystem.h"
 #include "WowFrameManager.h"
 #include "WowFrameTypes.h"
+#include "../WowPlacedFrameLayout.h"
 #include "WowMultiLineEditBox.h"
 #include "../WowEditOffsets.h"
 #include "WowFontManager.h"
@@ -2831,6 +2832,38 @@ static int LF_RegisterForDrag(lua_State* L)
 }
 
 // frame:StartMoving / StopMovingOrSizing
+static bool UserPlacedBoolean(lua_State* L)
+{
+    switch(lua_type(L,2))
+    {
+        case LUA_TNIL: return false;
+        case LUA_TBOOLEAN: return lua_toboolean(L,2)!=0;
+        case LUA_TNUMBER: { const double V=lua_tonumber(L,2); return V>=1 || V<=-1; }
+        case LUA_TSTRING: return WowPlacedFrameLayout::StringBoolean(lua_tostring(L,2));
+        default: return true; // omitted argument, like StringToBOOL(L,2,1) in 12340.
+    }
+}
+static int LF_SetUserPlaced(lua_State* L)
+{
+    auto* C=WowLuaApi::GetContext(L);
+    auto* D=C && C->FrameManager?C->FrameManager->GetMutableFrameDef(GetFrameHandle(L)):nullptr;
+    if(!D) return 0;
+    if(!D->bMovable && !D->bResizable) return luaL_error(L,"Frame %s is not movable or resizable",D->bAnonymous?"<unnamed>":TCHAR_TO_UTF8(*D->Name));
+    D->bUserPlaced=UserPlacedBoolean(L); return 0;
+}
+static int LF_IsUserPlaced(lua_State* L)
+{
+    auto* C=WowLuaApi::GetContext(L);
+    const auto* D=C && C->FrameManager?C->FrameManager->GetFrameDef(GetFrameHandle(L)):nullptr;
+    if(D && D->bUserPlaced) lua_pushinteger(L,1); else lua_pushnil(L); return 1;
+}
+static int LF_DontSavePosition(lua_State* L,bool Get)
+{
+    auto* C=WowLuaApi::GetContext(L);
+    auto* D=C && C->FrameManager?C->FrameManager->GetMutableFrameDef(GetFrameHandle(L)):nullptr;
+    if(Get) {if(D && D->bDontSavePosition) lua_pushinteger(L,1); else lua_pushnil(L); return 1;}
+    if(D) D->bDontSavePosition=UserPlacedBoolean(L); return 0;
+}
 static int LF_StartMoving(lua_State* L) { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager && !C->FrameManager->StartFrameMovement(GetFrameHandle(L))) return luaL_error(L,"Frame is not movable or another frame is being moved"); return 0; }
 static int LF_StartSizing(lua_State* L) { auto* C=WowLuaApi::GetContext(L); const char* P=luaL_optstring(L,2,"BOTTOMRIGHT"); if(C && C->FrameManager && !C->FrameManager->StartFrameMovement(GetFrameHandle(L),UTF8_TO_TCHAR(P))) return luaL_error(L,"Frame is not resizable or another frame is being moved"); return 0; }
 static int LF_StopMovingOrSizing(lua_State* L) { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->StopFrameMovement(GetFrameHandle(L)); return 0; }
@@ -3447,9 +3480,10 @@ static const luaL_Reg FrameMethods[] =
 	{"GetPoint", LF_GetPoint},
 	{"IsProtected", [](lua_State* L) -> int { lua_pushboolean(L, 0); return 1; }},
 	{"CanChangeProtectedState", [](lua_State* L) -> int { lua_pushboolean(L, 1); return 1; }},
-	{"SetUserPlaced", [](lua_State* L) -> int { return 0; }},
-	{"IsUserPlaced", [](lua_State* L) -> int { lua_pushboolean(L, 0); return 1; }},
-	{"SetDontSavePosition", [](lua_State* L) -> int { return 0; }},
+	{"SetUserPlaced", LF_SetUserPlaced},
+	{"IsUserPlaced", LF_IsUserPlaced},
+	{"SetDontSavePosition", [](lua_State* L)->int {return LF_DontSavePosition(L,false);}},
+	{"GetDontSavePosition", [](lua_State* L)->int {return LF_DontSavePosition(L,true);}},
 	{"SetMaxResize", [](lua_State* L)->int { return LF_ResizeBounds(L,true,false); }},
 	{"SetMinResize", [](lua_State* L)->int { return LF_ResizeBounds(L,false,false); }},
 	{"GetMaxResize", [](lua_State* L)->int { return LF_ResizeBounds(L,true,true); }},

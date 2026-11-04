@@ -240,6 +240,9 @@ const FWowFrameDef* FWowFrameManager::GetFrameDef(int64 Handle) const
 
 void FWowFrameManager::SetFrameVisible(int64 Handle, bool bVisible)
 {
+	if(!bVisible && MovingFrame>=0)
+		for(int64 Parent=MovingFrame; Parent>=0; Parent=GetParentHandle(Parent))
+			if(Parent==Handle) {StopFrameMovement(MovingFrame); break;}
 	if(!bVisible && FSlateApplication::IsInitialized())
 	{
 		for(const auto& Edit:EditBoxWidgets) if(Edit.Value.IsValid() && HasEditFocus(Edit.Key))
@@ -404,11 +407,9 @@ void FWowFrameManager::SetFrameAnchors(int64 Handle, const TArray<FWowAnchor>& N
 
 void FWowFrameManager::ClearFrameAnchors(int64 Handle)
 {
-	FFrameEntry* Entry = Frames.Find(Handle);
-	if (!Entry) return;
-
-	Entry->Def.Anchors.Empty();
-	Entry->Def.bSetAllPoints = false;
+	// Clearing anchors must discard the old measured rectangle too; otherwise
+	// a subsequent layout save can persist a position the frame no longer has.
+	SetFrameAnchors(Handle,{});
 }
 
 void FWowFrameManager::SetFrameAlpha(int64 Handle, float Alpha)
@@ -637,6 +638,11 @@ void FWowFrameManager::MergeTemplate(FWowFrameDef& Target, const FWowFrameDef& T
 	// EnableMouse / EnableKeyboard — inherit from template
     if(!Target.bHasEnableMouse && Template.bHasEnableMouse) {Target.bEnableMouse=Template.bEnableMouse; Target.bHasEnableMouse=true;}
 	Target.bMovable|=Template.bMovable; Target.bResizable|=Template.bResizable; Target.bClampedToScreen|=Template.bClampedToScreen;
+	if(!Target.bDontSavePositionSpecified && !Target.bDontSavePosition)
+	{
+		Target.bDontSavePosition=Template.bDontSavePosition;
+		Target.bDontSavePositionSpecified=Template.bDontSavePositionSpecified;
+	}
 	Target.bMotionScriptsWhileDisabled|=Template.bMotionScriptsWhileDisabled;
 	if(Target.HitInsets.Equals(FVector4(0,0,0,0))) Target.HitInsets=Template.HitInsets;
 	if (Template.bEnableKeyboard && !Target.bEnableKeyboard) Target.bEnableKeyboard = true;

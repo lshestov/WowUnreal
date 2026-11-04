@@ -789,6 +789,8 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 	Def.bEnableKeyboard = Node.attribute("enableKeyboard").as_bool(false);
 	Def.bMovable=Node.attribute("movable").as_bool(false);
 	Def.bResizable=Node.attribute("resizable").as_bool(false);
+	Def.bDontSavePosition=Node.attribute("dontSavePosition").as_bool(false);
+	Def.bDontSavePositionSpecified=bool(Node.attribute("dontSavePosition"));
 	Def.bClampedToScreen=Node.attribute("clampedToScreen").as_bool(false);
 	Def.bMotionScriptsWhileDisabled=Node.attribute("motionScriptsWhileDisabled").as_bool(false);
 	Def.Scale = Node.attribute("scale").as_float(1.f);
@@ -1245,6 +1247,8 @@ static FWowFrameDef ParseFrameNode(const FXmlNode* Node)
 	Def.bEnableKeyboard = EnableKeyboard.Equals(TEXT("true"), ESearchCase::IgnoreCase);
 	Def.bMovable=Node->GetAttribute(TEXT("movable")).Equals(TEXT("true"),ESearchCase::IgnoreCase);
 	Def.bResizable=Node->GetAttribute(TEXT("resizable")).Equals(TEXT("true"),ESearchCase::IgnoreCase);
+	Def.bDontSavePosition=Node->GetAttribute(TEXT("dontSavePosition")).Equals(TEXT("true"),ESearchCase::IgnoreCase);
+	Def.bDontSavePositionSpecified=!Node->GetAttribute(TEXT("dontSavePosition")).IsEmpty();
 	Def.bClampedToScreen=Node->GetAttribute(TEXT("clampedToScreen")).Equals(TEXT("true"),ESearchCase::IgnoreCase);
 	Def.bMotionScriptsWhileDisabled=Node->GetAttribute(TEXT("motionScriptsWhileDisabled")).Equals(TEXT("true"),ESearchCase::IgnoreCase);
 	const FString Scale = Node->GetAttribute(TEXT("scale"));

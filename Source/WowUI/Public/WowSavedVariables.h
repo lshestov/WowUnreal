@@ -15,6 +15,8 @@ class WOWUI_API FWowSavedVariables
 public:
 	/** Set account/server/character for path resolution */
 	static void SetIdentity(const FString& Account, const FString& Server = TEXT(""), const FString& Character = TEXT(""));
+	/** Directory containing character-local client files (not account-wide addon variables). */
+	static FString GetCharacterDirectory();
 
 	/** Load saved variables for an addon before its code runs */
 	static void LoadForAddon(lua_State* L, const FString& AddonName, const FWowTocData& Toc);

@@ -273,25 +273,38 @@ bool FWowFrameManager::IsRegionAnchored(const FString& Name) const
 
 bool FWowFrameManager::StartFrameMovement(int64 Handle,const FString& Point)
 {
-    const auto* Def=GetFrameDef(Handle);
+    auto* Def=GetMutableFrameDef(Handle);
     if(!Def || (Point.IsEmpty()?!Def->bMovable:!Def->bResizable)) return false;
     if(MovingFrame>=0) return true;
-    MovingFrame=Handle; SizingPoint=Point; MovePointerOrigin=LastPointerPosition;
     MoveRect=GetLayoutRect(Handle);
+    if(MoveRect.Z<=0 || MoveRect.W<=0) return true; // FlattenFrame fails silently for an unanchored frame.
+    MovingFrame=Handle; SizingPoint=Point; MovePointerOrigin=LastPointerPosition;
+    Def->bUserPlaced=true;
+    // Flatten all constraints immediately, retaining the resolved dimensions.
+    const float Scale=GetEffectiveFrameScale(Handle);
+    SetFrameSize(Handle,MoveRect.Z/Scale,MoveRect.W/Scale);
+    SetFrameAnchors(Handle,{{EWowAnchorPoint::TOPLEFT,TEXT("UIParent"),EWowAnchorPoint::TOPLEFT,float(MoveRect.X/Scale),float(-MoveRect.Y/Scale)}});
     return true;
 }
 
 void FWowFrameManager::StopFrameMovement(int64 Handle)
 {
     if(MovingFrame!=Handle) return;
-    UpdateFrameMovement(); MovingFrame=-1; SizingPoint.Reset();
+    UpdateFrameMovement();
+    SetFrameAnchors(Handle,{GetNearestScreenAnchor(Handle)});
+    MovingFrame=-1; SizingPoint.Reset();
 }
 
 void FWowFrameManager::UpdateFrameMovement()
 {
     if(MovingFrame<0) return;
     auto* Def=GetMutableFrameDef(MovingFrame);
-    if(!Def || Def->bHidden) { MovingFrame=-1; return; }
+    if(!Def) { MovingFrame=-1; return; }
+    if(!IsFrameHierarchyShown(MovingFrame))
+    {
+        SetFrameAnchors(MovingFrame,{GetNearestScreenAnchor(MovingFrame)});
+        MovingFrame=-1; SizingPoint.Reset(); return;
+    }
     const auto Delta=(LastPointerPosition-MovePointerOrigin)/FMath::Max(RawViewportScale,.001f);
     const float Scale=GetEffectiveFrameScale(MovingFrame);
     double X=MoveRect.X,Y=MoveRect.Y,W=MoveRect.Z,H=MoveRect.W;

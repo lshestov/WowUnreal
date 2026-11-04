@@ -151,6 +151,9 @@ public:
 	bool IsRegionAnchored(const FString& Name) const;
 	bool StartFrameMovement(int64 Handle,const FString& SizingPoint=FString());
 	void StopFrameMovement(int64 Handle);
+	/** Character-local layout-local.txt; loaded once after startup addons, before VARIABLES_LOADED. */
+	void LoadUserPlacedFrames(const FString& Path);
+	void SaveUserPlacedFrames();
 	bool IsFrameDragging(int64 Handle) const;
 	void RefreshLayout();
     void RefreshSubtreeLayout(int64 Handle);
@@ -350,6 +353,8 @@ private:
     FString HyperlinkHoverData,HyperlinkHoverText,HyperlinkPressedData,HyperlinkPressedButton;
 	FVector2D LastPointerPosition=FVector2D::ZeroVector;
 	int64 MovingFrame=-1;
+	FString UserPlacedLayoutPath;
+	FWowAnchor GetNearestScreenAnchor(int64 Handle);
 	int64 DraggingFrame=-1;
     int64 DraggingSlider=-1;
     void UpdateSliderPointer();

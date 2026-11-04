@@ -1,0 +1,28 @@
+{
+  "width": 1024,
+  "height": 768,
+  "steps": [
+    {"op":"wait_world","timeout":180},
+    {"op":"lua","code":"assert(LayoutProbeWindow,'Install isolated IdleWowLayoutProbe addon before starting the client'); SetCVar('gxWindow',1); SetCVar('gxMaximize',0); SetCVar('gxResolution','1024x768')"},
+    {"op":"lua_wait","condition":"math.abs(UIParent:GetWidth()-1024)<.05 and math.abs(UIParent:GetHeight()-768)<.05","timeout":20},
+    {"op":"lua","code":"LayoutProbeExpect(LayoutProbeWindow,80,60,160,80,false); assert(LayoutProbeWindow:IsUserPlaced()==nil); assert(not pcall(function() UIParent:SetUserPlaced(true) end)); LayoutProbeWindow:SetUserPlaced(); assert(LayoutProbeWindow:IsUserPlaced()==1); LayoutProbeWindow:SetUserPlaced(false); assert(LayoutProbeNoSave:GetDontSavePosition()==1)"},
+    {"op":"drag_frame","name":"LayoutProbeWindow","dx":60,"dy":40},
+    {"op":"lua","code":"LayoutProbeExpect(LayoutProbeWindow,140,100,160,80,true); local p,r,q,x,y=LayoutProbeWindow:GetPoint(); assert(p=='TOPLEFT' and r==UIParent and q==p and x==140 and y==-100 and LayoutProbeDragCount==1)"},
+    {"op":"drag_frame","name":"LayoutProbeNoSave","dx":40,"dy":20},
+    {"op":"lua","code":"LayoutProbeExpect(LayoutProbeNoSave,340,80,80,60,true); LayoutProbeAnonymous:StartMoving(); LayoutProbeAnonymous:StopMovingOrSizing(); assert(LayoutProbeAnonymous:IsUserPlaced()==1)"},
+    {"op":"capture","name":"layout-before-reload"},
+    {"op":"lua","code":"LayoutProbeReloadMarker=true; ReloadUI()"},
+    {"op":"lua_wait","condition":"LayoutProbeReloadMarker==nil and LayoutProbeDragCount==0 and LayoutProbeWindow and LayoutProbeWindow:IsUserPlaced()==1","timeout":45},
+    {"op":"lua","code":"LayoutProbeExpect(LayoutProbeWindow,140,100,160,80,true); LayoutProbeExpect(LayoutProbeNoSave,300,60,80,60,false); LayoutProbeExpect(LayoutProbeAnonymous,80,200,100,60,false)"},
+    {"op":"capture","name":"layout-after-reload"},
+    {"op":"drag_frame","name":"LayoutProbeWindow","button":"RightButton","dx":20,"dy":10},
+    {"op":"lua","code":"LayoutProbeExpect(LayoutProbeWindow,140,100,180,90,true)"},
+    {"op":"drag_frame","name":"LayoutProbeWindow","dx":644,"dy":0},
+    {"op":"lua","code":"LayoutProbeExpect(LayoutProbeWindow,784,100,180,90,true); local p,r,q,x,y=LayoutProbeWindow:GetPoint(); assert(p=='TOPRIGHT' and r==UIParent and q==p and x==-60 and y==-100); SetCVar('gxResolution','1280x720')"},
+    {"op":"lua_wait","condition":"math.abs(UIParent:GetWidth()-1365.3333333333)<.05","timeout":20},
+    {"op":"lua","code":"LayoutProbeExpect(LayoutProbeWindow,1125.3333333333,100,180,90,true); SetCVar('gxResolution','1024x768')"},
+    {"op":"lua_wait","condition":"math.abs(UIParent:GetWidth()-1024)<.05","timeout":20},
+    {"op":"lua","code":"LayoutProbeExpect(LayoutProbeWindow,784,100,180,90,true)"},
+    {"op":"capture","name":"layout-before-full-exit"}
+  ]
+}

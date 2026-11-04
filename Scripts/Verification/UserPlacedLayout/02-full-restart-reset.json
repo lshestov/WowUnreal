@@ -1,0 +1,14 @@
+{
+  "width": 1024,
+  "height": 768,
+  "steps": [
+    {"op":"wait_world","timeout":180},
+    {"op":"lua_wait","condition":"LayoutProbeWindow and math.abs(UIParent:GetWidth()-1024)<.05","timeout":30},
+    {"op":"lua","code":"LayoutProbeExpect(LayoutProbeWindow,784,100,180,90,true); LayoutProbeExpect(LayoutProbeNoSave,300,60,80,60,false); local p,r,q,x,y=LayoutProbeWindow:GetPoint(); assert(p=='TOPRIGHT' and r==UIParent and q==p and x==-60 and y==-100)"},
+    {"op":"capture","name":"layout-after-full-restart"},
+    {"op":"lua","code":"LayoutProbeWindow:SetUserPlaced(false); LayoutProbeExpect(LayoutProbeWindow,784,100,180,90,false); LayoutProbeReloadMarker=true; ReloadUI()"},
+    {"op":"lua_wait","condition":"LayoutProbeReloadMarker==nil and LayoutProbeWindow and not LayoutProbeWindow:IsUserPlaced()","timeout":45},
+    {"op":"lua","code":"LayoutProbeExpect(LayoutProbeWindow,80,60,160,80,false)"},
+    {"op":"capture","name":"layout-reset-after-reload"}
+  ]
+}

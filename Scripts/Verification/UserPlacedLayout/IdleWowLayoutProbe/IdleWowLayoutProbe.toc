@@ -1,0 +1,5 @@
+## Interface: 30300
+## Title: Isolated user-placed layout probe
+## Notes: QA only; no SavedVariables. Remove after verification.
+Probe.xml
+Probe.lua

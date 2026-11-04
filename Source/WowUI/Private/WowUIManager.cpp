@@ -23,6 +23,7 @@
 #include "WowSavedVariables.h"
 #include "WowMacros.h"
 #include "WowCombatLogUi.h"
+#include "Misc/Paths.h"
 
 #if __has_include("lua.h")
 extern "C" {
@@ -147,6 +148,8 @@ void UWowUIManager::Deinitialize()
 	NativeWindowRoot.Reset();
 	if (LuaVM && LuaVM->GetState())
 	{
+		// The VM's shutdown save runs after its context is detached.
+		if (bUILoaded && FrameManager) FrameManager->SaveUserPlacedFrames();
 		WowLuaApi::ClearContext(LuaVM->GetState());
 	}
 
@@ -355,6 +358,7 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 #endif
 
 	// 3. Fire post-addon startup events in WoW order.
+	FrameManager->LoadUserPlacedFrames(FPaths::Combine(FWowSavedVariables::GetCharacterDirectory(), TEXT("layout-local.txt")));
 	EventSystem->FireEvent(TEXT("VARIABLES_LOADED"));
 	EventSystem->FireEvent(TEXT("PLAYER_LOGIN"));
 	EventSystem->FireEvent(TEXT("PLAYER_ENTERING_WORLD"));

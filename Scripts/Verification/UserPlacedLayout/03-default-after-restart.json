@@ -1,0 +1,10 @@
+{
+  "width": 1024,
+  "height": 768,
+  "steps": [
+    {"op":"wait_world","timeout":180},
+    {"op":"lua_wait","condition":"LayoutProbeWindow and math.abs(UIParent:GetWidth()-1024)<.05","timeout":30},
+    {"op":"lua","code":"LayoutProbeExpect(LayoutProbeWindow,80,60,160,80,false); LayoutProbeExpect(LayoutProbeNoSave,300,60,80,60,false); LayoutProbeExpect(LayoutProbeAnonymous,80,200,100,60,false)"},
+    {"op":"capture","name":"layout-default-after-restart"}
+  ]
+}

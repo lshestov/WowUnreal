@@ -1,6 +1,8 @@
 #include "WowSavedVariables.h"
 #include "WowAddonLoader.h"
 #include "WowLuaVM.h"
+#include "WowFrameManager.h"
+#include "LuaApi/LuaApiRegistry.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "HAL/PlatformFileManager.h"
@@ -37,7 +39,12 @@ FString FWowSavedVariables::GetAccountSVPath()
 
 FString FWowSavedVariables::GetCharacterSVPath()
 {
-	return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("WTF"), TEXT("Account"), AccountName, ServerName, CharacterName, TEXT("SavedVariables"));
+	return FPaths::Combine(GetCharacterDirectory(), TEXT("SavedVariables"));
+}
+
+FString FWowSavedVariables::GetCharacterDirectory()
+{
+	return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("WTF"), TEXT("Account"), AccountName, ServerName, CharacterName);
 }
 
 void FWowSavedVariables::RegisterAddon(const FString& AddonName, const FWowTocData& Toc)
@@ -192,6 +199,8 @@ void FWowSavedVariables::SaveForAddon(lua_State* L, const FString& AddonName, co
 void FWowSavedVariables::SaveAll(lua_State* L)
 {
 #if HAS_LUA
+	if (!L) return;
+	if (auto* Context=WowLuaApi::GetContext(L); Context && Context->FrameManager) Context->FrameManager->SaveUserPlacedFrames();
 	for (const auto& Pair : RegisteredAddons)
 	{
 		SaveForAddon(L, Pair.Key, Pair.Value);
