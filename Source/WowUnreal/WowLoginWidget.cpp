@@ -87,7 +87,9 @@ void SWowLoginWidget::BuildStockLayout()
     Put(Label(Art->String(TEXT("BLIZZ_DISCLAIMER")),12),-360,-24,720,18,.5f,1);
     Put(Label(TEXT("Version 3.3.5 (12340)"),12),0,-24,230,18,0,1);
     StockEditStyle=FCoreStyle::Get().GetWidgetStyle<FEditableTextBoxStyle>("NormalEditableTextBox");FSlateBrush Empty;Empty.DrawAs=ESlateBrushDrawType::NoDrawType;
-    StockEditStyle.SetBackgroundImageNormal(Empty).SetBackgroundImageHovered(Empty).SetBackgroundImageFocused(Empty).SetBackgroundImageReadOnly(Empty).SetPadding(FMargin(12,0,5,5));
+    StockEditStyle.SetBackgroundImageNormal(Empty).SetBackgroundImageHovered(Empty).SetBackgroundImageFocused(Empty).SetBackgroundImageReadOnly(Empty);
+    // Keep editable text centered vertically and clear of the beveled sides.
+    StockEditStyle.SetPadding(FMargin(16, 0, 12, 0));
     auto Field=[&](const TSharedPtr<SEditableTextBox>& Box)
     {
         Box->SetStyle(&StockEditStyle);
