@@ -6,6 +6,15 @@ source name, source flags, destination GUID, destination name, destination
 flags), followed by typed spell and event-specific fields. GUIDs remain strings
 so Lua numbers cannot lose their high bits. Flags use the shared unit
 relationship, ownership and group state; unavailable names remain nil.
+Absent GUIDs use the original `0x0000000000000000` string. Damage mitigation
+uses nil when absent; critical/glancing/crushing and heal-critical use numeric
+1 or nil, as in build 12340. Heal overheal/absorb fields retain numeric zero.
+Tuple lengths include trailing nils and must be counted with `select('#', ...)`.
+
+The source candidate audit and the listener/filter/success/rejection/interruption
+acceptance route are in [CombatLogDeliveryQA.md](CombatLogDeliveryQA.md). Its
+new UE integration and native checks are pending; earlier verification reports
+below describe their original revisions.
 
 Supported inputs include attacker-state updates, non-melee/ranged/split/shield
 damage, healing, environmental damage, casts/rejections, periodic damage/healing,

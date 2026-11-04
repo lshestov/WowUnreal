@@ -2194,9 +2194,9 @@ void FWowPacketHandler::HandleExplorationExperience(FPacketReader& R)
 void FWowPacketHandler::HandleEnvironmentalDamageLog(FPacketReader& R)
 {
     // SMSG_ENVIRONMENTAL_DAMAGE_LOG
-    // uint64 VictimGuid, uint8 DamageType, uint32 Damage, uint32 Absorbed, uint32 Resisted
+    // AzerothCore: uint64 VictimGuid, uint8 DamageType, uint32 Damage, uint32 Resisted, uint32 Absorbed
 
-    if (!R.CanRead(21)) // 8 + 1 + 4 + 4 + 4
+    if (R.Remaining()!=21) // 8 + 1 + 4 + 4 + 4
     {
         UE_LOG(LogWowPacket, Warning, TEXT("ENVIRONMENTAL_DAMAGE_LOG: packet too short"));
         return;
@@ -2205,11 +2205,11 @@ void FWowPacketHandler::HandleEnvironmentalDamageLog(FPacketReader& R)
     uint64 VictimGuid = R.ReadU64();
     uint8 DamageType = R.ReadU8();
     uint32 Damage = R.ReadU32();
-    uint32 Absorbed = R.ReadU32();
     uint32 Resisted = R.ReadU32();
+    uint32 Absorbed = R.ReadU32();
     static const TCHAR* Types[]={TEXT("EXHAUSTION"),TEXT("DROWNING"),TEXT("FALLING"),TEXT("LAVA"),TEXT("SLIME"),TEXT("FIRE")};
     FWowCombatEntry Entry; Entry.Event=TEXT("ENVIRONMENTAL_DAMAGE"); Entry.Destination=VictimGuid;
-    Entry.Values={FWowCombatValue::S(DamageType<UE_ARRAY_COUNT(Types)?Types[DamageType]:TEXT("UNKNOWN")),FWowCombatValue::N(Damage),FWowCombatValue::N(0),FWowCombatValue::N(DamageType==3 || DamageType==5?4:DamageType==4?8:1),FWowCombatValue::N(Resisted),FWowCombatValue::N(0),FWowCombatValue::N(Absorbed),FWowCombatValue::B(false),FWowCombatValue::B(false),FWowCombatValue::B(false)};
+    Entry.Values={FWowCombatValue::S(DamageType<UE_ARRAY_COUNT(Types)?Types[DamageType]:TEXT("UNKNOWN")),FWowCombatValue::N(Damage),FWowCombatValue::N(0),FWowCombatValue::N(DamageType==3 || DamageType==5?4:DamageType==4?8:1),FWowCombatValue::Optional(Resisted),FWowCombatValue::Nil(),FWowCombatValue::Optional(Absorbed),FWowCombatValue::B(false),FWowCombatValue::B(false),FWowCombatValue::B(false)};
     RecordCombat(MoveTemp(Entry));
 
     UE_LOG(LogWowPacket, Log, TEXT("ENVIRONMENTAL_DAMAGE_LOG: GUID %llu, type %u, %u damage (%u absorbed, %u resisted)"),

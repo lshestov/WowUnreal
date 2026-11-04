@@ -83,7 +83,7 @@ int Push(lua_State* L,const FWowCombatEntry* E)
     auto* C=WowLuaApi::GetContext(L);
     lua_pushnumber(L,E->Timestamp); lua_pushstring(L,TCHAR_TO_UTF8(*E->Event));
     for(int32 Side=0;Side<2;++Side)
-    { const uint64 Guid=Side?E->Destination:E->Source; if(Guid) lua_pushstring(L,TCHAR_TO_UTF8(*GuidString(Guid))); else lua_pushnil(L); PushName(L,Guid); lua_pushnumber(L,E->FlagsCaptured?(Side?E->DestinationFlags:E->SourceFlags):WowLuaApi::CombatLogFlags(C,Guid)); }
+    { const uint64 Guid=Side?E->Destination:E->Source; lua_pushstring(L,TCHAR_TO_UTF8(*GuidString(Guid))); PushName(L,Guid); lua_pushnumber(L,E->FlagsCaptured?(Side?E->DestinationFlags:E->SourceFlags):WowLuaApi::CombatLogFlags(C,Guid)); }
     int Count=8;
     if(E->Spell)
     {
@@ -92,7 +92,7 @@ int Push(lua_State* L,const FWowCombatEntry* E)
     }
     for(const auto& V:E->Values)
     {
-        if(V.Kind==FWowCombatValue::EKind::Boolean) lua_pushboolean(L,V.Number!=0);
+        if(V.Kind==FWowCombatValue::EKind::Nil) lua_pushnil(L);
         else if(V.Kind==FWowCombatValue::EKind::Localized) {lua_getglobal(L,TCHAR_TO_UTF8(*V.String)); if(!lua_isstring(L,-1)) {lua_pop(L,1); lua_getglobal(L,"SPELL_FAILED_CANT_DO_THAT_RIGHT_NOW"); if(!lua_isstring(L,-1)) {lua_pop(L,1); lua_pushstring(L,"Cannot cast that spell right now.");}}}
         else if(V.Kind==FWowCombatValue::EKind::String) lua_pushstring(L,TCHAR_TO_UTF8(*V.String)); else lua_pushnumber(L,V.Number);
         ++Count;

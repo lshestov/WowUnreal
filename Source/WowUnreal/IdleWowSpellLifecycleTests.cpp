@@ -21,7 +21,7 @@ void Float(TArray<uint8>& P,float V) {P.Append(reinterpret_cast<const uint8*>(&V
 TArray<uint8> GroundGo()
 {
     TArray<uint8> P={1,1,1,1,37}; Word(P,10); Word(P,0); Word(P,0xfffffff0); P.Add(2); Wide(P,2); Wide(P,3); P.Add(0);
-    Word(P,0x60); P.Add(0); Float(P,1); Float(P,2); Float(P,3); P.Add(0); Float(P,4); Float(P,5); Float(P,6); return P;
+    Word(P,0x60); P.Add(0); Float(P,1); Float(P,2); Float(P,3); P.Add(0); Float(P,4); Float(P,5); Float(P,6); P.Add(0); return P;
 }
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSpellGroundTargetPacket,"WowUnreal.Gameplay.SpellGroundTargets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)

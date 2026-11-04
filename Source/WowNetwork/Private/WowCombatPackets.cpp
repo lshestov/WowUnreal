@@ -21,14 +21,14 @@ FString MissName(uint8 Id)
 void ExtraSpell(FWowCombatEntry& E,uint32 Id)
 {
     const auto* S=FDbcStore::Get().Spells().GetById(Id);
-    E.Values.Add(V::N(Id)); E.Values.Add(V::S(S?S->SpellName:FString::FromInt(Id))); E.Values.Add(V::N(S?S->SchoolMask:0));
+    E.Values.Add(V::N(Id)); E.Values.Add(S?V::S(S->SpellName):V::Nil()); E.Values.Add(V::N(S?S->SchoolMask:0));
 }
 void SpellDamage(FWowCombatEntry& E,uint32 Amount,uint32 Overkill,uint32 School,uint32 Absorb,uint32 Resist,uint32 Block,bool Critical,bool Periodic,bool Split=false)
 {
     const auto* S=FDbcStore::Get().Spells().GetById(E.Spell); const bool Ranged=S && (S->AttributesEx3&0x8000);
     E.School=School;
-    if(!Amount && (Absorb || Resist || Block)) {E.Event=Periodic?TEXT("SPELL_PERIODIC_MISSED"):Ranged?TEXT("RANGE_MISSED"):TEXT("SPELL_MISSED"); E.Values={V::S(Absorb?TEXT("ABSORB"):Block?TEXT("BLOCK"):TEXT("RESIST")),V::N(Absorb?Absorb:Block?Block:Resist)};}
-    else {E.Event=Split?TEXT("DAMAGE_SPLIT"):Periodic?TEXT("SPELL_PERIODIC_DAMAGE"):Ranged?TEXT("RANGE_DAMAGE"):TEXT("SPELL_DAMAGE"); E.Values={V::N(Amount),V::N(Overkill),V::N(School),V::N(Resist),V::N(Block),V::N(Absorb),V::B(Critical),V::B(false),V::B(false)};}
+    if(!Split && !Amount && (Absorb || Resist || Block)) {E.Event=Periodic?TEXT("SPELL_PERIODIC_MISSED"):Ranged?TEXT("RANGE_MISSED"):TEXT("SPELL_MISSED"); E.Values={V::S(Absorb?TEXT("ABSORB"):Block?TEXT("BLOCK"):TEXT("RESIST")),V::N(Absorb?Absorb:Block?Block:Resist)};}
+    else if(Split || Amount) {E.Event=Split?TEXT("DAMAGE_SPLIT"):Periodic?TEXT("SPELL_PERIODIC_DAMAGE"):Ranged?TEXT("RANGE_DAMAGE"):TEXT("SPELL_DAMAGE"); E.Values={V::N(Amount),V::N(Overkill),V::N(School),V::Optional(Resist),V::Optional(Block),V::Optional(Absorb),V::B(Critical),V::B(false),V::B(false)};}
 }
 bool Targets(FPacketReader& R,uint64& Target,FWowSpellLaunch* Launch=nullptr)
 {
@@ -47,11 +47,46 @@ bool Targets(FPacketReader& R,uint64& Target,FWowSpellLaunch* Launch=nullptr)
     if(Mask&0x2000) {int32 N=0; while(N<R.Remaining() && R.Data[R.Pos+N]) ++N; if(N==R.Remaining() || N>1024) return false; R.ReadCString();}
     return true;
 }
+// Validate every flagged trailer before changing cast state or publishing rows.
+bool CastTail(FPacketReader& R,uint32 Flags,uint32 TargetMask,bool Go)
+{
+    const auto Skip=[&](int32 Bytes) {if(!R.CanRead(Bytes)) return false; R.Skip(Bytes); return true;};
+    if((Flags&0x800) && !Skip(4)) return false; // remaining power
+    if(Flags&0x200000) // before/after rune masks, then cooldowns of spent runes
+    {
+        if(!R.CanRead(2)) return false;
+        const uint8 Before=R.ReadU8(),After=R.ReadU8();
+        for(int32 I=0;I<6;++I) if((Before&(1<<I)) && !(After&(1<<I)) && !Skip(1)) return false;
+    }
+    if(Go && (Flags&0x20000))
+    {
+        if(!R.CanRead(8) || !FMath::IsFinite(R.ReadFloat())) return false;
+        R.ReadU32(); // trajectory delay
+    }
+    if((Flags&0x20) && !Skip(8)) return false; // ammo display and inventory type
+    if(Go && (Flags&0x80000) && !Skip(8)) return false; // visual chain
+    // AzerothCore's UNKNOWN_23 trailer and the client's immunity trailer.
+    if(!Go && (Flags&0x400000) && !Skip(8)) return false;
+    if(!Go && (Flags&0x4000000) && !Skip(8)) return false;
+    if(Go && (TargetMask&0x40) && !Skip(1)) return false; // destination sequence
+    if(Go && (TargetMask&0x80000))
+    {
+        if(!R.CanRead(4)) return false; const uint32 Count=R.ReadU32();
+        if(Count>uint32(R.Remaining()/20)) return false;
+        for(uint32 I=0;I<Count;++I)
+        {
+            for(int32 Axis=0;Axis<3;++Axis) if(!FMath::IsFinite(R.ReadFloat())) return false;
+            R.ReadU64(); // target point transport is a full GUID
+        }
+    }
+    return R.Remaining()==0;
+}
 void PowerDrain(FWowCombatEntry& E,uint32 Amount,uint32 Power,float Multiplier,bool Periodic)
 {
-    const uint32 Mod=PowerMod(Power); const double Extra=FMath::TruncToDouble(FMath::TruncToDouble(double(Amount)*Multiplier)/Mod);
-    E.Event=Extra?(Periodic?TEXT("SPELL_PERIODIC_LEECH"):TEXT("SPELL_LEECH")):(Periodic?TEXT("SPELL_PERIODIC_DRAIN"):TEXT("SPELL_DRAIN"));
-    E.Values={V::N(Amount/Mod),V::N(Power),V::N(Extra)};
+    const uint32 Mod=PowerMod(Power); const double RawExtra=FMath::TruncToDouble(double(float(Amount)*Multiplier));
+    const double Extra=FMath::TruncToDouble(RawExtra/Mod);
+    E.Event=RawExtra?(Periodic?TEXT("SPELL_PERIODIC_LEECH"):TEXT("SPELL_LEECH")):(Periodic?TEXT("SPELL_PERIODIC_DRAIN"):TEXT("SPELL_DRAIN"));
+    E.Values={V::N(Amount/Mod),V::N(Power),V::Optional(Extra)};
 }
 }
 void FWowPacketHandler::RecordCombat(FWowCombatEntry Entry)
@@ -82,7 +117,8 @@ void FWowPacketHandler::HandleSpellStart(FPacketReader& R)
 {
     uint64 Object=0,Caster=0,Target=0;
     if(!Guid(R,Object) || !Guid(R,Caster) || !R.CanRead(13)) return;
-    const uint8 Counter=R.ReadU8(); const uint32 Spell=R.ReadU32(),Flags=R.ReadU32(); const int32 Time=int32(R.ReadU32()); if(!Targets(R,Target)) return;
+    FWowSpellLaunch TargetInfo;
+    const uint8 Counter=R.ReadU8(); const uint32 Spell=R.ReadU32(),Flags=R.ReadU32(); const int32 Time=int32(R.ReadU32()); if(!Targets(R,Target,&TargetInfo) || !CastTail(R,Flags,TargetInfo.TargetMask,false)) return;
     if(Time>0) {const double Now=FPlatformTime::Seconds(); if(Casts.Num()>256) for(auto It=Casts.CreateIterator();It;++It) if(It.Value().Ends<Now) It.RemoveCurrent(); Casts.Add(Caster,{Spell,Counter,Now,Now+Time/1000.,false});}
     if(Time>0) {FWowCombatEntry E; E.Source=Caster; E.Spell=Spell; E.Event=TEXT("SPELL_CAST_START"); RecordSpellCombat(MoveTemp(E));}
     CastFailures.Remove(Caster);
@@ -101,11 +137,17 @@ void FWowPacketHandler::HandleSpellGo(FPacketReader& R)
     {
         if(!R.CanRead(9)) return; FWowCombatEntry E; E.Source=Caster; E.Destination=R.ReadU64(); E.Spell=Spell;
         const uint8 Reason=R.ReadU8(); const auto Miss=MissName(Reason); if(Miss.IsEmpty()) return;
-        uint8 Reflect=0; if(Reason==11) {if(!R.CanRead(1)) return; Reflect=R.ReadU8();}
+        uint8 Reflect=0; if(Reason==11) {if(!R.CanRead(1)) return; Reflect=R.ReadU8(); if(Reflect && MissName(Reflect).IsEmpty()) return;}
         Launch.MissedTargets.Add({E.Destination,Reason,Reflect});
         E.Event=Definition && (Definition->AttributesEx3&0x8000)?TEXT("RANGE_MISSED"):TEXT("SPELL_MISSED"); E.Values={V::S(Miss)}; if(Reason==2 || Reason==5 || Reason==10) E.Values.Add(V::N(0)); Missed.Add(MoveTemp(E));
+        if(Reflect)
+        {
+            auto Reflected=Missed.Last(); Reflected.Destination=Caster; Reflected.Values={V::S(MissName(Reflect))};
+            if(Reflect==2 || Reflect==5 || Reflect==10) Reflected.Values.Add(V::N(0));
+            Missed.Add(MoveTemp(Reflected));
+        }
     }
-    uint64 ExplicitTarget=0; if(!Targets(R,ExplicitTarget,&Launch)) return; if(ExplicitTarget) Target=ExplicitTarget;
+    uint64 ExplicitTarget=0; if(!Targets(R,ExplicitTarget,&Launch) || !CastTail(R,Flags,Launch.TargetMask,true)) return; if(ExplicitTarget) Target=ExplicitTarget;
     Launch.ExplicitTargetGuid=ExplicitTarget;
     Launch.ReceivedAt=FPlatformTime::Seconds();
     if(RecentSpellLaunches.Num()>=256) for(auto It=RecentSpellLaunches.CreateIterator();It;++It) if(Launch.ReceivedAt-It.Value().ReceivedAt>5) It.RemoveCurrent();
@@ -171,7 +213,7 @@ void FWowPacketHandler::HandleAttackerStateUpdate(FPacketReader& R)
     else if(State==6) Miss=TEXT("EVADE"); else if(State==7) Miss=TEXT("IMMUNE"); else if(State==8) Miss=TEXT("DEFLECT");
     else if(!Damage && Absorb) Miss=TEXT("ABSORB"); else if(!Damage && Resist) Miss=TEXT("RESIST"); else if(!Damage && Blocked) Miss=TEXT("BLOCK");
     if(!Miss.IsEmpty()) { E.Event=TEXT("SWING_MISSED"); E.Values={V::S(Miss)}; if(Miss==TEXT("ABSORB") || Miss==TEXT("RESIST") || Miss==TEXT("BLOCK")) E.Values.Add(V::N(Miss==TEXT("ABSORB")?Absorb:Miss==TEXT("RESIST")?Resist:Blocked)); }
-    else { E.Event=TEXT("SWING_DAMAGE"); E.Values={V::N(Damage),V::N(Overkill),V::N(School?School:1),V::N(Resist),V::N(Blocked),V::N(Absorb),V::B((Hit&0x200)!=0),V::B((Hit&0x10000)!=0),V::B((Hit&0x20000)!=0)}; }
+    else { E.Event=TEXT("SWING_DAMAGE"); E.Values={V::N(Damage),V::N(Overkill),V::N(School?School:1),V::Optional(Resist),V::Optional(Blocked),V::Optional(Absorb),V::B((Hit&0x200)!=0),V::B((Hit&0x10000)!=0),V::B((Hit&0x20000)!=0)}; }
     const uint64 Source=E.Source,Destination=E.Destination;
     RecordCombat(MoveTemp(E));
     OnAttackerStateUpdate.Broadcast(Source,Destination,Hit,Damage);
@@ -183,18 +225,18 @@ void FWowPacketHandler::HandleSpellDamageLog(FPacketReader& R)
     E.Spell=R.ReadU32(); const uint32 Damage=R.ReadU32(),Overkill=R.ReadU32(); E.School=R.ReadU8();
     const uint32 Absorb=R.ReadU32(),Resist=R.ReadU32(); const bool Periodic=R.ReadU8()!=0; R.ReadU8(); const uint32 Blocked=R.ReadU32(),Hit=R.ReadU32(); R.ReadU8();
     if(R.Remaining()) return;
-    if(Hit&0x10) E.Source=E.Destination;
+    if((Hit&0x10) && !(Hit&8)) E.Source=E.Destination;
     SpellDamage(E,Damage,Overkill,E.School,Absorb,Resist,Blocked,(Hit&2)!=0,Periodic,(Hit&8)!=0);
-    RecordSpellCombat(MoveTemp(E));
+    if(!E.Event.IsEmpty()) RecordSpellCombat(MoveTemp(E));
 }
 void FWowPacketHandler::HandleSpellHealLog(FPacketReader& R)
 {
     FWowCombatEntry E;
     if(!Guid(R,E.Destination) || !Guid(R,E.Source) || !R.CanRead(18)) return;
     E.Spell=R.ReadU32(); const uint32 Amount=R.ReadU32(),Overheal=R.ReadU32(),Absorb=R.ReadU32(); const bool Critical=R.ReadU8()!=0; R.ReadU8();
-    if(const auto* Spell=FDbcStore::Get().Spells().GetById(E.Spell)) E.School=Spell->SchoolMask;
-    E.Event=TEXT("SPELL_HEAL"); E.Values={V::N(Amount),V::N(Overheal),V::N(Absorb),V::B(Critical)};
-    if(!R.Remaining()) RecordSpellCombat(MoveTemp(E));
+    const auto* Spell=FDbcStore::Get().Spells().GetById(E.Spell);
+    E.Event=Spell && (Spell->AttributesEx3&0x2000000)?TEXT("SPELL_PERIODIC_HEAL"):TEXT("SPELL_HEAL"); E.Values={V::N(Amount),V::N(Overheal),V::N(Absorb),V::B(Critical)};
+    if(!R.Remaining() && (Amount || Overheal || Absorb)) RecordSpellCombat(MoveTemp(E));
 }
 
 void FWowPacketHandler::HandleCombatPacket(uint32 Opcode,FPacketReader& R)
@@ -223,7 +265,7 @@ void FWowPacketHandler::HandleCombatPacket(uint32 Opcode,FPacketReader& R)
     {
         uint64 Owner=0; if(!Guid(R,Base.Destination) || !Guid(R,Base.Source) || !Guid(R,Owner) || !R.CanRead(8)) return;
         const int32 Damage=int32(R.ReadU32()); Base.Spell=R.ReadU32(); const auto* Spell=FDbcStore::Get().Spells().GetById(Base.Spell); const uint32 School=Spell?Spell->SchoolMask:1;
-        if(Damage>0) {Base.Values={V::N(Damage),V::N(0),V::N(School),V::N(0),V::N(0),V::N(0),V::B(false),V::B(false),V::B(false)}; Push(TEXT("SPELL_BUILDING_DAMAGE"));}
+        if(Damage>0) {Base.Values={V::N(Damage),V::N(0),V::N(School),V::Nil(),V::Nil(),V::Nil(),V::B(false),V::B(false),V::B(false)}; Push(TEXT("SPELL_BUILDING_DAMAGE"));}
         else {Base.Values={V::N(-int64(Damage)),V::N(0),V::N(0),V::B(false)}; Push(TEXT("SPELL_BUILDING_HEAL"));}
     }
     else if(Opcode==0x0130)
@@ -242,23 +284,28 @@ void FWowPacketHandler::HandleCombatPacket(uint32 Opcode,FPacketReader& R)
             if(Type==3 || Type==89)
             {if(!R.CanRead(21)) return; const uint32 Amount=R.ReadU32(),Over=R.ReadU32(),School=R.ReadU32(),Absorb=R.ReadU32(),Resist=R.ReadU32(); const bool Critical=R.ReadU8()!=0; SpellDamage(E,Amount,Over,School,Absorb,Resist,0,Critical,true);}
             else if(Type==8 || Type==20)
-            {if(!R.CanRead(13)) return; E.Event=TEXT("SPELL_PERIODIC_HEAL"); const uint32 Amount=R.ReadU32(),Over=R.ReadU32(),Absorb=R.ReadU32(); E.Values={V::N(Amount),V::N(Over),V::N(Absorb),V::B(R.ReadU8()!=0)};}
+            {if(!R.CanRead(13)) return; E.Event=TEXT("SPELL_PERIODIC_HEAL"); const uint32 Amount=R.ReadU32(),Over=R.ReadU32(),Absorb=R.ReadU32(); E.Values={V::N(Amount),V::N(Over),V::N(Absorb),V::B(R.ReadU8()!=0)}; if(!Amount && !Over && !Absorb) continue;}
             else if(Type==21 || Type==24 || Type==64)
-            {if(!R.CanRead(Type==64?12:8)) return; const uint32 Power=R.ReadU32(),Amount=R.ReadU32(); E.Event=TEXT("SPELL_PERIODIC_ENERGIZE"); E.Values={V::N(Amount/PowerMod(Power)),V::N(Power)}; if(Type==64) {const float Multiplier=R.ReadFloat(); if(!FMath::IsFinite(Multiplier) || Multiplier<0) return; if(Power==4) continue; PowerDrain(E,Amount,Power,Multiplier,true);}}
+            {if(!R.CanRead(Type==64?12:8)) return; const uint32 Power=R.ReadU32(),Amount=R.ReadU32(); E.Event=TEXT("SPELL_PERIODIC_ENERGIZE"); E.Values={V::N(Amount/PowerMod(Power)),V::N(Power)}; if(Type==64) {const float Multiplier=R.ReadFloat(); if(!FMath::IsFinite(Multiplier) || Multiplier<0) return; if(Power==4 || !Amount) continue; PowerDrain(E,Amount,Power,Multiplier,true);} if(!Amount) continue;}
             else return;
-            Entries.Add(MoveTemp(E));
+            if(!E.Event.IsEmpty()) Entries.Add(MoveTemp(E));
         }
     }
     else if(Opcode==0x0151)
     {
         if(!Guid(R,Base.Destination) || !Guid(R,Base.Source) || !R.CanRead(12)) return;
         Base.Spell=R.ReadU32(); const uint32 Power=R.ReadU32(),Amount=R.ReadU32(); Base.Values={V::N(Amount/PowerMod(Power)),V::N(Power)};
-        const auto* Spell=FDbcStore::Get().Spells().GetById(Base.Spell); Push(Spell && (Spell->AttributesEx3&0x2000000)?TEXT("SPELL_PERIODIC_ENERGIZE"):TEXT("SPELL_ENERGIZE"));
+        const auto* Spell=FDbcStore::Get().Spells().GetById(Base.Spell); if(Amount) Push(Spell && (Spell->AttributesEx3&0x2000000)?TEXT("SPELL_PERIODIC_ENERGIZE"):TEXT("SPELL_ENERGIZE"));
     }
     else if(Opcode==0x024B)
     {
-        if(!R.CanRead(17)) return; Base.Spell=R.ReadU32(); Base.Source=R.ReadU64(); R.ReadU8(); const uint32 Count=R.ReadU32(); if(Count>256 || R.Remaining()!=int64(Count)*9) return;
-        for(uint32 I=0;I<Count;++I) {Base.Destination=R.ReadU64(); const auto Miss=MissName(R.ReadU8()); if(Miss.IsEmpty()) return; Base.Values={V::S(Miss)}; if(Miss==TEXT("ABSORB") || Miss==TEXT("BLOCK") || Miss==TEXT("RESIST")) Base.Values.Add(V::N(0)); Push(TEXT("DAMAGE_SHIELD_MISSED"));}
+        if(!R.CanRead(17)) return; Base.Spell=R.ReadU32(); Base.Source=R.ReadU64(); const bool Debug=R.ReadU8()!=0; const uint32 Count=R.ReadU32(); if(Count>256 || R.Remaining()!=int64(Count)*(Debug?17:9)) return;
+        for(uint32 I=0;I<Count;++I)
+        {
+            Base.Destination=R.ReadU64(); const auto Miss=MissName(R.ReadU8()); if(Miss.IsEmpty()) return;
+            if(Debug) {R.ReadFloat(); R.ReadFloat(); continue;} // diagnostic rolls do not create combat entries
+            Base.Values={V::S(Miss)}; if(Miss==TEXT("ABSORB") || Miss==TEXT("BLOCK") || Miss==TEXT("RESIST")) Base.Values.Add(V::N(0)); Push(TEXT("DAMAGE_SHIELD_MISSED"));
+        }
     }
     else if(Opcode==0x014F || Opcode==0x027B || Opcode==0x0333)
     {
@@ -279,12 +326,12 @@ void FWowPacketHandler::HandleCombatPacket(uint32 Opcode,FPacketReader& R)
     }
     else if(Opcode==0x0260 || Opcode==0x0263)
     {
-        if(!R.CanRead(21)) return; Base.Source=R.ReadU64(); Base.Destination=R.ReadU64(); Base.Spell=R.ReadU32(); R.ReadU8(); Base.Values={V::S(Opcode==0x0260?TEXT("RESIST"):TEXT("IMMUNE"))}; if(Opcode==0x0260) Base.Values.Add(V::N(0)); Push(TEXT("SPELL_MISSED"));
+        if(!R.CanRead(21)) return; Base.Source=R.ReadU64(); Base.Destination=R.ReadU64(); Base.Spell=R.ReadU32(); const bool Debug=R.ReadU8()!=0; Base.Values={V::S(Opcode==0x0260?TEXT("RESIST"):TEXT("IMMUNE"))}; if(Opcode==0x0260) Base.Values.Add(V::N(0)); Push(Opcode==0x0260?TEXT("SPELL_MISSED"):Debug?TEXT("SPELL_PERIODIC_MISSED"):TEXT("DAMAGE_SHIELD_MISSED"));
     }
     else if(Opcode==0x024F)
     {
         if(!R.CanRead(32)) return; Base.Source=R.ReadU64(); Base.Destination=R.ReadU64(); Base.Spell=R.ReadU32(); const uint32 Amount=R.ReadU32(),Over=R.ReadU32(),School=R.ReadU32(); Base.School=School;
-        Base.Values={V::N(Amount),V::N(Over),V::N(School),V::N(0),V::N(0),V::N(0),V::B(false),V::B(false),V::B(false)}; Push(TEXT("DAMAGE_SHIELD"));
+        Base.Values={V::N(Amount),V::N(Over),V::N(School),V::Nil(),V::Nil(),V::Nil(),V::B(false),V::B(false),V::B(false)}; Push(TEXT("DAMAGE_SHIELD"));
     }
     else if(Opcode==0x01F5 || Opcode==0x032F)
     {
@@ -308,11 +355,12 @@ void FWowPacketHandler::HandleCombatPacket(uint32 Opcode,FPacketReader& R)
                 if(!Guid(R,E.Destination)) return;
                 switch(Effect)
                 {
-                case 8: case 62: {if(!R.CanRead(12)) return; const uint32 Amount=R.ReadU32(),Power=R.ReadU32(); const float Multiplier=R.ReadFloat(); if(!FMath::IsFinite(Multiplier) || Multiplier<0) return; if(Power==4) continue; const auto* Spell=FDbcStore::Get().Spells().GetById(E.Spell); PowerDrain(E,Amount,Power,Multiplier,Spell && (Spell->AttributesEx3&0x2000000)); break;}
+                case 8: case 62: {if(!R.CanRead(12)) return; const uint32 Amount=R.ReadU32(),Power=R.ReadU32(); const float Multiplier=R.ReadFloat(); if(!FMath::IsFinite(Multiplier) || Multiplier<0) return; if(Power==4 || !Amount) continue; const auto* Spell=FDbcStore::Get().Spells().GetById(E.Spell); PowerDrain(E,Amount,Power,Multiplier,Spell && (Spell->AttributesEx3&0x2000000)); break;}
                 case 18: case 113: E.Event=TEXT("SPELL_RESURRECT"); break;
-                case 19: if(!R.CanRead(4)) return; E.Event=TEXT("SPELL_EXTRA_ATTACKS"); E.Values={V::N(R.ReadU32())}; break;
-                case 28: case 56: case 104: E.Event=TEXT("SPELL_SUMMON"); break;
-                case 50: case 76: case 81: case 83: case 105: case 106: case 107: E.Event=TEXT("SPELL_CREATE"); break;
+                case 19: {if(!R.CanRead(4)) return; const uint32 Amount=R.ReadU32(); if(!Amount) continue; E.Event=TEXT("SPELL_EXTRA_ATTACKS"); E.Values={V::N(Amount)}; break;}
+                case 28: case 56: case 104:
+                case 50: case 76: case 81: case 83: case 105: case 106: case 107:
+                    E.Event=((E.Destination>>32)&0xF0F00000)==0xF0100000?TEXT("SPELL_CREATE"):TEXT("SPELL_SUMMON"); break;
                 case 68: if(!R.CanRead(4)) return; E.Event=TEXT("SPELL_INTERRUPT"); ExtraSpell(E,R.ReadU32()); break;
                 case 111: {if(!R.CanRead(8)) return; const int32 Item=int32(R.ReadU32()),Slot=int32(R.ReadU32()); E.Event=Item==-1 && Slot==-1?TEXT("SPELL_DURABILITY_DAMAGE_ALL"):TEXT("SPELL_DURABILITY_DAMAGE"); if(E.Event==TEXT("SPELL_DURABILITY_DAMAGE")) {const auto* Template=ItemTemplates.Find(Item); E.Values={V::N(Item),V::S(Template?Template->Name:FString::FromInt(Item))};} break;}
                 case 33: case 102: continue; // open-lock and dismiss-pet have no combat-log row

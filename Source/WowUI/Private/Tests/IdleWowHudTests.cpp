@@ -2237,7 +2237,7 @@ bool FHudCombatFamilies::RunTest(const FString&)
     Guid(Victim); Guid(1); U32(139); U32(2); U32(3); U32(20); U32(0); U32(2); U32(3); U32(4); P.Add(1); U32(8); U32(40); U32(5); U32(2); P.Add(0);
     auto Truncated=P; Truncated.Pop(); H.HandlePacket(0x24E,Truncated); TestEqual(TEXT("Partial multi-effect periodic packet publishes no rows"),H.CombatHistory.Num(),0);
     H.HandlePacket(0x24E,P);
-    Check(TEXT("Periodic damage and heal suffixes retain exact order/types"),TEXT("assert(#Rows==2 and Rows[1][2]=='SPELL_PERIODIC_DAMAGE' and Rows[1][12]==20 and Rows[1][15]==4 and Rows[1][17]==3 and Rows[1][18]==true); assert(Rows[2][2]=='SPELL_PERIODIC_HEAL' and Rows[2][12]==40 and Rows[2][13]==5 and Rows[2][14]==2 and Rows[2][15]==false)"));
+    Check(TEXT("Periodic damage and heal suffixes retain exact order/types"),TEXT("assert(#Rows==2 and Rows[1][2]=='SPELL_PERIODIC_DAMAGE' and Rows[1][12]==20 and Rows[1][15]==4 and Rows[1][17]==3 and Rows[1][18]==1); assert(Rows[2][2]=='SPELL_PERIODIC_HEAL' and Rows[2][12]==40 and Rows[2][13]==5 and Rows[2][14]==2 and Rows[2][15]==nil)"));
     P.Reset(); Guid(1); Guid(1); U32(78); U32(1); U32(150); H.HandlePacket(0x151,P);
     Check(TEXT("Rage uses client power display units"),TEXT("assert(Rows[3][2]=='SPELL_ENERGIZE' and Rows[3][12]==15 and Rows[3][13]==1)"));
     P.Reset(); Guid(1); U32(1766); U32(2); U32(68); U32(1); Guid(Victim); U32(133); U32(8); U32(1); Guid(Victim); U32(23); U32(0); Float(.5f);
@@ -2253,13 +2253,13 @@ bool FHudCombatFamilies::RunTest(const FString&)
     P.Reset(); U64(1); U64(Victim); H.HandlePacket(0x1F5,P); U32(78); H.HandlePacket(0x32F,P);
     Check(TEXT("Shield, party kill and instant-kill preserve full GUIDs"),TEXT("assert(Rows[11][2]=='DAMAGE_SHIELD' and Rows[11][12]==25 and Rows[11][13]==3); assert(Rows[12][2]=='PARTY_KILL' and Rows[13][2]=='SPELL_INSTAKILL'); assert(Rows[13][6]=='0xF130000005000001')"));
     P.Reset(); Guid(1); Guid(1); P.Add(7); U32(133); U32(0); U32(2000); U32(2); Guid(Victim); H.HandlePacket(WowOpcode::SMSG_SPELL_START,P);
-    Check(TEXT("Cast start has no fabricated destination"),TEXT("assert(Rows[14][2]=='SPELL_CAST_START' and Rows[14][6]==nil)"));
+    Check(TEXT("Cast start has no fabricated destination"),TEXT("assert(Rows[14][2]=='SPELL_CAST_START' and Rows[14][6]=='0x0000000000000000')"));
     P.Reset(); Guid(1); Guid(1); P.Add(8); U32(78); U32(0); U32(123); P.Add(1); U64(Victim); P.Add(1); U64(Victim); P.Add(11); P.Add(2); U32(2); Guid(Victim);
     Truncated=P; Truncated.Pop(); H.HandlePacket(WowOpcode::SMSG_SPELL_GO,Truncated); TestEqual(TEXT("Truncated target block does not emit success/miss"),H.CombatHistory.Num(),14);
     H.HandlePacket(WowOpcode::SMSG_SPELL_GO,P);
-    Check(TEXT("Spell-go hit/miss arrays contain full, not packed, GUIDs"),TEXT("assert(Rows[15][2]=='SPELL_CAST_SUCCESS' and Rows[15][6]=='0xF130000005000001'); assert(Rows[16][2]=='SPELL_MISSED' and Rows[16][12]=='REFLECT')"));
+    Check(TEXT("Spell-go hit/miss arrays contain full GUIDs, including the reflected result"),TEXT("assert(Rows[15][2]=='SPELL_CAST_SUCCESS' and Rows[15][6]=='0xF130000005000001'); assert(Rows[16][2]=='SPELL_MISSED' and Rows[16][12]=='REFLECT'); assert(Rows[17][2]=='SPELL_MISSED' and Rows[17][6]=='0x0000000000000001' and Rows[17][12]=='RESIST')"));
     P.Reset(); P.Add(8); U32(78); P.Add(51); H.HandlePacket(0x130,P);
-    Check(TEXT("Local cast rejection localizes the original failure token"),TEXT("assert(Rows[17][2]=='SPELL_CAST_FAILED' and Rows[17][12]=='Localized moving failure')"));
+    Check(TEXT("Local cast rejection localizes the original failure token"),TEXT("assert(Rows[18][2]=='SPELL_CAST_FAILED' and Rows[18][12]=='Localized moving failure')"));
     Check(TEXT("Spell filters, reverse indices and unfiltered traversal match original API"),TEXT("CombatLogResetFilter(); CombatLogAddFilter(nil,nil,nil,133); assert(CombatLogGetNumEntries()==1 and CombatLogGetNumEntries(0)==1); assert(CombatLogSetCurrentEntry(1)==1 and select(2,CombatLogGetCurrentEntry())=='SPELL_CAST_START'); assert(CombatLogSetCurrentEntry(-1,true)==1 and select(2,CombatLogGetCurrentEntry())=='SPELL_MISSED'); assert(CombatLogAdvanceEntry(1,true) and select(2,CombatLogGetCurrentEntry())=='SPELL_CAST_FAILED'); assert(not CombatLogAdvanceEntry(1,true)); CombatLogResetFilter(); CombatLogAddFilter(nil,nil,nil,GetSpellInfo(133)); assert(CombatLogGetNumEntries()==1); assert(not pcall(CombatLogAddFilter,nil,1,nil)); CombatLogResetFilter()"));
     const uint32 OldFlags=H.CombatHistory.Find(1)->DestinationFlags;
     H.EntityManager.Find(Victim)->SetField(UnitField::SUMMONEDBY,1);
@@ -2275,7 +2275,7 @@ bool FHudCombatFamilies::RunTest(const FString&)
     Check(TEXT("Aura removal references the old caster/spell"),TEXT("assert(Rows[4][2]=='SPELL_AURA_REMOVED' and Rows[4][9]==7386 and Rows[4][12]=='DEBUFF')"));
     P.Reset(); Guid(Victim); Guid(1); Guid(0); U32(30); U32(133); H.HandlePacket(0x32,P);
     P.Reset(); Guid(Victim); Guid(1); Guid(0); U32(uint32(-20)); U32(133); H.HandlePacket(0x32,P);
-    Check(TEXT("Destructible-building damage and healing have distinct suffixes"),TEXT("assert(Rows[5][2]=='SPELL_BUILDING_DAMAGE' and Rows[5][12]==30 and Rows[5][14]==4); assert(Rows[6][2]=='SPELL_BUILDING_HEAL' and Rows[6][12]==20 and Rows[6][15]==false)"));
+    Check(TEXT("Destructible-building damage and healing have distinct suffixes"),TEXT("assert(Rows[5][2]=='SPELL_BUILDING_DAMAGE' and Rows[5][12]==30 and Rows[5][14]==4); assert(Rows[6][2]=='SPELL_BUILDING_HEAL' and Rows[6][12]==20 and Rows[6][15]==nil)"));
     auto* Dying=H.EntityManager.Find(Victim); Dying->Entry=5; H.CreatureTypes.Add(5,13);
     P.Reset(); U32(1); P.Add(0); Guid(Victim); P.Add(1); U32(1u<<UnitField::HEALTH); U32(0); H.HandlePacket(WowOpcode::SMSG_UPDATE_OBJECT,P);
     Check(TEXT("Gas-cloud death uses the original dissipation event"),TEXT("assert(Rows[7][2]=='UNIT_DISSIPATES')"));
@@ -2323,7 +2323,7 @@ bool FHudCombatHistory::RunTest(const FString&)
     TestTrue(TEXT("Melee packet retains all WotLK damage schools and conditional fields"),F.Lua.ExecuteString(TEXT(R"LUA(
         local e=CombatRows[1]; assert(#CombatRows==1 and e[2]=='SWING_DAMAGE')
         assert(e[3]=='0x0000000000000001' and e[4]=='Player' and e[7]=='Wolf')
-        assert(e[9]==75 and e[10]==0 and e[11]==5 and e[12]==5 and e[13]==8 and e[14]==5 and e[15]==true and e[16]==false)
+        assert(e[9]==75 and e[10]==0 and e[11]==5 and e[12]==5 and e[13]==8 and e[14]==5 and e[15]==1 and e[16]==nil)
     )LUA")));
     Packet.Pop(); H.HandlePacket(WowOpcode::SMSG_ATTACKERSTATEUPDATE,Packet);
     TestEqual(TEXT("Truncated conditional melee payload does not enter history"),H.CombatHistory.Num(),1);
@@ -2336,8 +2336,8 @@ bool FHudCombatHistory::RunTest(const FString&)
     H.HandlePacket(0x150,Packet);
     TestTrue(TEXT("Spell events retain typed payloads and history filtering terminates"),F.Lua.ExecuteString(TEXT(R"LUA(
         assert(#CombatRows==3 and CombatFiltered==3)
-        local d=CombatRows[2]; assert(d[2]=='SPELL_DAMAGE' and d[9]==78 and d[12]==31 and d[15]==2 and d[16]==3 and d[17]==4 and d[18]==true)
-        local h=CombatRows[3]; assert(h[2]=='SPELL_HEAL' and h[9]==2050 and h[12]==60 and h[13]==17 and h[14]==4 and h[15]==true)
+        local d=CombatRows[2]; assert(d[2]=='SPELL_DAMAGE' and d[9]==78 and d[12]==31 and d[15]==2 and d[16]==3 and d[17]==4 and d[18]==1)
+        local h=CombatRows[3]; assert(h[2]=='SPELL_HEAL' and h[9]==2050 and h[12]==60 and h[13]==17 and h[14]==4 and h[15]==1)
         CombatLogResetFilter(); CombatLogAddFilter('SPELL_HEAL','0x0000000000000001',nil)
         assert(CombatLogGetNumEntries()==1 and CombatLogGetNumEntries(true)==3)
         CombatLogSetCurrentEntry(0); assert(select(2,CombatLogGetCurrentEntry())=='SPELL_HEAL')
