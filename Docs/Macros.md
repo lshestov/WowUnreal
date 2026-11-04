@@ -42,3 +42,8 @@ Unqualified casts use the configured self/focus modified-click assignments;
 explicit unit arguments retain their target. Original modifier defaults,
 preferences, mouse-button restrictions and runtime hotkey fallback are described
 in [modified clicks](ModifiedClicks.md).
+
+The [condition regression](MacroConditions.md) covers explicit versus implicit
+targets, condition combinations, command suppression and native player state.
+Its standalone Lua checks run without the shared Unreal/server test environment;
+the engine tests and stock action-button scenario are prepared for acceptance.

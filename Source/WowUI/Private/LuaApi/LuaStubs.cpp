@@ -626,8 +626,8 @@ static int L_IsFlying(lua_State* L)
         if (Player)
         {
             uint32 MoveFlags = Player->Movement.MoveFlags;
-            // Check MOVEMENTFLAG_FLYING (0x800000)
-            bool IsFlying = (MoveFlags & 0x800000) != 0;
+            // Build 12340: 0x00800000 is DESCENDING, not FLYING.
+            bool IsFlying = (MoveFlags & 0x02000000) != 0;
             lua_pushboolean(L, IsFlying ? 1 : 0);
             return 1;
         }
@@ -664,8 +664,8 @@ static int L_IsFalling(lua_State* L)
         if (Player)
         {
             uint32 MoveFlags = Player->Movement.MoveFlags;
-            // Check MOVEMENTFLAG_FALLING (0x2)
-            bool IsFalling = (MoveFlags & 0x2) != 0;
+            // Build 12340: 0x00000002 is BACKWARD, not FALLING.
+            bool IsFalling = (MoveFlags & 0x00001000) != 0;
             lua_pushboolean(L, IsFalling ? 1 : 0);
             return 1;
         }
@@ -682,11 +682,15 @@ static int L_IsStealthed(lua_State* L)
         FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
         if (Player)
         {
-            // Check for stealth auras (basic stealth spell IDs)
-            const TArray<uint32> StealthSpellIds = { 1784, 5215, 58984 }; // Stealth, Prowl, Shadow Meld
+            const double Now = FPlatformTime::Seconds();
             for (const FAuraInfo& Aura : Player->Auras)
             {
-                if (Aura.bActive && StealthSpellIds.Contains(Aura.SpellId))
+                if (!Aura.bActive || (Aura.DurationMs && Aura.UpdatedAt + Aura.RemainingMs / 1000.0 <= Now)) continue;
+                const auto* Spell = FDbcStore::Get().Spells().GetById(Aura.SpellId);
+                if (!Spell) continue;
+                // SPELL_AURA_MOD_STEALTH covers every Stealth/Prowl rank and
+                // other genuine stealth effects; invisibility is a separate aura.
+                for (uint32 Type : Spell->EffectApplyAuraName) if (Type == 16)
                 {
                     lua_pushboolean(L, 1);
                     return 1;

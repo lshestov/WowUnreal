@@ -122,12 +122,15 @@ local function condition(text,target)
     elseif key=='help' then result=UnitCanAssist('player',target)
     elseif key=='harm' then result=UnitCanAttack('player',target)
     elseif key=='dead' then result=UnitIsDeadOrGhost(target)
-    elseif key=='party' then result=UnitInParty(target)
+    elseif key=='party' then result=not truth(UnitIsUnit('player',target)) and UnitInParty(target)
     elseif key=='raid' then result=UnitInRaid(target)
     elseif key=='combat' then result=UnitAffectingCombat('player')
     elseif key=='mod' or key=='modifier' then
         if arg=='' then result=truth(IsShiftKeyDown()) or truth(IsControlKeyDown()) or truth(IsAltKeyDown())
-        else for value in arg:gmatch('[^/]+') do if value=='shift' and truth(IsShiftKeyDown()) or value=='ctrl' and truth(IsControlKeyDown()) or value=='alt' and truth(IsAltKeyDown()) then result=true end end end
+        else for value in arg:lower():gmatch('[^/]+') do
+            if value=='shift' and truth(IsShiftKeyDown()) or value=='ctrl' and truth(IsControlKeyDown()) or value=='alt' and truth(IsAltKeyDown()) then result=true
+            elseif value=='selfcast' and truth(IsModifiedClick('SELFCAST')) then result=true end
+        end end
     elseif key=='stance' or key=='form' then
         local form=GetShapeshiftForm()
         if arg=='' then result=form>0 else for value in arg:gmatch('[^/]+') do if tonumber(value)==form then result=true end end end
@@ -154,10 +157,10 @@ local function condition(text,target)
     elseif key=='indoors' then result=IsIndoors()
     elseif key=='outdoors' then result=IsOutdoors()
     elseif key=='group' then
-        if arg=='raid' then result=GetNumRaidMembers()>0
-        elseif arg=='party' then result=GetNumPartyMembers()>0 and GetNumRaidMembers()==0
-        elseif arg=='' then result=GetNumPartyMembers()>0 or GetNumRaidMembers()>0
-        else return false end
+        if arg=='' then result=GetNumPartyMembers()>0 or GetNumRaidMembers()>0
+        else for value in arg:lower():gmatch('[^/]+') do
+            if value=='raid' and GetNumRaidMembers()>0 or value=='party' and GetNumPartyMembers()>0 and GetNumRaidMembers()==0 then result=true end
+        end end
     else return false end
     result=truth(result); return negate and not result or not negate and result
 end
@@ -176,11 +179,18 @@ function SecureCmdOptionParse(options)
         end
         local action=clause
         for _,group in ipairs(groups) do
-            local target=group:match('@([^,%s]+)') or group:match('target=([^,%s]+)') or 'target'
+            -- The unit used to test predicates is not an explicit command target.
+            -- Returning "target" for []/[combat]/[nomod] bypasses modified casts
+            -- and changes the original /assist handler's interpretation of its text.
+            local target
+            for value in group:gmatch('[^,]+') do
+                value=value:match('^%s*(.-)%s*$')
+                target=value:match('^@([^,%s]+)$') or value:match('^target=([^,%s]+)$') or target
+            end
             local valid=true
             for value in group:gmatch('[^,]+') do
                 value=value:match('^%s*(.-)%s*$')
-                if not value:match('^target=') and not condition(value,target) then valid=false; break end
+                if not value:match('^target=') and not condition(value,target or 'target') then valid=false; break end
             end
             if valid then return action:match('^%s*(.-)%s*$'),target end
         end

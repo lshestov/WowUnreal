@@ -1,0 +1,20 @@
+{
+  "character": "Smrleadhcwxg",
+  "steps": [
+    {"op":"wait","seconds":12},
+    {"op":"lua","code":"assert(GetMacroIndexByName('QAMacroCond')==0 and not GetActionInfo(84) and not UnitExists('focus') and not UnitExists('target') and IsSpellKnown(78)); QACondAccount,QACondCharacter=GetNumMacros(); assert(QACondCharacter<18); QACondFocusEvents=0; QACondSent=0; QACondListener=CreateFrame('Frame'); QACondListener:RegisterEvent('PLAYER_FOCUS_CHANGED'); QACondListener:RegisterEvent('UNIT_SPELLCAST_SENT'); QACondListener:SetScript('OnEvent',function(_,event,unit) if event=='PLAYER_FOCUS_CHANGED' then QACondFocusEvents=QACondFocusEvents+1 elseif unit=='player' then QACondSent=QACondSent+1 end end); QACondMacro=CreateMacro('QAMacroCond',1,'/focus [@player,help,nodead]'..string.char(10)..'/stopmacro [@focus,exists]'..string.char(10)..'/clearfocus',true); ShowMacroFrame(); MacroFrame_SetCharacterMacros(); MacroFrame_SelectMacro(QACondMacro); MacroFrame_Update()"},
+    {"op":"capture","name":"macro-conditions-stock-editor"},
+    {"op":"lua","code":"HideUIPanel(MacroFrame); PickupMacro(QACondMacro); PlaceAction(84); assert(GetActionInfo(84)=='macro' and GetActionText(84)=='QAMacroCond')"},
+    {"op":"click_frame","name":"BonusActionButton12","timeout":8},
+    {"op":"lua","code":"assert(UnitIsUnit('focus','player') and QACondFocusEvents==1 and not UnitExists('target'),'explicit target and conditional stopmacro'); EditMacro(QACondMacro,nil,nil,'/clearfocus [@focus,harm]'..string.char(10)..'/cast [@focus,harm] '..GetSpellInfo(78))"},
+    {"op":"click_frame","name":"BonusActionButton12","timeout":8},
+    {"op":"lua","code":"assert(UnitIsUnit('focus','player') and QACondFocusEvents==1 and QACondSent==0,'false harm must suppress both commands'); EditMacro(QACondMacro,nil,nil,'/clearfocus [@focus,help,nodead]'..string.char(10)..'/focus [@missing,exists]')"},
+    {"op":"click_frame","name":"BonusActionButton12","timeout":8},
+    {"op":"lua","code":"assert(not UnitExists('focus') and QACondFocusEvents==2,'matching clearfocus and rejected missing target'); EditMacro(QACondMacro,nil,nil,'/focus [@missing,exists][@player,help,nodead]'..string.char(10)..'/clearfocus [@focus,harm]')"},
+    {"op":"click_frame","name":"BonusActionButton12","timeout":8},
+    {"op":"lua","code":"assert(UnitIsUnit('focus','player') and QACondFocusEvents==3,'alternative groups retain their own target'); ClearFocus(); EditMacro(QACondMacro,nil,nil,'/focus [@player,party]')"},
+    {"op":"click_frame","name":"BonusActionButton12","timeout":8},
+    {"op":"lua","code":"assert(not UnitExists('focus') and QACondFocusEvents==4,'party conditional excludes self'); assert(QACondSent==0 and not UnitExists('target')); DeleteMacro(QACondMacro); QACondListener:UnregisterAllEvents(); local a,c=GetNumMacros(); assert(a==QACondAccount and c==QACondCharacter and not GetActionInfo(84) and GetMacroIndexByName('QAMacroCond')==0)"},
+    {"op":"capture","name":"macro-conditions-stock-action-cleanup"}
+  ]
+}
