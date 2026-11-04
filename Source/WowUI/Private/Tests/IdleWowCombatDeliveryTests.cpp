@@ -138,7 +138,11 @@ bool FCombatResourcesAndCreation::RunTest(const FString&)
         assert(Rows[3][2]=='SPELL_CREATE' and Rows[3][6]=='0xF110000005000001')
         assert(Rows[4][2]=='SPELL_SUMMON' and Rows[4][6]=='0xF130000005000001')
     )LUA")));
-    FCombatPacket Heal; Heal.Guid(1); Heal.Guid(1); Heal.Word(139); Heal.Word(5); Heal.Word(0); Heal.Word(0); Heal.Byte(0); Heal.Byte(0);
+    // Renew 139 has AttributesEx3=0x80 and uses PERIODICAURALOG for its ticks.
+    // Vampiric Embrace's triggered heal has the actual 12340 TREAT_AS_PERIODIC flag.
+    const auto* PeriodicHeal=FDbcStore::Get().Spells().GetById(15290);
+    if(!TestTrue(TEXT("Vampiric Embrace heal carries TREAT_AS_PERIODIC"),PeriodicHeal && (PeriodicHeal->AttributesEx3&0x2000000))) return false;
+    FCombatPacket Heal; Heal.Guid(1); Heal.Guid(1); Heal.Word(15290); Heal.Word(5); Heal.Word(0); Heal.Word(0); Heal.Byte(0); Heal.Byte(0);
     H.HandlePacket(0x150,Heal.Data);
     TestTrue(TEXT("Heal-log uses periodic DBC flag and numeric zero overheal/absorb, nil critical"),F.Lua.ExecuteString(TEXT("local e=Rows[5]; assert(e.n==15 and e[2]=='SPELL_PERIODIC_HEAL' and e[12]==5 and e[13]==0 and e[14]==0 and e[15]==nil)")));
     FCombatPacket Zero; Zero.Guid(1); Zero.Guid(1); Zero.Word(2050); Zero.Word(0); Zero.Word(0); Zero.Word(0); Zero.Byte(0); Zero.Byte(0);

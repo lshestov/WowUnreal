@@ -151,8 +151,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCoordAdtToUE, "WowUnreal.Coord.AdtToUE",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FCoordAdtToUE::RunTest(const FString& Parameters)
 {
-    // ADT coords: X=east, Y=up, Z=south → UE: X=-Z*100, Y=X*100, Z=Y*100
-    FVector Result = FWowCoordinate::AdtToUE(10.0f, 20.0f, 30.0f);
+    // Tile (32,32)'s center is the UE origin; east/south offsets keep their axes.
+    const float Center = 32.5f * FWowCoordinate::TILE_SIZE;
+    TestTrue(TEXT("Map center is the UE origin"), FWowCoordinate::AdtToUE(Center, 0, Center).IsNearlyZero());
+    FVector Result = FWowCoordinate::AdtToUE(Center + 10.0f, 20.0f, Center + 30.0f);
     TestTrue(TEXT("UE X = -NgZ * 100"), FMath::IsNearlyEqual(Result.X, -3000.0, 0.01));
     TestTrue(TEXT("UE Y = NgX * 100"), FMath::IsNearlyEqual(Result.Y, 1000.0, 0.01));
     TestTrue(TEXT("UE Z = NgY * 100"), FMath::IsNearlyEqual(Result.Z, 2000.0, 0.01));
@@ -2957,8 +2959,9 @@ bool FRaidGroupListParsesRosterMetadata::RunTest(const FString& Parameters)
     };
 
     const uint64 GroupGuid = 0x1020304050607080ULL;
-    const uint64 LeaderGuid = 0x9988776655443322ULL;
-    const uint64 MemberGuidA = 0x1111222233334444ULL;
+    // Build-12340 player GUIDs have a zero high type, unlike creature GUIDs.
+    const uint64 LeaderGuid = 0x776655443322ULL;
+    const uint64 MemberGuidA = 0x222233334444ULL;
     const uint64 MemberGuidB = LeaderGuid;
 
     TArray<uint8> Packet;
@@ -3074,9 +3077,12 @@ bool FRaidReadyCheckPacketsTrackLifecycle::RunTest(const FString& Parameters)
         FMemory::Memcpy(Buffer.GetData() + Offset, &Value, sizeof(uint64));
     };
 
-    const uint64 InitiatorGuid = 0x8877665544332211ULL;
-    const uint64 ReadyGuid = 0x1111111122222222ULL;
-    const uint64 NotReadyGuid = 0x3333333344444444ULL;
+    const uint64 InitiatorGuid = 0x665544332211ULL;
+    const uint64 ReadyGuid = 0x111122222222ULL;
+    const uint64 NotReadyGuid = 0x333344444444ULL;
+    PacketHandler.EntityManager.LocalPlayerGuid = InitiatorGuid;
+    PacketHandler.GroupInfo.Members.AddDefaulted_GetRef().Guid = ReadyGuid;
+    PacketHandler.GroupInfo.Members.AddDefaulted_GetRef().Guid = NotReadyGuid;
 
     TArray<uint8> StartPacket;
     AppendU64(StartPacket, InitiatorGuid);
@@ -3485,8 +3491,9 @@ bool FZoneMusicDbcTest::RunTest(const FString& Parameters)
         return true;
     }
 
-    // Ensure DBCs are loaded
+    // Audio tables are deferred until world entry in the production loader.
     FDbcStore::Get().LoadAll(Mpq);
+    FDbcStore::Get().LoadDeferred(Mpq);
 
     // ZoneMusic ID 1 is Elwynn Forest music
     const FZoneMusicDbcEntry* Entry = FDbcStore::Get().ZoneMusic().GetById(1);
@@ -3514,6 +3521,7 @@ bool FSoundEntriesDbcTest::RunTest(const FString& Parameters)
     }
 
     FDbcStore::Get().LoadAll(Mpq);
+    FDbcStore::Get().LoadDeferred(Mpq);
 
     TestTrue(TEXT("SoundEntries has >1000 entries"), FDbcStore::Get().SoundEntries().Num() > 1000);
 
@@ -3554,6 +3562,7 @@ bool FSoundAmbienceDbcTest::RunTest(const FString& Parameters)
     }
 
     FDbcStore::Get().LoadAll(Mpq);
+    FDbcStore::Get().LoadDeferred(Mpq);
 
     TestTrue(TEXT("SoundAmbience has >10 entries"), FDbcStore::Get().SoundAmbience().Num() > 10);
 
