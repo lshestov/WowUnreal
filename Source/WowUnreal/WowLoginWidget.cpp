@@ -54,7 +54,13 @@ void SWowLoginWidget::BuildStockLayout()
     BlueButton->SetPressed(*Art->Brush(Base+TEXT("-Down-Blue"),FVector2f(0),Max));BlueButton->SetDisabled(*Art->Brush(Base+TEXT("-Disabled"),FVector2f(0),Max));
     BlueButton->SetNormalPadding(FMargin(0));BlueButton->SetPressedPadding(FMargin(1,1,0,0));
     auto Click=[&](FName Id,const FString& Text,FOnClicked Action,int32 Size=16)
-    {auto B=SNew(SButton).ButtonStyle(BlueButton.Get()).ContentPadding(FMargin(0,0,0,6)).HAlign(HAlign_Center).VAlign(VAlign_Center).OnClicked(Action)[Label(Text,Size)];StockControls.Add(Id,B);return B;};
+    {
+        // Align the visible glyphs to the blue face inside the textured frame.
+        auto B=SNew(SButton).ButtonStyle(BlueButton.Get()).ContentPadding(FMargin(0,0,0,1))
+            .HAlign(HAlign_Center).VAlign(VAlign_Center).OnClicked(Action)[Label(Text,Size)];
+        StockControls.Add(Id,B);
+        return B;
+    };
     auto Backdrop=[&](FWowBackdrop D)
     {auto* B=NewObject<UWowBackdropWidget>();Backdrops.Add(TStrongObjectPtr<UWowBackdropWidget>(B));B->Configure(D,Cast<UTexture2D>(Art->Brush(D.BgFile)->GetResourceObject()),Cast<UTexture2D>(Art->Brush(D.EdgeFile)->GetResourceObject()),1);return B->TakeWidget();};
     Canvas->AddSlot().Anchors(FAnchors(0,0,1,1)).Offset(FMargin(0))[SNew(SLoginViewport).Scene(Scene.Get())];
@@ -71,8 +77,20 @@ void SWowLoginWidget::BuildStockLayout()
         return SNew(SOverlay)+SOverlay::Slot()[Backdrop(D)]+SOverlay::Slot()[SAssignNew(Box,SEditableTextBox).Style(&StockEditStyle).Text(FText::FromString(Text)).Font(Font(16)).IsPassword(Password)
             .OnTextCommitted_Lambda([this](const FText&,ETextCommit::Type Type){if(Type==ETextCommit::OnEnter) OnLoginClicked();})];
     };
-    Put(Label(Art->String(TEXT("ACCOUNT_NAME"))),-300,-416,600,34,.5f,1);Put(Field(UsernameBox,User,false),-100,-382,200,37,.5f,1);
-    Put(Label(Art->String(TEXT("PASSWORD"))),-300,-346,600,34,.5f,1);Put(Field(PasswordBox,Pass,true),-100,-312,200,37,.5f,1);
+    auto AddLoginField = [&](const TCHAR* LabelKey, float LabelWidth, float FieldTop,
+                             TSharedPtr<SEditableTextBox>& Box, const FString& Value, bool IsPassword)
+    {
+        // AccountLogin.xml centers the caption in a 64-unit region whose
+        // bottom sits 23 units below the top of the edit box.
+        constexpr float LabelHeight = 64.f;
+        constexpr float LabelBottomOffset = 23.f;
+        auto Caption = SNew(SBox).VAlign(VAlign_Center).Visibility(EVisibility::HitTestInvisible)
+            [Label(Art->String(LabelKey))];
+        Put(Caption, -LabelWidth/2, FieldTop+LabelBottomOffset-LabelHeight, LabelWidth, LabelHeight, .5f, 1);
+        Put(Field(Box,Value,IsPassword), -100, FieldTop, 200, 37, .5f, 1);
+    };
+    AddLoginField(TEXT("ACCOUNT_NAME"), 600, -382, UsernameBox, User, false);
+    AddLoginField(TEXT("PASSWORD"), 256, -312, PasswordBox, Pass, true);
     Put(Click(TEXT("Login"),Art->String(TEXT("LOGIN")),FOnClicked::CreateSP(this,&SWowLoginWidget::OnLoginClicked)), -110,-215,220,45,.5f,1);
     Put(SAssignNew(StatusLabel,STextBlock).Font(Font(12)).ColorAndOpacity(FLinearColor(1,.25f,.15f)).Justification(ETextJustify::Center).AutoWrapText(true),-300,-159,600,42,.5f,1);
     Put(Click(TEXT("Options"),Art->String(TEXT("OPTIONS")),FOnClicked::CreateLambda([this]{bOptions=!bOptions;BuildStockLayout();return FReply::Handled();}),12),-155,-219,150,38,1,1);
