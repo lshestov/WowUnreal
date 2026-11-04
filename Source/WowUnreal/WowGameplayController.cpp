@@ -1385,7 +1385,13 @@ bool AWowGameplayController::InputKey(const FInputKeyEventArgs& Params)
 	if(UIManager && UIManager->GetLuaVM() && !Params.Key.IsMouseButton() && Params.Event!=IE_Axis)
 	{
 		const FString Name=FWowKeyBindings::KeyName(Params.Key);
-		if(UIManager->GetFrameManager()->DispatchKeyboard(Name,Params.Event==IE_Pressed || Params.Event==IE_Repeat)) return true;
+		if(UIManager->GetFrameManager()->DispatchKeyboard(Name,Params.Event==IE_Pressed || Params.Event==IE_Repeat))
+		{
+			// A keyboard-enabled popup can consume key-up after key-down reached
+			// PlayerInput. Release that state too, so modified clicks cannot stick.
+			if(Params.Event==IE_Released) Super::InputKey(Params);
+			return true;
+		}
 		if(!IsWowUiConsumingKeyboardInput())
 		{
 			FString Chord=Name;
