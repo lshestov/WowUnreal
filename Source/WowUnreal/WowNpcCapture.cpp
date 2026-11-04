@@ -8,6 +8,8 @@
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/BoxComponent.h"
+#include "Formats/Dbc/DbcStore.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/World.h"
 #include "Materials/MaterialInterface.h"
@@ -74,7 +76,7 @@ void AWowGameplayController::UpdateNpcCaptureCamera()
 
 void AWowGameplayController::LogNpcCapture() const
 {
-    const AActor* Target = NpcCaptureTarget.Get();
+    AActor* Target = NpcCaptureTarget.Get();
     if (!Target || !ConnectionManager) return;
     const FWowEntity* Entity = nullptr;
     for (const auto& Pair : SpawnedEntityActors)
@@ -102,6 +104,12 @@ void AWowGameplayController::LogNpcCapture() const
             if (Material->GetTextureParameterValue(FMaterialParameterInfo(TEXT("BaseTexture")), Texture) && Texture)
                 Textures.Add(Texture->GetName());
     }
+    const auto* Display = FDbcStore::Get().CreatureDisplayInfo().GetById(Entity->GetDisplayId());
+    const auto* Data = Display ? FDbcStore::Get().CreatureModelData().GetById(Display->ModelID) : nullptr;
+    const auto* Selection = FindObjectFast<UBoxComponent>(Target, TEXT("UnitSelection"));
+    UE_LOG(LogWowNpcCapture, Log, TEXT("NpcScaleCapture: entry=%u display=%u objectScale=%.4f displayScale=%.4f modelScale=%.4f renderedScale=%.4f referenceHeightYards=%.4f"),
+        Entity->Entry, Entity->GetDisplayId(), Entity->Scale, Display ? Display->Scale : 0, Data ? Data->Scale : 0,
+        Mesh->GetComponentScale().Z, Selection ? Selection->GetScaledBoxExtent().Z * 2 / FWowCoordinate::SCALE : 0);
     const double PositionError = FVector::Distance(Target->GetActorLocation(), FWowCoordinate::WowToUE(Entity->Movement.Position));
     UE_LOG(LogWowNpcCapture, Log, TEXT("NpcCapture: guid=%llu entry=%u display=%u positionError=%.3f vertices=%u textures=%d animId=%d time=%.3f rate=%.3f animatedBones=%d poseChecksum=%.6f splineSpeed=%.3f"),
         Entity->Guid, Entity->Entry, Entity->GetDisplayId(), PositionError,

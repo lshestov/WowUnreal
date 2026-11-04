@@ -12,6 +12,9 @@
 #include "WowSkyManager.h"
 #include "WowSpellMissile.h"
 #include "WowPlayerCharacter.h"
+#include "WowAnimationController.h"
+#include "WowCharacterBuilder.h"
+#include "WowM2AnimInstance.h"
 #include "WowM2EmitterComponent.h"
 #include "WowGraphicsSnapshot.h"
 #include "WowLoginScene.h"
@@ -19,6 +22,8 @@
 #include "WowAudioManager.h"
 #include "ProceduralMeshComponent.h"
 #include "GameFramework/SpringArmComponent.h"
+#include "Camera/CameraActor.h"
+#include "Camera/CameraComponent.h"
 #include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/App.h"
@@ -31,6 +36,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/BoxComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Components/TextBlock.h"
 #include "Components/Image.h"
 #include "Engine/Texture2D.h"
@@ -86,6 +92,9 @@ struct FWowGameplayProbe
     uint32 LastEquippedItem=0;
     uint64 PendingWorldClick=0;
     FVector2D SlateClickPoint=FVector2D::ZeroVector;
+    TWeakObjectPtr<ACameraActor> SideCamera;
+    TWeakObjectPtr<UBoxComponent> SideTarget;
+    FVector SideCameraOffset = FVector::ZeroVector;
     TWeakObjectPtr<UPrimitiveComponent> Avoiding;
     float AvoidSide=1;
     TMap<FString,TArray<double>> Profile;
@@ -229,8 +238,41 @@ struct FWowGameplayProbe
         Pawn->AddMovementInput(Direction,1); return false;
     }
 
+    FVector SideViewFocus(const APawn& Pawn, const UBoxComponent& Target) const
+    {
+        FVector Focus = (Pawn.GetActorLocation() + Target.Bounds.Origin) * .5;
+        // Leave space for a quest marker and overhead name above humanoids.
+        Focus.Z = FMath::Max(Pawn.GetActorLocation().Z, Target.Bounds.Origin.Z) + 25;
+        return Focus;
+    }
+
+    bool FrameFromSide(AWowGameplayController& C, AActor& Target, double Distance)
+    {
+        APawn* Pawn = C.GetPawn();
+        SideTarget = FindObjectFast<UBoxComponent>(&Target, TEXT("UnitSelection"));
+        if (!Pawn || !SideTarget.IsValid()) return false;
+        if (!SideCamera.IsValid()) SideCamera = C.GetWorld()->SpawnActor<ACameraActor>();
+        if (!SideCamera.IsValid()) return false;
+        const FVector Forward = (Target.GetActorLocation() - Pawn->GetActorLocation()).GetSafeNormal2D();
+        const FVector Right = Forward.IsNearlyZero() ? Pawn->GetActorRightVector() : FVector::CrossProduct(FVector::UpVector, Forward);
+        const FVector Lift(0, 0, Distance * .20);
+        const FVector Focus = SideViewFocus(*Pawn, *SideTarget.Get());
+        FCollisionQueryParams Query(SCENE_QUERY_STAT(ProbeSideCamera), true, Pawn);
+        Query.AddIgnoredActor(&Target);
+        SideCameraOffset = Right * Distance + Lift;
+        if (C.GetWorld()->LineTraceTestByChannel(Focus, Focus + SideCameraOffset, ECC_Visibility, Query))
+            SideCameraOffset = -Right * Distance + Lift;
+        SideCamera->GetCameraComponent()->SetConstraintAspectRatio(false);
+        SideCamera->GetCameraComponent()->SetFieldOfView(66);
+        SideCamera->SetActorLocationAndRotation(Focus + SideCameraOffset, (-SideCameraOffset).Rotation());
+        C.SetViewTarget(SideCamera.Get());
+        return true;
+    }
+
     void Tick(AWowGameplayController& C)
     {
+        if (SideCamera.IsValid() && C.GetViewTarget() == SideCamera.Get() && SideTarget.IsValid() && C.GetPawn())
+            SideCamera->SetActorLocation(SideViewFocus(*C.GetPawn(), *SideTarget.Get()) + SideCameraOffset);
         for(const auto& TestPeer:Peers) if(TestPeer) TestPeer->Tick();
         if (bFinished)
         {
@@ -558,6 +600,46 @@ struct FWowGameplayProbe
             Done=FFileHelper::SaveStringToFile(Text,*(Output/(Step->GetStringField(TEXT("name"))+TEXT(".json"))));
         }
         else if (Op==TEXT("interact")) { C.InteractWithTarget(); Done=true; }
+        else if (Op == TEXT("inspect_unit_overhead"))
+        {
+            const uint32 Entry = Step->GetIntegerField(TEXT("entry"));
+            const uint64 Guid = FindEntry(C, Entry);
+            const auto* Info = C.UnitOverheads.Find(Guid);
+            const auto* Marker = Info ? Info->Marker.Get() : nullptr;
+            const bool Visible = Marker && Marker->IsVisible() && Marker->GetStaticMesh();
+            const FString Model = Visible ? Info->MarkerModel.ToString() : FString();
+            const FString Expected = Step->GetStringField(TEXT("marker"));
+            const bool Show = Step->GetBoolField(TEXT("showName"));
+            const bool Painted = Info && Info->LastNamePaint && GFrameCounter - Info->LastNamePaint <= 2;
+            Done = Info && Info->ShowName == Show && Painted == Show && Model == Expected;
+            if (Done)
+            {
+                auto State = MakeShared<FJsonObject>();
+                State->SetStringField(TEXT("name"), Info->Name.ToString());
+                State->SetBoolField(TEXT("nameVisible"), Info->ShowName);
+                State->SetBoolField(TEXT("painted"), Painted);
+                if (Painted)
+                {
+                    const auto& Rect = Info->NamePixelRect;
+                    State->SetArrayField(TEXT("namePixelRect"), {MakeShared<FJsonValueNumber>(Rect.X), MakeShared<FJsonValueNumber>(Rect.Y),
+                        MakeShared<FJsonValueNumber>(Rect.Z), MakeShared<FJsonValueNumber>(Rect.W)});
+                }
+                State->SetNumberField(TEXT("status"), Handler.QuestGiverStatuses.FindRef(Guid));
+                State->SetStringField(TEXT("model"), Model);
+                State->SetNumberField(TEXT("markerPeriod"), Info->MarkerPeriod);
+                const auto* Entity = Handler.EntityManager.Find(Guid);
+                const auto* Actor = C.SpawnedEntityActors.FindRef(Guid).Get();
+                const auto* Body = Actor ? Actor->FindComponentByClass<USkeletalMeshComponent>() : nullptr;
+                if (Entity && Body && Info->Selection.IsValid())
+                {
+                    State->SetNumberField(TEXT("display"), Entity->GetDisplayId());
+                    State->SetNumberField(TEXT("serverScale"), Entity->Scale);
+                    State->SetNumberField(TEXT("renderedScale"), Body->GetComponentScale().Z);
+                    State->SetNumberField(TEXT("heightYards"), Info->Selection->GetScaledBoxExtent().Z * 2 / FWowCoordinate::SCALE);
+                }
+                Inspections->SetObjectField(Step->GetStringField(TEXT("label")), State);
+            }
+        }
         else if(Op==TEXT("inspect_target_model"))
         {
             const auto* Unit=Handler.EntityManager.FindUnit(C.TargetGuid);
@@ -571,7 +653,14 @@ struct FWowGameplayProbe
             if(!Pawn || !Pawn->CameraBoom || !Actor || !IsValid(*Actor)) {Failure=TEXT("Camera framing requires a rendered target and player"); Finish(C,false); return;}
             const auto Direction=(*Actor)->GetActorLocation()-Pawn->GetActorLocation();
             double Distance=1000; Step->TryGetNumberField(TEXT("distance"),Distance);
-            C.SetControlRotation(FRotator(-15,Direction.Rotation().Yaw,0)); Pawn->CameraBoom->TargetArmLength=FMath::Clamp(Distance,200.,2000.); Done=true;
+            Distance = FMath::Clamp(Distance,200.,2000.);
+            bool SideView=false; Step->TryGetBoolField(TEXT("sideView"),SideView);
+            if (SideView) Done = FrameFromSide(C, *Actor->Get(), Distance);
+            else
+            {
+                if (SideCamera.IsValid() && C.GetViewTarget() == SideCamera.Get()) C.SetViewTarget(Pawn);
+                C.SetControlRotation(FRotator(-15,Direction.Rotation().Yaw,0)); Pawn->CameraBoom->TargetArmLength=Distance; Done=true;
+            }
         }
         else if(Op==TEXT("wait_spell_missile"))
         {
@@ -683,6 +772,29 @@ struct FWowGameplayProbe
             {
                 TArray<UWowM2EmitterComponent*> Components; Pawn->GetComponents(Components);
                 Done=!C.AuthoredCastEffects.Contains(Handler.EntityManager.LocalPlayerGuid) && !Components.ContainsByPredicate([](const auto* Effect){return IsValid(Effect);});
+            }
+        }
+        else if (Op==TEXT("start_melee")) { C.StartAutoAttack(); Done=C.bIsAutoAttacking; }
+        else if (Op==TEXT("wait_unit_animation"))
+        {
+            const FString Unit=Step->GetStringField(TEXT("unit"));
+            const uint64 Guid=Unit==TEXT("player") ? Handler.EntityManager.LocalPlayerGuid : C.TargetGuid;
+            AActor* Actor=C.SpellActor(Guid);
+            const auto* Player=Cast<AWowPlayerCharacter>(Actor);
+            auto* Animation=Player ? Player->AnimationController.Get() : FWowCharacterBuilder::GetAnimationController(Actor);
+            const auto* Runtime=Animation ? Animation->GetRuntimeInstance() : nullptr;
+            double Progress=0; Step->TryGetNumberField(TEXT("progress"),Progress);
+            const auto* Entity=Handler.EntityManager.Find(Guid);
+            Done=Entity && Runtime && Runtime->GetM2AnimationId()==Step->GetIntegerField(TEXT("id")) &&
+                Runtime->GetM2Time()>=Runtime->GetM2Duration()*Progress;
+            if (Done)
+            {
+                const auto Row=MakeShared<FJsonObject>();
+                Row->SetStringField(TEXT("unit"),Unit); Row->SetNumberField(TEXT("health"),Entity->GetHealth());
+                Row->SetNumberField(TEXT("clip"),Runtime->GetM2AnimationId());
+                Row->SetNumberField(TEXT("seconds"),Runtime->GetM2Time()); Row->SetNumberField(TEXT("duration"),Runtime->GetM2Duration());
+                if (Player) Row->SetBoolField(TEXT("grounded"),Player->GetCharacterMovement()->IsMovingOnGround());
+                Inspections->SetObjectField(FString::Printf(TEXT("animation:%d"),Index),Row);
             }
         }
         else if (Op==TEXT("jump")) { if (auto* Character=Cast<ACharacter>(C.GetPawn())) { bJumpRequested=true; bJumpObserved=false; Character->Jump(); Done=true; } }

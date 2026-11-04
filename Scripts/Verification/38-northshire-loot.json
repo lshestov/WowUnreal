@@ -1,0 +1,14 @@
+{
+  "qaClass": 8, "qaLevel": 20, "qaGm": false,
+  "qaSpawnEntry": 6, "qaSpawnOffset": 5,
+  "width": 1280, "height": 900,
+  "steps": [
+    {"op":"wait_world","timeout":180}, {"op":"wait_floor","timeout":90}, {"op":"time","minutes":630},
+    {"op":"select_entry","entry":6,"timeout":30}, {"op":"approach","range":2.5,"timeout":40},
+    {"op":"frame_camera_target","distance":460}, {"op":"start_melee"}, {"op":"wait_dead","timeout":60},
+    {"op":"interact"}, {"op":"wait_loot","timeout":10},
+    {"op":"lua_wait","condition":"LootFrame:IsVisible() and GetNumLootItems() > 0 and LootSlotIsCoin(1)","timeout":8},
+    {"op":"move_pointer","x":0.75,"y":0.35}, {"op":"wait","seconds":0.5},
+    {"op":"capture","name":"01-kobold-copper-loot"}
+  ]
+}

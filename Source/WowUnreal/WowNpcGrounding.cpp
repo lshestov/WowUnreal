@@ -49,7 +49,7 @@ void AWowGameplayController::UpdateEntityGrounding()
                         Lowest = FMath::Min(Lowest, Positions.VertexPosition(Vertex).Z);
                 }
             }
-            NpcReferenceFeet.Add(Guid, Lowest * Mesh->GetComponentScale().Z + Mesh->GetRelativeLocation().Z);
+            NpcReferenceFeet.Add(Guid, Lowest * Mesh->GetComponentScale().Z + Mesh->GetRelativeLocation().Z * Actor->GetActorScale3D().Z);
         }
         const FVector Server = FWowCoordinate::WowToUE(Entity->Movement.Position);
         const float FootOffset = NpcReferenceFeet.FindRef(Guid);

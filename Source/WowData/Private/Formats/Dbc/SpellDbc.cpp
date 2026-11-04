@@ -23,7 +23,62 @@ bool FSpellDbc::LoadDescriptionVariables(const FDbcParser& Parser)
     }
     return true;
 }
-FString FSpellDbc::Description(uint32 Id,int32 Level,bool Aura) const
+bool FSpellDbc::LoadRadii(const FDbcParser& Parser)
+{
+    if(!Parser.IsValid() || Parser.GetFieldCount()<4) return false;
+    Radii.Reset();
+    for(uint32 I=0; I<Parser.GetRecordCount(); ++I) Radii.Add(Parser.GetUInt(I,0),Parser.GetFloat(I,1));
+    return true;
+}
+
+namespace
+{
+// Spell.dbc uses integer damage by default and an optional }.1 / }.2 precision.
+TOptional<double> EvaluateSpellExpression(FString Expr, FBasicMathExpressionEvaluator& Evaluator)
+{
+    // Functions may contain other functions and parenthesized arithmetic. Resolve inside out.
+    int32 Start;
+    while(Expr.FindLastChar('$',Start))
+    {
+        const int32 Open=Expr.Find(TEXT("("),ESearchCase::CaseSensitive,ESearchDir::FromStart,Start+1);
+        if(Open==INDEX_NONE) return {};
+        const FString Func=Expr.Mid(Start+1,Open-Start-1).ToLower();
+        TArray<double,TInlineAllocator<3>> Args;
+        int32 Argument=Open+1, Depth=0, End=Argument;
+        for(; End<Expr.Len(); ++End)
+        {
+            const TCHAR Ch=Expr[End];
+            if(Depth==0 && (Ch==',' || Ch==')'))
+            {
+                auto Value=Evaluator.Evaluate(*Expr.Mid(Argument,End-Argument));
+                if(!Value.IsValid() || !FMath::IsFinite(Value.GetValue())) return {};
+                Args.Add(Value.GetValue());
+                if(Ch==')') break;
+                Argument=End+1;
+            }
+            else if(Ch=='(') ++Depth;
+            else if(Ch==')') --Depth;
+        }
+        if(End==Expr.Len()) return {};
+        double Result;
+        if(Func==TEXT("cond") && Args.Num()==3) Result=Args[0]!=0?Args[1]:Args[2];
+        else if(Func==TEXT("eq") && Args.Num()==2) Result=Args[0]==Args[1];
+        else if(Func==TEXT("gt") && Args.Num()==2) Result=Args[0]>Args[1];
+        else if(Func==TEXT("gte") && Args.Num()==2) Result=Args[0]>=Args[1];
+        else if(Func==TEXT("min") && Args.Num()==2) Result=FMath::Min(Args[0],Args[1]);
+        else if(Func==TEXT("max") && Args.Num()==2) Result=FMath::Max(Args[0],Args[1]);
+        else if(Func==TEXT("abs") && Args.Num()==1) Result=FMath::Abs(Args[0]);
+        else if(Func==TEXT("floor") && Args.Num()==1) Result=FMath::FloorToDouble(Args[0]);
+        else return {};
+        Expr=Expr.Left(Start)+FString::SanitizeFloat(Result)+Expr.Mid(End+1);
+    }
+    auto Number=Evaluator.Evaluate(*Expr);
+    if(!Number.IsValid() || !FMath::IsFinite(Number.GetValue())) return {};
+    return Number.GetValue();
+}
+}
+
+FString FSpellDbc::Description(uint32 Id,int32 Level,bool Aura,const FSpellTextStats& Stats) const
 {
     const auto* Spell=GetById(Id); if(!Spell) return {};
     FString Text=Aura && !Spell->ToolTip.IsEmpty()?Spell->ToolTip:Spell->Description;
@@ -36,7 +91,33 @@ FString FSpellDbc::Description(uint32 Id,int32 Level,bool Aura) const
             Expanded+=Text.Mid(End); if(!Changed || Expanded==Text || Expanded.Len()>65536) break; Text=MoveTemp(Expanded);
         }
     }
-    FRegexMatcher Match(FRegexPattern(TEXT("\\$(?:([*/])([0-9]+(?:\\.[0-9]+)?);)?(?:(\\d+))?([sSmMdDtTuUxXoOrRhH])([1-3])?")),Text);
+    // Match entire identifiers first: $M is an effect maximum, $MWS a weapon speed.
+    FRegexMatcher Stat(FRegexPattern(TEXT("\\$([A-Za-z]{2,})(?![A-Za-z_(])")),Text);
+    FString WithStats;
+    int32 Last=0;
+    while(Stat.FindNext())
+    {
+        WithStats+=Text.Mid(Last,Stat.GetMatchBeginning()-Last);
+        const FString Token=Stat.GetCaptureGroup(1);
+        TOptional<double> Value;
+        if(Token==TEXT("AP")) Value=Stats.AttackPower;
+        else if(Token==TEXT("RAP")) Value=Stats.RangedAttackPower;
+        else if(Token==TEXT("SPH")) Value=Stats.HolyPower;
+        else if(Token==TEXT("SPS")) Value=Stats.ShadowPower;
+        else if(Token==TEXT("SPI")) Value=Stats.Spirit;
+        else if(Token==TEXT("PL")) Value=Level;
+        else if(Token==TEXT("MWS")) Value=Stats.WeaponSpeed;
+        else if(Token==TEXT("MW")) Value=FChar::IsUpper(Token[0])?Stats.WeaponMax:Stats.WeaponMin;
+        else if(Token==TEXT("RWS")) Value=Stats.RangedSpeed;
+        else if(Token==TEXT("RW")) Value=FChar::IsUpper(Token[0])?Stats.RangedMax:Stats.RangedMin;
+        else if(Token==TEXT("HND")) Value=Stats.WeaponHands;
+        if(!Value.IsSet()) WithStats+=Stat.GetCaptureGroup(0);
+        else if(Stats.bKnown || Token==TEXT("PL")) WithStats+=FString::SanitizeFloat(Value.GetValue(),0);
+        else WithStats+=TEXT("?");
+        Last=Stat.GetMatchEnding();
+    }
+    Text=WithStats+Text.Mid(Last);
+    FRegexMatcher Match(FRegexPattern(TEXT("\\$(?:([*/])([0-9]+(?:\\.[0-9]+)?);)?(?:(\\d+))?([aAbBdDeEfFhHiImMnNoOqQrRsStTuUxX])([1-3])?(?![a-zA-Z])")),Text);
     FString Result; int32 Previous=0;
     while(Match.FindNext())
     {
@@ -46,12 +127,36 @@ FString FSpellDbc::Description(uint32 Id,int32 Level,bool Aura) const
         const TCHAR Token=FChar::ToLower(Match.GetCaptureGroup(4)[0]); FString Value;
         if(Referenced)
         {
-            const float Points=FMath::Abs(Referenced->EffectBasePoints[Effect]+(Referenced->EffectDieSides[Effect]?1:0)+Referenced->EffectPointsPerLevel[Effect]*FMath::Max(0,FMath::Min(Level,int32(Referenced->MaxLevel?Referenced->MaxLevel:Level))-int32(Referenced->SpellLevel)));
-            if(Token=='d') { const float Seconds=Duration(Referenced->DurationIndex); Value=Seconds<0?TEXT("until cancelled"):FString::Printf(TEXT("%g %s"),Seconds>=60?Seconds/60:Seconds,Seconds>=60?TEXT("min"):TEXT("sec")); }
-            else if(Token=='s' || Token=='m') Value=FString::Printf(TEXT("%g"),Points);
+            const int32 AtLevel=FMath::Clamp(Level,int32(Referenced->BaseLevel),int32(Referenced->MaxLevel?Referenced->MaxLevel:FMath::Max(Level,int32(Referenced->BaseLevel))));
+            const int32 Base=Referenced->EffectBasePoints[Effect]+int32(Referenced->EffectPointsPerLevel[Effect]*(AtLevel-int32(FMath::Max(Referenced->SpellLevel,Referenced->BaseLevel))));
+            const int32 Sides=Referenced->EffectDieSides[Effect];
+            const int32 First=FMath::Abs(Base+(Sides!=0)),LastRoll=FMath::Abs(Base+Sides);
+            const int32 Points=FMath::Min(First,LastRoll),Maximum=FMath::Max(First,LastRoll);
+            const int32 Start=Match.GetMatchBeginning();
+            const bool InsideFormula=Text.Find(TEXT("${"),ESearchCase::CaseSensitive,ESearchDir::FromEnd,Start)>Text.Find(TEXT("}"),ESearchCase::CaseSensitive,ESearchDir::FromEnd,Start);
+            if(Token=='d')
+            {
+                const float Seconds=Duration(Referenced->DurationIndex);
+                if(InsideFormula) Value=FString::Printf(TEXT("%g"),Seconds);
+                else Value=Seconds<0?TEXT("until cancelled"):FString::Printf(TEXT("%g %s"),Seconds>=60?Seconds/60:Seconds,Seconds>=60?TEXT("min"):TEXT("sec"));
+            }
+            else if(Token=='s' || Token=='m')
+            {
+                if(Token=='s' && Maximum!=Points && !InsideFormula && Match.GetCaptureGroup(1).IsEmpty())
+                    Value=FString::Printf(TEXT("%d to %d"),Points,Maximum);
+                else Value=FString::FromInt(Match.GetCaptureGroup(4)[0]=='M'?Maximum:Points);
+            }
+            else if(Token=='a') Value=FString::Printf(TEXT("%g"),Radii.FindRef(Referenced->EffectRadiusIndex[Effect]));
             else if(Token=='t') Value=FString::Printf(TEXT("%g"),Referenced->EffectAmplitude[Effect]/1000.f);
             else if(Token=='u') Value=FString::FromInt(Referenced->StackAmount);
-            else if(Token=='h') Value=FString::FromInt(Referenced->RecoveryTime/1000);
+            else if(Token=='h') Value=FString::FromInt(Referenced->ProcChance);
+            else if(Token=='n') Value=FString::FromInt(Referenced->ProcCharges);
+            else if(Token=='i') Value=FString::FromInt(Referenced->MaxAffectedTargets);
+            else if(Token=='x') Value=FString::FromInt(Referenced->EffectChainTarget[Effect]);
+            else if(Token=='q') Value=FString::FromInt(Referenced->EffectMiscValue[Effect]);
+            else if(Token=='b') Value=FString::Printf(TEXT("%g"),Referenced->EffectPointsPerComboPoint[Effect]);
+            else if(Token=='f') Value=FString::Printf(TEXT("%g"),Referenced->EffectValueMultiplier[Effect]);
+            else if(Token=='e') Value=FString::Printf(TEXT("%g"),Referenced->EffectDamageMultiplier[Effect]);
             else if(Token=='o') { const float Interval=Referenced->EffectAmplitude[Effect]/1000.f; Value=FString::Printf(TEXT("%g"),Interval>0?Points*Duration(Referenced->DurationIndex)/Interval:Points); }
             else if(Token=='r') { const auto* Range=GetRange(Referenced->RangeIndex); Value=FString::Printf(TEXT("%g"),Range?Range->Max[0]:0); }
         }
@@ -67,13 +172,16 @@ FString FSpellDbc::Description(uint32 Id,int32 Level,bool Aura) const
     Result+=Text.Mid(Previous);
     // DBC descriptions contain numeric expressions such as ${$s1/10}.
     // Evaluate only the arithmetic grammar, after resolving spell tokens.
-    FRegexMatcher Formula(FRegexPattern(TEXT("\\$\\{([^{}]+)\\}")),Result);
+    FRegexMatcher Formula(FRegexPattern(TEXT("\\$\\{([^{}]+)\\}(?:\\.([0-9]))?")),Result);
     FString Expanded; Previous=0; FBasicMathExpressionEvaluator Evaluator;
     while(Formula.FindNext())
     {
         Expanded+=Result.Mid(Previous,Formula.GetMatchBeginning()-Previous);
-        const auto Number=Evaluator.Evaluate(*Formula.GetCaptureGroup(1));
-        Expanded+=Number.IsValid() && FMath::IsFinite(Number.GetValue())?FString::Printf(TEXT("%g"),Number.GetValue()):Formula.GetCaptureGroup(0);
+        const auto Number=EvaluateSpellExpression(Formula.GetCaptureGroup(1),Evaluator);
+        const int32 Precision=FCString::Atoi(*Formula.GetCaptureGroup(2));
+        if(!Number.IsSet()) Expanded+=Formula.GetCaptureGroup(1).Contains(TEXT("?"))?TEXT("?"):Formula.GetCaptureGroup(0);
+        else if(Precision) Expanded+=FString::Printf(TEXT("%.*f"),Precision,Number.GetValue());
+        else Expanded+=FString::Printf(TEXT("%.0f"),FMath::TruncToDouble(Number.GetValue()));
         Previous=Formula.GetMatchEnding();
     }
     Result=Expanded+Result.Mid(Previous);
@@ -138,6 +246,9 @@ bool FSpellDbc::Load(const FDbcParser& Parser)
         E.RecoveryTime = Parser.GetUInt(i, 29);
         E.CategoryRecoveryTime = Parser.GetUInt(i, 30);
         E.MaxLevel = Parser.GetUInt(i, 37);
+        E.ProcChance=Parser.GetUInt(i,35);
+        E.ProcCharges=Parser.GetUInt(i,36);
+        E.MaxAffectedTargets=Parser.GetUInt(i,212);
         E.BaseLevel = Parser.GetUInt(i, 38);
         E.SpellLevel = Parser.GetUInt(i, 39);
         E.DurationIndex = Parser.GetUInt(i, 40);
@@ -155,6 +266,11 @@ bool FSpellDbc::Load(const FDbcParser& Parser)
             E.EffectDieSides[j] = int32(Parser.GetUInt(i,74+j));
             E.EffectPointsPerLevel[j] = Parser.GetFloat(i,77+j);
             E.EffectAmplitude[j] = Parser.GetUInt(i,98+j);
+            E.EffectRadiusIndex[j] = Parser.GetUInt(i,92+j);
+            E.EffectValueMultiplier[j]=Parser.GetFloat(i,101+j);
+            E.EffectChainTarget[j]=Parser.GetUInt(i,104+j);
+            E.EffectPointsPerComboPoint[j]=Parser.GetFloat(i,119+j);
+            E.EffectDamageMultiplier[j]=Parser.GetFloat(i,216+j);
             E.EffectImplicitTargetA[j] = Parser.GetUInt(i, 86 + j);
             E.EffectImplicitTargetB[j] = Parser.GetUInt(i, 89 + j);
             E.EffectApplyAuraName[j] = Parser.GetUInt(i, 95 + j);

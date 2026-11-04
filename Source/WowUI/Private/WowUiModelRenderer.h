@@ -7,7 +7,7 @@ class UWorld;
 struct FWowGuildEmblem;
 struct FReferenceSkeleton;
 
-/** Independent UI character models and camera views of live unit portraits. */
+/** Independent full-body model views and cached still unit portraits. */
 class FWowUiModelRenderer
 {
 public:

@@ -36,7 +36,7 @@ int32 UWowQaCharacterCommandlet::Main(const FString& Params)
     // Preparation/disbanding keeps the original bounded Human QA recipes.
     // Deletion also accepts a UI-created participant, requiring an exact
     // race/class/gender match in addition to the registration/name/GUID guards.
-    if(Mode!=TEXT("delete") && ((ClassNumber!=1 && ClassNumber!=5 && ClassNumber!=8) || RaceNumber!=1 || GenderNumber!=0)) return 1;
+    if(Mode!=TEXT("delete") && ((ClassNumber!=1 && ClassNumber!=2 && ClassNumber!=5 && ClassNumber!=8) || RaceNumber!=1 || GenderNumber!=0)) return 1;
     FString GuildName; double GuildNumber=0; TSet<uint64> Owned;
     const bool ArenaDisband=Mode==TEXT("disband_arena");
     if(Mode==TEXT("disband") || ArenaDisband)

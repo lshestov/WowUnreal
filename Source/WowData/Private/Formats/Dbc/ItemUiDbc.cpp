@@ -2,6 +2,12 @@
 #include "Formats/DbcParser.h"
 #include "Mpq/MpqManager.h"
 
+FItemUiDbc::FWeaponSequences FItemUiDbc::MeleeSequences(uint32 Entry) const
+{
+    const uint8* Subclass = WeaponSubclasses.Find(Entry);
+    return Subclass ? MeleeSequencesForSubclass(*Subclass) : FWeaponSequences{};
+}
+
 int32 FItemUiDbc::DefaultReaction(uint32 From,uint32 To) const
 {
     const auto* A=ReactionTemplates.Find(From); const auto* B=ReactionTemplates.Find(To); if(!A || !B) return 0;
@@ -32,7 +38,32 @@ bool FItemUiDbc::Load(FMpqManager& Mpq)
         }
     }
     if(Read(TEXT("ItemClass.dbc"),20)) { Classes.Empty(); for(uint32 I=0;I<Parser.GetRecordCount();++I) Classes.Add(Parser.GetUInt(I,0),Parser.GetString(I,3)); }
-    if(Read(TEXT("ItemSubClass.dbc"),44)) { Subclasses.Empty(); for(uint32 I=0;I<Parser.GetRecordCount();++I) Subclasses.Add((uint64(Parser.GetUInt(I,0))<<32)|Parser.GetUInt(I,1),Parser.GetString(I,10)); }
+    if (Read(TEXT("Item.dbc"),8))
+    {
+        WeaponSubclasses.Reset();
+        for (uint32 I=0; I<Parser.GetRecordCount(); ++I)
+            if (Parser.GetUInt(I,1)==2) WeaponSubclasses.Add(Parser.GetUInt(I,0),Parser.GetUInt(I,2));
+    }
+    if (Read(TEXT("ItemSubClass.dbc"),44))
+    {
+        Subclasses.Reset();
+        WeaponSequences.Reset();
+        for (uint32 I=0; I<Parser.GetRecordCount(); ++I)
+        {
+            const uint32 Class=Parser.GetUInt(I,0), Subclass=Parser.GetUInt(I,1);
+            Subclasses.Add((uint64(Class)<<32)|Subclass,Parser.GetString(I,10));
+            if (Class!=2) continue;
+            // ItemSubClass ready/attack selectors are indices, not AnimationData IDs.
+            // Ranged weapon selectors have no melee swing; use the unarmed sequence.
+            constexpr uint8 ReadyIds[] = {27,28,26};
+            constexpr uint8 AttackIds[] = {18,19,16,17};
+            const uint32 Ready=Parser.GetUInt(I,7), Attack=Parser.GetUInt(I,8);
+            FWeaponSequences Sequences;
+            if (Ready<UE_ARRAY_COUNT(ReadyIds)) Sequences.Ready=ReadyIds[Ready];
+            if (Attack<UE_ARRAY_COUNT(AttackIds)) Sequences.Attack=AttackIds[Attack];
+            WeaponSequences.Add(Subclass,Sequences);
+        }
+    }
     if(Read(TEXT("DurabilityCosts.dbc"),30))
     {
         DurabilityCosts.Empty(); for(uint32 I=0;I<Parser.GetRecordCount();++I) { TArray<uint32> Values; for(uint32 N=1;N<30;++N) Values.Add(Parser.GetUInt(I,N)); DurabilityCosts.Add(Parser.GetUInt(I,0),MoveTemp(Values)); }

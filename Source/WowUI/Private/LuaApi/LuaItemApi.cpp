@@ -348,7 +348,7 @@ void ItemTooltip(lua_State* L,FWowLuaContext* C,int64 H,const FWowItemTemplate* 
         for(const auto& Stat:T->Stats) if(const auto Key=StatKey(Stat.Key); !Key.IsEmpty()) F->TooltipAddLine(H,FString::Printf(TEXT("%+d %s"),Stat.Value,*StatLabel(L,Key)),1,1,1,false);
         if(T->RequiredLevel>1) F->TooltipAddLine(H,FString::Printf(TEXT("Requires Level %u"),T->RequiredLevel),1,1,1,false);
         if(!T->Description.IsEmpty()) F->TooltipAddLine(H,T->Description,1,.82f,0,true);
-        if(T->UseSpellId) { const auto* P=C->EntityManager?C->EntityManager->GetLocalPlayer():nullptr; const auto Text=FDbcStore::Get().Spells().Description(T->UseSpellId,P?P->GetLevel():1); if(!Text.IsEmpty()) F->TooltipAddLine(H,TEXT("Use: ")+Text,0,1,0,true); }
+        if(T->UseSpellId) { const auto* P=C->EntityManager?C->EntityManager->GetLocalPlayer():nullptr; const auto Text=F->DescribeSpell(T->UseSpellId,P?P->GetLevel():1); if(!Text.IsEmpty()) F->TooltipAddLine(H,TEXT("Use: ")+Text,0,1,0,true); }
         if(Item && Item->GetField(ItemField::MAX_DURABILITY)) F->TooltipAddLine(H,FString::Printf(TEXT("Durability %u / %u"),Item->GetField(ItemField::DURABILITY),Item->GetField(ItemField::MAX_DURABILITY)),1,1,1,false);
     }
     F->SetFrameVisible(H,true);

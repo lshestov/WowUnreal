@@ -112,6 +112,12 @@ bool NativeValue(lua_State* L,const FString& Name,FString& Value)
 }
 void ApplyNative(lua_State* L,const FString& Name,const FString& Value)
 {
+    if(Name==TEXT("buffdurations"))
+    {
+        lua_pushstring(L,TCHAR_TO_UTF8(*Value));
+        lua_setglobal(L,"SHOW_BUFF_DURATIONS");
+        return;
+    }
     auto* W=World(L); if(!W) return;
     if(auto* Render=W->GetSubsystem<UWowRenderSettings>())
     {

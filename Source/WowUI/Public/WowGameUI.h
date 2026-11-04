@@ -78,6 +78,7 @@ private:
     TSharedPtr<SWowLootWindow> LootWindow;
     TSharedPtr<SWowVendorWindow> VendorWindow;
     TSharedPtr<SWowQuestDialog> QuestDialog;
+    void PrepareQuestDialog(uint64 Guid);
     TSharedPtr<SWowTradeWindow> TradeWindow;
     TSharedPtr<SWidget> WindowRoot;
 

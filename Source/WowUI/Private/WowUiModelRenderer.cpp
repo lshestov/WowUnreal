@@ -38,6 +38,7 @@ struct FWowUiModelRenderer::FSlot
     double NextCapture=0;
     bool bLogged=false;
     bool Captured=false;
+    TWeakObjectPtr<AActor> PortraitSource;
     FString FallbackPortrait;
     TUniquePtr<FWowUiDressUpPreview> Preview;
     float ModelScale=1,BaseModelScale=1;
@@ -60,6 +61,7 @@ void FWowUiModelRenderer::Configure(const FString& Key,UImage* Image,uint64 Guid
     {
         Owned=MakeUnique<FSlot>(); auto& S=*Owned;
         S.Image=Image; S.Handle=Handle; S.bPortrait=Portrait;
+        if(Portrait) S.Preview=MakeUnique<FWowUiDressUpPreview>();
         S.Target.Reset(NewObject<UTextureRenderTarget2D>());
         S.Target->RenderTargetFormat=Portrait?RTF_RGBA8:RTF_RGBA16f;
         S.Target->ClearColor=Portrait?FLinearColor::Black:FLinearColor(0,0,0,1);
@@ -89,7 +91,11 @@ void FWowUiModelRenderer::Configure(const FString& Key,UImage* Image,uint64 Guid
     Brush.SetResourceObject(Slot.Material.IsValid()?static_cast<UObject*>(Slot.Material.Get()):static_cast<UObject*>(Slot.Target.Get()));
     Brush.ImageSize=FVector2D(Portrait?128:256,Portrait?128:384);
     Image->SetBrush(Brush); Image->SetRenderOpacity(1); Image->SetColorAndOpacity(FLinearColor::White);
-    if(Owned->Guid!=Guid) { Owned->Guid=Guid; Owned->NextCapture=0; Owned->bLogged=false; Owned->Captured=false; Owned->FallbackPortrait.Empty(); }
+    if(Slot.Guid!=Guid)
+    {
+        Slot.Guid=Guid; Slot.NextCapture=0; Slot.bLogged=false; Slot.Captured=false; Slot.FallbackPortrait.Empty();
+        if(Portrait) Slot.Preview->SetUnit(Guid);
+    }
     Image->SetVisibility(Guid?ESlateVisibility::HitTestInvisible:ESlateVisibility::Collapsed);
 }
 
@@ -182,7 +188,7 @@ void FWowUiModelRenderer::Tick(UWorld* World)
         if(!S.Image.IsValid() || !S.Guid || Now<S.NextCapture) continue;
         if(S.Image->GetVisibility()==ESlateVisibility::Collapsed) continue;
         auto* Actor=Context.ResolveActor(S.Guid);
-        if(S.Preview) { if(!S.Preview->Rebuild(World,Context,Mpq,Cache)) { S.NextCapture=Now+.2; continue; } Actor=S.Preview->GetActor(); }
+        if(S.Preview) Actor=S.Preview->Rebuild(World,Context,Mpq,Cache,S.bPortrait)?S.Preview->GetActor():nullptr;
         if(!IsValid(Actor))
         {
             if(S.bPortrait && Context.ConnectionManager)
@@ -201,8 +207,9 @@ void FWowUiModelRenderer::Tick(UWorld* World)
                     else {auto Brush=S.Image->GetBrush(); Brush.SetResourceObject(Texture); S.Image->SetBrush(Brush);}
                 }
             }
-            S.NextCapture=Now+.2; continue;
+            S.Captured=false; S.NextCapture=Now+.2; continue;
         }
+        if(S.bPortrait && S.Captured && S.PortraitSource.Get()==Actor) { S.NextCapture=Now+.25; continue; }
         if(!S.Camera.IsValid() || S.Camera->GetWorld()!=World)
         {
             FActorSpawnParameters Params; Params.ObjectFlags=RF_Transient;
@@ -228,6 +235,15 @@ void FWowUiModelRenderer::Tick(UWorld* World)
             if(!Body) Body=Cast<USkeletalMeshComponent>(Mesh);
         }
         if(!Body) continue;
+        if(S.bPortrait)
+        {
+            // Portraits are textures. Sample the isolated model in its initial idle pose.
+            Body->TickAnimation(0.f,false);
+            Body->RefreshBoneTransforms();
+            Body->bPauseAnims=true;
+            Body->SetComponentTickEnabled(false);
+            S.PortraitSource=Actor;
+        }
         if(!S.bPortrait)
         {
             const FVector2D Size=S.Image->GetCachedGeometry().GetLocalSize();

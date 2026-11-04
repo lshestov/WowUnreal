@@ -33,6 +33,7 @@ public:
     void InitializeLabel(FWowFrameManager* Frames,float Scale);
     virtual void SetText(FText InText) override;
     void RefreshRichStyle(float Scale=0);
+    FVector2D MeasureRenderedText(float LayoutScale);
     void SetVerticalJustification(const FString& Value);
     const FString& GetVerticalJustification() const { return VerticalJustification; }
     ETextJustify::Type GetHorizontalJustification() const { return Justification; }

@@ -48,7 +48,7 @@ int WowLuaApi::SetGlyphTooltip(lua_State* L)
     Frames->TooltipAddLine(Handle,Text(L,S.Slot->Type?TEXT("MINOR_GLYPH"):TEXT("MAJOR_GLYPH"),S.Slot->Type?TEXT("Minor Glyph"):TEXT("Major Glyph")),.4f,.7f,1,false);
     if(Spell)
     {
-        const auto* Player=C->EntityManager->GetLocalPlayer(); Frames->TooltipAddLine(Handle,FDbcStore::Get().Spells().Description(Spell->ID,Player?Player->GetLevel():1),1,.82f,0,true);
+        const auto* Player=C->EntityManager->GetLocalPlayer(); Frames->TooltipAddLine(Handle,Frames->DescribeSpell(Spell->ID,Player?Player->GetLevel():1),1,.82f,0,true);
         if(S.Group==C->ConnectionManager->PacketHandler.ActiveTalentGroup) Frames->TooltipAddLine(Handle,Text(L,TEXT("GLYPH_SLOT_REMOVE_TOOLTIP"),TEXT("Shift-right-click to remove this glyph")),.5f,.5f,.5f,false);
     }
     else Frames->TooltipAddLine(Handle,Text(L,S.Enabled?TEXT("GLYPH_EMPTY_DESC"):FString::Printf(TEXT("GLYPH_SLOT_TOOLTIP%u"),S.Slot->Tooltip),S.Enabled?TEXT("Use a glyph to fill this slot."):TEXT("This glyph slot unlocks at a higher level.")),1,.82f,0,true);

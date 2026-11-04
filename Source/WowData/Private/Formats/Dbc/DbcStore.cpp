@@ -293,6 +293,7 @@ void FDbcStore::LoadDeferred(FMpqManager& Mpq)
     {SummonSlots.Reset(); for(uint32 I=0;I<Parser.GetRecordCount();++I) SummonSlots.Add(Parser.GetUInt(I,0),Parser.GetUInt(I,4));}
     if(LoadSingleDbc(Mpq,TEXT("DBFilesClient\\SpellDescriptionVariables.dbc"),Parser)) SpellDbc.LoadDescriptionVariables(Parser);
     if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\SpellRange.dbc"), Parser)) SpellDbc.LoadRanges(Parser);
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\SpellRadius.dbc"), Parser)) SpellDbc.LoadRadii(Parser);
     if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\Spell.dbc"), Parser))
     {
         SpellDbc.Load(Parser);

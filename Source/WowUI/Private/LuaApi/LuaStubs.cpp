@@ -1098,13 +1098,14 @@ static int L_UnitAffectingCombat(lua_State* L)
     return 1;
 }
 
-static int PushUnitAura(lua_State* L,const char* DefaultFilter)
+const FAuraInfo* WowLuaApi::FindUnitAura(lua_State* L,int32 UnitIndex,const char* DefaultFilter)
 {
-    auto* C=WowLuaApi::GetContext(L); auto* Entity=ResolveUnit(L);
-    const bool ByName=!lua_isnumber(L,2) && lua_isstring(L,2);
-    const FString Filter=UTF8_TO_TCHAR(luaL_optstring(L,ByName?4:3,DefaultFilter));
-    const FString Name=ByName?UTF8_TO_TCHAR(lua_tostring(L,2)):TEXT("");
-    int32 Wanted=ByName?1:luaL_checkinteger(L,2);
+    auto* C=GetContext(L); auto* Entity=ResolveUnit(L,UnitIndex);
+    const int32 Index=UnitIndex+1;
+    const bool ByName=!lua_isnumber(L,Index) && lua_isstring(L,Index);
+    const FString Filter=UTF8_TO_TCHAR(luaL_optstring(L,Index+(ByName?2:1),DefaultFilter));
+    const FString Name=ByName?UTF8_TO_TCHAR(lua_tostring(L,Index)):TEXT("");
+    int32 Wanted=ByName?1:luaL_checkinteger(L,Index);
     const bool Harmful=Filter.Contains(TEXT("HARMFUL")) || (!Filter.Contains(TEXT("HELPFUL")) && FCStringAnsi::Strcmp(DefaultFilter,"HARMFUL")==0);
     const bool PlayerOnly=Filter.Contains(TEXT("PLAYER"));
     const double Now=FPlatformTime::Seconds();
@@ -1115,7 +1116,20 @@ static int PushUnitAura(lua_State* L,const char* DefaultFilter)
         if(A.DurationMs && A.UpdatedAt+A.RemainingMs/1000.0<=Now) continue;
         const auto* Spell=FDbcStore::Get().Spells().GetById(A.SpellId); if(!Spell || !Spell->HasVisibleAuraIcon()) continue;
         if(ByName && !Spell->SpellName.Equals(Name,ESearchCase::IgnoreCase)) continue;
-        if(--Wanted!=0) continue;
+        if(--Wanted==0) return &A;
+    }
+    return nullptr;
+}
+
+static int PushUnitAura(lua_State* L,const char* DefaultFilter)
+{
+    if(const auto* Found=WowLuaApi::FindUnitAura(L,1,DefaultFilter))
+    {
+        const auto& A=*Found;
+        const auto* C=WowLuaApi::GetContext(L);
+        const auto* Entity=ResolveUnit(L);
+        const bool Harmful=(A.Flags&0x80)!=0;
+        const auto* Spell=FDbcStore::Get().Spells().GetById(A.SpellId);
         const auto* Icon=FDbcStore::Get().SpellIcons().GetById(Spell->SpellIconID);
         lua_pushstring(L,TCHAR_TO_UTF8(*Spell->SpellName)); lua_pushstring(L,TCHAR_TO_UTF8(*Spell->Rank));
         if(Icon) lua_pushstring(L,TCHAR_TO_UTF8(*Icon->TexturePath)); else lua_pushnil(L);
@@ -3389,7 +3403,7 @@ static TMap<FString, FString> CVarStorage;
 struct FChatWindowOptions
 {
     FString Name;
-    float FontSize = 14, Alpha = .2f;
+    float FontSize = 14, Alpha = .25f;
     FLinearColor Color = FLinearColor::Black;
     bool Shown = false, Locked = false, Uninteractable = false;
     int32 Dock = 0;
@@ -3423,6 +3437,8 @@ static FString GetDefaultCVarValue(const FString& Name)
 {
     static const TMap<FString, FString> ExplicitDefaults = {
         { TEXT("questpoi"), TEXT("1") },
+        { TEXT("unitnamenpc"), TEXT("1") },
+        { TEXT("buffdurations"), TEXT("1") },
         { TEXT("showarenaenemyframes"), TEXT("1") },
         { TEXT("showarenaenemycastbar"), TEXT("1") },
         { TEXT("minimaptrackedinfo"), TEXT("") },
@@ -3662,10 +3678,14 @@ static uint32 CoinAmount(lua_State* L)
 {
     const double Value=luaL_checknumber(L,1); return uint32(FMath::Clamp(FMath::IsFinite(Value)?Value:0.,0.,double(MAX_int32)));
 }
+FString WowLuaApi::CoinIcon(uint32 Amount)
+{
+    const TCHAR* Icon=Amount<10?TEXT("05"):Amount<100?TEXT("06"):Amount<1000?TEXT("03"):Amount<10000?TEXT("04"):Amount<100000?TEXT("01"):TEXT("02");
+    return FString(TEXT("Interface\\Icons\\INV_Misc_Coin_"))+Icon;
+}
 static int L_GetCoinIcon(lua_State* L)
 {
-    const uint32 Amount=CoinAmount(L); const TCHAR* Icon=Amount<10?TEXT("05"):Amount<100?TEXT("06"):Amount<1000?TEXT("03"):Amount<10000?TEXT("04"):Amount<100000?TEXT("01"):TEXT("02");
-    lua_pushstring(L,TCHAR_TO_UTF8(*(FString(TEXT("Interface\\Icons\\INV_Misc_Coin_"))+Icon))); return 1;
+    lua_pushstring(L,TCHAR_TO_UTF8(*WowLuaApi::CoinIcon(CoinAmount(L)))); return 1;
 }
 static int CoinString(lua_State* L,bool Textures)
 {
@@ -6996,5 +7016,6 @@ lua_pushboolean(L2, PLATFORM_MAC);
 }
 
 #else
+const FAuraInfo* WowLuaApi::FindUnitAura(lua_State*,int32,const char*) { return nullptr; }
 void WowLuaApi::RegisterStubs(lua_State*) {}
 #endif

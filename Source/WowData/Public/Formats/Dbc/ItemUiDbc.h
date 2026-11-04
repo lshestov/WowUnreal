@@ -6,6 +6,9 @@ class FMpqManager;
 class WOWDATA_API FItemUiDbc
 {
 public:
+    struct FWeaponSequences { uint8 Attack=16, Ready=25; };
+    FWeaponSequences MeleeSequences(uint32 Entry) const;
+    FWeaponSequences MeleeSequencesForSubclass(uint32 Subclass) const { return WeaponSequences.FindRef(Subclass); }
     struct FExtendedCost { uint32 Honor=0,Arena=0,Bracket=0,Items[5]={},Counts[5]={},Rating=0,Group=0; };
     struct FStationery { uint32 Id=0,Item=0,Flags=0; FString Texture; };
     struct FPackage { uint32 Id=0,Cost=0; FString Icon,Name; };
@@ -28,6 +31,8 @@ public:
     const FString* MailSubject(uint32 Id) const { return MailSubjects.Find(Id); }
     uint32 RepairCost(uint32 Level,uint32 Quality,uint32 Class,uint32 Subclass,uint32 Lost,float Discount=1) const;
 private:
+    TMap<uint32,uint8> WeaponSubclasses;
+    TMap<uint32,FWeaponSequences> WeaponSequences;
     TMap<uint32,FExtendedCost> ExtendedCosts;
     TMap<uint32,FString> Classes;
     TMap<uint64,FString> Subclasses;

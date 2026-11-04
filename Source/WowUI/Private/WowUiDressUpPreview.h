@@ -18,7 +18,7 @@ public:
     void Dress(bool Dressed);
     void Tabard(const FWowGuildEmblem& Value,uint32 Display) {Emblem=Value; TabardDisplay=Display; HasTabardPreview=true; Dirty=true;}
     void ReleaseActor();
-    bool Rebuild(UWorld* World,FWowLuaContext& Context,FMpqManager* Mpq,FWowAssetCache* Cache);
+    bool Rebuild(UWorld* World,FWowLuaContext& Context,FMpqManager* Mpq,FWowAssetCache* Cache,bool Portrait=false);
     AActor* GetActor() const { return Actor.Get(); }
     static int32 SlotForType(uint32 InventoryType);
     uint64 Guid=0;

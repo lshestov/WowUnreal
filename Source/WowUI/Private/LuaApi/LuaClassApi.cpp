@@ -187,11 +187,11 @@ int WowLuaApi::SetTalentTooltip(lua_State* L)
         if(TreeSpent(C,N->TalentTab,Pet,G,Preview)<TierCost) if(const auto* Tab=FDbcStore::Get().TalentTabs().GetById(N->TalentTab)) Add(Text("TOOLTIP_TALENT_TIER_POINTS",TEXT("Requires more points in this tree"),{FString::FromInt(TierCost),Tab->Name}),1,.1f,.1f,false);
         if(N->RequiredSpell && !Available(C,*N,Pet)) if(const auto* Required=Spells.GetById(N->RequiredSpell)) Add(Text("ITEM_REQ_SKILL",TEXT("Requires a class ability"),{Required->SpellName}),1,.1f,.1f,false);
     }
-    if(!(N->Flags&1) && R>0) Add(Spells.Description(Spell->ID,Level),1,.82f,0,true);
+    if(!(N->Flags&1) && R>0) Add(Frames->DescribeSpell(Spell->ID,Level),1,.82f,0,true);
     if(R<Max)
     {
         if(R>0) { Add(TEXT(" ")); Add(Text("TOOLTIP_TALENT_NEXT_RANK",TEXT("Next rank:"))); }
-        Add(Spells.Description(N->RankID[R],Level),1,.82f,0,true);
+        Add(Frames->DescribeSpell(N->RankID[R],Level),1,.82f,0,true);
     }
     if(G==Active(C,Pet) && Ready)
     {

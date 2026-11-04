@@ -6,6 +6,7 @@
 #include "WowFrameXmlParser.h"
 #include "WowUiModelRenderer.h"
 #include "WowUiMapRenderer.h"
+#include "WowMinimapUi.h"
 #include "WowUiCursorRenderer.h"
 #include "WowModifiedClicks.h"
 #include "WowAddonLoader.h"
@@ -328,6 +329,7 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 	if (LuaVM && LuaVM->IsInitialized())
 	{
 		const char* PostLoadFixup = R"LUA(
+            SHOW_BUFF_DURATIONS = GetCVar("buffDurations")
 			-- BuffFrame: ensure OnLoad fields exist (OnLoad may have run on wrong self)
 			if BuffFrame and BuffFrame.BuffFrameUpdateTime == nil then
 				BuffFrame.BuffFrameUpdateTime = 0
@@ -531,6 +533,12 @@ void UWowUIManager::TickWorldImages(UWorld* World, uint64 MouseoverGuid)
     }
 }
 
+void UWowUIManager::GetNpcOverheadSettings(bool& ShowNames, bool& TrackTrivial) const
+{
+    ShowNames = !LuaVM || !LuaVM->GetState() || WowLuaApi::GetUiPreference(LuaVM->GetState(), TEXT("cvar_unitnamenpc"), 1) != 0;
+    TrackTrivial = UIContext && WowMinimapUi::View(UIContext).CommonKey == TEXT("MINIMAP_TRACKING_TRIVIAL_QUESTS");
+}
+
 FLinearColor UWowUIManager::GetUnitSelectionColor(uint64 Guid) const
 {
     const auto* Unit=UIContext && UIContext->EntityManager?UIContext->EntityManager->Find(Guid):nullptr;
@@ -647,6 +655,7 @@ void UWowUIManager::UpdateInventory()
 void UWowUIManager::SetConnectionManager(UWowConnectionManager* InConnectionManager)
 {
 	ConnectionManager = InConnectionManager;
+    if(FrameManager) FrameManager->SetSpellSource(InConnectionManager);
 
 	// Update the Lua context with connection manager and entity manager
 	if (UIContext && ConnectionManager)

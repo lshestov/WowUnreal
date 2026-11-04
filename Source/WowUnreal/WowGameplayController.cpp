@@ -21,7 +21,6 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/Texture2D.h"
 #include "Rendering/SkeletalMeshRenderData.h"
-#include "WowNameplateWidget.h"
 #include "SWowCombatLog.h"
 #include "SWowChatWindow.h"
 #include "SWowDuelInvite.h"
@@ -80,6 +79,18 @@ DEFINE_LOG_CATEGORY_STATIC(LogWowGameplay, Log, All);
 
 namespace
 {
+FItemUiDbc::FWeaponSequences GetMeleeSequences(const FWowPacketHandler& Handler, const FWowEntity& Entity, bool Offhand = false)
+{
+    const uint16 Slot = Offhand ? 1 : 0;
+    const uint32 Entry = Entity.GetField(Entity.IsPlayer()
+        ? PlayerField::VISIBLE_ITEM_BASE + (PlayerField::EQUIPMENT_SLOT_MAINHAND + Slot) * 2
+        : UnitField::VIRTUAL_ITEM_SLOT_ID + Slot);
+    const auto& Items = FDbcStore::Get().ItemUi();
+    if (const auto* Item = Handler.ItemTemplates.Find(Entry))
+        return Item->Class == 2 ? Items.MeleeSequencesForSubclass(Item->Subclass) : FItemUiDbc::FWeaponSequences{};
+    return Items.MeleeSequences(Entry);
+}
+
 TSharedPtr<SWidget> GetWowGameViewportWidget()
 {
 	if (!GEngine || !GEngine->GameViewport)
@@ -1007,6 +1018,7 @@ void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
 		// Don't override position when entity is moving via spline (SMSG_MONSTER_MOVE).
 		// Instead, smoothly lerp to the server position to avoid teleporting.
 		TObjectPtr<AActor>* ActorPtr = SpawnedEntityActors.Find(Entity.Guid);
+		if (ActorPtr && *ActorPtr) ApplyUnitScale(ActorPtr->Get(), Entity);
 		if (ActorPtr && *ActorPtr && Entity.Movement.Position != FVector::ZeroVector
             && !Entity.Movement.bHasActiveSpline)
 		{
@@ -1035,7 +1047,7 @@ void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
 		}
 
 		// Check for death — entity health=0 with valid MaxHealth, or StandState=DEAD
-		if (!DeadEntityGuids.Contains(Entity.Guid) && Entity.Guid != LocalGuid)
+		if (Entity.Guid != LocalGuid && Entity.IsUnit())
 		{
 			int32 EntityHealth = Entity.GetHealth();
 			int32 EntityMaxHealth = Entity.GetMaxHealth();
@@ -1055,23 +1067,8 @@ void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
 			else if (!bIsDead && DeadEntityGuids.Contains(Entity.Guid) && EntityHealth > 0)
 			{
 				DeadEntityGuids.Remove(Entity.Guid);
+				if (auto* Anim = FWowCharacterBuilder::GetAnimationController(ActorPtr ? ActorPtr->Get() : nullptr)) Anim->RestoreLivingPose();
 				UE_LOG(LogWowGameplay, Log, TEXT("Entity %llu resurrected (health=%d)"), Entity.Guid, EntityHealth);
-			}
-		}
-
-		// Update nameplate health if needed
-		TObjectPtr<UWidgetComponent>* NameplatePtr = EntityNameplates.Find(Entity.Guid);
-		if (NameplatePtr && *NameplatePtr)
-		{
-			UWidgetComponent* NameplateComponent = *NameplatePtr;
-			if (UWowNameplateWidget* NameplateWidget = Cast<UWowNameplateWidget>(NameplateComponent->GetUserWidgetObject()))
-			{
-				int32 Health = Entity.GetHealth();
-				int32 MaxHealth = Entity.GetMaxHealth();
-				if (Health > 0 && MaxHealth > 0)
-				{
-					NameplateWidget->UpdateHealth(Health, MaxHealth);
-				}
 			}
 		}
 	}
@@ -1156,6 +1153,8 @@ void AWowGameplayController::Tick(float DeltaTime)
 
 	if (!ConnectionManager || ConnectionManager->GetState()!=EWowSessionState::WorldInGame) return;
 
+	RefreshUnitOverheads();
+
 	// Update entity spline movement
 	UpdateEntitySplineMovement(DeltaTime);
 
@@ -1228,7 +1227,8 @@ void AWowGameplayController::PrepareCharacterSelect()
     bIsAutoAttacking=false; AutoAttackTargetGuid=0; TargetGuid=0; bIsCasting=false;
     if(auto* PawnCharacter=Cast<AWowPlayerCharacter>(GetPawn())) if(PawnCharacter->AnimationController) PawnCharacter->AnimationController->StopSpellAnimation(true);
     for(auto& Pair:SpawnedEntityActors) if(IsValid(Pair.Value)) Pair.Value->Destroy();
-    SpawnedEntityActors.Reset(); EntityNameplates.Reset(); DeadEntityGuids.Reset();
+    RemoveUnitNameLayer();
+    SpawnedEntityActors.Reset(); UnitOverheads.Reset(); NextOverheadUpdate = 0; DeadEntityGuids.Reset();
     NpcGroundOffsets.Reset(); NpcReferenceFeet.Reset(); LocalPlayerAppearance.Reset();
     bHasServerPosition=false;
     if(TargetHighlightCircle) TargetHighlightCircle->SetVisibility(false);
@@ -1682,8 +1682,7 @@ void AWowGameplayController::OnEntityDeath(uint64 Guid)
 		UWowAnimationController* AnimController = FWowCharacterBuilder::GetAnimationController(*ActorPtr);
 		if (AnimController)
 		{
-			AnimController->PlayAnimationById(EWowAnimId::Death, false);
-			UE_LOG(LogWowGameplay, Log, TEXT("Playing death animation for entity %llu"), Guid);
+			AnimController->UpdateDeathPose();
 		}
 	}
 
@@ -1716,8 +1715,8 @@ void AWowGameplayController::OnEntityDestroyed(uint64 Guid)
 	}
 	SpawnedEntityActors.Remove(Guid);
 
-	// Clean up nameplate
-	EntityNameplates.Remove(Guid);
+	// Discard the overhead state along with its actor.
+	UnitOverheads.Remove(Guid);
 
 	// Clean up target highlight if this was our target
 	if (TargetGuid == Guid)
@@ -1793,6 +1792,7 @@ void AWowGameplayController::SpawnEntityModel(const FWowEntity& Entity)
 
 	if (SpawnedActor)
 	{
+		ApplyUnitScale(SpawnedActor, Entity);
 		// Tag actor with GUID for targeting
 		SpawnedActor->Tags.Add(FName(*FString::Printf(TEXT("%llu"), Entity.Guid)));
 		SpawnedEntityActors.Add(Entity.Guid, SpawnedActor);
@@ -1815,7 +1815,7 @@ void AWowGameplayController::SpawnEntityModel(const FWowEntity& Entity)
 				}
 				// Grounding uses the same reference-pose feet for this NPC.
 				if (Bounds.IsValid && !Entity.IsPlayer())
-					NpcReferenceFeet.Add(Entity.Guid, Bounds.Min.Z * Body->GetComponentScale().Z + Body->GetRelativeLocation().Z);
+					NpcReferenceFeet.Add(Entity.Guid, Bounds.Min.Z * Body->GetComponentScale().Z + Body->GetRelativeLocation().Z * SpawnedActor->GetActorScale3D().Z);
 			}
 			if (!Bounds.IsValid) Bounds = Body->GetLocalBounds().GetBox();
 
@@ -1829,64 +1829,6 @@ void AWowGameplayController::SpawnEntityModel(const FWowEntity& Entity)
 			Selection->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 			Selection->SetGenerateOverlapEvents(false);
 			Selection->RegisterComponent();
-		}
-
-		// Create nameplate widget component
-		UWidgetComponent* NameplateComponent = NewObject<UWidgetComponent>(SpawnedActor);
-		if (NameplateComponent)
-		{
-			NameplateComponent->SetupAttachment(SpawnedActor->GetRootComponent());
-			NameplateComponent->SetWidgetSpace(EWidgetSpace::Screen);
-			NameplateComponent->SetDrawSize(FVector2D(200.0f, 40.0f));
-
-			// Position the nameplate above the entity (offset Z by ~200cm)
-			NameplateComponent->SetRelativeLocation(FVector(0.0f, 0.0f, 200.0f));
-
-			// Create the nameplate widget class
-			UClass* NameplateClass = UWowNameplateWidget::StaticClass();
-			if (NameplateClass)
-			{
-				NameplateComponent->SetWidgetClass(NameplateClass);
-
-				// Get entity name and health
-				FString EntityName = TEXT("NPC");
-				bool bIsHostile = false;
-
-				if (Entity.IsPlayer())
-				{
-					EntityName = FString::Printf(TEXT("Player %llu"), Entity.Guid);
-					bIsHostile = false; // Assume other players are friendly for now
-				}
-				else
-				{
-					EntityName = FString::Printf(TEXT("NPC %d"), Entity.Entry);
-
-					// Determine hostility based on faction (simplified)
-					const FWowUnitEntity* UnitEntity = static_cast<const FWowUnitEntity*>(&Entity);
-					uint32 FactionTemplate = UnitEntity->GetFactionTemplate();
-					// Simple heuristic: most hostile creatures have faction > 100
-					bIsHostile = (FactionTemplate > 100 && FactionTemplate != 2000); // 2000 is often neutral/friendly
-				}
-
-				int32 Health = Entity.GetHealth();
-				int32 MaxHealth = Entity.GetMaxHealth();
-
-				// Initialize the nameplate widget
-				if (UWowNameplateWidget* NameplateWidget = Cast<UWowNameplateWidget>(NameplateComponent->GetUserWidgetObject()))
-				{
-					NameplateWidget->SetupNameplate(EntityName, Health, MaxHealth, bIsHostile);
-				}
-				else
-				{
-					// Widget not yet created, store data to initialize later
-					UE_LOG(LogWowGameplay, Log, TEXT("Nameplate widget not ready yet for entity %llu, will initialize on first update"), Entity.Guid);
-				}
-
-				NameplateComponent->RegisterComponent();
-				EntityNameplates.Add(Entity.Guid, NameplateComponent);
-
-				UE_LOG(LogWowGameplay, Log, TEXT("Created nameplate for entity %llu (%s)"), Entity.Guid, *EntityName);
-			}
 		}
 	}
 }
@@ -2600,7 +2542,10 @@ void AWowGameplayController::UpdatePlayerAnimations()
 				}
 			}
 			// Spell torso tracks are independent of locomotion and its play rate.
-			AnimController->UpdateLocalPlayerState(PlayerChar, PlayerChar->bIsWalking);
+			const auto& Handler = ConnectionManager->PacketHandler;
+			const auto* Self = Handler.EntityManager.Find(Handler.EntityManager.LocalPlayerGuid);
+			if (Self) AnimController->SetCombatReadyAnimation(static_cast<EWowAnimId>(GetMeleeSequences(Handler,*Self).Ready));
+			AnimController->UpdateLocalPlayerState(PlayerChar, PlayerChar->bIsWalking, Self && (Self->GetField(UnitField::FLAGS) & 0x00080000));
 		}
 	}
 }
@@ -2623,9 +2568,6 @@ void AWowGameplayController::UpdateEntityAnimations()
 		// Skip local player — handled by UpdatePlayerAnimations()
 		if (Guid == LocalGuid) continue;
 
-		// Skip dead entities (corpses) — keep their death animation
-		if (DeadEntityGuids.Contains(Guid)) continue;
-
 		// Get the animation controller for this actor
 		UWowAnimationController* AnimController = FWowCharacterBuilder::GetAnimationController(Actor);
 		if (!AnimController) continue;
@@ -2636,22 +2578,20 @@ void AWowGameplayController::UpdateEntityAnimations()
 
 		// Check server-authoritative stand state from UNIT_FIELD_BYTES_1
 		uint8 StandState = Entity->GetFieldByte(UnitField::BYTES_1, 0);
-		if (StandState == WowStandState::DEAD)
+		if (StandState == WowStandState::DEAD || (Entity->GetMaxHealth() > 0 && Entity->GetHealth() == 0))
 		{
 			// Server says this entity is dead — trigger death handling
 			if (!DeadEntityGuids.Contains(Guid))
 			{
 				OnEntityDeath(Guid);
 			}
+			AnimController->UpdateDeathPose();
 			continue;
 		}
 
-		// If already marked dead by OnEntityHealthChanged, skip
-		// Note: Do NOT check GetHealth()==0 here — fields may not be populated yet
-		// for newly spawned entities. Death is detected in OnEntityHealthChanged
-		// when health transitions from >0 to 0, or by StandState==DEAD above.
-		if (Entity->GetHealth() <= 0 && Entity->GetMaxHealth() > 0 && DeadEntityGuids.Contains(Guid))
+		if (DeadEntityGuids.Contains(Guid))
 		{
+			AnimController->UpdateDeathPose();
 			continue;
 		}
 
@@ -2692,7 +2632,8 @@ void AWowGameplayController::UpdateEntityAnimations()
 			}
 		}
 
-		bool bEntityInCombat = false;
+		const bool bEntityInCombat = (Entity->GetField(UnitField::FLAGS) & 0x00080000) != 0;
+		if (bEntityInCombat) AnimController->SetCombatReadyAnimation(static_cast<EWowAnimId>(GetMeleeSequences(ConnectionManager->PacketHandler,*Entity).Ready));
 		bool bEntityCasting = false;
 
 		AnimController->UpdateAnimationState(AnimMovement, bEntityInCombat, bEntityCasting);
@@ -3139,39 +3080,6 @@ void AWowGameplayController::SetTarget(uint64 NewTargetGuid, bool bUpdateConnect
 	if (OldTargetGuid != NewTargetGuid && bUpdateConnection)
 	{
 		FireUIEvent(TEXT("PLAYER_TARGET_CHANGED"));
-	}
-
-	// Update nameplate highlighting
-
-	// Unhighlight previous target's nameplate
-	if (OldTargetGuid != 0)
-	{
-		TObjectPtr<UWidgetComponent>* OldNameplatePtr = EntityNameplates.Find(OldTargetGuid);
-		if (OldNameplatePtr && *OldNameplatePtr)
-		{
-			UWidgetComponent* NameplateComponent = *OldNameplatePtr;
-			if (UWowNameplateWidget* NameplateWidget = Cast<UWowNameplateWidget>(NameplateComponent->GetUserWidgetObject()))
-			{
-				// Reset nameplate to normal state (would need to add this method to nameplate)
-				// For now, just change the scale back to normal
-				NameplateComponent->SetWorldScale3D(FVector(1.0f, 1.0f, 1.0f));
-			}
-		}
-	}
-
-	// Highlight new target's nameplate
-	if (NewTargetGuid != 0)
-	{
-		TObjectPtr<UWidgetComponent>* NewNameplatePtr = EntityNameplates.Find(NewTargetGuid);
-		if (NewNameplatePtr && *NewNameplatePtr)
-		{
-			UWidgetComponent* NameplateComponent = *NewNameplatePtr;
-			if (UWowNameplateWidget* NameplateWidget = Cast<UWowNameplateWidget>(NameplateComponent->GetUserWidgetObject()))
-			{
-				// Highlight the nameplate (simple approach: scale it up slightly)
-				NameplateComponent->SetWorldScale3D(FVector(1.2f, 1.2f, 1.2f));
-			}
-		}
 	}
 
 	// Update highlight circle
@@ -4017,30 +3925,16 @@ void AWowGameplayController::OnAttackerStateUpdate(uint64 AttackerGuid, uint64 V
 
 	// Play attack animation on the attacker
 	const uint64 LocalGuid2 = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
-	if (AttackerGuid == LocalGuid2)
+	AActor* AttackerActor = SpellActor(AttackerGuid);
+	AWowPlayerCharacter* AttackingPlayer = Cast<AWowPlayerCharacter>(AttackerActor);
+	UWowAnimationController* AttackerAnim = AttackingPlayer ? AttackingPlayer->AnimationController.Get()
+		: FWowCharacterBuilder::GetAnimationController(AttackerActor);
+	const auto& Handler = ConnectionManager->PacketHandler;
+	if (const auto* Attacker = Handler.EntityManager.Find(AttackerGuid); Attacker && AttackerAnim)
 	{
-		// Local player attack animation
-		if (AWowPlayerCharacter* PlayerChar = Cast<AWowPlayerCharacter>(GetPawn()))
-		{
-			if (UWowAnimationController* AnimController = PlayerChar->AnimationController)
-			{
-				AnimController->PlayAttackAnimation();
-			}
-		}
-	}
-	else
-	{
-		// Other entity attack animation
-		if (TObjectPtr<AActor>* AttackerActorPtr = SpawnedEntityActors.Find(AttackerGuid))
-		{
-			if (AActor* AttackerActor = AttackerActorPtr->Get())
-			{
-				if (UWowAnimationController* AnimController = FWowCharacterBuilder::GetAnimationController(AttackerActor))
-				{
-					AnimController->PlayAttackAnimation();
-				}
-			}
-		}
+		const bool Offhand = (HitInfo & 0x4) != 0;
+		const auto Attack = static_cast<EWowAnimId>(GetMeleeSequences(Handler,*Attacker,Offhand).Attack);
+		AttackerAnim->PlayAttackAnimation(Offhand ? EWowAnimId::AttackOffhand : Attack);
 	}
 
 	// Play wound/hit reaction animation on the victim

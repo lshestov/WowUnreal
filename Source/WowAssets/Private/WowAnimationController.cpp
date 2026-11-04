@@ -115,99 +115,40 @@ void UWowAnimationController::UpdateAnimationState(const FWowMovementInfo& Movem
         return;
     }
 
-    // Don't override one-shot animations (attack, wound) until they finish
-    if (IsPlayingOneShot())
-    {
-        return;
-    }
-    const bool bOneShotFinished = bPlayingOneShot;
-    bPlayingOneShot = false;
-
-    EWowAnimState NewState = DetermineAnimationState(MovementInfo, bIsInCombat, bIsCasting);
-
-    // Handle jump sequence timing
-    if (CurrentState == EWowAnimState::Jumping && bInJumpSequence)
-    {
-        float CurrentTime = FPlatformTime::Seconds();
-        float JumpDuration = CurrentTime - JumpStartTime;
-
-        // Switch from jump start to airborne after brief takeoff
-        if (JumpDuration > 0.2f && NewState == EWowAnimState::Jumping)
-        {
-            if (MovementInfo.MoveFlags & WowMovementFlags::FALLING)
-            {
-                NewState = EWowAnimState::Falling;
-            }
-        }
-
-        // End jump sequence if landed
-        if (!(MovementInfo.MoveFlags & (WowMovementFlags::JUMPING | WowMovementFlags::FALLING)))
-        {
-            bInJumpSequence = false;
-            // Transition to appropriate movement state
-            NewState = DetermineAnimationState(MovementInfo, bIsInCombat, bIsCasting);
-        }
-    }
-
-    if (NewState != CurrentState || bOneShotFinished)
-    {
-        SetAnimationState(NewState, bOneShotFinished);
-    }
+    const EWowAnimState NewState = DetermineAnimationState(MovementInfo, bIsInCombat, bIsCasting);
+    UpdateLocomotion(NewState);
     if (RuntimeInstance && (NewState == EWowAnimState::Walking || NewState == EWowAnimState::Running))
         RuntimeInstance->SetM2MovementSpeed(MovementInfo.GetSplineSpeed(), MeshComponent->GetComponentScale().GetAbsMax());
 }
 
-void UWowAnimationController::UpdateLocalPlayerState(ACharacter* PlayerCharacter, bool bWalking)
+void UWowAnimationController::UpdateLocomotion(EWowAnimState NewState, bool bDescending)
 {
-    if (!IsInitialized() || !PlayerCharacter)
+    const bool bAirborne = NewState == EWowAnimState::Jumping || NewState == EWowAnimState::Falling;
+    const bool bWasAirborne = bJumpAirborne;
+    bJumpAirborne = bAirborne;
+    if (bWasAirborne && !bAirborne && NewState != EWowAnimState::Swimming && NewState != EWowAnimState::SwimmingIdle)
     {
+        CurrentState = NewState;
+        if (PlayAnimationById(EWowAnimId::JumpEnd, false)) return;
+        SetAnimationState(NewState, true);
         return;
     }
-
-    // Don't override one-shot animations (attack, wound) until they finish
-    if (IsPlayingOneShot())
-    {
-        return;
-    }
-    const bool bOneShotFinished = bPlayingOneShot;
-    bPlayingOneShot = false;
-
-    EWowAnimState NewState = DetermineLocalPlayerState(PlayerCharacter, bWalking);
-
-    // Handle jump sequence for local player
-    UCharacterMovementComponent* Movement = PlayerCharacter->GetCharacterMovement();
-    if (Movement)
-    {
-        if (Movement->IsFalling() && CurrentState != EWowAnimState::Falling)
-        {
-            if (Movement->Velocity.Z > 0)
-            {
-                // Starting a jump
-                NewState = EWowAnimState::Jumping;
-                if (!bInJumpSequence) JumpStartTime = FPlatformTime::Seconds();
-                bInJumpSequence = true;
-            }
-            else
-            {
-                // Just falling
-                NewState = EWowAnimState::Falling;
-            }
-        }
-        else if (!Movement->IsFalling() && bInJumpSequence)
-        {
-            // Landed
-            bInJumpSequence = false;
-            NewState = DetermineLocalPlayerState(PlayerCharacter, bWalking);
-            if (PlayAnimationById(EWowAnimId::JumpEnd, false)) return;
-        }
-    }
-
-    if (NewState != CurrentState || bOneShotFinished)
-    {
-        SetAnimationState(NewState, bOneShotFinished);
-    }
-    if (NewState == EWowAnimState::Jumping && FPlatformTime::Seconds() - JumpStartTime > 0.2)
+    if (bAirborne == bWasAirborne && IsPlayingOneShot()) return;
+    const bool bFinished = bPlayingOneShot;
+    if (NewState != CurrentState || bFinished)
+        SetAnimationState(NewState, bFinished);
+    if (NewState == EWowAnimState::Jumping && RuntimeInstance &&
+        RuntimeInstance->GetM2AnimationId() == int32(EWowAnimId::JumpStart) &&
+        (bDescending || RuntimeInstance->GetM2Time() >= RuntimeInstance->GetM2Duration()))
         PlayAnimationById(EWowAnimId::Jump, true);
+}
+
+void UWowAnimationController::UpdateLocalPlayerState(ACharacter* PlayerCharacter, bool bWalking, bool bInCombat)
+{
+    if (!IsInitialized() || !PlayerCharacter) return;
+    EWowAnimState NewState = DetermineLocalPlayerState(PlayerCharacter, bWalking);
+    if (NewState == EWowAnimState::Idle && bInCombat) NewState = EWowAnimState::Combat;
+    UpdateLocomotion(NewState, PlayerCharacter->GetVelocity().Z <= 0.f);
     if (RuntimeInstance && (NewState == EWowAnimState::Walking || NewState == EWowAnimState::Running))
         RuntimeInstance->SetM2MovementSpeed(PlayerCharacter->GetVelocity().Size2D() / 100.0f, MeshComponent->GetComponentScale().GetAbsMax());
 }
@@ -237,14 +178,14 @@ EWowAnimState UWowAnimationController::DetermineAnimationState(const FWowMovemen
     }
 
     // Check for jumping/falling
-    if (MovementInfo.MoveFlags & WowMovementFlags::JUMPING)
+    if (MovementInfo.MoveFlags & WowMovementFlags::FALLING_FAR)
     {
-        return EWowAnimState::Jumping;
+        return EWowAnimState::Falling;
     }
 
     if (MovementInfo.MoveFlags & WowMovementFlags::FALLING)
     {
-        return EWowAnimState::Falling;
+        return EWowAnimState::Jumping;
     }
 
     // Check for movement
@@ -294,7 +235,8 @@ EWowAnimState UWowAnimationController::DetermineLocalPlayerState(ACharacter* Pla
     // Check if falling
     if (Movement->IsFalling())
     {
-        if (Movement->Velocity.Z > 0)
+        // Stay in the jump until contact, or until descent exceeds a level-ground jump.
+        if (Movement->Velocity.Z > 0 || (CurrentState == EWowAnimState::Jumping && Movement->Velocity.Z >= -Movement->JumpZVelocity))
         {
             return EWowAnimState::Jumping;
         }
@@ -343,7 +285,7 @@ EWowAnimId UWowAnimationController::GetAnimationForState(EWowAnimState State) co
         case EWowAnimState::Falling:
             return EWowAnimId::Fall;
         case EWowAnimState::Combat:
-            return EWowAnimId::ReadyUnarmed;
+            return CombatReady;
         case EWowAnimState::Casting:
             return EWowAnimId::ReadySpellDirected;
         case EWowAnimState::Channeling:
@@ -550,6 +492,12 @@ void UWowAnimationController::StopSpellAnimation(bool bImmediate)
     else PlayAnimationById(EWowAnimId::Stand,true);
 }
 
+bool UWowAnimationController::IsPlayingOneShot() const
+{
+    if (!bPlayingOneShot || FPlatformTime::Seconds() >= OneShotEndTime) return false;
+    return !RuntimeInstance || RuntimeInstance->GetM2Time() < RuntimeInstance->GetM2Duration();
+}
+
 bool UWowAnimationController::PlayAnimationById(EWowAnimId AnimId, bool bLooping)
 {
     if (!MeshComponent) return false;
@@ -565,6 +513,17 @@ bool UWowAnimationController::PlayAnimationById(EWowAnimId AnimId, bool bLooping
             case EWowAnimId::Run: bStarted = RuntimeInstance->PlayM2Animation(4, bLooping); break;
             case EWowAnimId::Fall:
             case EWowAnimId::JumpStart: bStarted = RuntimeInstance->PlayM2Animation(38, bLooping); break;
+            case EWowAnimId::Ready1H:
+            case EWowAnimId::Ready2H:
+            case EWowAnimId::Ready2HL:
+            case EWowAnimId::ReadyUnarmed:
+            {
+                // 12340 AnimationData: weapon stances fall back to ReadyUnarmed (25), then Stand (0).
+                if (AnimId != EWowAnimId::ReadyUnarmed)
+                    bStarted = RuntimeInstance->PlayM2Animation(int32(EWowAnimId::ReadyUnarmed),bLooping);
+                if (!bStarted) bStarted = RuntimeInstance->PlayM2Animation(int32(EWowAnimId::Stand),bLooping);
+                break;
+            }
             default: break;
             }
         }
@@ -700,20 +659,47 @@ bool UWowAnimationController::PlayAnimationById(EWowAnimId AnimId, bool bLooping
     return true;
 }
 
-bool UWowAnimationController::PlayAttackAnimation()
+void UWowAnimationController::SetCombatReadyAnimation(EWowAnimId Ready)
 {
-    // Try attack animations in order of preference until one succeeds
-    if (PlayAnimationById(EWowAnimId::Attack1H, false)) return true;
-    if (PlayAnimationById(EWowAnimId::AttackUnarmed, false)) return true;
-    if (PlayAnimationById(EWowAnimId::Attack2H, false)) return true;
-    if (PlayAnimationById(EWowAnimId::Spell, false)) return true;
+    if (CombatReady == Ready) return;
+    CombatReady = Ready;
+    if (CurrentState == EWowAnimState::Combat && !IsPlayingOneShot()) SetAnimationState(CurrentState, true);
+}
 
-    UE_LOG(LogWowAnim, Warning, TEXT("PlayAttackAnimation: No attack animations available"));
-    return false;
+bool UWowAnimationController::PlayAttackAnimation(EWowAnimId WeaponAttack)
+{
+    if (CurrentState == EWowAnimState::Dead) return false;
+    if (PlayAnimationById(WeaponAttack, false)) return true;
+    if (WeaponAttack != EWowAnimId::AttackUnarmed && PlayAnimationById(EWowAnimId::AttackUnarmed, false)) return true;
+    return WeaponAttack != EWowAnimId::Attack1H && PlayAnimationById(EWowAnimId::Attack1H, false);
+}
+
+void UWowAnimationController::UpdateDeathPose()
+{
+    if (!IsInitialized()) return;
+    if (CurrentState != EWowAnimState::Dead)
+    {
+        CurrentState = EWowAnimState::Dead;
+        bJumpAirborne = false;
+        if (!PlayAnimationById(EWowAnimId::Death, false)) PlayAnimationById(EWowAnimId::Dead, true);
+    }
+    else if (RuntimeInstance && RuntimeInstance->GetM2AnimationId() == int32(EWowAnimId::Death) &&
+             RuntimeInstance->GetM2Time() >= RuntimeInstance->GetM2Duration() && bPlayingOneShot)
+    {
+        // Models like the timber wolf have no Dead sequence. Their final Death key is the corpse pose.
+        bPlayingOneShot = false;
+        PlayAnimationById(EWowAnimId::Dead, true);
+    }
+}
+
+void UWowAnimationController::RestoreLivingPose()
+{
+    if (CurrentState == EWowAnimState::Dead) SetAnimationState(EWowAnimState::Idle, true);
 }
 
 bool UWowAnimationController::PlayWoundAnimation()
 {
+    if (CurrentState == EWowAnimState::Dead || IsPlayingOneShot()) return false;
     // Try wound animations in order of preference until one succeeds
     if (PlayAnimationById(EWowAnimId::CombatWound, false)) return true;
     if (PlayAnimationById(EWowAnimId::StandWound, false)) return true;

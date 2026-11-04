@@ -995,8 +995,9 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
             if (M2Data->HasAnimationData())
             {
                 UWowAnimationController* AnimController = NewObject<UWowAnimationController>(Actor, TEXT("WowAnimationController"));
+                Actor->AddInstanceComponent(AnimController);
+                AnimController->RegisterComponent();
                 AnimController->InitializeRuntime(SkelMesh, M2Data);
-                Actor->Tags.Add(FName(TEXT("HasWowAnimController")));
             }
             UE_LOG(LogWowCharacter, Log, TEXT("Spawned skeletal M2 actor: %s at %s (scale=%.2f, %d bones, %d anims)"),
                 *ModelPath, *Location.ToString(), Scale, M2Data->Bones.Num(), M2Data->AnimationTracks.Num());
@@ -1063,14 +1064,5 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
 
 UWowAnimationController* FWowCharacterBuilder::GetAnimationController(AActor* CharacterActor)
 {
-    if (!CharacterActor) return nullptr;
-
-    // Check if this actor has an animation controller
-    if (!CharacterActor->Tags.Contains(FName(TEXT("HasWowAnimController"))))
-    {
-        return nullptr;
-    }
-
-    // Find the animation controller by name
-    return FindObject<UWowAnimationController>(CharacterActor, TEXT("WowAnimationController"));
+    return CharacterActor ? CharacterActor->FindComponentByClass<UWowAnimationController>() : nullptr;
 }

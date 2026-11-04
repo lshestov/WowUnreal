@@ -13,6 +13,8 @@ class USlider;
 class UWowMultiLineEditBox;
 class UTextBlock;
 class FWowEventSystem;
+class UWowConnectionManager;
+struct FAuraInfo;
 class FWowFontManager;
 class FMpqManager;
 class FWowAssetCache;
@@ -325,6 +327,8 @@ public:
 		float TimeVisible=120,FadeDuration=3;
 		FString FontPath;
 		float FontHeight=0,AppliedFontScale=0;
+		FVector2D ShadowOffset=FVector2D::ZeroVector;
+		FLinearColor ShadowColor=FLinearColor::Black;
 	};
 	TMap<int64,FMessageState> MessageFrames;
 	void SetMessageFont(int64 Handle, const FString& Path, float Height);
@@ -405,6 +409,7 @@ private:
 	TMap<int64, FTooltipState> TooltipStates;
 
 	FWowEventSystem* EventSystem = nullptr;
+    TWeakObjectPtr<UWowConnectionManager> SpellSource;
 	FWowFontManager* FontManager = nullptr;
 	FMpqManager* MpqManager = nullptr;
 	FWowAssetCache* AssetCache = nullptr;
@@ -474,7 +479,9 @@ public:
 	void TooltipSetText(int64 TooltipHandle, const FString& Text);
 	void TooltipAppendText(int64 TooltipHandle, const FString& Text);
 	void TooltipSetItem(int64 TooltipHandle, const FString& ItemLink);
-	void TooltipSetSpell(int64 TooltipHandle, int32 SpellId,int32 Level=1,bool Aura=false);
+	void TooltipSetSpell(int64 TooltipHandle,int32 SpellId,int32 Level=1,bool Aura=false,const FAuraInfo* Applied=nullptr);
+    void SetSpellSource(UWowConnectionManager* Source);
+    FString DescribeSpell(int32 SpellId,int32 Level,bool Aura=false,const FAuraInfo* Applied=nullptr) const;
 	void TooltipSetUnit(int64 TooltipHandle, const FString& UnitToken);
 	void TooltipUpdateDisplay(int64 TooltipHandle);
 	FTooltipState* GetTooltipState(int64 TooltipHandle);
@@ -500,6 +507,7 @@ private:
 		float Width, Height;
 		bool bAllPoints;
 		bool bUnanchored=false; // Explicit ClearAllPoints; distinct from XML's implicit owner layout.
+        bool bNativeTooltipRow=false;
 	};
 	TArray<FRegionLayout> RegionLayouts;
 	TSet<FString> UnanchoredRegions;

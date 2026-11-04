@@ -129,9 +129,9 @@ void WowLuaApi::RegisterLootApi(lua_State* L)
         if(Coin(C,Index))
         {
             const uint32 Money=Handler(C)->Loot.Gold;
-            const FString Icon=Money>=10000?TEXT("Interface\\MoneyFrame\\UI-GoldIcon"):Money>=100?TEXT("Interface\\MoneyFrame\\UI-SilverIcon"):TEXT("Interface\\MoneyFrame\\UI-CopperIcon");
             const FString Text=MoneyText(S,Money);
-            lua_pushstring(S,TCHAR_TO_UTF8(*Icon)); lua_pushstring(S,TCHAR_TO_UTF8(*Text)); lua_pushinteger(S,1); lua_pushinteger(S,1); lua_pushboolean(S,0); return 5;
+            lua_pushstring(S,TCHAR_TO_UTF8(*CoinIcon(Money)));
+            lua_pushstring(S,TCHAR_TO_UTF8(*Text)); lua_pushinteger(S,1); lua_pushinteger(S,1); lua_pushboolean(S,0); return 5;
         }
         if(!I) {lua_pushnil(S); return 1;} const auto* T=QueryItemTemplate(C,I->ItemId);
         lua_pushstring(S,TCHAR_TO_UTF8(*ItemIconForUi(C,I->ItemId,I->DisplayId))); lua_pushstring(S,TCHAR_TO_UTF8(*(T?T->Name:Global(S,"RETRIEVING_ITEM_INFO"))));

@@ -1,5 +1,6 @@
 #pragma once
 #include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
 #include "WowEntity.h"
 #include "WowAnimationController.generated.h"
 
@@ -92,6 +93,7 @@ enum class EWowAnimId : uint8
     SitChair = 70,          // Sit on chair
     Sleep = 71,             // Sleeping
     Kneel = 72,             // Kneeling
+    AttackOffhand = 87,
     Dance = 109,            // Dance emote
     EmoteBow = 115,         // Bow emote
     FlyRun = 147,           // Flying run
@@ -144,7 +146,7 @@ namespace WowMovementFlags
     static constexpr uint32 PITCH_UP = 0x00000040;
     static constexpr uint32 PITCH_DOWN = 0x00000080;
     static constexpr uint32 WALK_MODE = 0x00000100;
-    static constexpr uint32 JUMPING = 0x00002000;
+    static constexpr uint32 FALLING_FAR = 0x00002000;
 }
 
 /**
@@ -153,7 +155,7 @@ namespace WowMovementFlags
  * movement state, combat state, and other entity conditions.
  */
 UCLASS(BlueprintType)
-class WOWASSETS_API UWowAnimationController : public UObject
+class WOWASSETS_API UWowAnimationController : public UActorComponent
 {
     GENERATED_BODY()
 
@@ -183,7 +185,7 @@ public:
      * Translates UE5 movement component state to WoW animation state.
      */
     UFUNCTION(BlueprintCallable)
-    void UpdateLocalPlayerState(class ACharacter* PlayerCharacter, bool bWalking = false);
+    void UpdateLocalPlayerState(class ACharacter* PlayerCharacter, bool bWalking = false, bool bInCombat = false);
 
     /**
      * Play a specific animation by M2 animation ID.
@@ -205,11 +207,14 @@ public:
 
     /**
      * Play attack animation with fallback chain.
-     * Tries Attack1H -> AttackUnarmed -> Attack2H -> Spell
+     * Uses the equipped weapon sequence, with an unarmed fallback for creature models.
      * Returns true if any animation was successfully played.
      */
     UFUNCTION(BlueprintCallable)
-    bool PlayAttackAnimation();
+    bool PlayAttackAnimation(EWowAnimId WeaponAttack = EWowAnimId::AttackUnarmed);
+    void SetCombatReadyAnimation(EWowAnimId Ready);
+    void UpdateDeathPose();
+    void RestoreLivingPose();
 
     /**
      * Play wound animation with fallback chain.
@@ -236,7 +241,7 @@ public:
      * State machine updates should be skipped while this returns true.
      */
     UFUNCTION(BlueprintCallable, BlueprintPure)
-    bool IsPlayingOneShot() const { return bPlayingOneShot && FPlatformTime::Seconds() < OneShotEndTime; }
+    bool IsPlayingOneShot() const;
 
     /**
      * Get the animation cache for copying to another controller.
@@ -277,14 +282,15 @@ protected:
     TObjectPtr<UAnimSequence> CurrentAnimation;
 
     /** Jump sequence tracking */
-    double JumpStartTime = 0.0;
-    bool bInJumpSequence = false;
+    bool bJumpAirborne = false;
+    EWowAnimId CombatReady = EWowAnimId::ReadyUnarmed;
 
     /** One-shot animation lock — prevents state machine from overriding non-looping anims */
     double OneShotEndTime = 0.0;
     bool bPlayingOneShot = false;
 
 private:
+    void UpdateLocomotion(EWowAnimState NewState, bool bDescending = false);
     bool bServerSpellPose=false;
     uint32 ServerSpellId=0;
     uint8 ServerSpellCounter=0;

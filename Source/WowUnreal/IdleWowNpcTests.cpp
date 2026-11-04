@@ -2,6 +2,8 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Engine/SkeletalMesh.h"
+#include "Rendering/SkeletalMeshRenderData.h"
+#include "Coord/WowCoordinate.h"
 #include "Engine/Texture2D.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Materials/MaterialInterface.h"
@@ -113,6 +115,9 @@ bool FIdleWowNpcModels::RunTest(const FString& Parameters)
     if (!TestTrue(TEXT("Existing local MPQ data opens"), Mpq.Initialize(DataPath))) return false;
     auto& Dbc = FDbcStore::Get();
     Dbc.LoadAll(Mpq); Dbc.LoadDeferred(Mpq);
+    TestEqual(TEXT("Bent Staff uses the original long two-handed swing"),int32(Dbc.ItemUi().MeleeSequences(35).Attack),19);
+    TestEqual(TEXT("Battleworn Hammer uses the original two-handed swing"),int32(Dbc.ItemUi().MeleeSequences(2361).Attack),18);
+    TestEqual(TEXT("Worn Shortsword uses the original one-handed swing"),int32(Dbc.ItemUi().MeleeSequences(25).Attack),17);
     FWowAssetCache Cache;
     UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
     GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
@@ -135,6 +140,17 @@ bool FIdleWowNpcModels::RunTest(const FString& Parameters)
         TestTrue(TEXT("NPC section has a resolved skin texture"), Mesh->GetMaterial(0)->GetTextureParameterValue(FMaterialParameterInfo(TEXT("BaseTexture")), Texture) && Texture);
         if (Display == 31048)
         {
+            TestTrue(TEXT("Northshire wolf uses the original small display on the full-sized Wolf M2"),
+                FMath::IsNearlyEqual(double(Mesh->GetComponentScale().Z), .55, .001));
+            const auto* Render = Mesh->GetSkeletalMeshAsset()->GetResourceForRendering();
+            if (Render && !Render->LODRenderData.IsEmpty())
+            {
+                const auto& Positions = Render->LODRenderData[0].StaticVertexBuffers.PositionVertexBuffer;
+                FBox Bounds(ForceInit);
+                if (Positions.GetVertexData()) for (uint32 I = 0; I < Positions.GetNumVertices(); ++I) Bounds += FVector(Positions.VertexPosition(I));
+                TestTrue(TEXT("Visible wolf stands about one yard tall in reference pose"), Bounds.IsValid &&
+                    FMath::IsNearlyEqual(Bounds.GetSize().Z * Mesh->GetComponentScale().Z / FWowCoordinate::SCALE, 1.03, .03));
+            }
             TestEqual(TEXT("Diseased wolf has separate fur and body layers"), Mesh->GetNumMaterials(), 2);
             const TCHAR* Expected[] = {TEXT("WolfSkinDiseasedAlpha.blp"), TEXT("WolfSkinDiseased.blp")};
             for (int32 Slot = 0; Slot < UE_ARRAY_COUNT(Expected); ++Slot)
@@ -151,7 +167,33 @@ bool FIdleWowNpcModels::RunTest(const FString& Parameters)
         }
         auto* Controller = FWowCharacterBuilder::GetAnimationController(Actor);
         if (!TestNotNull(TEXT("NPC native animation controller"), Controller)) continue;
+        TestTrue(TEXT("The actor owns the controller across garbage collection"),Actor->GetInstanceComponents().Contains(Controller));
         TestTrue(TEXT("NPC has an available walking clip"), Controller->PlayAnimationById(EWowAnimId::Walk));
+        if (Display==31048)
+        {
+            auto* Runtime=Controller->GetRuntimeInstance();
+            FWowMovementInfo Stationary;
+            Controller->UpdateAnimationState(Stationary,true);
+            TestEqual(TEXT("Wolf without ReadyUnarmed uses the authored Stand in combat"),Runtime->GetM2AnimationId(),0);
+            TestTrue(TEXT("Wolf can bite from the fallback stance"),Controller->PlayAttackAnimation());
+            TestEqual(TEXT("Bite uses the creature's unarmed clip"),Runtime->GetM2AnimationId(),16);
+            Runtime->NativeUpdateAnimation(Runtime->GetM2Duration());
+            Controller->UpdateAnimationState(Stationary,true);
+            TestEqual(TEXT("Wolf resumes Stand when the bite ends, while combat is still active"),Runtime->GetM2AnimationId(),0);
+            Controller->PlayAnimationById(EWowAnimId::Walk);
+            TArray<FTransform> Walking,Corpse;
+            Runtime->SampleLocalPose(Walking);
+            Controller->UpdateDeathPose();
+            Runtime->NativeUpdateAnimation(Runtime->GetM2Duration()+1.f);
+            Controller->UpdateDeathPose();
+            Runtime->SampleLocalPose(Corpse);
+            TestEqual(TEXT("Wolf holds its authored Death clip"), Runtime->GetM2AnimationId(),1);
+            TestEqual(TEXT("Wolf corpse stays on the final sample"), Runtime->GetM2Time(),Runtime->GetM2Duration());
+            int32 Changed=0;
+            for (int32 I=0;I<FMath::Min(Walking.Num(),Corpse.Num());++I)
+                if (!Walking[I].Equals(Corpse[I],.01)) ++Changed;
+            TestTrue(TEXT("Death changes the actual wolf skeleton"),Changed>2);
+        }
         if (const auto* Info = Dbc.CreatureDisplayInfo().GetById(Display))
         {
             if (Info->ExtendedDisplayInfoID)

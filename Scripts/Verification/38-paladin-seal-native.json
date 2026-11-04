@@ -1,0 +1,98 @@
+{
+  "qaClass": 2,
+  "qaLevel": 20,
+  "qaSpells": [
+    21084,
+    465
+  ],
+  "qaGm": false,
+  "width": 1280,
+  "height": 900,
+  "steps": [
+    {
+      "op": "wait_world",
+      "timeout": 180
+    },
+    {
+      "op": "wait_floor",
+      "timeout": 90
+    },
+    {
+      "op": "lua",
+      "code": "function QASealIndex(id) for i=1,40 do local name,_,_,_,_,_,_,_,_,_,spell=UnitBuff('player',i); if not name then return end; if spell==id then return i end end end\nfunction QASealTooltip() local t={}; for i=1,GameTooltip:NumLines() do local line=_G['GameTooltipTextLeft'..i]; if line then t[#t+1]=line:GetText() or '' end end; return table.concat(t,' ') end\nassert(UnitClass('player')=='Paladin'); assert(GetCVar('buffDurations')=='1' and SHOW_BUFF_DURATIONS=='1','default aura timers disabled'); CastSpellByID(21084,'player')"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "QASealIndex(21084) ~= nil",
+      "timeout": 12
+    },
+    {
+      "op": "lua",
+      "code": "local i=QASealIndex(21084); local _,_,_,_,_,duration,expires=UnitBuff('player',i); assert(duration==1800 and expires-GetTime()>1780 and expires-GetTime()<=1800); QASealButton='BuffButton'..i; local base,pos,neg=UnitAttackPower('player'); local holy=GetSpellBonusDamage(2); QAPaladinDamage=math.floor(UnitAttackSpeed('player')*(0.022*(base+pos+neg)+0.044*holy)); QAPaladinJudgement=math.floor(1+0.2*(base+pos+neg)+0.32*holy)"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "_G[QASealButton] and _G[QASealButton].duration and _G[QASealButton].duration:IsShown() and (_G[QASealButton].duration:GetText() or ''):find('30')",
+      "timeout": 6
+    },
+    {
+      "op": "hover_frame",
+      "nameFromGlobal": "QASealButton"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "GameTooltip:IsVisible() and QASealTooltip():find('remaining',1,true) and QASealTooltip():find(QAPaladinDamage..' Holy damage',1,true) and not QASealTooltip():find('$',1,true)",
+      "timeout": 5
+    },
+    {
+      "op": "lua",
+      "code": "local n=GameTooltip:NumLines(); local desc=_G['GameTooltipTextLeft'..(n-1)]; local timer=_G['GameTooltipTextLeft'..n]; assert(desc:GetBottom()>=timer:GetTop()-.1,'aura timer overlaps description'); assert(timer:GetBottom()>=GameTooltip:GetBottom()+3,'aura timer touches border')"
+    },
+    {
+      "op": "capture",
+      "name": "seal-duration-and-aura-tooltip"
+    },
+    {
+      "op": "lua",
+      "code": "SetCVar('buffDurations','0')"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "not _G[QASealButton].duration:IsShown()",
+      "timeout": 6
+    },
+    {
+      "op": "lua",
+      "code": "SetCVar('buffDurations','1'); local slot; for tab=1,GetNumSpellTabs() do local _,_,offset,count=GetSpellTabInfo(tab); for i=offset+1,offset+count do if GetSpellName(i,BOOKTYPE_SPELL)==GetSpellInfo(21084) then slot=i end end end; assert(slot,'seal missing from spellbook'); GameTooltip:SetOwner(UIParent,'ANCHOR_NONE'); GameTooltip:ClearAllPoints(); GameTooltip:SetPoint('CENTER',UIParent,'CENTER',0,50); GameTooltip:SetSpell(slot,BOOKTYPE_SPELL); local text=QASealTooltip(); assert(text:find('30 min',1,true) and text:find(QAPaladinDamage..' additional Holy damage',1,true) and not text:find('$',1,true),text); GameTooltip:SetSpellByID(21084); assert(QASealTooltip():find(QAPaladinJudgement..' Holy damage',1,true),QASealTooltip())"
+    },
+    {
+      "op": "lua",
+      "code": "local body=_G['GameTooltipTextLeft'..GameTooltip:NumLines()]; assert(body:GetBottom()>=GameTooltip:GetBottom()+3,'spellbook description touches bottom border')"
+    },
+    {
+      "op": "capture",
+      "name": "seal-spellbook-calculated-damage"
+    },
+    {
+      "op": "lua",
+      "code": "GameTooltip:Hide(); PickupSpell(21084); PlaceAction(12); ClearCursor(); assert(select(2,GetActionInfo(12))==21084); GameTooltip:SetOwner(ActionButton12,'ANCHOR_RIGHT'); GameTooltip:SetAction(12); assert(QASealTooltip():find(QAPaladinDamage..' additional Holy damage',1,true) and not QASealTooltip():find('$',1,true),QASealTooltip()); GameTooltip:Hide()"
+    },
+    {
+      "op": "wait",
+      "seconds": 1.7
+    },
+    {
+      "op": "lua",
+      "code": "GameTooltip:Hide(); CastSpellByID(465,'player')"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "QASealIndex(465) ~= nil",
+      "timeout": 12
+    },
+    {
+      "op": "lua",
+      "code": "local i=QASealIndex(465); local _,_,_,_,_,duration,expires=UnitBuff('player',i); assert(duration==0 and expires==0); GameTooltip:SetOwner(UIParent,'ANCHOR_NONE'); GameTooltip:SetUnitBuff('player',i); local t=QASealTooltip(); assert(t:find('armor',1,true) and not t:find('remaining',1,true) and not t:find('$',1,true),t); assert(not _G['BuffButton'..i].duration:IsShown()); GameTooltip:Hide()"
+    }
+  ]
+}

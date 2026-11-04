@@ -248,6 +248,7 @@ bool FHudStockChatFont::RunTest(const FString&)
     if (!TestTrue(TEXT("An actual scrolling-message row is present"), State && !State->Widgets.IsEmpty() && State->Widgets[0].IsValid())) return false;
     const auto* Row=State->Widgets[0].Get();
     TestEqual(TEXT("The visible row uses the extracted narrow typeface"), Row->GetFont().TypefaceFontName, FName(TEXT("ARIALN")));
+    TestTrue(TEXT("ChatFontNormal's one-pixel shadow reaches real chat rows"), Row->GetShadowOffset().Equals(FVector2D(1,1)) && Row->GetShadowColorAndOpacity()==FLinearColor::Black);
     TestTrue(TEXT("Fourteen native pixels keep their exact size in Slate points"), Row->GetFont().Size==10.5f);
     F.Lua.ExecuteString(TEXT("local file,_,flags=StockChatProbe:GetFont(); StockChatProbe:SetFont(file,20,flags)"));
     TestTrue(TEXT("Changing chat font size also updates a line already on screen"), Row->GetFont().TypefaceFontName==FName(TEXT("ARIALN")) && Row->GetFont().Size==15);
@@ -562,6 +563,7 @@ bool FHudLootState::RunTest(const FString&)
         local groups={GetChatWindowMessages(1)}; local found={}; for _,group in ipairs(groups) do found[group]=true end; assert(found.LOOT and found.MONEY and found.ACHIEVEMENT and found.GUILD_ACHIEVEMENT)
         assert(GetCVarDefault('lastTalkedToGM')==''); SetCVar('lastTalkedToGM','0'); assert(GetCVar('lastTalkedToGM')==''); SetCVar('lastTalkedToGM','')
         assert(GetNumLootItems()==3 and LootSlotIsCoin(1) and LootSlotIsItem(2) and GetLootSlotType(1)==2)
+        local coin=GetLootSlotInfo(1); assert(coin==GetCoinIcon(19) and coin:find('INV_Misc_Coin_06',1,true))
         local icon,name,count,quality,locked=GetLootSlotInfo(2); assert(name=='Moss Agate' and count==3 and quality==2 and not locked)
         assert(select(5,GetLootSlotInfo(3)) and GetLootSlotInfo(4)==nil)
         assert(GetLootSlotLink(2):find(':-9:33:0|h',1,true))
@@ -2399,10 +2401,49 @@ bool FHudCombatFamilies::RunTest(const FString&)
     FString Path; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false; FMpqManager Mpq; if(!Mpq.Initialize(Path)) return false;
     auto& Dbc=FDbcStore::Get(); if(!Dbc.IsLoaded()) Dbc.LoadAll(Mpq); if(!Dbc.IsDeferredLoaded()) Dbc.LoadDeferred(Mpq);
     const FString Renew=Dbc.Spells().Description(139,20); TestTrue(TEXT("Named description variables resolve before numeric formulas"),Renew.Contains(TEXT("45")) && !Renew.Contains(TEXT("$<")));
+    FSpellTextStats Paladin;
+    Paladin.AttackPower=101; Paladin.HolyPower=50; Paladin.WeaponSpeed=2.5;
+    Paladin.WeaponMin=45; Paladin.WeaponMax=65;
+    const auto& Spells=Dbc.Spells();
+    const auto* Seal=Spells.GetById(21084);
+    if(!TestNotNull(TEXT("The 12340 seal exists"),Seal)) return false;
+    TestEqual(TEXT("The 12340 Seal of Righteousness lasts 30 minutes"),Spells.Duration(Seal->DurationIndex),1800.f,.001f);
+    const FString Book=Spells.Description(21084,20,false,Paladin);
+    TestTrue(TEXT("Book resolves weapon speed, holy power, attack power and referenced duration"),Book.Contains(TEXT("30 min")) && Book.Contains(TEXT("11 additional Holy damage")) && Book.Contains(TEXT("37 Holy damage")) && !Book.Contains(TEXT("$")));
+    TestTrue(TEXT("Aura uses its own description and the same combat stats"),Spells.Description(20154,20,true,Paladin).Contains(TEXT("11 Holy damage")));
+    TestTrue(TEXT("Exorcism's low and high effects retain the real damage range"),Spells.Description(879,20,false,Paladin).Contains(TEXT("118 to 132 Holy damage")));
+    TestFalse(TEXT("Judgement resolves nested weapon-hand conditionals"),Spells.Description(20187,20,false,Paladin).Contains(TEXT("$")));
+    FSpellTextStats Unknown=Paladin; Unknown.bKnown=false;
+    TestTrue(TEXT("An aura without the caster's attack stats does not display the local player's damage"),Spells.Description(20154,20,true,Unknown).Contains(TEXT("? Holy damage")));
+    TestTrue(TEXT("Periodic Fireball aura uses the tick effect while the spell shows the rolled direct damage range"),Spells.Description(133,1,true).Contains(TEXT("1 Fire damage every 2 seconds")) && Spells.Description(133,1).Contains(TEXT("14 to 22 Fire damage")));
+    TestTrue(TEXT("Duration inside Volley's arithmetic remains numeric"),Spells.Description(1510,40).Contains(TEXT("1.00 second")));
+    const auto* Devotion=Spells.GetById(465);
+    TestTrue(TEXT("Permanent Devotion Aura has a radius and no finite duration"),Devotion && Spells.Duration(Devotion->DurationIndex)<0 && Spells.Description(465,20).Contains(TEXT("40 yards")));
     FHudFixture F; TStrongObjectPtr<UWowConnectionManager> C(NewObject<UWowConnectionManager>()); auto& H=C->PacketHandler;
     F.Context.ConnectionManager=C.Get(); F.Context.EntityManager=&H.EntityManager; H.EntityManager.LocalPlayerGuid=1;
     H.EntityManager.PromoteToTyped(1,WowTypeMask::PLAYER|WowTypeMask::UNIT).SetField(UnitField::HEALTH,100);
     const uint64 Victim=0xf130000005000001ULL; H.EntityManager.PromoteToTyped(Victim,WowTypeMask::UNIT).SetField(UnitField::HEALTH,100);
+    TestTrue(TEXT("Create the wrapped spell and aura-time rows of a GameTooltip"),F.Lua.ExecuteString(TEXT(R"LUA(
+        CombatTip=CreateFrame('GameTooltip','CombatTip',UIParent)
+        CombatTip:SetOwner(UIParent,'ANCHOR_NONE')
+        CombatTip:SetPoint('CENTER')
+        local icon=CombatTip:CreateTexture('CombatTipQuestBadge','OVERLAY')
+        icon:SetTexture(1,1,1); icon:SetSize(9,9); icon:SetPoint('TOPRIGHT',CombatTip,'TOPRIGHT',-4,-4)
+        CombatTip:AddLine('Seal of Righteousness')
+        CombatTip:AddLine('Melee attacks cause an additional 7 Holy damage. '..string.rep('Spell description. ',12),1,.82,0,true)
+        CombatTip:AddLine('30 minutes remaining')
+        CombatTip:Show()
+    )LUA")));
+    F.Frames.RefreshLayout();
+    const auto BodyRect=F.Frames.GetRegionRect(TEXT("CombatTipTextLeft2"));
+    const auto TimeRect=F.Frames.GetRegionRect(TEXT("CombatTipTextLeft3"));
+    const auto TipRect=F.Frames.GetLayoutRect(F.Frames.FindFrame(TEXT("CombatTip")));
+    TestTrue(TEXT("Wrapped tooltip reserves more than one line before the aura timer"),
+        TimeRect.W>0 && BodyRect.W>=2*TimeRect.W && BodyRect.Y+BodyRect.W<=TimeRect.Y+.01 &&
+        TimeRect.Y+TimeRect.W+4<=TipRect.Y+TipRect.W);
+    const auto BadgeRect=F.Frames.GetRegionRect(TEXT("CombatTipQuestBadge"));
+    TestTrue(TEXT("A tooltip addon's own texture keeps its anchor after the native rows resize"),
+        FMath::IsNearlyEqual(BadgeRect.X+BadgeRect.Z,TipRect.X+TipRect.Z-4,.01));
     H.PlayerNameCache.Add(1,TEXT("Main")); H.CreatureNameCache.Add(5,TEXT("Wolf"));
     H.OnResolveCombatFlags.BindLambda([&](uint64 Id){return WowLuaApi::CombatLogFlags(&F.Context,Id);});
     H.OnCombatLog.BindLambda([&](const FWowCombatEntry& E){FWowCombatLogUi::Dispatch(F.Lua.GetState(),E);});

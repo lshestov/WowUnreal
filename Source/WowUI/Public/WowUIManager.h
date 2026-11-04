@@ -51,6 +51,7 @@ public:
 
 	bool IsUILoaded() const { return bUILoaded; }
     bool HasSoftwareCursor() const;
+    void GetNpcOverheadSettings(bool& ShowNames, bool& TrackTrivial) const;
     FLinearColor GetUnitSelectionColor(uint64 Guid) const;
 
 	/** UI Window Management */

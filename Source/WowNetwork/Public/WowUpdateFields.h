@@ -104,6 +104,7 @@ namespace ContainerField
 namespace UnitField
 {
     inline constexpr uint16 BASE = ObjectField::END;
+    inline constexpr uint16 VIRTUAL_ITEM_SLOT_ID = BASE + 0x0032; // Creature main hand, off hand, ranged item entries
 
     inline constexpr uint16 CHARM                = BASE + 0x0000; // 2
     inline constexpr uint16 SUMMON               = BASE + 0x0002; // 2

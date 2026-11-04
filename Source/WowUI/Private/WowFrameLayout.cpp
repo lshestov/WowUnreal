@@ -153,8 +153,11 @@ FWowFrameManager::FFrameRect FWowFrameManager::GetFrameRect(const FString& Name)
         // callback. Resolve those regions from their definitions before reading
         // their slots, rather than using geometry from the previous frame.
         bool Anchored=true;
+        // Native tooltip rows already have measured slots. Reading a row via
+        // FontString:GetBottom must not restore its original XML anchors.
         if(Widget) for(const auto& Layout:RegionLayouts) if(Layout.Widget.Get()==Widget)
         {
+            if(Layout.bNativeTooltipRow) break;
             if(Layout.bUnanchored) { Anchored=false; break; }
             const float Scale=GetEffectiveFrameScale(FindFrame(*Owner));
             ApplyElementAnchors(Widget,nullptr,Layout.Anchors,Layout.Width,Layout.Height,Layout.bAllPoints,Parent.W/Scale,Parent.H/Scale);
@@ -358,6 +361,7 @@ void FWowFrameManager::RefreshSubtreeLayout(int64 Handle)
         for(const auto& S:SliderWidgets) if(Members.Contains(S.Key)) UpdateSliderThumb(S.Key);
         for(const auto& R:RegionLayouts) if(Members.Contains(FindFrame(R.Owner)) && R.Widget.IsValid())
         {
+            if(R.bNativeTooltipRow) continue;
             if(R.bUnanchored) {if(R.Widget->GetVisibility()!=ESlateVisibility::Collapsed) R.Widget->SetVisibility(ESlateVisibility::Hidden); continue;}
             const auto Owner=GetFrameRect(R.Owner); const float Scale=GetEffectiveFrameScale(FindFrame(R.Owner));
             ApplyElementAnchors(R.Widget.Get(),nullptr,R.Anchors,R.Width,R.Height,R.bAllPoints,Owner.W/Scale,Owner.H/Scale);
@@ -384,7 +388,7 @@ void FWowFrameManager::RefreshLayout()
         // Hidden addon panels can contain thousands of paragraphs. Measure
         // them lazily if a visible anchor actually references one, or on Show.
         if(!Region.Widget.IsValid() || !IsFrameDrawn(FindFrame(Region.Owner)) || Region.Widget->GetVisibility()==ESlateVisibility::Collapsed) continue;
-        if(const auto* OwnerDef=GetFrameDef(FindFrame(Region.Owner)); OwnerDef && OwnerDef->Type==EWowFrameType::GameTooltip) continue;
+        if(Region.bNativeTooltipRow) continue;
         const auto Owner = GetFrameRect(Region.Owner);
         const float Scale = GetEffectiveFrameScale(FindFrame(Region.Owner));
         if (Region.Widget.IsValid())

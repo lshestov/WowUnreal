@@ -22,11 +22,27 @@ void FWowUiDressUpPreview::TryOn(uint32 Id,uint32 Type)
     Overrides.Add(Slot,Id); if(Type==17) Overrides.Add(16,0); Dirty=true;
 }
 void FWowUiDressUpPreview::Dress(bool Dressed) { Undressed=!Dressed; Overrides.Empty(); Dirty=true; }
-bool FWowUiDressUpPreview::Rebuild(UWorld* World,FWowLuaContext& Context,FMpqManager* Mpq,FWowAssetCache* Cache)
+bool FWowUiDressUpPreview::Rebuild(UWorld* World,FWowLuaContext& Context,FMpqManager* Mpq,FWowAssetCache* Cache,bool Portrait)
 {
     if(Actor.IsValid() && Actor->GetWorld()!=World) ReleaseActor();
     if(!World || !Mpq || !Cache || !Context.EntityManager || !Context.ConnectionManager) return false;
-    const auto* Player=Context.EntityManager->FindPlayer(Guid); if(!Player) return false;
+    const auto* Unit=Context.EntityManager->FindUnit(Guid);
+    const auto* Player=Context.EntityManager->FindPlayer(Guid);
+    if(Portrait && Unit && (!Player || (Unit->GetNativeDisplayId() && Unit->GetNativeDisplayId()!=Unit->GetDisplayId())))
+    {
+        const uint32 Display=Unit->GetDisplayId();
+        if(!Dirty && Actor.IsValid() && SourceHash==Display) return true;
+        if(!Display) return false;
+        auto* Model=FWowCharacterBuilder::SpawnCreatureByDisplayId(World,Mpq,Cache,Display,FVector(0,0,-100000));
+        if(!Model) return false;
+        ReleaseActor();
+        Model->SetFlags(RF_Transient); Model->SetActorEnableCollision(false);
+        TInlineComponentArray<UMeshComponent*> Meshes; Model->GetComponents(Meshes);
+        for(auto* Mesh:Meshes) { Mesh->SetVisibleInSceneCaptureOnly(true); Mesh->SetCastShadow(false); }
+        Actor=Model; Dirty=false; SourceHash=Display;
+        return true;
+    }
+    if(!Player) return false;
     uint32 CurrentHash=HashCombine(GetTypeHash(Player->GetPlayerBytes()),GetTypeHash(Player->GetPlayerBytes2()));
     CurrentHash=HashCombine(CurrentHash,GetTypeHash(Player->GetRaceId()|(Player->GetGenderId()<<8)));
     for(int32 Slot=0;Slot<19;++Slot) {CurrentHash=HashCombine(CurrentHash,GetTypeHash(Player->GetEquipmentItemGuid(Slot))); CurrentHash=HashCombine(CurrentHash,GetTypeHash(Player->GetField(PlayerField::VISIBLE_ITEM_BASE+Slot*2)));}

@@ -120,6 +120,13 @@ bool FIdleWowWorldPickTest::RunTest(const FString& Parameters)
         Controller->TraceWorldUnit(FVector::ZeroVector,FVector(900,0,0)),Guid);
     TestEqual(TEXT("Click alongside the model finds no unit"),
         Controller->TraceWorldUnit(FVector(0,100,0),FVector(900,100,0)),uint64(0));
+    FWowUnitEntity Unit;
+    Unit.Guid=Guid; Unit.Scale=1.5f;
+    Controller->ApplyUnitScale(Controller->SpawnedEntityActors.FindRef(Guid),Unit);
+    auto* HitBox=Controller->SpawnedEntityActors.FindRef(Guid)->FindComponentByClass<UBoxComponent>();
+    TestTrue(TEXT("Server growth multiplies the existing selection geometry"), HitBox->GetScaledBoxExtent().Equals(FVector(75)));
+    Unit.Scale=1; Controller->ApplyUnitScale(Controller->SpawnedEntityActors.FindRef(Guid),Unit);
+    TestTrue(TEXT("Restoring scale uses the same original geometry"),HitBox->GetScaledBoxExtent().Equals(FVector(50)));
     Box(150,ECC_WorldStatic);
     TestEqual(TEXT("A wall in front of the same unit blocks selection"),
         Controller->TraceWorldUnit(FVector::ZeroVector,FVector(900,0,0)),uint64(0));
@@ -170,6 +177,7 @@ bool FIdleWowDeathLifetimeTest::RunTest(const FString& Parameters)
         Corpse->SetField(UnitField::HEALTH, 50);
         Entities.OnEntityUpdated.Broadcast(*Corpse);
         TestEqual(TEXT("Server can restore health on the same entity"), Corpse->GetHealth(), 50);
+        TestFalse(TEXT("Resurrection clears the death marker before the next mesh tick"), Controller->DeadEntityGuids.Contains(NpcGuid));
     }
     Npc.SetField(UnitField::HEALTH,0); Entities.OnEntityUpdated.Broadcast(Npc);
     Controller->TargetGuid=NpcGuid;

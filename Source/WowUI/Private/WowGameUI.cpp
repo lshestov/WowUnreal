@@ -5,6 +5,9 @@
 #include "Widgets/SWowTradeWindow.h"
 #include "Widgets/SWowVendorWindow.h"
 #include "Widgets/SWowQuestDialog.h"
+#include "WowUIManager.h"
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
 #include "WowConnectionManager.h"
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
@@ -106,9 +109,20 @@ void UWowGameUI::HideVendorWindow()
     }
 }
 
-void UWowGameUI::ShowQuestDialog(const FWowQuestDetails& QuestDetails)
+void UWowGameUI::PrepareQuestDialog(uint64 Guid)
 {
     CreateWidgets();
+    auto* GameInstance = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
+    auto* UI = GameInstance ? GameInstance->GetSubsystem<UWowUIManager>() : nullptr;
+    if (!UI || !UI->GetFrameManager() || !QuestDialog) return;
+    const auto* Entity = ConnectionManager ? ConnectionManager->PacketHandler.EntityManager.Find(Guid) : nullptr;
+    const FString Name = Entity ? ConnectionManager->PacketHandler.CreatureNameCache.FindRef(Entity->Entry) : FString();
+    QuestDialog->SetPresentation(*UI->GetFrameManager(),Name,ConnectionManager && uint64(ConnectionManager->GetTargetGuid())==Guid);
+}
+
+void UWowGameUI::ShowQuestDialog(const FWowQuestDetails& QuestDetails)
+{
+    PrepareQuestDialog(QuestDetails.QuestGiverGuid);
     if (QuestDialog.IsValid())
     {
         QuestDialog->ShowQuestDetails(FormatQuest(QuestDetails,ConnectionManager));
@@ -118,7 +132,7 @@ void UWowGameUI::ShowQuestDialog(const FWowQuestDetails& QuestDetails)
 
 void UWowGameUI::ShowQuestRewardDialog(const FWowQuestDetails& QuestDetails)
 {
-    CreateWidgets();
+    PrepareQuestDialog(QuestDetails.QuestGiverGuid);
     if (QuestDialog.IsValid())
     {
         QuestDialog->ShowQuestReward(FormatQuest(QuestDetails,ConnectionManager));
@@ -137,7 +151,7 @@ void UWowGameUI::HideQuestDialog()
 
 void UWowGameUI::ShowGossip(const FWowGossipMenu& Menu)
 {
-    CreateWidgets(); QuestDialog->ShowGossip(Menu);
+    PrepareQuestDialog(Menu.Guid); QuestDialog->ShowGossip(Menu);
 }
 
 void UWowGameUI::SelectGossipQuest(uint32 Id)
@@ -245,7 +259,7 @@ void UWowGameUI::AddWidgetsToViewport()
             SNew(SConstraintCanvas).Visibility(EVisibility::SelfHitTestInvisible)
             +SConstraintCanvas::Slot().Anchors(FAnchors(.5f,.35f)).Alignment(FVector2D::ZeroVector).Offset(FMargin(-200,-100,400,300))[LootWindow.ToSharedRef()]
             +SConstraintCanvas::Slot().Anchors(FAnchors(.2f,.5f)).Alignment(FVector2D::ZeroVector).Offset(FMargin(-150,-200,300,400))[VendorWindow.ToSharedRef()]
-            +SConstraintCanvas::Slot().Anchors(FAnchors(.5f,.5f)).Alignment(FVector2D::ZeroVector).Offset(FMargin(-250,-200,500,400))[QuestDialog.ToSharedRef()]
+            +SConstraintCanvas::Slot().Anchors(FAnchors(0,0)).Alignment(FVector2D::ZeroVector).Offset(FMargin(0,104,354,442))[QuestDialog.ToSharedRef()]
             +SConstraintCanvas::Slot().Anchors(FAnchors(.5f,.45f)).Alignment(FVector2D::ZeroVector).Offset(FMargin(-240,-170,480,340))[TradeWindow.ToSharedRef()]
         ];
     GEngine->GameViewport->AddViewportWidgetContent(WindowRoot.ToSharedRef(),90);

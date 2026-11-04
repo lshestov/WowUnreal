@@ -1,4 +1,5 @@
 #include "WowFrameManager.h"
+#include "WowConnectionManager.h"
 #include "WowTextBlock.h"
 #include "WowBackdropWidget.h"
 #include "WowEventSystem.h"
@@ -1073,7 +1074,18 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 			}
 
 			ApplyElementAnchors(TextWidget, Container, FS.Anchors, FS.Width, FS.Height, false, EffectiveParentW, EffectiveParentH);
-			RegionLayouts.Add({TextWidget, Def.Name, FS.Anchors, FS.Width, FS.Height, false});
+            bool NativeTooltipRow=false;
+            const auto* OwnerDef=GetFrameDef(OwnerHandle);
+            if(Def.Type==EWowFrameType::GameTooltip || (OwnerDef && OwnerDef->Type==EWowFrameType::GameTooltip))
+            {
+                FString Suffix=FS.Name;
+                if(Suffix.RemoveFromStart(Def.Name) && (Suffix.RemoveFromStart(TEXT("TextLeft")) || Suffix.RemoveFromStart(TEXT("TextRight"))))
+                {
+                    const int32 Row=FCString::Atoi(*Suffix);
+                    NativeTooltipRow=Row>0 && Suffix==FString::FromInt(Row);
+                }
+            }
+			RegionLayouts.Add({TextWidget, Def.Name, FS.Anchors, FS.Width, FS.Height, false,false,NativeTooltipRow});
 			if (!FS.Name.IsEmpty()) RegionOwners.Add(FS.Name, Def.Name);
 
 			if (!FS.Name.IsEmpty())
@@ -2092,7 +2104,12 @@ void FWowFrameManager::DrawMessages(int64 Handle,double Now)
 		if (FontManager) Font = FontName.IsEmpty() ? FontManager->GetDefaultFont(Pixels) : FontManager->GetFont(FontName,Pixels);
 		else Font.Size = FMath::Max(1,FMath::RoundToInt(Pixels*.75f));
 		for (int32 I=FirstFontRow; I<State.Widgets.Num(); ++I)
-			if (auto* Label=State.Widgets[I].Get()) Label->SetFont(Font);
+			if (auto* Label=State.Widgets[I].Get())
+			{
+				Label->SetFont(Font);
+				Label->SetShadowColorAndOpacity(State.ShadowColor);
+				Label->SetShadowOffset(State.ShadowOffset*UIScale);
+			}
 		State.AppliedFontScale = UIScale;
 	}
 	float Bottom=State.InsertTop?0:Height*UIScale;
@@ -2969,12 +2986,24 @@ void FWowFrameManager::TooltipUpdateDisplay(int64 TooltipHandle)
 		return Text;
 	};
 
+    const float TextLayoutScale=RawViewportScale/UIScale;
+    const auto Desired=[&](UTextBlock* Label)->FVector2D
+    {
+        if(auto* Rich=Cast<UWowTextBlock>(Label))
+        {
+            Rich->RefreshRichStyle(UIScale);
+            return Rich->MeasureRenderedText(TextLayoutScale);
+        }
+        auto Widget=Label->TakeWidget();
+        Widget->Invalidate(EInvalidateWidgetReason::Prepass);
+        Widget->SlatePrepass(TextLayoutScale);
+        return Widget->GetDesiredSize();
+    };
     const auto Measure=[&](UTextBlock* Label,const FString& Text)->FVector2D
     {
         if(!Label) return FVector2D::ZeroVector;
         Label->SetText(FText::FromString(Text)); Label->SetAutoWrapText(false); Label->SetWrapTextAt(0);
-        if(auto* Rich=Cast<UWowTextBlock>(Label)) Rich->RefreshRichStyle(UIScale);
-        Label->ForceLayoutPrepass(); return Label->GetDesiredSize()/UIScale;
+        return Desired(Label)/UIScale;
     };
     float HeaderReserve=0;
     for(int64 Child:GetChildHandles(TooltipHandle)) if(const auto* Def=GetFrameDef(Child); Def && !Def->bHidden && (Def->Type==EWowFrameType::Button || Def->Type==EWowFrameType::CheckButton))
@@ -2992,7 +3021,7 @@ void FWowFrameManager::TooltipUpdateDisplay(int64 TooltipHandle)
         const auto Left=Measure(EnsureText(Index,false),Line.LeftText),Right=Measure(EnsureText(Index,true),Line.RightText);
         ContentWidth=FMath::Max(ContentWidth,float(Left.X+Right.X+12)+(First==~I?HeaderReserve:0));
     }
-    ContentWidth=(FMath::CeilToFloat(ContentWidth*UIScale)+1)/UIScale;
+    ContentWidth=(FMath::CeilToFloat(ContentWidth*RawViewportScale)+1)/RawViewportScale;
 
 	int32 LineIndex=0;
     // FontString numbers follow insertion order, including mixed single/double rows.
@@ -3010,8 +3039,15 @@ void FWowFrameManager::TooltipUpdateDisplay(int64 TooltipHandle)
                 Label->SetText(FText::FromString(Text)); Label->SetAutoWrapText(false);
                 Label->SetWrapTextAt(Wrap?ContentWidth*UIScale:0);
                 Label->SetColorAndOpacity(FSlateColor(Color)); Label->SetVisibility(ESlateVisibility::Visible);
-                if(auto* Rich=Cast<UWowTextBlock>(Label)) Rich->RefreshRichStyle(UIScale);
-                Label->ForceLayoutPrepass(); Height=FMath::Max(Height,float(Label->GetDesiredSize().Y/UIScale));
+                const FVector2D Size=Desired(Label);
+                const float PixelsHigh=FMath::CeilToFloat(Size.Y*TextLayoutScale);
+                Height=FMath::Max(Height,PixelsHigh/RawViewportScale);
+                if(auto* Slot=Cast<UCanvasPanelSlot>(Label->Slot))
+                {
+                    const float Width=Wrap?ContentWidth*UIScale:(FMath::CeilToFloat(Size.X*TextLayoutScale)+1)/TextLayoutScale;
+                    Slot->SetAutoSize(false);
+                    Slot->SetSize(FVector2D(Width,PixelsHigh/TextLayoutScale));
+                }
             }
         };
         if(Single)
@@ -3082,7 +3118,44 @@ void FWowFrameManager::TooltipSetItem(int64 TooltipHandle, const FString& ItemLi
 	TooltipAddLine(TooltipHandle, FString::Printf(TEXT("Item: %s"), *ItemLink), 1.0f, 1.0f, 1.0f, false);
 }
 
-void FWowFrameManager::TooltipSetSpell(int64 TooltipHandle, int32 SpellId,int32 Level,bool Aura)
+void FWowFrameManager::SetSpellSource(UWowConnectionManager* Source)
+{
+    SpellSource=Source;
+}
+
+FString FWowFrameManager::DescribeSpell(int32 SpellId,int32 Level,bool Aura,const FAuraInfo* Applied) const
+{
+    FSpellTextStats Stats;
+    const auto* Source=SpellSource.Get();
+    const auto* Player=Source?Source->PacketHandler.EntityManager.GetLocalPlayer():nullptr;
+    Stats.bKnown=Player && (!Applied || Applied->CasterGuid==Player->Guid);
+    if(Stats.bKnown)
+    {
+        const auto AttackPower=[Player](uint16 Base)
+        {
+            const int32 Power=int32(Player->GetField(Base))+int32(Player->GetField(Base+1));
+            return FMath::Max(0,Power)*(1.0+Player->GetFieldFloat(Base+2));
+        };
+        if(!Applied) Level=FMath::Max(1,Player->GetLevel());
+        Stats.AttackPower=AttackPower(UnitField::ATTACK_POWER);
+        Stats.RangedAttackPower=AttackPower(UnitField::RANGED_ATTACK_POWER);
+        Stats.HolyPower=int32(Player->GetField(PlayerField::BASE+0x03FF+1))+int32(Player->GetField(PlayerField::BASE+0x0406+1));
+        Stats.ShadowPower=int32(Player->GetField(PlayerField::BASE+0x03FF+5))+int32(Player->GetField(PlayerField::BASE+0x0406+5));
+        Stats.Spirit=Player->GetSpirit();
+        Stats.WeaponSpeed=Player->GetField(UnitField::BASE+0x0038)/1000.;
+        Stats.RangedSpeed=Player->GetField(UnitField::BASE+0x003A)/1000.;
+        Stats.WeaponMin=Player->GetFieldFloat(UnitField::BASE+0x0040);
+        Stats.WeaponMax=Player->GetFieldFloat(UnitField::BASE+0x0041);
+        Stats.RangedMin=Player->GetFieldFloat(UnitField::BASE+0x007B);
+        Stats.RangedMax=Player->GetFieldFloat(UnitField::BASE+0x007C);
+        if(const auto* Item=Source->PacketHandler.EntityManager.FindItem(Player->GetEquipmentItemGuid(15)))
+            if(const auto* Template=Source->PacketHandler.ItemTemplates.Find(Item->Entry))
+                Stats.WeaponHands=Template->InventoryType==17?2:1;
+    }
+    return FDbcStore::Get().Spells().Description(SpellId,Level,Aura,Stats);
+}
+
+void FWowFrameManager::TooltipSetSpell(int64 TooltipHandle,int32 SpellId,int32 Level,bool Aura,const FAuraInfo* Applied)
 {
 	FTooltipState* State = GetTooltipState(TooltipHandle);
 	if (!State) return;
@@ -3109,7 +3182,7 @@ void FWowFrameManager::TooltipSetSpell(int64 TooltipHandle, int32 SpellId,int32 
 		TooltipAddLine(TooltipHandle,Cast>0?FString::Printf(TEXT("%g sec cast"),Cast):TEXT("Instant"),1,1,1,false);
 		if(Spell->RecoveryTime) TooltipAddLine(TooltipHandle,FString::Printf(TEXT("%g sec cooldown"),Spell->RecoveryTime/1000.f),1,1,1,false);
 	}
-	const FString Description=Spells.Description(SpellId,Level,Aura);
+	const FString Description=DescribeSpell(SpellId,Level,Aura,Applied);
 	if(!Description.IsEmpty()) TooltipAddLine(TooltipHandle,Description,1,.82f,0,true);
 	SetFrameVisible(TooltipHandle,true);
 }

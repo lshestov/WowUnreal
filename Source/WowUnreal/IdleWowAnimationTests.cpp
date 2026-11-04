@@ -65,7 +65,7 @@ bool FIdleWowRuntimeAnimations::RunTest(const FString& Parameters)
     Data->BoundingBox = FBox(FVector::ZeroVector, FVector(1, 1, 1));
     Data->Cameras.Add({1,.6f,FVector(10,0,2),FVector(0,0,2)});
     Data->Cameras.Add({0,PI/4,FVector(.6,-.4,1.9),FVector(.06,.03,1.86)});
-    for (int32 Id : {0, 4, 5, 25, 37, 38, 39, 40, 16, 109})
+    for (int32 Id : {0, 1, 4, 5, 25, 28, 37, 38, 39, 40, 16, 19, 109})
     {
         FM2AnimationData Clip;
         Clip.AnimationId = Id;
@@ -143,13 +143,27 @@ bool FIdleWowRuntimeAnimations::RunTest(const FString& Parameters)
     TestEqual(TEXT("Jump starts with takeoff"), Instance->GetM2AnimationId(), 37);
     TestFalse(TEXT("Takeoff does not lock out falling or landing"), Controller->IsPlayingOneShot());
     Movement->Velocity.Z = -100;
+    Instance->NativeUpdateAnimation(1.f);
     Controller->UpdateLocalPlayerState(Player, false);
-    TestEqual(TEXT("Descending switches to falling before the takeoff clip ends"), Instance->GetM2AnimationId(), 40);
+    TestEqual(TEXT("Descending through an ordinary jump keeps the airborne jump pose"), Instance->GetM2AnimationId(), 38);
     Movement->SetMovementMode(MOVE_Walking);
     Movement->Velocity = FVector::ZeroVector;
     Controller->UpdateLocalPlayerState(Player, false);
     TestEqual(TEXT("Landing plays the landing clip"), Instance->GetM2AnimationId(), 39);
-    TestTrue(TEXT("Combat fallback finds actual unarmed animation"), Controller->PlayAttackAnimation());
+    Controller->SetCombatReadyAnimation(EWowAnimId::Ready2HL);
+    TestTrue(TEXT("A staff uses the long two-handed attack"), Controller->PlayAttackAnimation(EWowAnimId::Attack2HL));
+    TestEqual(TEXT("Weapon swing plays its own track"),Instance->GetM2AnimationId(),19);
+    TestFalse(TEXT("An incoming wound cannot interrupt the swing"),Controller->PlayWoundAnimation());
+    Controller->UpdateDeathPose();
+    TestEqual(TEXT("Death interrupts an ongoing melee swing"), Instance->GetM2AnimationId(),1);
+    TestFalse(TEXT("Late combat packets cannot reanimate the corpse"),Controller->PlayWoundAnimation() || Controller->PlayAttackAnimation());
+    Instance->NativeUpdateAnimation(2.f);
+    Controller->UpdateDeathPose();
+    TestEqual(TEXT("A model without a Dead loop holds the last death frame"),Instance->GetM2Time(),Instance->GetM2Duration());
+    Controller->RestoreLivingPose();
+    Controller->UpdateLocalPlayerState(Player,false,true);
+    TestEqual(TEXT("Resurrection restores equipped combat stance"),Instance->GetM2AnimationId(),28);
+    TestTrue(TEXT("Combat fallback finds actual unarmed animation"), Controller->PlayAttackAnimation(EWowAnimId::Attack1H));
     TestEqual(TEXT("Unavailable 1H clip does not pretend to play idle"), Instance->GetM2AnimationId(), 16);
     TestTrue(TEXT("Dance can use the same native runtime path"), Controller->PlayAnimationById(EWowAnimId::Dance));
 

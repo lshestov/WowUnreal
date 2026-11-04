@@ -40,11 +40,15 @@ struct FSpellDbcEntry
     uint32 RangeIndex;
     float Speed;
     uint32 StackAmount;
+    uint32 ProcChance, ProcCharges, MaxAffectedTargets;
     uint32 Effect[3];
     int32 EffectBasePoints[3];
     int32 EffectDieSides[3];
     float EffectPointsPerLevel[3];
     uint32 EffectAmplitude[3];
+    uint32 EffectRadiusIndex[3];
+    uint32 EffectChainTarget[3];
+    float EffectPointsPerComboPoint[3], EffectValueMultiplier[3], EffectDamageMultiplier[3];
     uint32 EffectImplicitTargetA[3];
     uint32 EffectImplicitTargetB[3];
     uint32 EffectApplyAuraName[3];
@@ -70,6 +74,15 @@ struct FSpellDbcEntry
     uint32 SchoolMask;
 };
 
+struct FSpellTextStats
+{
+    bool bKnown = true;
+    double AttackPower = 0, RangedAttackPower = 0, HolyPower = 0, ShadowPower = 0, Spirit = 0;
+    double WeaponSpeed = 0, WeaponMin = 0, WeaponMax = 0;
+    double RangedSpeed = 0, RangedMin = 0, RangedMax = 0;
+    int32 WeaponHands = 1;
+};
+
 class WOWDATA_API FSpellDbc
 {
 public:
@@ -77,11 +90,12 @@ public:
     const FSpellDbcEntry* GetById(uint32 ID) const;
     struct FRange { float Min[2] = {}, Max[2] = {}; uint32 Flags = 0; };
     bool LoadRanges(const FDbcParser& Parser);
+    bool LoadRadii(const FDbcParser& Parser);
     bool LoadTimes(const FDbcParser& Parser,bool CastTimes);
     bool LoadDescriptionVariables(const FDbcParser& Parser);
     float Duration(uint32 Id) const { const auto* Value=Durations.Find(Id); return Value?*Value:0; }
     float CastTime(uint32 Id) const { const auto* Value=CastTimes.Find(Id); return Value?*Value:0; }
-    FString Description(uint32 Id,int32 Level=1,bool Aura=false) const;
+    FString Description(uint32 Id,int32 Level=1,bool Aura=false,const FSpellTextStats& Stats={}) const;
     const FRange* GetRange(uint32 ID) const { return Ranges.Find(ID); }
     const TArray<FSpellDbcEntry>& GetAll() const { return Entries; }
     int32 Num() const { return Entries.Num(); }
@@ -90,6 +104,7 @@ private:
     TArray<FSpellDbcEntry> Entries;
     TMap<uint32, int32> IdIndex;
     TMap<uint32, FRange> Ranges;
+    TMap<uint32,float> Radii;
     TMap<uint32,float> Durations,CastTimes;
     TMap<uint32,TMap<FString,FString>> DescriptionVariables;
 };

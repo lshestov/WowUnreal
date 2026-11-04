@@ -1,0 +1,25 @@
+{
+  "qaClass": 1, "qaLevel": 1, "qaGm": false, "qaSpawnEntry": 823, "qaSpawnOffset": 3,
+  "width": 1280, "height": 900,
+  "steps": [
+    {"op":"wait_world","timeout":140}, {"op":"wait_floor","timeout":80},
+    {"op":"time","minutes":630}, {"op":"select_entry","entry":823,"timeout":30},
+    {"op":"frame_camera_target","distance":540,"sideView":true}, {"op":"move_pointer","x":0.77,"y":0.36},
+    {"op":"inspect_unit_overhead","entry":823,"marker":"TalkToMe","showName":true,"label":"willem-default","timeout":15},
+    {"op":"wait","seconds":1}, {"op":"capture","name":"01-names-and-questgiver"},
+    {"op":"lua","code":"SetCVar('UnitNameNPC',0)"},
+    {"op":"inspect_unit_overhead","entry":823,"marker":"TalkToMe","showName":false,"label":"willem-names-off","timeout":5},
+    {"op":"capture","name":"01b-overhead-names-off"},
+    {"op":"lua","code":"SetCVar('UnitNameNPC',1)"},
+    {"op":"interact"}, {"op":"wait_menu","timeout":15}, {"op":"quest","id":783}, {"op":"wait_dialog","id":783,"timeout":18},
+    {"op":"wait","seconds":1}, {"op":"capture","name":"02-quest-offer"},
+    {"op":"accept"}, {"op":"wait_quest","id":783,"timeout":15},
+    {"op":"key","name":"L"}, {"op":"lua_wait","condition":"QuestLogFrame:IsVisible() and GetNumQuestLogEntries()>0","timeout":12},
+    {"op":"lua_wait","condition":"QuestInfoDescriptionText:GetJustifyH()=='LEFT' and QuestInfoObjectivesText:GetJustifyH()=='LEFT' and #QuestInfoDescriptionText:GetText()>40","timeout":12},
+    {"op":"wait","seconds":1}, {"op":"capture","name":"02-quest-journal"},
+    {"op":"key","name":"L"},
+    {"op":"lua","code":"SendChatMessage('Meet me at Northshire Abbey.','SAY')"},
+    {"op":"wait","seconds":4}, {"op":"capture","name":"03-chat-at-rest"},
+    {"op":"move_pointer","x":0.14,"y":0.78}, {"op":"wait","seconds":1}, {"op":"capture","name":"04-chat-hover"}
+  ]
+}

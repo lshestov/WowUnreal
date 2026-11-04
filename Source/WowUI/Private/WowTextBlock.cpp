@@ -222,6 +222,17 @@ void UWowTextBlock::RefreshRichStyle(float Scale)
     if(RichState->Overflow!=GetTextOverflowPolicy()) { RichState->Overflow=GetTextOverflowPolicy(); RichWidget->SetOverflowPolicy(RichState->Overflow); }
     if(RichState->Justification!=LabelJustification) { RichState->Justification=LabelJustification; RichWidget->SetJustification(LabelJustification); }
 }
+FVector2D UWowTextBlock::MeasureRenderedText(float LayoutScale)
+{
+    TakeWidget();
+    TSharedPtr<SWidget> ContentWidget=RichWidget.IsValid()?StaticCastSharedPtr<SWidget>(RichWidget):PlainWidget;
+    if(!ContentWidget) return FVector2D::ZeroVector;
+    // A font's hinted advances and wrapping depend on the viewport DPI. The
+    // SBox can still cache the unwrapped size when a tooltip changes in one frame.
+    ContentWidget->Invalidate(EInvalidateWidgetReason::Layout | EInvalidateWidgetReason::Prepass);
+    ContentWidget->SlatePrepass(LayoutScale);
+    return ContentWidget->GetDesiredSize();
+}
 void UWowTextBlock::SetVerticalJustification(const FString& Value)
 {
     VerticalJustification=Value;

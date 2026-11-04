@@ -2,7 +2,8 @@
 #include "CoreMinimal.h"
 #include "WowSpellLaunch.h"
 #include "GameFramework/PlayerController.h"
-#include "Components/WidgetComponent.h"
+#include "Fonts/SlateFontInfo.h"
+#include "Math/InterpCurve.h"
 #include "Components/PointLightComponent.h"
 #include "WowAnimationController.h"
 #include "WowGameplayController.generated.h"
@@ -43,6 +44,7 @@ class WOWUNREAL_API AWowGameplayController : public APlayerController
 public:
     AWowGameplayController();
     virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type Reason) override;
     virtual void Tick(float DeltaTime) override;
     virtual void SetupInputComponent() override;
 
@@ -313,8 +315,26 @@ private:
     UPROPERTY()
     TMap<uint64, TObjectPtr<AActor>> SpawnedEntityActors;
 
-    UPROPERTY()
-    TMap<uint64, TObjectPtr<UWidgetComponent>> EntityNameplates;
+    struct FUnitOverhead
+    {
+        TWeakObjectPtr<class UBoxComponent> Selection;
+        TWeakObjectPtr<class UStaticMeshComponent> Marker;
+        FName MarkerModel;
+        FInterpCurveFloat MarkerHeight;
+        float MarkerPeriod = 0;
+        FText Name;
+        FLinearColor Color = FLinearColor::White;
+        bool ShowName = false;
+        uint64 LastNamePaint = 0;
+        FVector4 NamePixelRect = FVector4(0, 0, 0, 0);
+    };
+    TMap<uint64, FUnitOverhead> UnitOverheads;
+    friend class SWowUnitNameLayer;
+    TSharedPtr<class SWowUnitNameLayer> UnitNameLayer;
+    void RemoveUnitNameLayer();
+    double NextOverheadUpdate = 0;
+    void ApplyUnitScale(AActor* Actor, const FWowEntity& Entity);
+    void RefreshUnitOverheads();
 
     FMpqManager* CachedMpq = nullptr;
     FWowAssetCache* CachedAssetCache = nullptr;

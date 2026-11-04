@@ -134,16 +134,28 @@ int WowLuaApi::SetSpellTooltip(lua_State* L)
     const auto* P=C->EntityManager?C->EntityManager->GetLocalPlayer():nullptr;
     C->FrameManager->TooltipSetSpell(H,Id,P?P->GetLevel():1); return 0;
 }
-int WowLuaApi::SetAuraTooltip(lua_State* L)
+int WowLuaApi::SetAuraTooltip(lua_State* L,const char* DefaultFilter)
 {
     auto* C=GetContext(L); if(!C || !C->FrameManager) return 0;
     lua_getfield(L,1,"__handle"); const int64 H=lua_tointeger(L,-1); lua_pop(L,1);
-    const char* Kind=lua_tostring(L,lua_upvalueindex(1)); lua_getglobal(L,Kind?Kind:"UnitAura");
-    lua_pushvalue(L,2); lua_pushvalue(L,3); lua_pushvalue(L,4);
-    if(lua_pcall(L,3,11,0)!=0) return lua_error(L);
-    const uint32 Id=lua_tointeger(L,-1); lua_pop(L,11);
-    const auto* P=C->EntityManager?C->EntityManager->GetLocalPlayer():nullptr;
-    C->FrameManager->TooltipSetSpell(H,Id,P?P->GetLevel():1,true); return 0;
+    const auto* Aura=FindUnitAura(L,2,DefaultFilter);
+    C->FrameManager->TooltipSetSpell(H,Aura?Aura->SpellId:0,Aura?Aura->Level:1,true,Aura);
+    if(!Aura || !Aura->DurationMs) return 0;
+    const double Remaining=Aura->UpdatedAt+Aura->RemainingMs/1000.-FPlatformTime::Seconds();
+    if(Remaining>0)
+    {
+        const int32 Unit=Remaining>=86400?86400:Remaining>=3600?3600:Remaining>=60?60:1;
+        const char* Key=Unit==86400?"SPELL_TIME_REMAINING_DAYS":Unit==3600?"SPELL_TIME_REMAINING_HOURS":Unit==60?"SPELL_TIME_REMAINING_MIN":"SPELL_TIME_REMAINING_SEC";
+        lua_getglobal(L,Key);
+        if(lua_isstring(L,-1))
+        {
+            const FString Format=UTF8_TO_TCHAR(lua_tostring(L,-1));
+            const FString Count=FString::FromInt(FMath::CeilToInt(Remaining/Unit));
+            C->FrameManager->TooltipAddLine(H,Format.Replace(TEXT("%d"),*Count),1,1,1,false);
+        }
+        lua_pop(L,1);
+    }
+    return 0;
 }
 void WowLuaApi::RegisterSpellApi(lua_State* L)
 {
@@ -235,7 +247,7 @@ void WowLuaApi::NotifyCastState(lua_State* L,uint64 Caster,uint32 Spell,uint8 Ki
 #else
 void WowLuaApi::RegisterSpellApi(lua_State*) {}
 int WowLuaApi::SetSpellTooltip(lua_State*) { return 0; }
-int WowLuaApi::SetAuraTooltip(lua_State*) { return 0; }
+int WowLuaApi::SetAuraTooltip(lua_State*,const char*) { return 0; }
 int WowLuaApi::PushSpellCooldown(lua_State*,uint32) { return 0; }
 void WowLuaApi::NotifyCastState(lua_State*,uint64,uint32,uint8,bool,uint8) {}
 #endif

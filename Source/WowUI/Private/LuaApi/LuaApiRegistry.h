@@ -12,6 +12,7 @@ class FWowFrameManager;
 class FMpqManager;
 class AActor;
 struct FWowEntity;
+struct FAuraInfo;
 struct FWowSpellBookView;
 struct FWowCombatLogView;
 struct FWowClassUiView;
@@ -104,6 +105,7 @@ namespace WowLuaApi
     const FWowItemTemplate* QueryItemTemplate(FWowLuaContext* Context,uint32 Id);
     FString ItemLinkForUi(FWowLuaContext* Context,uint32 Id);
     FString ItemIconForUi(FWowLuaContext* Context,uint32 Id,uint32 Display=0);
+    FString CoinIcon(uint32 Amount);
     bool CanUseItem(FWowLuaContext* Context,const FWowItemTemplate& Item);
     uint32 ItemRepairCost(FWowLuaContext* Context,const FWowItemEntity& Item);
     FWowItemEntity* BuybackItemForUi(FWowLuaContext* Context,int32 Index,int32* Slot=nullptr);
@@ -164,7 +166,8 @@ namespace WowLuaApi
     int TryOnItem(lua_State* L);
     int SetSpellTooltip(lua_State* L);
     int SetActionTooltip(lua_State* L);
-    int SetAuraTooltip(lua_State* L);
+    const FAuraInfo* FindUnitAura(lua_State* L,int32 UnitIndex,const char* DefaultFilter);
+    int SetAuraTooltip(lua_State* L,const char* DefaultFilter);
 
     /** Store game context pointer in Lua registry for API functions to use */
     void SetContext(lua_State* L, FWowLuaContext* Ctx);

@@ -1807,6 +1807,17 @@ static int LF_TextShadow(lua_State* L,bool Offset,bool Get)
     }
     if(Get) { for(int32 I=0;I<Count;++I) lua_pushnumber(L,Values[I]); return Count; }
     if(T) { if(Offset) T->SetShadowOffset(FVector2D(Values[0],-Values[1])*Scale); else T->SetShadowColorAndOpacity(FLinearColor(Values[0],Values[1],Values[2],Values[3])); }
+    else if(C && C->FrameManager)
+    {
+        const int64 Handle=GetOptionalFrameHandle(L);
+        if(auto* State=C->FrameManager->MessageFrames.Find(Handle))
+        {
+            if(Offset) State->ShadowOffset=FVector2D(Values[0],-Values[1]);
+            else State->ShadowColor=FLinearColor(Values[0],Values[1],Values[2],Values[3]);
+            State->AppliedFontScale=0;
+            if(!State->Lines.IsEmpty()) C->FrameManager->DrawMessages(Handle);
+        }
+    }
     InvalidateLabel(L); return 0;
 }
 static int LF_TextHeight(lua_State* L,bool Get)
@@ -3629,9 +3640,9 @@ static const luaL_Reg FrameMethods[] =
 
 	// Tooltip methods
 	{"SetOwner", LF_TooltipSetOwner},
-	{"SetUnitBuff", [](lua_State* L) -> int { lua_pushstring(L,"UnitBuff"); lua_pushcclosure(L,WowLuaApi::SetAuraTooltip,1); lua_pushvalue(L,1); lua_pushvalue(L,2); lua_pushvalue(L,3); lua_pushvalue(L,4); lua_call(L,4,0); return 0; }},
-	{"SetUnitDebuff", [](lua_State* L) -> int { lua_pushstring(L,"UnitDebuff"); lua_pushcclosure(L,WowLuaApi::SetAuraTooltip,1); lua_pushvalue(L,1); lua_pushvalue(L,2); lua_pushvalue(L,3); lua_pushvalue(L,4); lua_call(L,4,0); return 0; }},
-	{"SetUnitAura", WowLuaApi::SetAuraTooltip},
+	{"SetUnitBuff", [](lua_State* L) -> int { return WowLuaApi::SetAuraTooltip(L,"HELPFUL"); }},
+	{"SetUnitDebuff", [](lua_State* L) -> int { return WowLuaApi::SetAuraTooltip(L,"HARMFUL"); }},
+	{"SetUnitAura", [](lua_State* L) -> int { return WowLuaApi::SetAuraTooltip(L,"HELPFUL"); }},
 	{"SetInventoryItem", WowLuaApi::SetInventoryItemTooltip},
 	{"SetBagItem", WowLuaApi::SetBagItemTooltip},
     {"SetLootItem",WowLuaApi::SetLootItemTooltip},
