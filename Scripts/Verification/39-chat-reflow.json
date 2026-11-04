@@ -1,0 +1,21 @@
+{
+  "qaClass":1,"qaLevel":1,"qaGm":false,"qaSpawnEntry":823,"qaSpawnOffset":3,
+  "width":1280,"height":900,
+  "steps":[
+    {"op":"wait_world","timeout":140},{"op":"wait_floor","timeout":80},
+    {"op":"time","minutes":630},{"op":"select_entry","entry":823,"timeout":30},
+    {"op":"approach","range":3,"timeout":25},
+    {"op":"frame_camera_target","distance":540,"sideView":true},
+    {"op":"lua","code":"ChatFrame1:SetFading(false); ChatFrame1:Clear(); SendChatMessage('Meet me at Northshire Abbey near the front door. Bring a friend and wait by the entrance before entering the building together.','SAY')"},
+    {"op":"wait","seconds":3},{"op":"capture","name":"01-chat-original-width"},
+    {"op":"lua","code":"ChatFrame1:SetSize(250,180)"},{"op":"wait","seconds":1},
+    {"op":"capture","name":"02-chat-narrow-existing-text"},
+    {"op":"lua","code":"ChatFrame1:SetScale(0.8)"},{"op":"wait","seconds":1},
+    {"op":"capture","name":"03-chat-scaled-existing-text"},
+    {"op":"lua","code":"ChatFrame1:SetScale(1); ChatFrame1:SetSize(430,150)"},{"op":"wait","seconds":1},
+    {"op":"capture","name":"04-chat-expanded-existing-text"},
+    {"op":"interact"},{"op":"wait_menu","timeout":15},{"op":"quest","id":783},
+    {"op":"wait_dialog","id":783,"timeout":18},{"op":"wait","seconds":1},
+    {"op":"capture","name":"05-quest-offer"}
+  ]
+}

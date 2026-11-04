@@ -124,7 +124,22 @@ void WowLuaApi::UpdateMinimapState(lua_State* L)
     if((Initial || ZoomChanged) && C->FrameManager) {C->FrameManager->MinimapZoom=FMath::Clamp(FCString::Atoi(*Cvar(L,Where.Minimap?"minimapInsideZoom":"minimapZoom")),0,5); C->EventSystem->FireEvent(TEXT("MINIMAP_UPDATE_ZOOM"));}
     uint32 QuestHash=HashCombineFast(H.CurrentMapId,P->GetLevel());
     TArray<uint64> Givers; for(const auto& Pair:C->EntityManager->GetAll()) if((Pair.Value->IsUnit() && Pair.Value->GetField(UnitField::NPC_FLAGS)&2) || Pair.Value->IsGameObject()) Givers.Add(Pair.Key);
-    Givers.Sort(); for(uint64 Guid:Givers) QuestHash=HashCombineFast(QuestHash,GetTypeHash(Guid));
+    Givers.Sort();
+    for (uint64 Guid : Givers)
+    {
+        QuestHash = HashCombineFast(QuestHash, GetTypeHash(Guid));
+        if (const auto* Giver = C->EntityManager->Find(Guid); Giver && Giver->IsUnit())
+            QuestHash = HashCombineFast(QuestHash, Giver->GetField(UnitField::FACTIONTEMPLATE));
+    }
+    // Reputation requirements and faction changes affect available quests even
+    // while the same NPCs and quest log entries remain in sight.
+    QuestHash = HashCombineFast(QuestHash, P->GetField(UnitField::FACTIONTEMPLATE));
+    for (const auto& Reputation : H.Reputations)
+        QuestHash = HashCombineFast(QuestHash, HashCombineFast(GetTypeHash(Reputation.Standing), Reputation.Flags));
+    uint32 ForcedReactions = 0;
+    for (const auto& Reaction : H.ForcedReactions)
+        ForcedReactions ^= HashCombineFast(Reaction.Key, Reaction.Value);
+    QuestHash = HashCombineFast(QuestHash, ForcedReactions);
     for(int32 I=0;I<125;++I) QuestHash=HashCombineFast(QuestHash,P->GetField(PlayerField::BASE+0x000A+I));
     const double Now=FPlatformTime::Seconds();
     if(QuestHash!=V.QuestgiverHash && Now>=V.NextQuestgiverQuery && C->ConnectionManager->GetState()==EWowSessionState::WorldInGame)

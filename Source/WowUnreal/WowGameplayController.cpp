@@ -993,7 +993,7 @@ void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
 		{
 			if (AWowPlayerCharacter* PlayerChar = Cast<AWowPlayerCharacter>(GetPawn()))
 			{
-				PlayerChar->ApplyServerSpeeds(Entity.Movement.RunSpeed, Entity.Movement.WalkSpeed);
+				PlayerChar->ApplyServerSpeeds(Entity.Movement.RunSpeed, Entity.Movement.WalkSpeed, Entity.Movement.RunBackSpeed);
 			}
 		}
 

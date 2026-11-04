@@ -2060,7 +2060,20 @@ void FWowFrameManager::TickMessages(double Now)
 {
     for(auto& Pair:MessageFrames)
     {
-        auto& State=Pair.Value; if(!State.Fading || State.Lines.IsEmpty()) continue; const auto* Def=GetFrameDef(Pair.Key);
+        auto& State=Pair.Value; if(State.Lines.IsEmpty()) continue;
+        // Existing history must reflow even when no new message arrives (or
+        // fading is disabled), including after resizing a docked chat window.
+        if(IsFrameDrawn(Pair.Key))
+        {
+            const auto R=GetLayoutRect(Pair.Key);
+            const float Scale=FMath::Max(.001f,GetEffectiveFrameScale(Pair.Key));
+            const FVector2D Size(R.Z/Scale,R.W/Scale);
+            const float TextScale=RawViewportScale/UIScale;
+            if(!State.LayoutSize.Equals(Size,.01f) || State.AppliedFontScale!=UIScale ||
+                !FMath::IsNearlyEqual(State.TextLayoutScale,TextScale)) DrawMessages(Pair.Key,Now);
+        }
+        if(!State.Fading) continue;
+        const auto* Def=GetFrameDef(Pair.Key);
         if(Def && Def->Type==EWowFrameType::MessageFrame && State.Lines.RemoveAll([&](const FMessage& Line){return Now-Line.At>=State.TimeVisible+State.FadeDuration;})>0) {DrawMessages(Pair.Key,Now); continue;}
         for(int32 I=0;I<State.Widgets.Num();++I) if(auto* Text=State.Widgets[I].Get()) {const int32 Index=State.Lines.Num()-1-State.Offset-I; if(State.Lines.IsValidIndex(Index)) Text->SetRenderOpacity(MessageOpacity(State,State.Lines[Index],Now));}
     }
@@ -2081,7 +2094,13 @@ void FWowFrameManager::DrawMessages(int64 Handle,double Now)
 	auto* Canvas=Cast<UCanvasPanel>(GetWidgetForHandle(Handle)); if(!Canvas) return;
 	auto& State=MessageFrames.FindOrAdd(Handle); const auto R=GetLayoutRect(Handle);
 	const auto* Def=GetFrameDef(Handle);
-	const float Height=FMath::Max(float(R.W),14.f),Width=FMath::Max(float(R.Z),100.f);
+	// GetLayoutRect includes inherited frame scale. Children of this canvas
+	// already inherit that transform, so their geometry is in local units.
+	const float FrameScale=FMath::Max(.001f,GetEffectiveFrameScale(Handle));
+	State.LayoutSize=FVector2D(R.Z/FrameScale,R.W/FrameScale);
+	// Def.Scale is a render transform, not part of Slate's text layout scale.
+	State.TextLayoutScale=RawViewportScale/UIScale;
+	const float Height=FMath::Max(float(State.LayoutSize.Y),1.f),Width=FMath::Max(float(State.LayoutSize.X),1.f);
 	const FString FontName = State.FontPath.IsEmpty() && Def ? Def->MessageFont : State.FontPath;
 	const float FontHeight = State.FontHeight>0 ? State.FontHeight : FontManager ? FontManager->GetFontSize(FontName) : 12;
 	const float RowSpacing = FontHeight+2;
@@ -2091,7 +2110,7 @@ void FWowFrameManager::DrawMessages(int64 Handle,double Now)
 	while(State.Widgets.Num()<Visible)
 	{
 		auto* Text=CreateTextBlock(Canvas); Text->SetVisibility(ESlateVisibility::HitTestInvisible);
-		Text->SetJustification(Def && Def->MessageJustifyH==TEXT("CENTER")?ETextJustify::Center:Def && Def->MessageJustifyH==TEXT("RIGHT")?ETextJustify::Right:ETextJustify::Left); Text->SetAutoWrapText(true);
+		Text->SetJustification(Def && Def->MessageJustifyH==TEXT("CENTER")?ETextJustify::Center:Def && Def->MessageJustifyH==TEXT("RIGHT")?ETextJustify::Right:ETextJustify::Left); Text->SetAutoWrapText(false);
 		Canvas->AddChildToCanvas(Text); State.Widgets.Add(Text);
 	}
 	// Update already displayed history on SetFont. New pooled rows use the
@@ -2118,8 +2137,9 @@ void FWowFrameManager::DrawMessages(int64 Handle,double Now)
 		const int32 Index=State.Lines.Num()-1-State.Offset-I;
 		if(I>=Visible || Index<0 || (State.InsertTop?Bottom>=Height*UIScale:Bottom<=0)) { Text->SetVisibility(ESlateVisibility::Collapsed); continue; }
 		const auto& Line=State.Lines[Index]; Text->SetText(FText::FromString(Line.Text)); Text->SetColorAndOpacity(Line.Color); Text->SetWrapTextAt(Width*UIScale);
-		Text->TakeWidget(); if(auto* Label=Cast<UWowTextBlock>(Text)) Label->RefreshRichStyle();
-		Text->ForceLayoutPrepass(); const float RowHeight=FMath::Max(RowSpacing*UIScale,Text->GetDesiredSize().Y);
+		auto* Label=CastChecked<UWowTextBlock>(Text);
+		Label->TakeWidget(); Label->RefreshRichStyle(UIScale);
+		const float RowHeight=FMath::Max(RowSpacing*UIScale,Label->MeasureRenderedText(State.TextLayoutScale).Y);
 		if(!State.InsertTop) Bottom-=RowHeight;
 		if(auto* Slot=Cast<UCanvasPanelSlot>(Text->Slot)) { Slot->SetAnchors(FAnchors(0,0)); Slot->SetAlignment(FVector2D::ZeroVector); Slot->SetPosition(FVector2D(0,Bottom)); Slot->SetSize(FVector2D(Width*UIScale,RowHeight)); Slot->SetZOrder(200); }
 		Text->SetRenderOpacity(MessageOpacity(State,Line,Now)); Text->SetVisibility(ESlateVisibility::HitTestInvisible); if(State.InsertTop) Bottom+=RowHeight;
@@ -2951,7 +2971,7 @@ void FWowFrameManager::TooltipAppendText(int64 TooltipHandle, const FString& Tex
 
 void FWowFrameManager::TooltipUpdateDisplay(int64 TooltipHandle)
 {
-	const FTooltipState* State = GetTooltipState(TooltipHandle);
+	FTooltipState* State = GetTooltipState(TooltipHandle);
 	if (!State) return;
 
 	const FWowFrameDef* TooltipDef = GetFrameDef(TooltipHandle);
@@ -3008,18 +3028,25 @@ void FWowFrameManager::TooltipUpdateDisplay(int64 TooltipHandle)
     float HeaderReserve=0;
     for(int64 Child:GetChildHandles(TooltipHandle)) if(const auto* Def=GetFrameDef(Child); Def && !Def->bHidden && (Def->Type==EWowFrameType::Button || Def->Type==EWowFrameType::CheckButton))
         for(const auto& Anchor:Def->Anchors) if(Anchor.Point==EWowAnchorPoint::TOPRIGHT) HeaderReserve=FMath::Max(HeaderReserve,Def->Width+FMath::Max(0.f,-Anchor.OffsetX));
-    const int32 First=State->LineOrder.IsEmpty()?MAX_int32:State->LineOrder[0];
     float ContentWidth=FMath::Max(1.f,State->MinimumWidth-16);
-    for(int32 I=0;I<State->Lines.Num();++I)
+    for(int32 Row=0;Row<State->LineOrder.Num();++Row)
     {
-        const auto& Line=State->Lines[I]; const auto Size=Measure(EnsureText(I+1,false),Line.Text);
-        ContentWidth=FMath::Max(ContentWidth,float(Line.bWrapText?FMath::Min(300.,Size.X):Size.X)+(First==I?HeaderReserve:0));
-    }
-    for(int32 I=0;I<State->DoubleLines.Num();++I)
-    {
-        const auto& Line=State->DoubleLines[I]; const int32 Index=State->Lines.Num()+I+1;
-        const auto Left=Measure(EnsureText(Index,false),Line.LeftText),Right=Measure(EnsureText(Index,true),Line.RightText);
-        ContentWidth=FMath::Max(ContentWidth,float(Left.X+Right.X+12)+(First==~I?HeaderReserve:0));
+        const int32 Ordered=State->LineOrder[Row];
+        float Width=0;
+        if(Ordered>=0 && State->Lines.IsValidIndex(Ordered))
+        {
+            const auto& Line=State->Lines[Ordered];
+            const auto Size=Measure(EnsureText(Row+1,false),Line.Text);
+            Width=Line.bWrapText?FMath::Min(300.,Size.X):Size.X;
+        }
+        else if(Ordered<0 && State->DoubleLines.IsValidIndex(~Ordered))
+        {
+            const auto& Line=State->DoubleLines[~Ordered];
+            const auto Left=Measure(EnsureText(Row+1,false),Line.LeftText);
+            const auto Right=Measure(EnsureText(Row+1,true),Line.RightText);
+            Width=Left.X+Right.X+12;
+        }
+        ContentWidth=FMath::Max(ContentWidth,Width+(Row==0?HeaderReserve:0));
     }
     ContentWidth=(FMath::CeilToFloat(ContentWidth*RawViewportScale)+1)/RawViewportScale;
 
@@ -3064,7 +3091,8 @@ void FWowFrameManager::TooltipUpdateDisplay(int64 TooltipHandle)
     }
 
 	// Hide unused FontString widgets
-	for (int32 HideIndex = LineIndex + 1; HideIndex <= 30; HideIndex++) // WoW usually has up to 30 tooltip lines
+    State->MaxRenderedLines=FMath::Max(State->MaxRenderedLines,LineIndex);
+	for (int32 HideIndex = LineIndex + 1; HideIndex <= State->MaxRenderedLines; HideIndex++)
 	{
 		FString LeftFontStringName = FString::Printf(TEXT("%sTextLeft%d"),*Prefix,HideIndex);
 		UTextBlock* LeftTextBlock = GetNamedFontString(LeftFontStringName);
@@ -3131,6 +3159,11 @@ FString FWowFrameManager::DescribeSpell(int32 SpellId,int32 Level,bool Aura,cons
     Stats.bKnown=Player && (!Applied || Applied->CasterGuid==Player->Guid);
     if(Stats.bKnown)
     {
+        Stats.KnownSpells=&Source->PacketHandler.KnownSpells;
+        const auto& Handler=Source->PacketHandler;
+        if(Handler.TalentGroups.IsValidIndex(Handler.ActiveTalentGroup))
+            for(uint16 GlyphId:Handler.TalentGroups[Handler.ActiveTalentGroup].Glyphs)
+                if(const auto* Glyph=FDbcStore::Get().Glyph(GlyphId)) Stats.ActiveSpells.Add(Glyph->Spell);
         const auto AttackPower=[Player](uint16 Base)
         {
             const int32 Power=int32(Player->GetField(Base))+int32(Player->GetField(Base+1));

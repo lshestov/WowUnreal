@@ -44,6 +44,7 @@ struct FTooltipState
 	TArray<FTooltipLine> Lines;
 	TArray<FTooltipDoubleLine> DoubleLines;
     TArray<int32> LineOrder; // Single index, or bitwise-complement double index.
+    int32 MaxRenderedLines=0; // Widgets survive ClearLines and tooltip reuse.
 	int64 OwnerHandle = -1;
 	FString AnchorType = TEXT("ANCHOR_NONE");
 	FString ItemLink;
@@ -327,6 +328,8 @@ public:
 		float TimeVisible=120,FadeDuration=3;
 		FString FontPath;
 		float FontHeight=0,AppliedFontScale=0;
+		FVector2D LayoutSize=FVector2D::ZeroVector;
+		float TextLayoutScale=0;
 		FVector2D ShadowOffset=FVector2D::ZeroVector;
 		FLinearColor ShadowColor=FLinearColor::Black;
 	};

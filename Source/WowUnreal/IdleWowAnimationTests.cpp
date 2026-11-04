@@ -8,6 +8,7 @@
 #include "WowPlayerCharacter.h"
 #include "WowSkeletalMeshBuilder.h"
 #include "WowAnimationController.h"
+#include "InputActionValue.h"
 #include "WowM2AnimInstance.h"
 #include "WowPortraitCameraData.h"
 #include "Formats/M2Parser.h"
@@ -65,7 +66,7 @@ bool FIdleWowRuntimeAnimations::RunTest(const FString& Parameters)
     Data->BoundingBox = FBox(FVector::ZeroVector, FVector(1, 1, 1));
     Data->Cameras.Add({1,.6f,FVector(10,0,2),FVector(0,0,2)});
     Data->Cameras.Add({0,PI/4,FVector(.6,-.4,1.9),FVector(.06,.03,1.86)});
-    for (int32 Id : {0, 1, 4, 5, 25, 28, 37, 38, 39, 40, 16, 19, 109})
+    for (int32 Id : {0, 1, 4, 5, 13, 25, 28, 37, 38, 39, 40, 16, 19, 109})
     {
         FM2AnimationData Clip;
         Clip.AnimationId = Id;
@@ -128,12 +129,36 @@ bool FIdleWowRuntimeAnimations::RunTest(const FString& Parameters)
     TestEqual(TEXT("One-shot clamps at final frame"), Instance->GetM2Time(), 1.0f);
 
     auto* Movement = Player->GetCharacterMovement();
+    Player->ApplyServerSpeeds(7.f,2.5f,4.5f);
+    Player->OnMove(FInputActionValue(FVector2D(0,-1)));
+    TestFalse(TEXT("Reverse input preserves facing instead of turning into the movement vector"),Movement->bOrientRotationToMovement);
+    TestEqual(TEXT("Backpedalling uses the authoritative run-back speed"),Movement->MaxWalkSpeed,450.f);
+    Player->ApplyServerSpeeds(3.5f,1.25f,2.25f);
+    TestEqual(TEXT("A server speed change applies while reverse input is held"),Movement->MaxWalkSpeed,225.f);
+    Player->OnToggleWalk();
+    TestEqual(TEXT("Backpedalling in walking mode retains walking speed"),Movement->MaxWalkSpeed,125.f);
+    Player->OnToggleWalk();
+    Player->OnMove(FInputActionValue(FVector2D::ZeroVector));
+    TestTrue(TEXT("Completed or cancelled input restores forward orientation"),Movement->bOrientRotationToMovement);
+    TestEqual(TEXT("Releasing reverse input restores the current server run speed"),Movement->MaxWalkSpeed,350.f);
+    Player->OnMove(FInputActionValue(FVector2D(1,0)));
+    TestEqual(TEXT("Sideways input preserves the server run speed"),Movement->MaxWalkSpeed,350.f);
+    TestTrue(TEXT("Sideways input keeps the existing orientation behavior"),Movement->bOrientRotationToMovement);
+    Player->OnMove(FInputActionValue(FVector2D(0,1)));
+    TestEqual(TEXT("Forward input preserves the server run speed"),Movement->MaxWalkSpeed,350.f);
+    Player->OnMove(FInputActionValue(FVector2D::ZeroVector));
+    Player->ApplyServerSpeeds(7.f,2.5f,4.5f);
     Movement->SetMovementMode(MOVE_Walking);
     Movement->Velocity = FVector(700, 0, 0);
     Controller->UpdateLocalPlayerState(Player, false);
     TestEqual(TEXT("Normal movement uses Run"), Instance->GetM2AnimationId(), 5);
     Controller->UpdateLocalPlayerState(Player, true);
     TestEqual(TEXT("Walking toggle uses Walk"), Instance->GetM2AnimationId(), 4);
+    Movement->Velocity = -Player->GetActorForwardVector()*450.f;
+    Controller->UpdateLocalPlayerState(Player,false);
+    TestEqual(TEXT("Actual reverse movement selects Walkbackwards"),Instance->GetM2AnimationId(),13);
+    Controller->UpdateLocalPlayerState(Player,true);
+    TestEqual(TEXT("Walking mode cannot change backpedalling into a forward gait"),Instance->GetM2AnimationId(),13);
     Movement->Velocity = FVector::ZeroVector;
     Controller->UpdateLocalPlayerState(Player, false);
     TestEqual(TEXT("Stopping returns to Stand"), Instance->GetM2AnimationId(), 0);
@@ -150,6 +175,30 @@ bool FIdleWowRuntimeAnimations::RunTest(const FString& Parameters)
     Movement->Velocity = FVector::ZeroVector;
     Controller->UpdateLocalPlayerState(Player, false);
     TestEqual(TEXT("Landing plays the landing clip"), Instance->GetM2AnimationId(), 39);
+    Movement->Velocity=Player->GetActorForwardVector()*700.f;
+    Controller->UpdateLocalPlayerState(Player,false);
+    TestEqual(TEXT("Starting movement interrupts the remaining landing recovery"),Instance->GetM2AnimationId(),5);
+    TestFalse(TEXT("Landing cannot leave a locomotion lock after movement resumes"),Controller->IsPlayingOneShot());
+    Movement->SetMovementMode(MOVE_Falling);
+    Movement->Velocity.Z=400;
+    Controller->UpdateLocalPlayerState(Player,false);
+    Movement->SetMovementMode(MOVE_Walking);
+    Movement->Velocity.Z=0;
+    Controller->UpdateLocalPlayerState(Player,false);
+    TestEqual(TEXT("A moving landing proceeds straight to the running gait"),Instance->GetM2AnimationId(),5);
+    Movement->SetMovementMode(MOVE_Falling);
+    Movement->Velocity=FVector(0,0,-1000);
+    Controller->UpdateLocalPlayerState(Player,false);
+    TestEqual(TEXT("A genuine long fall still uses Fall"),Instance->GetM2AnimationId(),40);
+    Movement->SetMovementMode(MOVE_Walking);
+    Movement->Velocity=FVector::ZeroVector;
+    Controller->UpdateLocalPlayerState(Player,false);
+    TestEqual(TEXT("A stationary long-fall landing retains its recovery"),Instance->GetM2AnimationId(),39);
+    Controller->PlayAttackAnimation(EWowAnimId::Attack2HL);
+    Movement->Velocity=Player->GetActorForwardVector()*700.f;
+    Controller->UpdateLocalPlayerState(Player,false);
+    TestEqual(TEXT("Movement only interrupts landing, never a melee swing that replaced it"),Instance->GetM2AnimationId(),19);
+    Movement->Velocity=FVector::ZeroVector;
     Controller->SetCombatReadyAnimation(EWowAnimId::Ready2HL);
     TestTrue(TEXT("A staff uses the long two-handed attack"), Controller->PlayAttackAnimation(EWowAnimId::Attack2HL));
     TestEqual(TEXT("Weapon swing plays its own track"),Instance->GetM2AnimationId(),19);
@@ -189,6 +238,11 @@ bool FIdleWowRuntimeAnimations::RunTest(const FString& Parameters)
     Copied->UpdateAnimationState(Travel, true);
     TestEqual(TEXT("Combat ready is used after stopping"), Copied->GetRuntimeInstance()->GetM2AnimationId(), 25);
     Copied->UpdateAnimationState(Travel, false);
+    Travel.MoveFlags=WowMovementFlags::BACKWARD;
+    Copied->UpdateAnimationState(Travel,false);
+    TestEqual(TEXT("A remote player's BACKWARD flag selects the same reverse gait"),Copied->GetRuntimeInstance()->GetM2AnimationId(),13);
+    Travel.MoveFlags=0;
+    Copied->UpdateAnimationState(Travel,false);
     TestNotEqual(TEXT("Each character owns an independent playback instance"), Copied->GetRuntimeInstance(), Instance);
     Other->SetupAnimationController(Copied);
     Other->GetCharacterMovement()->SetMovementMode(MOVE_Walking);

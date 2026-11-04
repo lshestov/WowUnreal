@@ -66,7 +66,7 @@ public:
     float WalkSpeedFactor = 0.357f; // 2.5 / 7.0
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    float BackpedalFactor = 0.6f; // 60% of forward speed
+    float BackpedalFactor = 4.5f / 7.0f; // Server run-back speed relative to run speed
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
     bool bIsWalking = false;
@@ -81,7 +81,7 @@ public:
     float FallDamageMinHeight = 1500.0f; // ~15 WoW yards
 
     /** Apply speeds received from the server entity */
-    void ApplyServerSpeeds(float ServerRunSpeed, float ServerWalkSpeed);
+    void ApplyServerSpeeds(float ServerRunSpeed, float ServerWalkSpeed, float ServerRunBackSpeed = 4.5f);
 
     /** Apply server spawn data */
     void ApplyLoginSpawn(const FVector& SpawnPos, float OrientationRadians);
@@ -101,6 +101,9 @@ public:
     void SetupAnimationController(class UWowAnimationController* AnimController);
 
 private:
+    friend class FIdleWowRuntimeAnimations;
+    void RefreshGroundSpeed();
+    bool bIsBackpedaling = false;
     void OnMove(const FInputActionValue& Value);
     void OnLook(const FInputActionValue& Value);
     void OnJumpPressed();

@@ -91,6 +91,21 @@ FString FSpellDbc::Description(uint32 Id,int32 Level,bool Aura,const FSpellTextS
             Expanded+=Text.Mid(End); if(!Changed || Expanded==Text || Expanded.Len()>65536) break; Text=MoveTemp(Expanded);
         }
     }
+    // Original 12340 descriptions use talent/glyph and player-level clauses.
+    FRegexMatcher Condition(FRegexPattern(TEXT("\\$\\?(?:\\(?s([0-9]+)\\)?|\\$gte\\(\\$pl,([0-9]+)\\))\\[([^\\[\\]]*)\\]\\[([^\\[\\]]*)\\]")),Text);
+    FString ConditionalText;
+    int32 ConditionalEnd=0;
+    while(Condition.FindNext())
+    {
+        ConditionalText+=Text.Mid(ConditionalEnd,Condition.GetMatchBeginning()-ConditionalEnd);
+        const uint32 RequiredSpell=FCString::Atoi(*Condition.GetCaptureGroup(1));
+        const bool Known=Condition.GetCaptureGroup(2).IsEmpty()
+            ? Stats.bKnown && ((Stats.KnownSpells && Stats.KnownSpells->Contains(RequiredSpell)) || Stats.ActiveSpells.Contains(RequiredSpell))
+            : Level>=FCString::Atoi(*Condition.GetCaptureGroup(2));
+        ConditionalText+=Condition.GetCaptureGroup(Known?3:4);
+        ConditionalEnd=Condition.GetMatchEnding();
+    }
+    Text=ConditionalText+Text.Mid(ConditionalEnd);
     // Match entire identifiers first: $M is an effect maximum, $MWS a weapon speed.
     FRegexMatcher Stat(FRegexPattern(TEXT("\\$([A-Za-z]{2,})(?![A-Za-z_(])")),Text);
     FString WithStats;

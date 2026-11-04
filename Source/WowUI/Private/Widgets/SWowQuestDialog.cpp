@@ -143,6 +143,7 @@ TSharedRef<SWidget> SWowQuestDialog::GossipRow(const FString& Label,const FSlate
 
 void SWowQuestDialog::ShowQuestDetails(const FWowQuestDetails& QuestDetails)
 {
+    ContentArea->ScrollToStart();
     CurrentQuest = QuestDetails;
     bIsRewardDialog = false;
     SelectedRewardChoice = 0;
@@ -155,6 +156,7 @@ void SWowQuestDialog::ShowQuestDetails(const FWowQuestDetails& QuestDetails)
 
 void SWowQuestDialog::ShowQuestReward(const FWowQuestDetails& QuestDetails)
 {
+    ContentArea->ScrollToStart();
     CurrentQuest = QuestDetails;
     bIsRewardDialog = true;
     SelectedRewardChoice = 0;
@@ -185,6 +187,7 @@ void SWowQuestDialog::CompleteCurrentQuest()
 
 void SWowQuestDialog::ShowGossip(const FWowGossipMenu& Menu)
 {
+    ContentArea->ScrollToStart();
     CurrentQuest=FWowQuestDetails();
     ContentArea->ClearChildren();  ButtonArea->ClearChildren();
     ContentArea->AddSlot()[SNew(STextBlock).Font(BodyFont).Justification(ETextJustify::Left).ColorAndOpacity(FLinearColor(.055f,.027f,.01f)).Text(FText::FromString(Menu.Greeting.IsEmpty()?TEXT("Available quests and conversation"):Menu.Greeting)).AutoWrapText(true)];

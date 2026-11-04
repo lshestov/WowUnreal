@@ -81,6 +81,8 @@ struct FSpellTextStats
     double WeaponSpeed = 0, WeaponMin = 0, WeaponMax = 0;
     double RangedSpeed = 0, RangedMin = 0, RangedMax = 0;
     int32 WeaponHands = 1;
+    const TSet<uint32>* KnownSpells = nullptr;
+    TSet<uint32> ActiveSpells;
 };
 
 class WOWDATA_API FSpellDbc

@@ -2,6 +2,7 @@
 #include "CoreMinimal.h"
 #include "WowWmoArea.h"
 struct FWowLuaContext;
+struct FWowEntity;
 
 struct FWowMinimapUiView
 {
@@ -24,6 +25,7 @@ struct FBlip {uint64 Guid=0; uint8 Icon=8; FVector Position=FVector::ZeroVector;
 FWowMinimapUiView& View(FWowLuaContext* C);
 TArray<FTracking> Tracking(FWowLuaContext* C);
 uint32 TrackingSpell(FWowLuaContext* C);
+uint8 QuestStatus(const FWowLuaContext* C, const FWowEntity& Entity);
 int32 CommonTracking(FWowLuaContext* C);
 TArray<FBlip> Blips(FWowLuaContext* C);
 float Radius(FWowLuaContext* C);

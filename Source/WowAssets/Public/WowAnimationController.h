@@ -118,7 +118,9 @@ enum class EWowAnimState : uint8
     Combat,         // Combat animations
     Casting,        // Spell casting
     Channeling,     // Spell channeling
-    Dead            // Death state
+    Dead,           // Death state
+    WalkingBackwards,
+    Landing
 };
 
 enum class EWowSpellPosePhase : uint8 { Precast, Release, Channel };

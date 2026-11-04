@@ -140,7 +140,14 @@ int WowLuaApi::SetAuraTooltip(lua_State* L,const char* DefaultFilter)
     lua_getfield(L,1,"__handle"); const int64 H=lua_tointeger(L,-1); lua_pop(L,1);
     const auto* Aura=FindUnitAura(L,2,DefaultFilter);
     C->FrameManager->TooltipSetSpell(H,Aura?Aura->SpellId:0,Aura?Aura->Level:1,true,Aura);
-    if(!Aura || !Aura->DurationMs) return 0;
+    if(!Aura)
+    {
+        // Match GameTooltip:Hide when the hovered aura is removed or expires.
+        lua_pushnil(L); lua_setfield(L,1,"__tooltipOwner");
+        C->FrameManager->GetTooltipState(H)->OwnerHandle=-1;
+        return 0;
+    }
+    if(!Aura->DurationMs) return 0;
     const double Remaining=Aura->UpdatedAt+Aura->RemainingMs/1000.-FPlatformTime::Seconds();
     if(Remaining>0)
     {

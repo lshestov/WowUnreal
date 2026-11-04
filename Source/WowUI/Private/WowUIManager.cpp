@@ -539,6 +539,12 @@ void UWowUIManager::GetNpcOverheadSettings(bool& ShowNames, bool& TrackTrivial) 
     TrackTrivial = UIContext && WowMinimapUi::View(UIContext).CommonKey == TEXT("MINIMAP_TRACKING_TRIVIAL_QUESTS");
 }
 
+uint8 UWowUIManager::GetQuestGiverStatus(uint64 Guid) const
+{
+    const auto* Unit = UIContext && UIContext->EntityManager ? UIContext->EntityManager->Find(Guid) : nullptr;
+    return Unit ? WowMinimapUi::QuestStatus(UIContext, *Unit) : 0;
+}
+
 FLinearColor UWowUIManager::GetUnitSelectionColor(uint64 Guid) const
 {
     const auto* Unit=UIContext && UIContext->EntityManager?UIContext->EntityManager->Find(Guid):nullptr;

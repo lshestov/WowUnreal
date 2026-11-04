@@ -23,6 +23,7 @@ void UWowAnimationController::InitializeRuntime(USkeletalMeshComponent* InMeshCo
     AnimationCache.Reset();
     CurrentAnimation = nullptr;
     CurrentState = EWowAnimState::Idle;
+    bJumpAirborne = false;
     bPlayingOneShot = false;
     bServerSpellPose=false;
     if (!MeshComponent || !RuntimeModel || !RuntimeModel->HasAnimationData()) return;
@@ -117,23 +118,30 @@ void UWowAnimationController::UpdateAnimationState(const FWowMovementInfo& Movem
 
     const EWowAnimState NewState = DetermineAnimationState(MovementInfo, bIsInCombat, bIsCasting);
     UpdateLocomotion(NewState);
-    if (RuntimeInstance && (NewState == EWowAnimState::Walking || NewState == EWowAnimState::Running))
+    if (RuntimeInstance && (NewState == EWowAnimState::Walking || NewState == EWowAnimState::Running || NewState == EWowAnimState::WalkingBackwards))
         RuntimeInstance->SetM2MovementSpeed(MovementInfo.GetSplineSpeed(), MeshComponent->GetComponentScale().GetAbsMax());
 }
 
 void UWowAnimationController::UpdateLocomotion(EWowAnimState NewState, bool bDescending)
 {
     const bool bAirborne = NewState == EWowAnimState::Jumping || NewState == EWowAnimState::Falling;
+    const bool bGroundMovement = NewState == EWowAnimState::Walking || NewState == EWowAnimState::Running || NewState == EWowAnimState::WalkingBackwards;
     const bool bWasAirborne = bJumpAirborne;
     bJumpAirborne = bAirborne;
     if (bWasAirborne && !bAirborne && NewState != EWowAnimState::Swimming && NewState != EWowAnimState::SwimmingIdle)
     {
-        CurrentState = NewState;
-        if (PlayAnimationById(EWowAnimId::JumpEnd, false)) return;
+        if (!bGroundMovement && PlayAnimationById(EWowAnimId::JumpEnd, false))
+        {
+            CurrentState = EWowAnimState::Landing;
+            return;
+        }
         SetAnimationState(NewState, true);
         return;
     }
-    if (bAirborne == bWasAirborne && IsPlayingOneShot()) return;
+    const bool bLandingClip = CurrentState == EWowAnimState::Landing &&
+        (RuntimeInstance ? RuntimeInstance->GetM2AnimationId() == int32(EWowAnimId::JumpEnd)
+            : CurrentAnimation && CurrentAnimation == AnimationCache.FindRef(int32(EWowAnimId::JumpEnd)));
+    if (bAirborne == bWasAirborne && IsPlayingOneShot() && !(bLandingClip && bGroundMovement)) return;
     const bool bFinished = bPlayingOneShot;
     if (NewState != CurrentState || bFinished)
         SetAnimationState(NewState, bFinished);
@@ -149,7 +157,7 @@ void UWowAnimationController::UpdateLocalPlayerState(ACharacter* PlayerCharacter
     EWowAnimState NewState = DetermineLocalPlayerState(PlayerCharacter, bWalking);
     if (NewState == EWowAnimState::Idle && bInCombat) NewState = EWowAnimState::Combat;
     UpdateLocomotion(NewState, PlayerCharacter->GetVelocity().Z <= 0.f);
-    if (RuntimeInstance && (NewState == EWowAnimState::Walking || NewState == EWowAnimState::Running))
+    if (RuntimeInstance && (NewState == EWowAnimState::Walking || NewState == EWowAnimState::Running || NewState == EWowAnimState::WalkingBackwards))
         RuntimeInstance->SetM2MovementSpeed(PlayerCharacter->GetVelocity().Size2D() / 100.0f, MeshComponent->GetComponentScale().GetAbsMax());
 }
 
@@ -191,6 +199,8 @@ EWowAnimState UWowAnimationController::DetermineAnimationState(const FWowMovemen
     // Check for movement
     if (IsMoving(MovementInfo))
     {
+        if (MovementInfo.MoveFlags & WowMovementFlags::BACKWARD)
+            return EWowAnimState::WalkingBackwards;
         if (IsWalking(MovementInfo))
         {
             return EWowAnimState::Walking;
@@ -252,6 +262,8 @@ EWowAnimState UWowAnimationController::DetermineLocalPlayerState(ACharacter* Pla
 
     if (Speed > 10.0f) // Moving threshold
     {
+        if (FVector::DotProduct(PlayerCharacter->GetActorForwardVector(), Velocity.GetSafeNormal2D()) < -0.3f)
+            return EWowAnimState::WalkingBackwards;
         // Check if walking (based on character's walking flag)
         if (bWalking)
         {
@@ -274,6 +286,10 @@ EWowAnimId UWowAnimationController::GetAnimationForState(EWowAnimState State) co
             return EWowAnimId::Stand;
         case EWowAnimState::Walking:
             return EWowAnimId::Walk;
+        case EWowAnimState::WalkingBackwards:
+            return EWowAnimId::Walkbackwards;
+        case EWowAnimState::Landing:
+            return EWowAnimId::JumpEnd;
         case EWowAnimState::Running:
             return EWowAnimId::Run;
         case EWowAnimState::Swimming:
@@ -316,6 +332,7 @@ void UWowAnimationController::SetAnimationState(EWowAnimState NewState, bool bFo
     switch (NewState)
     {
         case EWowAnimState::Jumping:
+        case EWowAnimState::Landing:
         case EWowAnimState::Dead:
             bShouldLoop = false;
             break;
@@ -511,6 +528,7 @@ bool UWowAnimationController::PlayAnimationById(EWowAnimId AnimId, bool bLooping
             switch (AnimId)
             {
             case EWowAnimId::Run: bStarted = RuntimeInstance->PlayM2Animation(4, bLooping); break;
+            case EWowAnimId::Walkbackwards: bStarted = RuntimeInstance->PlayM2Animation(4, bLooping); break;
             case EWowAnimId::Fall:
             case EWowAnimId::JumpStart: bStarted = RuntimeInstance->PlayM2Animation(38, bLooping); break;
             case EWowAnimId::Ready1H:
@@ -604,6 +622,7 @@ bool UWowAnimationController::PlayAnimationById(EWowAnimId AnimId, bool bLooping
                 FallbackIds = {0}; // Stand
                 break;
             case 5: // Run
+            case 13: // Walk backwards
                 FallbackIds = {4, 0}; // Walk → Stand
                 break;
             case 33: // CombatWound

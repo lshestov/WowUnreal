@@ -24,3 +24,12 @@ expiry, disabled fading, preserved chat history and scroll reset without
 sleeping. Six focused checks and a 21-step native route verify character stats
 and visible/fading/expired notification captures. All four images were
 validated and inspected. The native log has no startup PaperDoll error.
+
+Existing chat history reflows when its frame is resized or the viewport scale
+changes, including when fading is disabled and no new messages arrive. Row
+positions use the canvas's local dimensions so a frame's render scale is not
+applied twice. Plain and rich text are measured using Slate's actual layout
+DPI before arranging the rows; explicit wrapping does not retain the previous
+window's width. `WowUnreal.Hud.MessageResizeAndWrapping` covers these cases.
+`Scripts/Verification/39-chat-reflow.json` captures the same server-delivered
+message at normal, narrow, scaled and expanded sizes.

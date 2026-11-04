@@ -174,7 +174,8 @@ FWowFrameManager::FFrameRect FWowFrameManager::GetFrameRect(const FString& Name)
                 const float Scale = GetEffectiveFrameScale(FindFrame(*Owner)) / UIScale;
                 const auto S = Slot->GetAutoSize() ? Widget->GetDesiredSize() : Slot->GetSize();
                 const auto P = Slot->GetPosition() - Slot->GetAlignment() * S;
-                Result = FFrameRect(Parent.X + P.X * Scale, Parent.Y + P.Y * Scale, S.X * Scale, S.Y * Scale);
+                Result = FFrameRect(Parent.X+Parent.W*Anchors.Minimum.X+P.X*Scale,
+                    Parent.Y+Parent.H*Anchors.Minimum.Y+P.Y*Scale,S.X*Scale,S.Y*Scale);
             }
         }
     }

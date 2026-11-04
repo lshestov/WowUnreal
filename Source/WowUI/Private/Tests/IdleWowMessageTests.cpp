@@ -39,4 +39,43 @@ bool FHudTimedMessages::RunTest(const FString&)
     TestTrue(TEXT("Clearing history resets the scroll offset for future messages"),Lua.ExecuteString(TEXT("History:Clear(); History:AddMessage('after clear'); assert(History:GetNumMessages()==1)")) && Chat.Offset==0);
     WowLuaApi::ClearContext(Lua.GetState()); Lua.Shutdown(); return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudMessageReflow,"WowUnreal.Hud.MessageResizeAndWrapping",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudMessageReflow::RunTest(const FString&)
+{
+    FWowFrameManager Frames;
+    TStrongObjectPtr<UCanvasPanel> Canvas(NewObject<UCanvasPanel>());
+    Frames.Initialize(Canvas.Get());
+    FWowFrameDef Def; Def.Name=TEXT("ResizeChat"); Def.Parent=TEXT("UIParent");
+    Def.Type=EWowFrameType::ScrollingMessageFrame; Def.Width=440; Def.Height=180;
+    Def.Anchors.Add({EWowAnchorPoint::BOTTOMLEFT,TEXT("UIParent"),EWowAnchorPoint::BOTTOMLEFT,10,40});
+    const int64 Handle=Frames.CreateFrame(Def); Frames.RefreshLayout();
+    Frames.AddMessage(Handle,TEXT("Older message remains immediately above the next wrapped message."),FLinearColor::White);
+    Frames.AddMessage(Handle,TEXT("Meet me at Northshire Abbey near the front door. Bring |cffffff00a friend|r and wait by the entrance before entering the building together."),FLinearColor::White);
+    auto& State=Frames.MessageFrames[Handle];
+    if(!TestTrue(TEXT("Two chat rows were created"),State.Widgets.Num()>=2)) return false;
+    auto* Newest=Cast<UCanvasPanelSlot>(State.Widgets[0]->Slot);
+    auto* Older=Cast<UCanvasPanelSlot>(State.Widgets[1]->Slot);
+    const float WideHeight=Newest->GetSize().Y;
+    Frames.SetFrameSize(Handle,180,220); Frames.RefreshLayout();
+    Frames.TickMessages(FPlatformTime::Seconds());
+    TestEqual(TEXT("Resizing with fading disabled reflows existing history without a new message"),float(Newest->GetSize().X),180*Frames.GetUIScale());
+    TestTrue(TEXT("Narrow rich text takes more lines"),Newest->GetSize().Y>WideHeight);
+    TestTrue(TEXT("Newest message stays attached to the bottom after resizing"),FMath::IsNearlyEqual(Newest->GetPosition().Y+Newest->GetSize().Y,220*Frames.GetUIScale(),.1));
+    TestTrue(TEXT("Wrapped chat rows do not overlap"),FMath::IsNearlyEqual(Older->GetPosition().Y+Older->GetSize().Y,Newest->GetPosition().Y,.1));
+    Frames.SetFrameScale(Handle,.75f); Frames.RefreshLayout(); Frames.TickMessages(FPlatformTime::Seconds());
+    TestEqual(TEXT("Frame scale is inherited once, not multiplied into local row width"),float(Newest->GetSize().X),180*Frames.GetUIScale());
+    TestTrue(TEXT("Scaled chat keeps its local bottom edge"),FMath::IsNearlyEqual(Newest->GetPosition().Y+Newest->GetSize().Y,220*Frames.GetUIScale(),.1));
+    const float Dpi=Frames.GetScreenScale()/Frames.GetUIScale();
+    const auto Root=Canvas->TakeWidget(); Root->SlatePrepass(Dpi);
+    for(const auto& Row:State.Widgets) if(Row.IsValid() && Row->IsVisible())
+    {
+        const auto* Slot=Cast<UCanvasPanelSlot>(Row->Slot);
+        const float TextHeight=CastChecked<UWowTextBlock>(Row.Get())->MeasureRenderedText(Dpi).Y;
+        TestTrue(TEXT("Actual Slate text fits the row after its parent's render transform"),Slot && Slot->GetSize().Y+.1f>=TextHeight);
+    }
+    Frames.SetFrameSize(Handle,440,180); Frames.RefreshLayout(); Frames.TickMessages(FPlatformTime::Seconds());
+    TestTrue(TEXT("Expanding the frame removes cached narrow wrapping"),Newest->GetSize().Y<WideHeight+1);
+    TestEqual(TEXT("Reflow preserves message history"),State.Lines.Num(),2);
+    return true;
+}
 #endif

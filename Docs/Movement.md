@@ -21,3 +21,11 @@ verification sends two real server teleports, checks actor feet and shared
 network coordinates, captures both results and exits. The root round-trip
 wrapper snapshots and restores the exact original position/facing/zone after
 logout, while verifying that health, inventory and money are unchanged.
+
+Reverse input preserves character facing, uses the server's RunBackSpeed,
+and selects the original Walkbackwards clip (13). Releasing input restores
+the current forward speed. A stationary landing keeps JumpEnd (39), but
+moving immediately resumes the appropriate ground animation instead of
+sliding in the landing pose. Ordinary weapon one-shots are not interrupted
+by this landing-specific transition. `WowUnreal.Animation.RuntimePlayback`
+and `Scripts/Verification/39-backpedal-and-landing.json` cover these paths.

@@ -30,6 +30,19 @@ const FTracking Common[]={
 bool IsTracking(const FSpellDbcEntry* S) {if(S) for(uint32 Aura:S->EffectApplyAuraName) if(Aura==44 || Aura==45 || Aura==151) return true; return false;}
 int32 QuestIcon(uint8 Status,bool Trivial) {return Status==10?10:Status==8 || (Trivial && Status==2)?9:Status==7 || (Trivial && Status==4)?11:-1;}
 }
+uint8 WowMinimapUi::QuestStatus(const FWowLuaContext* C, const FWowEntity& Entity)
+{
+    if (!C || !C->ConnectionManager || !C->EntityManager) return 0;
+    const auto* Player = C->EntityManager->GetLocalPlayer();
+    if (!Player) return 0;
+    // A cached response can outlive the NPC faction, death or questgiver flags.
+    // The server excludes hostile NPCs from its status list.
+    if (Entity.IsUnit() && (!(Entity.GetField(UnitField::NPC_FLAGS) & 2) || Entity.GetHealth() <= 0 ||
+        Entity.GetFieldByte(UnitField::BYTES_1, 0) == WowStandState::DEAD ||
+        WowLuaApi::UnitReactionRank(C, &Entity, Player) < 4)) return 0;
+    return C->ConnectionManager->PacketHandler.QuestGiverStatuses.FindRef(Entity.Guid);
+}
+
 FWowMinimapUiView& WowMinimapUi::View(FWowLuaContext* C) {if(!C->Minimap) C->Minimap=MakeShared<FWowMinimapUiView>(); return *C->Minimap;}
 TArray<WowMinimapUi::FTracking> WowMinimapUi::Tracking(FWowLuaContext* C)
 {
@@ -102,7 +115,7 @@ TArray<WowMinimapUi::FBlip> WowMinimapUi::Blips(FWowLuaContext* C)
                 if(!T) C->ConnectionManager->RequestGameObjectTemplate(E.Entry,E.Guid);
                 if(Track || (T && (FDbcStore::Get().MapUi().ResourceLockMask(T->Data[0])&Resources))) {Icon=8; Name=T?T->Name:TEXT("Mailbox");}
             }
-            if(Icon<0) Icon=QuestIcon(H.QuestGiverStatuses.FindRef(E.Guid),Track && Track->Type==3);
+            if(Icon<0) Icon=QuestIcon(QuestStatus(C,E),Track && Track->Type==3);
             if(T) Name=T->Name;
         }
         else
@@ -112,7 +125,7 @@ TArray<WowMinimapUi::FBlip> WowMinimapUi::Blips(FWowLuaContext* C)
             if(H.GroupInfo.FindMember(E.Guid)) Icon=H.GroupInfo.IsRaidGroup()?0:1;
             else if(E.GetField64(UnitField::SUMMONEDBY)==Player->Guid || E.GetField64(UnitField::CHARMEDBY)==Player->Guid) Icon=15;
             else if(Track && Track->Type==1 && (Track->Flags&E.GetField(UnitField::NPC_FLAGS)) && Reaction>=4) Icon=8;
-            if(Icon<0) Icon=QuestIcon(H.QuestGiverStatuses.FindRef(E.Guid),Track && Track->Type==3);
+            if(Icon<0) Icon=QuestIcon(QuestStatus(C,E),Track && Track->Type==3);
             if(Icon<0 && (E.GetField(UnitField::NPC_FLAGS)&0x2000) && Reaction>=4) Icon=13;
             const uint32 Type=E.IsPlayer()?7:H.CreatureTypes.FindRef(E.Entry);
             const uint8 UnitFlags=E.GetFieldByte(UnitField::BYTES_1,2);

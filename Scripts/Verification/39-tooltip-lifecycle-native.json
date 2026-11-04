@@ -1,0 +1,103 @@
+{
+  "qaClass": 8,
+  "qaLevel": 40,
+  "qaSpells": [
+    168,
+    6117,
+    66
+  ],
+  "qaGm": false,
+  "width": 1280,
+  "height": 900,
+  "steps": [
+    {
+      "op": "wait_world",
+      "timeout": 180
+    },
+    {
+      "op": "wait_floor",
+      "timeout": 90
+    },
+    {
+      "op": "lua",
+      "code": "function QATooltipText(tip) local text={}; for i=1,tip:NumLines() do text[#text+1]=_G[tip:GetName()..'TextLeft'..i]:GetText() or '' end; return table.concat(text,' ') end\nfunction QAAuraIndex(id) for i=1,40 do local name,_,_,_,_,_,_,_,_,_,spell=UnitBuff('player',i); if not name then return end; if id==spell then return i end end end\nGameTooltip:SetOwner(UIParent,'ANCHOR_NONE'); GameTooltip:SetPoint('CENTER',UIParent,'CENTER',0,80)\nfor i=1,36 do GameTooltip:AddDoubleLine('Previous item row '..i,'Right '..i) end\nGameTooltip:SetSpellByID(66)\nassert(not QATooltipText(GameTooltip):find('$',1,true) and QATooltipText(GameTooltip):find('Fades the caster',1,true),QATooltipText(GameTooltip))\nfor i=GameTooltip:NumLines()+1,36 do assert(not _G['GameTooltipTextLeft'..i]:IsShown() and not _G['GameTooltipTextRight'..i]:IsShown(),'old tooltip row survived') end"
+    },
+    {
+      "op": "capture",
+      "name": "39-invisibility-description-without-glyph"
+    },
+    {
+      "op": "lua",
+      "code": "GameTooltip:SetSpellByID(845); assert(QATooltipText(GameTooltip):find('his nearest ally',1,true) and not QATooltipText(GameTooltip):find('$',1,true)); GameTooltip:Hide(); CastSpellByID(168,'player')"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "QAAuraIndex(168)~=nil",
+      "timeout": 12
+    },
+    {
+      "op": "lua",
+      "code": "QAAuraButton='BuffButton'..QAAuraIndex(168)"
+    },
+    {
+      "op": "hover_frame",
+      "nameFromGlobal": "QAAuraButton"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "GameTooltip:IsVisible() and select(3,GameTooltip:GetSpell())==168",
+      "timeout": 5
+    },
+    {
+      "op": "wait",
+      "seconds": 1.7
+    },
+    {
+      "op": "lua",
+      "code": "CastSpellByID(6117,'player')"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "QAAuraIndex(6117)~=nil and QAAuraIndex(168)==nil and select(3,GameTooltip:GetSpell())==6117",
+      "timeout": 12
+    },
+    {
+      "op": "capture",
+      "name": "39-hovered-armor-aura-replaced"
+    },
+    {
+      "op": "lua",
+      "code": "CancelUnitBuff('player',QAAuraIndex(6117))"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "QAAuraIndex(6117)==nil and not GameTooltip:IsVisible()",
+      "timeout": 8
+    },
+    {
+      "op": "lua",
+      "code": "GameTooltip:SetOwner(UIParent,'ANCHOR_NONE'); GameTooltip:SetUnitBuff('player',40); assert(not GameTooltip:IsShown() and GameTooltip:NumLines()==0 and GameTooltip:GetSpell()==nil and GameTooltip:GetOwner()==nil and not GameTooltip:IsOwned(UIParent)); GameTooltip:SetOwner(UIParent,'ANCHOR_NONE'); GameTooltip:ClearAllPoints(); GameTooltip:SetPoint('CENTER',UIParent,'CENTER',0,80); GameTooltip:SetInventoryItem('player',16); assert(GameTooltip:GetItem(),'equipped main-hand tooltip is missing')"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "GameTooltip:IsVisible() and not QATooltipText(GameTooltip):find('Retrieving',1,true)",
+      "timeout": 6
+    },
+    {
+      "op": "capture",
+      "name": "39-equipped-weapon-double-lines"
+    },
+    {
+      "op": "lua",
+      "code": "QAMixedTooltip=CreateFrame('GameTooltip','QAMixedTooltip',UIParent,'GameTooltipTemplate')\nQAMixedTooltip:SetOwner(UIParent,'ANCHOR_NONE'); QAMixedTooltip:SetPoint('CENTER',UIParent,'CENTER',0,80)\nQAMixedTooltip:AddDoubleLine('Long weapon title','Speed 2.00')\nQAMixedTooltipTextLeft1:SetFont('Fonts\\\\FRIZQT__.TTF',24)\nQAMixedTooltipTextRight1:SetFont('Fonts\\\\FRIZQT__.TTF',24)\nQAMixedTooltip:AddLine('Short')\nQAMixedTooltip:Show(); GameTooltip:Hide()\nassert(QAMixedTooltipTextLeft1:GetRight()+8<=QAMixedTooltipTextRight1:GetLeft(),'double header columns overlap')\nassert(QAMixedTooltipTextRight1:GetRight()<=QAMixedTooltip:GetRight()-7,'right column exceeds tooltip')"
+    },
+    {
+      "op": "capture",
+      "name": "39-double-header-with-mixed-rows"
+    },
+    {
+      "op": "lua",
+      "code": "QAMixedTooltip:Hide(); GameTooltip:Hide()"
+    }
+  ]
+}

@@ -193,7 +193,12 @@ void AWowPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInput
 
 	if (UEnhancedInputComponent* EI = Cast<UEnhancedInputComponent>(PlayerInputComponent))
 	{
-		if (MoveAction) EI->BindAction(MoveAction, ETriggerEvent::Triggered, this, &AWowPlayerCharacter::OnMove);
+		if (MoveAction)
+		{
+			EI->BindAction(MoveAction, ETriggerEvent::Triggered, this, &AWowPlayerCharacter::OnMove);
+			EI->BindAction(MoveAction, ETriggerEvent::Completed, this, &AWowPlayerCharacter::OnMove);
+			EI->BindAction(MoveAction, ETriggerEvent::Canceled, this, &AWowPlayerCharacter::OnMove);
+		}
 		if (LookAction) EI->BindAction(LookAction, ETriggerEvent::Triggered, this, &AWowPlayerCharacter::OnLook);
 		if (JumpAction)
 		{
@@ -209,6 +214,9 @@ void AWowPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInput
 void AWowPlayerCharacter::OnMove(const FInputActionValue& Value)
 {
 	const FVector2D Input = Value.Get<FVector2D>();
+	bIsBackpedaling = Input.Y < 0.f;
+	GetCharacterMovement()->bOrientRotationToMovement = !bIsBackpedaling;
+	RefreshGroundSpeed();
 	if (Input.IsNearlyZero()) return;
 
 	if (bIsAutoRunning)
@@ -216,8 +224,8 @@ void AWowPlayerCharacter::OnMove(const FInputActionValue& Value)
 		bIsAutoRunning = false;
 	}
 
-	// Movement relative to controller (camera) facing — standard UE5 3rd person
-	const FRotator ControlRot = GetControlRotation();
+	// Reverse input preserves the character's facing, including while the camera is orbiting.
+	const FRotator ControlRot = bIsBackpedaling ? GetActorRotation() : GetControlRotation();
 	const FRotator YawRot(0.0f, ControlRot.Yaw, 0.0f);
 	const FVector Forward = FRotationMatrix(YawRot).GetUnitAxis(EAxis::X);
 	const FVector Right = FRotationMatrix(YawRot).GetUnitAxis(EAxis::Y);
@@ -263,11 +271,8 @@ void AWowPlayerCharacter::OnToggleWalk()
 {
 	bIsWalking = !bIsWalking;
 
-	UCharacterMovementComponent* Mov = GetCharacterMovement();
-	if (Mov)
-	{
-		Mov->MaxWalkSpeed = bIsWalking ? RunSpeed * WalkSpeedFactor : RunSpeed;
-	}
+	RefreshGroundSpeed();
+	const UCharacterMovementComponent* Mov = GetCharacterMovement();
 
 	UE_LOG(LogWowPlayerChar, Log, TEXT("Movement mode: %s (speed: %.0f cm/s)"),
 		bIsWalking ? TEXT("Walk") : TEXT("Run"),
@@ -277,17 +282,30 @@ void AWowPlayerCharacter::OnToggleWalk()
 void AWowPlayerCharacter::OnToggleAutoRun()
 {
 	bIsAutoRunning = !bIsAutoRunning;
+	if (bIsAutoRunning)
+	{
+		bIsBackpedaling = false;
+		GetCharacterMovement()->bOrientRotationToMovement = true;
+		RefreshGroundSpeed();
+	}
 	UE_LOG(LogWowPlayerChar, Log, TEXT("Auto-run: %s"), bIsAutoRunning ? TEXT("ON") : TEXT("OFF"));
 }
 
-void AWowPlayerCharacter::ApplyServerSpeeds(float ServerRunSpeed, float ServerWalkSpeed)
+void AWowPlayerCharacter::RefreshGroundSpeed()
+{
+	const float Speed = bIsWalking ? RunSpeed * WalkSpeedFactor : RunSpeed;
+	GetCharacterMovement()->MaxWalkSpeed = bIsBackpedaling ? FMath::Min(Speed, RunSpeed * BackpedalFactor) : Speed;
+}
+
+void AWowPlayerCharacter::ApplyServerSpeeds(float ServerRunSpeed, float ServerWalkSpeed, float ServerRunBackSpeed)
 {
 	RunSpeed = ServerRunSpeed * 100.0f; // WoW units → cm
 	WalkSpeedFactor = (ServerRunSpeed > 0.0f) ? (ServerWalkSpeed / ServerRunSpeed) : 0.357f;
+	BackpedalFactor = ServerRunSpeed > 0.f ? ServerRunBackSpeed / ServerRunSpeed : 0.f;
 
 	if (UCharacterMovementComponent* Mov = GetCharacterMovement())
 	{
-		Mov->MaxWalkSpeed = bIsWalking ? RunSpeed * WalkSpeedFactor : RunSpeed;
+		RefreshGroundSpeed();
 		Mov->MaxSwimSpeed = RunSpeed * SwimSpeedFactor;
 	}
 }

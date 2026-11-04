@@ -29,6 +29,13 @@ quests require the corresponding tracking selection. Status queries are
 read-only, rate limited and refreshed when visible givers or quest fields
 change. Incomplete/invalid lists cannot partially replace the cache.
 
+The minimap and world overheads share the same quest-status eligibility
+filter. Cached markers disappear when a unit dies, loses its questgiver
+flag or becomes hostile toward the player. Faction, reputation and forced
+reaction changes also refresh server status queries. The native route
+`Scripts/Verification/39-npc-quest-markers.json` exercises quest 783 through
+acceptance, abandonment, acceptance again and turn-in to the next giver.
+
 Minimap pings carry absolute world X/Y coordinates in MSG_MINIMAP_PING. A
 local ping always animates; a packet is sent only when grouped. Received pings
 must belong to the player or a current group member. GetPingPosition and the

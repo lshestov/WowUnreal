@@ -165,7 +165,7 @@ void AWowGameplayController::RefreshUnitOverheads()
         const bool Nearby = Box && !DeadEntityGuids.Contains(Pair.Key) &&
             FVector::DistSquared(GetPawn()->GetActorLocation(), Actor->GetActorLocation()) < FMath::Square(40 * FWowCoordinate::SCALE);
         const TCHAR* Model = Nearby && (Entity->GetField(UnitField::NPC_FLAGS) & 2) ?
-            QuestMarkerModel(Handler.QuestGiverStatuses.FindRef(Pair.Key), TrackTrivial) : nullptr;
+            QuestMarkerModel(UIManager->GetQuestGiverStatus(Pair.Key), TrackTrivial) : nullptr;
         // The marker inherits the unit's movement, but keeps its own world size.
         auto* Marker = Info.Marker.Get();
         if (Model && CachedMpq && CachedAssetCache)

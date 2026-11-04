@@ -336,6 +336,15 @@ bool FHudUnitReactions::RunTest(const FString&)
     for(const auto& Row:D.Factions()) if(Row.Id==72) Stormwind=&Row;
     if(!TestNotNull(TEXT("Original Stormwind faction metadata exists"),Stormwind)) return false;
     auto& Rep=H.Reputations[Stormwind->Index]; Rep.Flags=1;
+    N.SetField(UnitField::HEALTH,50); N.SetField(UnitField::NPC_FLAGS,2); H.QuestGiverStatuses.Add(N.Guid,8);
+    TestEqual(TEXT("Friendly NPC retains its authoritative available quest"),WowMinimapUi::QuestStatus(&F.Context,N),uint8(8));
+    Rep.Standing=-6000-Stormwind->BaseFor(1,1);
+    TestEqual(TEXT("Hostile standing immediately suppresses a previously available quest"),WowMinimapUi::QuestStatus(&F.Context,N),uint8(0));
+    Rep.Standing=0; Rep.Flags|=2;
+    TestEqual(TEXT("At War alone does not fabricate hostile NPC standing"),WowMinimapUi::QuestStatus(&F.Context,N),uint8(8));
+    Rep.Flags=1; H.ForcedReactions.Add(72,1);
+    TestEqual(TEXT("A server-forced hostile faction suppresses a cached quest"),WowMinimapUi::QuestStatus(&F.Context,N),uint8(0));
+    H.ForcedReactions.Reset(); H.QuestGiverStatuses.Remove(N.Guid); N.SetField(UnitField::NPC_FLAGS,0);
     TestTrue(TEXT("Original friendly NPC frame is green, self is Friendly, not fabricated Exalted"),F.Lua.ExecuteString(TEXT("assert(UnitReaction('target','player')==5 and UnitReaction('player','player')==5 and UnitIsFriend('player','target') and not UnitCanAttack('player','target'))")));
     TestTrue(TEXT("FrameXML selection colour is green for a friendly NPC"),F.Lua.ExecuteString(TEXT("local r,g,b=UnitSelectionColor('target'); assert(r==0 and g==1 and b==0); assert(UnitPlayerOrPetInParty('target')==nil and UnitPlayerOrPetInRaid('target')==nil)")));
     Rep.Standing=42000-Stormwind->BaseFor(1,1);
@@ -1017,7 +1026,19 @@ bool FHudMinimapTracking::RunTest(const FString&)
     V.CommonKey=TEXT("MINIMAP_TRACKING_REPAIR"); auto Blips=WowMinimapUi::Blips(&F.Context);
     TestTrue(TEXT("Only matching nearby friendly vendors appear"),Blips.Num()==1 && Blips[0].Guid==2 && Blips[0].Icon==8 && Blips[0].Name==TEXT("Repair vendor"));
     N.SetField(UnitField::FACTIONTEMPLATE,29); TestTrue(TEXT("Hostile vendor flags do not create friendly service dots"),WowMinimapUi::Blips(&F.Context).IsEmpty()); N.SetField(UnitField::FACTIONTEMPLATE,12);
+    N.SetField(UnitField::NPC_FLAGS,0x1002);
     V.CommonKey.Empty(); H.QuestGiverStatuses.Add(2,10); Blips=WowMinimapUi::Blips(&F.Context); TestTrue(TEXT("Actual reward status is a completed quest dot"),Blips.Num()==1 && Blips[0].Icon==10);
+    N.SetField(UnitField::FACTIONTEMPLATE,29);
+    TestTrue(TEXT("A hostile faction change immediately hides stale reward signs in the minimap and world"),
+        WowMinimapUi::QuestStatus(&F.Context,N)==0 && WowMinimapUi::Blips(&F.Context).IsEmpty());
+    N.SetField(UnitField::FACTIONTEMPLATE,12);
+    TestTrue(TEXT("A friendly questgiver recovers its still-valid status"), WowMinimapUi::QuestStatus(&F.Context,N)==10);
+    N.SetField(UnitField::HEALTH,0);
+    TestEqual(TEXT("A dead questgiver cannot retain a cached quest sign"), WowMinimapUi::QuestStatus(&F.Context,N),uint8(0));
+    N.SetField(UnitField::HEALTH,50); N.SetField(UnitField::NPC_FLAGS,0x1000);
+    TestTrue(TEXT("Removing the questgiver flag hides the cached sign"),
+        WowMinimapUi::QuestStatus(&F.Context,N)==0 && WowMinimapUi::Blips(&F.Context).IsEmpty());
+    N.SetField(UnitField::NPC_FLAGS,0x1002);
     H.QuestGiverStatuses.Add(2,2); TestTrue(TEXT("Trivial available quests require their tracking selection"),WowMinimapUi::Blips(&F.Context).IsEmpty()); V.CommonKey=TEXT("MINIMAP_TRACKING_TRIVIAL_QUESTS"); Blips=WowMinimapUi::Blips(&F.Context); TestTrue(TEXT("Low-level selection exposes the real quest status"),Blips.Num()==1 && Blips[0].Icon==9);
     H.QuestGiverStatuses.Empty(); V.CommonKey.Empty(); H.CreatureTypes.Add(10,1); P->SetField(PlayerField::BASE+0x36A,1); Blips=WowMinimapUi::Blips(&F.Context); TestTrue(TEXT("Tracking creature bitmasks uses DBC faction reaction"),Blips.Num()==1 && Blips[0].Icon==7);
     N.SetField(UnitField::BYTES_1,4<<16); TestTrue(TEXT("Untrackable units remain hidden"),WowMinimapUi::Blips(&F.Context).IsEmpty()); N.SetField(UnitField::BYTES_1,0); N.Movement.Position.X=200; TestTrue(TEXT("Dots outside the stock 0.8-radius bound are culled"),WowMinimapUi::Blips(&F.Context).IsEmpty()); H.EntityManager.Remove(2);
