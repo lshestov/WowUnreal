@@ -4,7 +4,7 @@
 #include "WowRealmSelectWidget.h"
 #include "WowCharacterSelectWidget.h"
 #include "WowCharacterCreateWidget.h"
-#include "WowCinematicManager.h"
+
 #include "WowLoginScene.h"
 #include "WowCharacterPreview.h"
 #include "WowCredentialStore.h"
@@ -89,12 +89,6 @@ void AWowLoginController::EndPlay(const EEndPlayReason::Type EndPlayReason)
     FScreenshotRequest::OnScreenshotRequestProcessed().Remove(WorldScreenshotProcessedHandle);
     if (ConnectionManager) ConnectionManager->Disconnect();
     ClearCurrentScreen();
-    if (CinematicManager)
-    {
-        CinematicManager->StopCinematic();
-        delete CinematicManager;
-        CinematicManager = nullptr;
-    }
     if(IsValid(MenuAudio)){MenuAudio->SetGlueMode(false);MenuAudio->Destroy();}MenuAudio=nullptr;
     Super::EndPlay(EndPlayReason);
 }
@@ -233,12 +227,6 @@ void AWowLoginController::OnStateChanged(EWowSessionState NewState)
     case EWowSessionState::WorldInGame:
         UE_LOG(LogWowLogin, Log, TEXT("Entered world — showing loading screen"));
         if(MenuAudio) MenuAudio->SetGlueMode(false);
-        if (CinematicManager)
-        {
-            CinematicManager->StopCinematic();
-            delete CinematicManager;
-            CinematicManager = nullptr;
-        }
         ClearCurrentScreen();
         ShowLoadingScreen(ConnectionManager->PacketHandler.CurrentMapId);
         InitializeWorldSystems();
@@ -566,44 +554,23 @@ void AWowLoginController::HandleDeleteCharacterRequest(int64 Guid)
     bCharacterDeletePending=true;CharacterDeleteRequestedAt=FPlatformTime::Seconds();ConnectionManager->DeleteCharacter(Guid);
 }
 
-void AWowLoginController::InitializeCinematics()
+void AWowLoginController::UpdateLoginScene()
 {
-    if (!WorldManager || !WorldManager->GetMpqManager()) return;
-    EnsureMenuAudio();
-    if(LoginWidget && LoginWidget->GetCurrentExpansion()==EWowExpansion::WrathOfTheLichKing)
+    if (!LoginWidget) return;
+    auto* Mpq = WorldManager ? WorldManager->GetMpqManager() : nullptr;
+    if (LoginWidget->GetCurrentExpansion() == EWowExpansion::WrathOfTheLichKing && Mpq && Mpq->IsInitialized())
     {
-        if(!LoginScene)
+        EnsureMenuAudio();
+        LoginScene = GetWorld()->SpawnActor<AWowLoginScene>();
+        if (LoginScene && !LoginScene->Setup(WorldManager, MenuAudio))
         {
-            LoginScene=GetWorld()->SpawnActor<AWowLoginScene>();
-            if(!LoginScene->Setup(WorldManager,MenuAudio)){LoginScene->Destroy();LoginScene=nullptr;UE_LOG(LogWowLogin,Error,TEXT("Unable to load original Wrath AccountLogin scene"));}
+            LoginScene->Destroy();
+            LoginScene = nullptr;
         }
-        if(LoginScene) LoginWidget->SetScene(LoginScene,WorldManager->GetMpqManager(),MenuAudio);
-        return;
     }
-
-    if(CinematicManager) {CinematicManager->StopCinematic();delete CinematicManager;}
-    CinematicManager = new FWowCinematicManager();
-
-    // Extract all expansion cinematics
-    FMpqManager* Mpq = WorldManager->GetMpqManager();
-    CinematicManager->PrepareCinematic(Mpq, EWowExpansion::Classic);
-    CinematicManager->PrepareCinematic(Mpq, EWowExpansion::BurningCrusade);
-    CinematicManager->PrepareCinematic(Mpq, EWowExpansion::WrathOfTheLichKing);
-
-    // Bind media texture to the login widget
-    if (LoginWidget.IsValid())
-    {
-        LoginWidget->SetCinematicTexture(CinematicManager->GetMediaTexture());
-    }
-
-    // Play the cinematic for the current expansion
-    EWowExpansion CurrentExp = LoginWidget.IsValid() ? LoginWidget->GetCurrentExpansion() : EWowExpansion::WrathOfTheLichKing;
-    if (CinematicManager->HasCinematic(CurrentExp))
-    {
-        CinematicManager->PlayCinematic(CurrentExp);
-        UE_LOG(LogWowLogin, Log, TEXT("Playing login cinematic for expansion %d"), static_cast<int32>(CurrentExp));
-    }
+    LoginWidget->SetScene(LoginScene, Mpq, MenuAudio);
 }
+
 void AWowLoginController::EnsureMenuAudio()
 {
     if(!MenuAudio) MenuAudio=Cast<AWowAudioManager>(UGameplayStatics::GetActorOfClass(GetWorld(),AWowAudioManager::StaticClass()));
@@ -994,17 +961,23 @@ void AWowLoginController::TryFinalizeGroundSnap()
 
 void AWowLoginController::HandleExpansionChanged(uint8 ExpansionIndex)
 {
-    if(LoginScene){LoginScene->Destroy();LoginScene=nullptr;}
-    if(CinematicManager){CinematicManager->StopCinematic();delete CinematicManager;CinematicManager=nullptr;}
-    if(LoginWidget && ExpansionIndex!=uint8(EWowExpansion::WrathOfTheLichKing)) LoginWidget->SetScene(nullptr,WorldManager->GetMpqManager(),MenuAudio);
-    InitializeCinematics();
-
+    if (LoginScene)
+    {
+        LoginScene->Destroy();
+        LoginScene = nullptr;
+    }
+    if (ExpansionIndex != uint8(EWowExpansion::WrathOfTheLichKing))
+    {
+        if (MenuAudio) MenuAudio->SetGlueMode(false);
+        if (ConnectionManager->GetState() != EWowSessionState::Disconnected)
+            ConnectionManager->Disconnect();
+    }
+    UpdateLoginScene();
 }
 
 void AWowLoginController::ClearCurrentScreen()
 {
     if(LoginScene){LoginScene->Destroy();LoginScene=nullptr;}
-    if(CinematicManager){CinematicManager->StopCinematic();delete CinematicManager;CinematicManager=nullptr;}
     if(CharCreateWidget && FSlateApplication::IsInitialized()) FSlateApplication::Get().ReleaseAllPointerCapture();
     if (LoadingScreenWidget.IsValid())
     {
@@ -1063,8 +1036,7 @@ void AWowLoginController::ShowLoginScreen()
         }
     }
 
-    // Initialize cinematics after showing the widget
-    InitializeCinematics();
+    UpdateLoginScene();
 
     // Auto-submit if -autologin flag is set
     if (bAutoLoginActive && !bAutoLoginSubmitted)

@@ -1,0 +1,7 @@
+{"steps":[
+  {"at":3,"action":"capture","capture":"01-wrath"},
+  {"at":6,"action":"expansion","version":0,"server":"localhost:3730","capture":"02-classic"},
+  {"at":9,"action":"expansion","version":1,"capture":"03-burning-crusade"},
+  {"at":12,"action":"expansion","version":2,"expectedPort":3730,"capture":"04-wrath-return"},
+  {"at":15,"action":"options","capture":"05-options"}
+]}

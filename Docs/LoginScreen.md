@@ -19,7 +19,9 @@ textures; `Scripts/CreateLoginSceneMaterials.py` regenerates them.
   544.080 seconds. The scene's four `$DSO` events resolve sound IDs 14143–14146
   at 7000, 10533, 15067 and 26233 ms.
 * Glue UI BLPs, FRIZQT font and localized strings supply the Wrath login controls.
-  Connection host and existing expansion choices remain available through Options.
+  The Wrath form exposes the login server (host and optional port), account
+  and password. The bottom tabs keep these entries when switching versions.
+  Classic and The Burning Crusade currently show unavailable-login screens.
   This change does not implement the original external account/credits/TOS flows
   or claim pixel-identical reproduction of the entire Glue UI.
 

@@ -8,18 +8,15 @@
 DECLARE_DELEGATE_FourParams(FOnLoginSubmit, const FString& /*Server*/, int32 /*Port*/, const FString& /*User*/, const FString& /*Pass*/);
 DECLARE_DELEGATE_OneParam(FOnExpansionChanged, uint8 /*ExpansionIndex*/);
 
-class UMediaTexture;
+class SBox;
 class AWowLoginScene;
 class AWowAudioManager;
 class FMpqManager;
 class FWowCharacterCreationArt;
 class UWowBackdropWidget;
-struct FSlateBrush;
 
 /**
- * WoW-themed login screen with expansion switcher.
- * Mimics the look of the original client login screens.
- * Supports cinematic video background via media texture.
+ * Wrath login form and shared expansion selector.
  */
 class SWowLoginWidget : public SCompoundWidget
 {
@@ -41,9 +38,6 @@ public:
     /** Programmatically click the login button */
     void AutoSubmit();
 
-    /** Set the media texture for cinematic background */
-    void SetCinematicTexture(UMediaTexture* InTexture);
-
     FOnLoginSubmit OnLoginSubmit;
     FOnExpansionChanged OnExpansionChanged;
 
@@ -60,7 +54,8 @@ private:
     TSharedPtr<FSliderStyle> GlueSlider;
     FEditableTextBoxStyle StockEditStyle;
     TMap<FName,TWeakPtr<SButton>> StockControls;
-    bool bOptions=false,bBusy=false;
+    bool bOptions=false;
+    TSharedPtr<SBox> ScreenBody;
     FReply OnLoginClicked();
     void SetExpansion(EWowExpansion Expansion);
 
@@ -71,7 +66,6 @@ private:
     FLinearColor GetBackgroundColor() const;
     FLinearColor GetAccentColor() const;
     FString GetExpansionTitle() const;
-    FString GetExpansionSubtitle() const;
 
     EWowExpansion CurrentExpansion = EWowExpansion::WrathOfTheLichKing;
 
@@ -79,16 +73,4 @@ private:
     TSharedPtr<SEditableTextBox> UsernameBox;
     TSharedPtr<SEditableTextBox> PasswordBox;
     TSharedPtr<STextBlock> StatusLabel;
-    TSharedPtr<STextBlock> TitleText;
-    TSharedPtr<STextBlock> SubtitleText;
-    TSharedPtr<SBorder> BackgroundBorder;
-
-    // Cinematic background
-    TSharedPtr<SImage> CinematicImage;
-    TSharedPtr<FSlateBrush> CinematicBrush;
-
-    // Expansion tab buttons for styling updates
-    TSharedPtr<SBorder> ClassicTab;
-    TSharedPtr<SBorder> BCTab;
-    TSharedPtr<SBorder> WotLKTab;
 };

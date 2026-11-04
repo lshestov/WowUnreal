@@ -54,6 +54,37 @@ void AWowLoginTestGameMode::Tick(float Delta)
     const auto S=Steps[Index]->AsObject();if(Now-Started<S->GetNumberField(TEXT("at"))) return;
     const FString Action=S->GetStringField(TEXT("action"));auto* Audio=Controller->MenuAudio.Get();
     if(Action==TEXT("capture")){}
+    else if(Action==TEXT("expansion"))
+    {
+        const int32 Version=S->GetIntegerField(TEXT("version"));
+        auto Widget=Controller->LoginWidget;
+        if (!Widget || Version<0 || Version>=int32(EWowExpansion::Count))
+        {Finish(false,TEXT("Invalid expansion step"));return;}
+        if (S->HasField(TEXT("server")))
+            Widget->SetCredentials(S->GetStringField(TEXT("server")),TEXT("offline"),TEXT("draft"));
+        if (!Widget->PressStockControl(FName(*FString::Printf(TEXT("Expansion_%d"),Version))) ||
+            int32(Widget->GetCurrentExpansion())!=Version)
+        {Finish(false,TEXT("Footer did not select the requested expansion"));return;}
+        const bool Wrath=Version==int32(EWowExpansion::WrathOfTheLichKing);
+        if (IsValid(Controller->LoginScene)!=Wrath || (!Wrath && Audio->IsGlueMusicPlaying()))
+        {Finish(false,TEXT("Expansion scene or audio lifetime mismatch"));return;}
+        if (!Wrath)
+        {
+            const int32 Previous=Submits;
+            Widget->AutoSubmit();
+            if(Submits!=Previous){Finish(false,TEXT("Unavailable expansion dispatched login"));return;}
+        }
+        else if(S->HasField(TEXT("expectedPort")))
+        {
+            bool Matched=false;
+            Widget->OnLoginSubmit.BindLambda([&](const FString& Host,int32 Port,const FString& User,const FString& Password)
+            {Matched=Host==TEXT("localhost") && Port==S->GetIntegerField(TEXT("expectedPort")) && User==TEXT("offline") && Password==TEXT("draft");});
+            Widget->PressStockControl(TEXT("Login"));
+            Widget->OnLoginSubmit.BindLambda([this](const FString&,int32,const FString&,const FString&){++Submits;});
+            if(!Matched){Finish(false,TEXT("Login draft changed across expansion tabs"));return;}
+            Widget->SetStatusText(FString());
+        }
+    }
     else if(Action==TEXT("musicOff")){Audio->SetUiOption(TEXT("sound_enablesfx"),TEXT("0"));Audio->SetUiOption(TEXT("sound_enableambience"),TEXT("0"));Audio->SetUiOption(TEXT("sound_enablemusic"),TEXT("0"));}
     else if(Action==TEXT("musicOn")) Audio->SetUiOption(TEXT("sound_enablemusic"),TEXT("1"));
     else if(Action==TEXT("masterOff")) Audio->SetUiOption(TEXT("sound_mastervolume"),TEXT("0"));
@@ -94,7 +125,7 @@ void AWowLoginTestGameMode::Tick(float Delta)
     Results.Add(MakeShared<FJsonValueObject>(Row));FString CaptureName;
     if(S->TryGetStringField(TEXT("capture"),CaptureName))
     {
-        if(Action==TEXT("realm") || Action==TEXT("select") || Action==TEXT("create") || Action==TEXT("login")){PendingCapture=CaptureName;Changed=Now;Phase=3;}
+        if(Action==TEXT("realm") || Action==TEXT("select") || Action==TEXT("create") || Action==TEXT("login") || Action==TEXT("expansion")){PendingCapture=CaptureName;Changed=Now;Phase=3;}
         else {FScreenshotRequest::RequestScreenshot(Output/(CaptureName+TEXT(".png")),true,false);Phase=1;}
     }
     else ++Index;

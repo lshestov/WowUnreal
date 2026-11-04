@@ -9,7 +9,7 @@ class UWowConnectionManager;
 class AWowWorldManager;
 class AWowAudioManager;
 class UWowUIManager;
-class FWowCinematicManager;
+
 class AWowCharacterPreview;
 class AWowLoginScene;
 class SWowLoginWidget;
@@ -72,7 +72,7 @@ private:
     void InitializeWorldSystems();
 
     /** Initialize and start cinematic playback */
-    void InitializeCinematics();
+    void UpdateLoginScene();
 
     /** Show the loading screen and start terrain loading around spawn */
     void ShowLoadingScreen();
@@ -105,8 +105,6 @@ private:
     TSharedPtr<SWidget> CurrentWidget;
     TSharedPtr<SWidget> LoadingWidget; // Separate from CurrentWidget so it overlays
 
-    /** Cinematic manager for login screen backgrounds (owned, cleaned up in EndPlay) */
-    FWowCinematicManager* CinematicManager = nullptr;
     UPROPERTY() TObjectPtr<AWowLoginScene> LoginScene;
     UPROPERTY() TObjectPtr<AWowAudioManager> MenuAudio;
     void EnsureMenuAudio();

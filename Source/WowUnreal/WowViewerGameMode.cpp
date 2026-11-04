@@ -455,14 +455,13 @@ void AWowViewerGameMode::SetupLoginScene(UWorld* World)
     // Spawn the login flow controller (shows login screen UI)
     FActorSpawnParameters LoginParams;
     LoginParams.Name = FName(TEXT("WowLoginController"));
+    LoginParams.bDeferConstruction = true;
     AWowLoginController* LoginCtrl = World->SpawnActor<AWowLoginController>(
-        AWowLoginController::StaticClass(),
-        FVector::ZeroVector, FRotator::ZeroRotator, LoginParams);
-
-    // Give the LoginController a reference to WorldManager for world entry
+        AWowLoginController::StaticClass(), FTransform::Identity, LoginParams);
     if (LoginCtrl)
     {
         LoginCtrl->WorldManager = WorldMgr;
+        LoginCtrl->FinishSpawning(FTransform::Identity);
     }
 }
 

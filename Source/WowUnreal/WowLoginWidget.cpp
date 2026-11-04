@@ -6,7 +6,7 @@
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/SOverlay.h"
 #include "Widgets/Images/SImage.h"
-#include "MediaTexture.h"
+
 #include "WowLoginScene.h"
 #include "WowAudioManager.h"
 #include "WowCharacterCreationArt.h"
@@ -35,17 +35,35 @@ private:TWeakObjectPtr<AWowLoginScene> Scene;FSlateBrush Brush;
 void SWowLoginWidget::SetScene(AWowLoginScene* InScene,FMpqManager* Mpq,AWowAudioManager* InAudio)
 {
     Scene=InScene;Audio=InAudio;
-    if(InScene){Art=MakeUnique<FWowCharacterCreationArt>(Mpq);BuildStockLayout();}
-    else
+    if (InScene)
     {
-        const FString Server=ServerBox?ServerBox->GetText().ToString():FString(),User=UsernameBox?UsernameBox->GetText().ToString():FString(),Pass=PasswordBox?PasswordBox->GetText().ToString():FString();
-        Construct(FArguments());SetCredentials(Server,User,Pass);Art.Reset();
+        if (!Art) Art = MakeUnique<FWowCharacterCreationArt>(Mpq);
+        BuildStockLayout();
+        return;
     }
+    bOptions = false;
+    ScreenBody->SetContent(SNullWidget::NullWidget);
+    Backdrops.Reset();
+    StatusLabel.Reset();
+    StockControls.Remove(TEXT("Login"));
+    StockControls.Remove(TEXT("Options"));
+    StockControls.Remove(TEXT("Quit"));
+    const FString Notice = CurrentExpansion == EWowExpansion::WrathOfTheLichKing
+        ? TEXT("Unable to load the Wrath login scene.") : TEXT("Login is not available for this expansion yet.");
+    ScreenBody->SetContent(SNew(SBorder)
+        .BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox")).BorderBackgroundColor(GetBackgroundColor())
+        .HAlign(HAlign_Center).VAlign(VAlign_Center)
+        [SNew(SVerticalBox)
+            + SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0,0,0,8)
+            [SNew(STextBlock).Text(FText::FromString(GetExpansionTitle())).Font(FCoreStyle::GetDefaultFontStyle("Bold",26)).ColorAndOpacity(GetAccentColor())]
+            + SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)
+            [SNew(STextBlock).Text(FText::FromString(Notice))]]);
 }
 void SWowLoginWidget::BuildStockLayout()
 {
-    const FString Server=ServerBox?ServerBox->GetText().ToString():TEXT("127.0.0.1:3724"),User=UsernameBox?UsernameBox->GetText().ToString():FString(),Pass=PasswordBox?PasswordBox->GetText().ToString():FString();
-    Backdrops.Reset();StockControls.Reset();const FLinearColor Gold(1,.82f,0);auto Canvas=SNew(SConstraintCanvas);
+    ScreenBody->SetContent(SNullWidget::NullWidget);
+    Backdrops.Reset();
+    const FLinearColor Gold(1,.82f,0);auto Canvas=SNew(SConstraintCanvas);
     auto Put=[&](TSharedRef<SWidget> W,float X,float Y,float Width,float Height,float AX=0,float AY=0){Canvas->AddSlot().Anchors(FAnchors(AX,AY)).Alignment(FVector2D::ZeroVector).Offset(FMargin(X,Y,Width,Height))[W];};
     auto Font=[this](int32 Size){auto F=Art->Font(Size);F.OutlineSettings=FFontOutlineSettings(1);return F;};
     auto Label=[&](const FString& Text,int32 Size=16){return SNew(STextBlock).Text(FText::FromString(Text)).Font(Font(Size)).ColorAndOpacity(Gold).Justification(ETextJustify::Center);};
@@ -70,41 +88,36 @@ void SWowLoginWidget::BuildStockLayout()
     Put(Label(TEXT("Version 3.3.5 (12340)"),12),0,-24,230,18,0,1);
     StockEditStyle=FCoreStyle::Get().GetWidgetStyle<FEditableTextBoxStyle>("NormalEditableTextBox");FSlateBrush Empty;Empty.DrawAs=ESlateBrushDrawType::NoDrawType;
     StockEditStyle.SetBackgroundImageNormal(Empty).SetBackgroundImageHovered(Empty).SetBackgroundImageFocused(Empty).SetBackgroundImageReadOnly(Empty).SetPadding(FMargin(12,0,5,5));
-    auto Field=[&](TSharedPtr<SEditableTextBox>& Box,const FString& Text,bool Password)
+    auto Field=[&](const TSharedPtr<SEditableTextBox>& Box)
     {
+        Box->SetStyle(&StockEditStyle);
+        Box->SetFont(Font(16));
         FWowBackdrop D;D.BgFile=TEXT("Interface\\Tooltips\\UI-Tooltip-Background");D.EdgeFile=TEXT("Interface\\Glues\\Common\\Glue-Tooltip-Border");D.EdgeSize=16;D.TileSize=16;D.Tile=true;
         D.InsetLeft=10;D.InsetRight=5;D.InsetTop=4;D.InsetBottom=9;D.Color=FLinearColor(.09f,.09f,.09f,1);D.BorderColor=FLinearColor(.8f,.8f,.8f,1);
-        return SNew(SOverlay)+SOverlay::Slot()[Backdrop(D)]+SOverlay::Slot()[SAssignNew(Box,SEditableTextBox).Style(&StockEditStyle).Text(FText::FromString(Text)).Font(Font(16)).IsPassword(Password)
-            .OnTextCommitted_Lambda([this](const FText&,ETextCommit::Type Type){if(Type==ETextCommit::OnEnter) OnLoginClicked();})];
+        return SNew(SOverlay)+SOverlay::Slot()[Backdrop(D)]+SOverlay::Slot()[Box.ToSharedRef()];
     };
-    auto AddLoginField = [&](const TCHAR* LabelKey, float LabelWidth, float FieldTop,
-                             TSharedPtr<SEditableTextBox>& Box, const FString& Value, bool IsPassword)
+    auto AddLoginField = [&](const FString& CaptionText, float LabelWidth, float FieldTop,
+                             const TSharedPtr<SEditableTextBox>& Box)
     {
         // AccountLogin.xml centers the caption in a 64-unit region whose
         // bottom sits 23 units below the top of the edit box.
         constexpr float LabelHeight = 64.f;
         constexpr float LabelBottomOffset = 23.f;
         auto Caption = SNew(SBox).VAlign(VAlign_Center).Visibility(EVisibility::HitTestInvisible)
-            [Label(Art->String(LabelKey))];
+            [Label(CaptionText)];
         Put(Caption, -LabelWidth/2, FieldTop+LabelBottomOffset-LabelHeight, LabelWidth, LabelHeight, .5f, 1);
-        Put(Field(Box,Value,IsPassword), -100, FieldTop, 200, 37, .5f, 1);
+        Put(Field(Box), -100, FieldTop, 200, 37, .5f, 1);
     };
-    AddLoginField(TEXT("ACCOUNT_NAME"), 600, -382, UsernameBox, User, false);
-    AddLoginField(TEXT("PASSWORD"), 256, -312, PasswordBox, Pass, true);
+    AddLoginField(TEXT("Login server"), 256, -452, ServerBox);
+    AddLoginField(Art->String(TEXT("ACCOUNT_NAME")), 600, -382, UsernameBox);
+    AddLoginField(Art->String(TEXT("PASSWORD")), 256, -312, PasswordBox);
     Put(Click(TEXT("Login"),Art->String(TEXT("LOGIN")),FOnClicked::CreateSP(this,&SWowLoginWidget::OnLoginClicked)), -110,-215,220,45,.5f,1);
     Put(SAssignNew(StatusLabel,STextBlock).Font(Font(12)).ColorAndOpacity(FLinearColor(1,.25f,.15f)).Justification(ETextJustify::Center).AutoWrapText(true),-300,-159,600,42,.5f,1);
     Put(Click(TEXT("Options"),Art->String(TEXT("OPTIONS")),FOnClicked::CreateLambda([this]{bOptions=!bOptions;BuildStockLayout();return FReply::Handled();}),12),-155,-219,150,38,1,1);
     Put(Click(TEXT("Quit"),Art->String(TEXT("QUIT")),FOnClicked::CreateLambda([]{FPlatformMisc::RequestExit(false);return FReply::Handled();}),12),-155,-67,150,38,1,1);
-    // Connection/expansion controls remain available inside Options.
-    // Keep the options controls between the centered login button and the
-    // right-side buttons even at the original 1024x768 viewport.
     constexpr float PanelLeft=-385,PanelWidth=210;
-    auto ServerField=Field(ServerBox,Server,false);ServerField->SetVisibility(bOptions?EVisibility::Visible:EVisibility::Collapsed);Put(ServerField,PanelLeft,-294,PanelWidth,37,1,1);
     if(bOptions)
     {
-        Put(Label(TEXT("Login server"),12),PanelLeft,-320,PanelWidth,24,1,1);
-        const TCHAR* Titles[]={TEXT("Classic"),TEXT("The Burning Crusade"),TEXT("Wrath of the Lich King")};
-        for(uint8 I=0;I<3;++I) Put(Click(FName(*FString::Printf(TEXT("Expansion_%u"),I)),Titles[I],FOnClicked::CreateLambda([this,I]{SetExpansion(EWowExpansion(I));return FReply::Handled();}),12),-330+I*220,140,220,38,.5f,0);
         if(!GlueCheck) GlueCheck=MakeShared<FCheckBoxStyle>();
         const auto* Up=Art->Brush(TEXT("Interface\\Buttons\\UI-CheckBox-Up"));const auto* Checked=Art->Brush(TEXT("Interface\\Buttons\\UI-CheckBox-Check"));
         GlueCheck->SetUncheckedImage(*Up).SetUncheckedHoveredImage(*Up).SetUncheckedPressedImage(*Art->Brush(TEXT("Interface\\Buttons\\UI-CheckBox-Down")));
@@ -119,8 +132,7 @@ void SWowLoginWidget::BuildStockLayout()
         Put(Backdrop(SliderBack),PanelLeft,-215,PanelWidth,17,1,1);
         Put(SNew(SSlider).Style(GlueSlider.Get()).Value_Lambda([this]{return Audio.IsValid()?Audio->MusicVolume:.5f;}).OnValueChanged_Lambda([this](float V){if(Audio.IsValid()) Audio->SetUiOption(TEXT("sound_musicvolume"),FString::SanitizeFloat(V));}),PanelLeft,-222,PanelWidth,32,1,1);
     }
-    else ServerBox->SetVisibility(EVisibility::Collapsed);
-    ChildSlot[SNew(SDPIScaler).DPIScale_Lambda([this]{return GetCachedGeometry().GetLocalSize().Y>0?float(GetCachedGeometry().GetLocalSize().Y/768):1.f;})[Canvas]];
+    ScreenBody->SetContent(Canvas);
 }
 bool SWowLoginWidget::PressStockControl(FName Name)
 {
@@ -168,7 +180,7 @@ FString SWowLoginWidget::GetExpansionTitle() const
     switch (CurrentExpansion)
     {
     case EWowExpansion::Classic:
-        return TEXT("World of Warcraft");
+        return TEXT("World of Warcraft Classic");
     case EWowExpansion::BurningCrusade:
         return TEXT("The Burning Crusade");
     case EWowExpansion::WrathOfTheLichKing:
@@ -177,353 +189,65 @@ FString SWowLoginWidget::GetExpansionTitle() const
     }
 }
 
-FString SWowLoginWidget::GetExpansionSubtitle() const
-{
-    switch (CurrentExpansion)
-    {
-    case EWowExpansion::Classic:
-        return TEXT("");
-    case EWowExpansion::BurningCrusade:
-        return TEXT("World of Warcraft");
-    case EWowExpansion::WrathOfTheLichKing:
-    default:
-        return TEXT("World of Warcraft");
-    }
-}
-
-// ─── UI Construction ────────────────────────────────────────────────────────
-
 void SWowLoginWidget::Construct(const FArguments& InArgs)
 {
-    // WoW gold color palette
-    const FLinearColor WowGold(1.0f, 0.84f, 0.0f);
-    const FLinearColor WowGoldDim(0.7f, 0.6f, 0.1f);
-    const FLinearColor FieldBg(0.0f, 0.0f, 0.0f, 0.6f);
-    const FLinearColor FieldBorder(0.35f, 0.3f, 0.1f, 0.8f);
-    const FLinearColor PanelBorder(0.4f, 0.35f, 0.1f, 0.6f);
-
-    // Styled text field builder
-    auto MakeField = [&](TSharedPtr<SEditableTextBox>& OutBox, const FString& HintText, bool bPassword = false) -> TSharedRef<SWidget>
+    auto MakeInput = [this](bool IsPassword)
     {
-        return SNew(SBorder)
-            .BorderBackgroundColor(FieldBg)
-            .BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
-            .Padding(FMargin(2))
-            [
-                SNew(SBorder)
-                .BorderBackgroundColor(FieldBorder)
-                .BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
-                .Padding(FMargin(1))
-                [
-                    SNew(SBox).MinDesiredWidth(280).MaxDesiredHeight(30)
-                    [
-                        SAssignNew(OutBox, SEditableTextBox)
-                        .IsPassword(bPassword)
-                        .HintText(FText::FromString(HintText))
-                        .Font(FCoreStyle::GetDefaultFontStyle("Regular", 14))
-                        .BackgroundColor(FLinearColor(0.05f, 0.05f, 0.1f, 1.0f))
-                        .ForegroundColor(FSlateColor(FLinearColor::White))
-                    ]
-                ]
-            ];
+        return SNew(SEditableTextBox).IsPassword(IsPassword)
+            .OnTextCommitted_Lambda([this](const FText&, ETextCommit::Type Commit)
+            {
+                if (Commit == ETextCommit::OnEnter) OnLoginClicked();
+            });
     };
-
-    ChildSlot
-    [
-        SNew(SOverlay)
-
-        // Layer 0: Cinematic video background (hidden until texture is set)
-        + SOverlay::Slot()
-        [
-            SAssignNew(CinematicImage, SImage)
-            .Visibility(EVisibility::Collapsed)
-        ]
-
-        // Layer 1: Color overlay + UI
-        + SOverlay::Slot()
-        [
-        SAssignNew(BackgroundBorder, SBorder)
-        .BorderBackgroundColor(GetBackgroundColor())
-        .BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
-        [
-            SNew(SVerticalBox)
-
-            // ═══ Top spacer ═══
-            + SVerticalBox::Slot().FillHeight(1.5f)
-
-            // ═══ Title area ═══
-            + SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0, 0, 0, 5)
-            [
-                SAssignNew(SubtitleText, STextBlock)
-                .Text(FText::FromString(GetExpansionSubtitle()))
-                .Font(FCoreStyle::GetDefaultFontStyle("Regular", 14))
-                .ColorAndOpacity(FLinearColor(0.8f, 0.75f, 0.5f))
-                .Justification(ETextJustify::Center)
-            ]
-
-            + SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0, 0, 0, 30)
-            [
-                SAssignNew(TitleText, STextBlock)
-                .Text(FText::FromString(GetExpansionTitle()))
-                .Font(FCoreStyle::GetDefaultFontStyle("Bold", 36))
-                .ColorAndOpacity(GetAccentColor())
-                .Justification(ETextJustify::Center)
-            ]
-
-            // ═══ Login panel (centered, bordered) ═══
-            + SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)
-            [
-                SNew(SBorder)
-                .BorderBackgroundColor(FLinearColor(0.0f, 0.0f, 0.0f, 0.4f))
-                .BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
-                .Padding(FMargin(30, 25))
-                [
-                    SNew(SBorder)
-                    .BorderBackgroundColor(PanelBorder)
-                    .BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
-                    .Padding(FMargin(1))
-                    [
-                        SNew(SBorder)
-                        .BorderBackgroundColor(FLinearColor(0.03f, 0.03f, 0.06f, 0.95f))
-                        .BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
-                        .Padding(FMargin(25, 20))
-                        [
-                            SNew(SVerticalBox)
-
-                            // Server field
-                            + SVerticalBox::Slot().AutoHeight().Padding(0, 4)
-                            [
-                                SNew(SVerticalBox)
-                                + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 3)
-                                [
-                                    SNew(STextBlock)
-                                    .Text(FText::FromString(TEXT("Login server")))
-                                    .Font(FCoreStyle::GetDefaultFontStyle("Regular", 12))
-                                    .ColorAndOpacity(WowGoldDim)
-                                ]
-                                + SVerticalBox::Slot().AutoHeight()
-                                [
-                                    MakeField(ServerBox, TEXT("127.0.0.1:3724"))
-                                ]
-                            ]
-
-                            // Username field
-                            + SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 4)
-                            [
-                                SNew(SVerticalBox)
-                                + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 3)
-                                [
-                                    SNew(STextBlock)
-                                    .Text(FText::FromString(TEXT("Account Name")))
-                                    .Font(FCoreStyle::GetDefaultFontStyle("Regular", 12))
-                                    .ColorAndOpacity(WowGoldDim)
-                                ]
-                                + SVerticalBox::Slot().AutoHeight()
-                                [
-                                    MakeField(UsernameBox, TEXT(""))
-                                ]
-                            ]
-
-                            // Password field
-                            + SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 4)
-                            [
-                                SNew(SVerticalBox)
-                                + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 3)
-                                [
-                                    SNew(STextBlock)
-                                    .Text(FText::FromString(TEXT("Password")))
-                                    .Font(FCoreStyle::GetDefaultFontStyle("Regular", 12))
-                                    .ColorAndOpacity(WowGoldDim)
-                                ]
-                                + SVerticalBox::Slot().AutoHeight()
-                                [
-                                    MakeField(PasswordBox, TEXT(""), true)
-                                ]
-                            ]
-
-                            // Login button
-                            + SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0, 18, 0, 8)
-                            [
-                                SNew(SBorder)
-                                .BorderBackgroundColor(FLinearColor(0.35f, 0.28f, 0.05f, 1.0f))
-                                .BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
-                                .Padding(FMargin(1))
-                                [
-                                    SNew(SButton)
-                                    .ButtonColorAndOpacity(FLinearColor(0.15f, 0.12f, 0.02f, 1.0f))
-                                    .OnClicked_Raw(this, &SWowLoginWidget::OnLoginClicked)
-                                    [
-                                        SNew(SBox).Padding(FMargin(40, 6)).HAlign(HAlign_Center)
-                                        [
-                                            SNew(STextBlock)
-                                            .Text(FText::FromString(TEXT("Login")))
-                                            .Font(FCoreStyle::GetDefaultFontStyle("Bold", 16))
-                                            .ColorAndOpacity(WowGold)
-                                            .Justification(ETextJustify::Center)
-                                        ]
-                                    ]
-                                ]
-                            ]
-
-                            // Status label
-                            + SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0, 4)
-                            [
-                                SAssignNew(StatusLabel, STextBlock)
-                                .Font(FCoreStyle::GetDefaultFontStyle("Regular", 12))
-                                .ColorAndOpacity(FLinearColor(0.9f, 0.7f, 0.3f))
-                            ]
-                        ]
-                    ]
-                ]
-            ]
-
-            // ═══ Bottom spacer ═══
-            + SVerticalBox::Slot().FillHeight(2.0f)
-
-            // ═══ Expansion tabs ═══
-            + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 0)
-            [
-                BuildExpansionTabs()
-            ]
-        ]
-        ] // SOverlay Layer 1
-    ];
+    ServerBox = MakeInput(false);
     ServerBox->SetText(FText::FromString(TEXT("127.0.0.1:3724")));
+    UsernameBox = MakeInput(false);
+    PasswordBox = MakeInput(true);
+
+    ChildSlot[SNew(SDPIScaler).DPIScale_Lambda([this]
+    {
+        const float Height = GetCachedGeometry().GetLocalSize().Y;
+        return Height > 0 ? Height / 768.f : 1.f;
+    })[SNew(SVerticalBox)
+        + SVerticalBox::Slot().FillHeight(1)[SAssignNew(ScreenBody,SBox)]
+        + SVerticalBox::Slot().AutoHeight()[BuildExpansionTabs()]]];
 }
 
 TSharedRef<SWidget> SWowLoginWidget::BuildExpansionTabs()
 {
-    const FLinearColor TabBarBg(0.0f, 0.0f, 0.0f, 0.7f);
-    const FLinearColor TabBorderColor(0.3f, 0.25f, 0.08f, 0.8f);
-    const FLinearColor InactiveTab(0.06f, 0.05f, 0.02f, 0.9f);
-    const FLinearColor ActiveClassic(0.12f, 0.1f, 0.03f, 0.95f);
-    const FLinearColor ActiveBC(0.05f, 0.12f, 0.03f, 0.95f);
-    const FLinearColor ActiveWotLK(0.03f, 0.06f, 0.12f, 0.95f);
-
-    auto MakeTab = [&](const FString& Label, EWowExpansion Exp, TSharedPtr<SBorder>& OutBorder) -> TSharedRef<SWidget>
+    auto Tabs = SNew(SHorizontalBox);
+    auto AddTab = [&](EWowExpansion Expansion, const TCHAR* Title)
     {
-        bool bActive = (CurrentExpansion == Exp);
-        FLinearColor ActiveColor;
-        switch (Exp)
-        {
-        case EWowExpansion::Classic: ActiveColor = ActiveClassic; break;
-        case EWowExpansion::BurningCrusade: ActiveColor = ActiveBC; break;
-        default: ActiveColor = ActiveWotLK; break;
-        }
-
-        return SNew(SBox).Padding(FMargin(2, 0))
-        [
-            SAssignNew(OutBorder, SBorder)
-            .BorderBackgroundColor(TabBorderColor)
-            .BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
-            .Padding(FMargin(1))
-            [
-                SNew(SButton)
-                .ButtonColorAndOpacity(bActive ? ActiveColor : InactiveTab)
-                .OnClicked_Lambda([this, Exp]() -> FReply
+        auto Button = SNew(SButton)
+            .ContentPadding(FMargin(16,4))
+            .ButtonColorAndOpacity_Lambda([this,Expansion]
+            {
+                return CurrentExpansion == Expansion ? FLinearColor(.12f,.22f,.32f) : FLinearColor(.08f,.07f,.06f);
+            })
+            .OnClicked_Lambda([this,Expansion]
+            {
+                SetExpansion(Expansion);
+                return FReply::Handled();
+            })
+            [SNew(STextBlock).Text(FText::FromString(Title)).Font(FCoreStyle::GetDefaultFontStyle("Bold",12))
+                .ColorAndOpacity_Lambda([this,Expansion]() -> FSlateColor
                 {
-                    SetExpansion(Exp);
-                    return FReply::Handled();
-                })
-                [
-                    SNew(SBox).Padding(FMargin(20, 8)).HAlign(HAlign_Center)
-                    [
-                        SNew(STextBlock)
-                        .Text(FText::FromString(Label))
-                        .Font(FCoreStyle::GetDefaultFontStyle(bActive ? "Bold" : "Regular", 13))
-                        .ColorAndOpacity(bActive ? GetAccentColor() : FLinearColor(0.5f, 0.45f, 0.3f))
-                    ]
-                ]
-            ]
-        ];
+                    return CurrentExpansion == Expansion ? FLinearColor(1,.82f,.15f) : FLinearColor(.78f,.75f,.65f);
+                })];
+        StockControls.Add(FName(*FString::Printf(TEXT("Expansion_%u"),uint8(Expansion))),Button);
+        Tabs->AddSlot().AutoWidth().Padding(2,0)[Button];
     };
-
-    return SNew(SBorder)
-        .BorderBackgroundColor(TabBarBg)
-        .BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
-        .Padding(FMargin(0, 4))
-        [
-            SNew(SHorizontalBox)
-            + SHorizontalBox::Slot().FillWidth(1.0f)
-            + SHorizontalBox::Slot().AutoWidth()
-            [
-                MakeTab(TEXT("Classic"), EWowExpansion::Classic, ClassicTab)
-            ]
-            + SHorizontalBox::Slot().AutoWidth()
-            [
-                MakeTab(TEXT("The Burning Crusade"), EWowExpansion::BurningCrusade, BCTab)
-            ]
-            + SHorizontalBox::Slot().AutoWidth()
-            [
-                MakeTab(TEXT("Wrath of the Lich King"), EWowExpansion::WrathOfTheLichKing, WotLKTab)
-            ]
-            + SHorizontalBox::Slot().FillWidth(1.0f)
-        ];
-}
-
-void SWowLoginWidget::SetCinematicTexture(UMediaTexture* InTexture)
-{
-    if (!CinematicImage.IsValid()) return;
-
-    if (InTexture)
-    {
-        // Create a brush from the media texture
-        CinematicBrush = MakeShared<FSlateBrush>();
-        CinematicBrush->SetResourceObject(InTexture);
-        CinematicBrush->ImageSize = FVector2D(1920, 1080);
-        CinematicBrush->DrawAs = ESlateBrushDrawType::Image;
-        CinematicBrush->Tiling = ESlateBrushTileType::NoTile;
-
-        CinematicImage->SetImage(CinematicBrush.Get());
-        CinematicImage->SetVisibility(EVisibility::SelfHitTestInvisible);
-
-        // Make the color overlay semi-transparent so cinematic shows through
-        if (BackgroundBorder.IsValid())
-        {
-            FLinearColor BgColor = GetBackgroundColor();
-            BgColor.A = 0.3f; // Let video show through
-            BackgroundBorder->SetBorderBackgroundColor(BgColor);
-        }
-    }
-    else
-    {
-        CinematicImage->SetVisibility(EVisibility::Collapsed);
-        CinematicBrush.Reset();
-
-        // Restore opaque background
-        if (BackgroundBorder.IsValid())
-        {
-            BackgroundBorder->SetBorderBackgroundColor(GetBackgroundColor());
-        }
-    }
+    AddTab(EWowExpansion::Classic,TEXT("Classic"));
+    AddTab(EWowExpansion::BurningCrusade,TEXT("The Burning Crusade"));
+    AddTab(EWowExpansion::WrathOfTheLichKing,TEXT("Wrath of the Lich King"));
+    return SNew(SBorder).BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
+        .BorderBackgroundColor(FLinearColor(.023f,.025f,.03f)).Padding(0,3).HAlign(HAlign_Center)[Tabs];
 }
 
 void SWowLoginWidget::SetExpansion(EWowExpansion Expansion)
 {
+    if (Expansion == CurrentExpansion) return;
     CurrentExpansion = Expansion;
-
-    // Update visuals
-    if (BackgroundBorder.IsValid())
-    {
-        // If cinematic is playing, keep semi-transparent; otherwise opaque
-        FLinearColor BgColor = GetBackgroundColor();
-        if (CinematicImage.IsValid() && CinematicImage->GetVisibility() != EVisibility::Collapsed)
-        {
-            BgColor.A = 0.3f;
-        }
-        BackgroundBorder->SetBorderBackgroundColor(BgColor);
-    }
-    if (TitleText.IsValid())
-    {
-        TitleText->SetText(FText::FromString(GetExpansionTitle()));
-        TitleText->SetColorAndOpacity(GetAccentColor());
-    }
-    if (SubtitleText.IsValid())
-    {
-        SubtitleText->SetText(FText::FromString(GetExpansionSubtitle()));
-    }
-
-    // Notify controller to switch cinematic
     OnExpansionChanged.ExecuteIfBound(static_cast<uint8>(Expansion));
 }
 
@@ -531,6 +255,7 @@ void SWowLoginWidget::SetExpansion(EWowExpansion Expansion)
 
 FReply SWowLoginWidget::OnLoginClicked()
 {
+    if (CurrentExpansion != EWowExpansion::WrathOfTheLichKing) return FReply::Handled();
     FString ServerStr = ServerBox.IsValid() ? ServerBox->GetText().ToString().TrimStartAndEnd() : TEXT("127.0.0.1:3724");
     if (ServerStr.IsEmpty()) ServerStr = TEXT("127.0.0.1:3724");
     FString User = UsernameBox.IsValid() ? UsernameBox->GetText().ToString().TrimStartAndEnd() : TEXT("");
