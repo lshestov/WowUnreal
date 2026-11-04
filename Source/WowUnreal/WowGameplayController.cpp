@@ -19,6 +19,7 @@
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/Texture2D.h"
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "WowNameplateWidget.h"
 #include "SWowCombatLog.h"
@@ -32,7 +33,6 @@
 #include "UI/SWowMailbox.h"
 #include "UI/SWowTalentWindow.h"
 #include "WowDeathManager.h"
-#include "WowCursorManager.h"
 #include "WowSpellMissile.h"
 #include "WowM2EmitterComponent.h"
 #include "WowDoodadManager.h"
@@ -49,12 +49,14 @@
 #include "Coord/WowCoordinate.h"
 #include "Components/WidgetComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/BoxComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/Material.h"
-#include "Materials/MaterialExpressionConstant.h"
-#include "Materials/MaterialExpressionConstant3Vector.h"
+#include "WowWorldCollision.h"
+#include "WowTerrainMaterial.h"
+#include "ProceduralMeshComponent.h"
 #include "Components/DecalComponent.h"
 #include "Widgets/SViewport.h"
 #include "SWowCastBar.h"
@@ -224,7 +226,6 @@ void AWowGameplayController::BeginPlay()
 
 	// Create managers
 	DeathManager = NewObject<UWowDeathManager>(this);
-	CursorManager = NewObject<UWowCursorManager>(this);
 	TooltipManager = NewObject<UWowTooltipManager>(this);
 
 	// FrameXML owns casting feedback whenever its stock bar is available.
@@ -931,12 +932,10 @@ void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
 			{
 				if (bIsInCombat)
 				{
-					FireUIEvent(TEXT("PLAYER_ENTER_COMBAT"));
 					FireUIEvent(TEXT("PLAYER_REGEN_DISABLED"));
 				}
 				else
 				{
-					FireUIEvent(TEXT("PLAYER_LEAVE_COMBAT"));
 					FireUIEvent(TEXT("PLAYER_REGEN_ENABLED"));
 				}
 				bWasInCombat = bIsInCombat;
@@ -1092,7 +1091,11 @@ void AWowGameplayController::Tick(float DeltaTime)
 	// world interaction/highlights in sync without sending or publishing twice.
 	if(ConnectionManager && TargetGuid!=uint64(ConnectionManager->GetTargetGuid())) SetTarget(uint64(ConnectionManager->GetTargetGuid()),false);
 	if(UIManager) UIManager->ProcessPendingReload();
-	if(ConnectionManager && ConnectionManager->GetState()!=EWowSessionState::WorldInGame) return;
+	if(ConnectionManager && ConnectionManager->GetState()!=EWowSessionState::WorldInGame && !bOfflineUiPreview)
+	{
+		CurrentMouseCursor = EMouseCursor::Default;
+		return;
+	}
     if(ConnectionManager) ConnectionManager->RefreshItemCursor();
 	const uint64 UiStarted=FPlatformTime::Cycles64();
 
@@ -1128,7 +1131,11 @@ void AWowGameplayController::Tick(float DeltaTime)
 
 		// Update cooldown overlay animations
 		UIManager->GetFrameManager()->TickCooldowns();
-		UIManager->TickWorldImages(GetWorld());
+		const auto* Frames = UIManager->GetFrameManager();
+		const FVector2D Pointer = Frames->GetPointerPosition();
+		const bool OverWorld = Pointer.X >= 0 && Pointer.Y >= 0 && !Frames->IsPointerOverFrame()
+			&& !UIManager->IsPointerOverWindow() && !(GameUI && GameUI->IsPointerOverWindow());
+		UIManager->TickWorldImages(GetWorld(), OverWorld ? GetWorldUnitAtScreen(Pointer.X, Pointer.Y) : 0);
         CurrentMouseCursor=UIManager->HasSoftwareCursor()?EMouseCursor::None:EMouseCursor::Default;
 		LastWidgetMilliseconds=FPlatformTime::ToMilliseconds64(FPlatformTime::Cycles64()-PartStarted);
 
@@ -1138,8 +1145,9 @@ void AWowGameplayController::Tick(float DeltaTime)
 	// Update tooltip manager
 	if (TooltipManager && FSlateApplication::IsInitialized())
 	{
-		FVector2D MousePosition = FSlateApplication::Get().GetCursorPos();
-		TooltipManager->Update(MousePosition);
+		const bool StockTooltip=UIManager && UIManager->IsUILoaded() && UIManager->GetFrameManager()->FindFrame(TEXT("GameTooltip"))>=0;
+		if(!StockTooltip) TooltipManager->Update(FSlateApplication::Get().GetCursorPos());
+		else if(TooltipManager->IsTooltipVisible()) TooltipManager->HideTooltip();
 	}
 
 	MaybeApplyDebugDuelPreview();
@@ -1210,6 +1218,7 @@ void AWowGameplayController::Tick(float DeltaTime)
 	if (AuraUpdateTimer >= AuraUpdateInterval)
 	{
 		AuraUpdateTimer = 0.0f;
+		AlignTargetHighlightToFloor();
 		UpdateAuraDisplay();
 	}
 }
@@ -1541,106 +1550,44 @@ void AWowGameplayController::TryTargetUnderCursor()
 {
 	if (!ConnectionManager) return;
 
-	// Get mouse position and deproject to world
 	float MouseX, MouseY;
-	if (!GetMousePosition(MouseX, MouseY))
+	if (GameplayProbePointer.IsSet())
 	{
-		UE_LOG(LogWowGameplay, Log, TEXT("TryTarget: no mouse position"));
-		return;
+		MouseX = GameplayProbePointer->X;
+		MouseY = GameplayProbePointer->Y;
 	}
-	TryTargetAtScreen(MouseX,MouseY);
+	else if (!GetMousePosition(MouseX, MouseY)) return;
+	TryTargetAtScreen(MouseX, MouseY);
 }
 
-void AWowGameplayController::TryTargetAtScreen(float MouseX,float MouseY)
+uint64 AWowGameplayController::GetWorldUnitAtScreen(float MouseX, float MouseY) const
+{
+	FVector Origin, Direction;
+	if (!DeprojectScreenPositionToWorld(MouseX, MouseY, Origin, Direction)) return 0;
+	return TraceWorldUnit(Origin, Origin + Direction * 1000000.0);
+}
+
+uint64 AWowGameplayController::TraceWorldUnit(const FVector& Start, const FVector& End) const
+{
+	// Movement passes through units. The visibility channel sees both their
+	// selection shapes and the nearest occluding wall or terrain in one query.
+	FHitResult Hit;
+	FCollisionQueryParams Query(SCENE_QUERY_STAT(WowPickUnit), false, GetPawn());
+	if (GetWorld() && GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Query)
+		&& Hit.GetComponent() && Hit.GetComponent()->GetCollisionObjectType() == ECC_Pawn)
+	{
+		if (const auto* Guid = SpawnedEntityActors.FindKey(Hit.GetActor())) return *Guid;
+	}
+	return 0;
+}
+
+void AWowGameplayController::TryTargetAtScreen(float MouseX, float MouseY)
 {
 	if (!ConnectionManager) return;
-
-	FVector WorldLoc, WorldDir;
-	if (!DeprojectScreenPositionToWorld(MouseX, MouseY, WorldLoc, WorldDir))
-	{
-		UE_LOG(LogWowGameplay, Log, TEXT("TryTarget: deproject failed at mouse (%.0f,%.0f)"), MouseX, MouseY);
-		return;
-	}
-
-	// Line trace 10000 cm (~100 WoW yards)
-	FVector TraceEnd = WorldLoc + WorldDir * 1000000.0f;
-	FHitResult Hit;
-	FCollisionQueryParams TraceParams;
-	TraceParams.AddIgnoredActor(GetPawn());
-	TraceParams.bTraceComplex = false; // Use simple collision (faster, more reliable)
-
-	UWorld* World = GetWorld();
-	if (!World) return;
-
-	// Try ECC_Pawn first (entity meshes), then ECC_WorldStatic for terrain
-	bool bHit = World->LineTraceSingleByChannel(Hit, WorldLoc, TraceEnd, ECC_Pawn, TraceParams);
-	if (!bHit)
-	{
-		bHit = World->LineTraceSingleByChannel(Hit, WorldLoc, TraceEnd, ECC_Visibility, TraceParams);
-	}
-
-	if (bHit && Hit.GetActor())
-	{
-		AActor* HitActor = Hit.GetActor();
-
-		// Find GUID from spawned entity actors map (reverse lookup — more reliable than tag parsing)
-		for (const auto& Pair : SpawnedEntityActors)
-		{
-			if (Pair.Value == HitActor)
-			{
-				uint64 HitGuid = Pair.Key;
-				if (HitGuid != TargetGuid)
-				{
-					SetTarget(HitGuid);
-				}
-				return;
-			}
-		}
-
-		// Also check if we hit a child component (capsule) of an entity actor
-		AActor* HitOwner = HitActor->GetOwner();
-		if (HitOwner)
-		{
-			for (const auto& Pair : SpawnedEntityActors)
-			{
-				if (Pair.Value == HitOwner)
-				{
-					uint64 HitGuid = Pair.Key;
-					if (HitGuid != TargetGuid)
-					{
-						SetTarget(HitGuid);
-					}
-					return;
-				}
-			}
-		}
-
-		UE_LOG(LogWowGameplay, Log, TEXT("TryTarget: hit non-entity actor: %s (class: %s) component: %s"),
-			*HitActor->GetName(), *HitActor->GetClass()->GetName(),
-			Hit.GetComponent() ? *Hit.GetComponent()->GetName() : TEXT("none"));
-	}
-	else
-	{
-		// Count entities with capsule components for debugging
-		int32 EntitiesWithCapsules = 0;
-		for (const auto& Pair : SpawnedEntityActors)
-		{
-			if (Pair.Value && Pair.Value->FindComponentByClass<UCapsuleComponent>())
-				EntitiesWithCapsules++;
-		}
-		UE_LOG(LogWowGameplay, Log, TEXT("TryTarget: no hit (mouse %.0f,%.0f) entities=%d withCapsules=%d traceFrom=%s"),
-			MouseX, MouseY, SpawnedEntityActors.Num(), EntitiesWithCapsules, *WorldLoc.ToString());
-	}
-
-	// Clicked on nothing or non-entity — clear target and stop attacking
-	if (TargetGuid != 0)
-	{
-		if (bIsAutoAttacking)
-		{
-			StopAutoAttack();
-		}
-		SetTarget(0);
-	}
+	const uint64 Picked = GetWorldUnitAtScreen(MouseX, MouseY);
+	if (Picked == TargetGuid) return;
+	if (!Picked && bIsAutoAttacking) StopAutoAttack();
+	SetTarget(Picked);
 }
 
 void AWowGameplayController::CacheWorldResources()
@@ -1850,23 +1797,38 @@ void AWowGameplayController::SpawnEntityModel(const FWowEntity& Entity)
 		SpawnedActor->Tags.Add(FName(*FString::Printf(TEXT("%llu"), Entity.Guid)));
 		SpawnedEntityActors.Add(Entity.Guid, SpawnedActor);
 
-		// Add a capsule collision for click targeting (skeletal meshes have no physics asset)
-		UCapsuleComponent* TargetCapsule = NewObject<UCapsuleComponent>(SpawnedActor, TEXT("TargetCapsule"));
-		if (TargetCapsule)
+		// Runtime M2 meshes have no physics asset. Size a query-only box to
+		// the rendered body in mesh space so scale and orientation follow it.
+		if (auto* Body = FindObjectFast<UMeshComponent>(SpawnedActor, TEXT("CharacterMesh")))
 		{
-			TargetCapsule->SetupAttachment(SpawnedActor->GetRootComponent());
-			TargetCapsule->SetCapsuleSize(100.0f, 200.0f); // ~1 WoW yard radius, ~2 yards tall (with 100x scale)
-			TargetCapsule->SetRelativeLocation(FVector(0, 0, 200.0f)); // Center at waist height
-			TargetCapsule->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-			TargetCapsule->SetCollisionObjectType(ECC_Pawn);
-			TargetCapsule->SetCollisionResponseToAllChannels(ECR_Ignore);
-			// Unit hitboxes support selection. WoW characters can overlap, which
-			// is essential at shared party/arena spawn points.
-			TargetCapsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
-			TargetCapsule->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
-			TargetCapsule->ShapeColor = FColor::Green;
-			TargetCapsule->SetHiddenInGame(true);
-			TargetCapsule->RegisterComponent();
+			FBox Bounds(ForceInit);
+			if (auto* Skeletal = Cast<USkeletalMeshComponent>(Body))
+			{
+				auto* Mesh = Skeletal->GetSkeletalMeshAsset();
+				const auto* Render = Mesh ? Mesh->GetResourceForRendering() : nullptr;
+				if (Render && !Render->LODRenderData.IsEmpty())
+				{
+					const auto& Vertices = Render->LODRenderData[0].StaticVertexBuffers.PositionVertexBuffer;
+					if (Vertices.GetVertexData())
+						for (uint32 I = 0; I < Vertices.GetNumVertices(); ++I)
+							Bounds += FVector(Vertices.VertexPosition(I));
+				}
+				// Grounding uses the same reference-pose feet for this NPC.
+				if (Bounds.IsValid && !Entity.IsPlayer())
+					NpcReferenceFeet.Add(Entity.Guid, Bounds.Min.Z * Body->GetComponentScale().Z + Body->GetRelativeLocation().Z);
+			}
+			if (!Bounds.IsValid) Bounds = Body->GetLocalBounds().GetBox();
+
+			auto* Selection = NewObject<UBoxComponent>(SpawnedActor, TEXT("UnitSelection"));
+			Selection->SetupAttachment(Body);
+			Selection->SetBoxExtent(Bounds.GetExtent());
+			Selection->SetRelativeLocation(Bounds.GetCenter());
+			Selection->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+			Selection->SetCollisionObjectType(ECC_Pawn);
+			Selection->SetCollisionResponseToAllChannels(ECR_Ignore);
+			Selection->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+			Selection->SetGenerateOverlapEvents(false);
+			Selection->RegisterComponent();
 		}
 
 		// Create nameplate widget component
@@ -2480,13 +2442,6 @@ void AWowGameplayController::InitializeManagers()
 	if (DeathManager)
 	{
 		DeathManager->Initialize(ConnectionManager, RootWidget);
-	}
-
-	// Initialize cursor manager
-	if (CursorManager && CachedMpq && CachedAssetCache)
-	{
-		CursorManager->Initialize(CachedMpq, CachedAssetCache);
-		CursorManager->LoadCursors();
 	}
 
 	// Initialize tooltip manager
@@ -3235,96 +3190,79 @@ void AWowGameplayController::SetTarget(uint64 NewTargetGuid, bool bUpdateConnect
 
 void AWowGameplayController::UpdateTargetHighlight()
 {
-	// Remove existing highlight
 	if (TargetHighlightCircle)
 	{
 		TargetHighlightCircle->DestroyComponent();
 		TargetHighlightCircle = nullptr;
 	}
 
-	if (TargetGuid == 0) return;
+	AActor* Actor = SpawnedEntityActors.FindRef(TargetGuid);
+	if (!IsValid(Actor) || !ConnectionManager || !UIManager) return;
+	const auto* Entity = ConnectionManager->PacketHandler.EntityManager.Find(TargetGuid);
+	const auto* Body = FindObjectFast<UBoxComponent>(Actor, TEXT("UnitSelection"));
+	if (!Entity || !Body) return;
+	auto* Texture = FWowTerrainMaterial::LoadBlpTexture(TEXT("Textures\\UnitSelectTexture.blp"), CachedMpq, CachedAssetCache);
+	auto* Parent = LoadObject<UMaterial>(nullptr, TEXT("/Game/Materials/M_WowParticleAlpha"));
+	if (!Texture || !Parent) return;
 
-	// Find the target actor
-	TObjectPtr<AActor>* TargetActorPtr = SpawnedEntityActors.Find(TargetGuid);
-	if (!TargetActorPtr || !*TargetActorPtr) return;
-
-	AActor* TargetActor = *TargetActorPtr;
-
-	// Create a flat cylinder mesh as the highlight circle
-	TargetHighlightCircle = NewObject<UStaticMeshComponent>(TargetActor, TEXT("TargetHighlight"));
-	UStaticMesh* CylinderMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cylinder"));
-	if (!CylinderMesh) return;
-
-	TargetHighlightCircle->SetStaticMesh(CylinderMesh);
+	// The BLP stores white RGB and the arc in its separate alpha plane.
+	// Even at 70% radius the lower half is up to 40% opaque. Draw the
+	// textured rim on an annulus so it cannot tint the ground inside.
+	const auto Extent = Body->GetScaledBoxExtent();
+	const double Radius = FMath::Max3(Extent.X, Extent.Y, double(Entity->GetFieldFloat(UnitField::BOUNDINGRADIUS) * FWowCoordinate::SCALE));
+	const FColor Tint = UIManager->GetUnitSelectionColor(TargetGuid).ToFColor(false);
+	TArray<FVector> Positions;
+	TArray<FVector2D> UV;
+	TArray<FColor> Colors;
+	TArray<int32> Indices;
+	constexpr int32 Sides = 64;
+	constexpr double Radii[] = {.86, .90, 1.};
+	for (int32 Side = 0; Side <= Sides; ++Side)
+	{
+		const double Angle = 2 * UE_DOUBLE_PI * Side / Sides;
+		const FVector2D Direction(FMath::Cos(Angle), FMath::Sin(Angle));
+		const FVector2D Arc(Direction.X, FMath::Abs(Direction.Y));
+		// Fade in just inside the alpha peak at roughly 90% of the BLP radius.
+		for (int32 Edge = 0; Edge < UE_ARRAY_COUNT(Radii); ++Edge)
+		{
+			const double Fraction = Radii[Edge];
+			Positions.Add(FVector(Direction.X, Direction.Y, 0) * (Fraction * Radius));
+			UV.Add(FVector2D(.5,.5) + Arc * (.5 * Fraction));
+			Colors.Add(FColor(Tint.R, Tint.G, Tint.B, Edge==0 ? 0 : 220));
+		}
+		if (Side == Sides) break;
+		for (int32 Band = 0; Band < 2; ++Band)
+		{
+			const int32 Inner = Side*3 + Band;
+			Indices.Append({Inner,Inner+3,Inner+1,Inner+1,Inner+3,Inner+4});
+		}
+	}
+	TargetHighlightCircle = NewObject<UProceduralMeshComponent>(Actor);
+	auto* Material = UMaterialInstanceDynamic::Create(Parent, TargetHighlightCircle);
+	Material->SetTextureParameterValue(TEXT("ParticleTexture"), Texture);
+	TargetHighlightCircle->SetupAttachment(Actor->GetRootComponent());
+	TargetHighlightCircle->SetAbsolute(false, true, true);
 	TargetHighlightCircle->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	TargetHighlightCircle->CastShadow = false;
+	TargetHighlightCircle->SetCastShadow(false);
+	TargetHighlightCircle->SetHiddenInSceneCapture(true);
 	TargetHighlightCircle->bReceivesDecals = false;
-
-	// Determine color based on entity type
-	const FWowEntity* Entity = ConnectionManager ?
-		ConnectionManager->PacketHandler.EntityManager.Find(TargetGuid) : nullptr;
-
-	FLinearColor HighlightColor = FLinearColor::Red;
-	if (Entity && Entity->IsPlayer())
-	{
-		HighlightColor = FLinearColor::Green;
-	}
-	else if (Entity)
-	{
-		if (Entity->IsGameObject() && Entity->GetFieldByte(GameObjectField::BYTES_1, 1) == WowGameObjectType::MAILBOX)
-		{
-			HighlightColor = FLinearColor::Green;
-		}
-		else if (Entity->IsUnit())
-		{
-			uint32 NpcFlags = Entity->GetField(UnitField::NPC_FLAGS);
-			if ((NpcFlags & WowNpcFlags::INTERACTABLE) || (NpcFlags & WowNpcFlags::MAILBOX))
-			{
-				HighlightColor = FLinearColor::Green;
-			}
-		}
-	}
-
-	// Build a translucent emissive material at runtime
-#if WITH_EDITOR
-	UMaterial* RingMat = NewObject<UMaterial>(GetTransientPackage(), TEXT("M_TargetRing"));
-	RingMat->SetShadingModel(MSM_Unlit);
-	RingMat->BlendMode = BLEND_Translucent;
-
-	auto* ColorConst = NewObject<UMaterialExpressionConstant3Vector>(RingMat);
-	ColorConst->Constant = HighlightColor;
-	RingMat->GetExpressionCollection().AddExpression(ColorConst);
-	RingMat->GetEditorOnlyData()->EmissiveColor.Connect(0, ColorConst);
-
-	auto* OpacityConst = NewObject<UMaterialExpressionConstant>(RingMat);
-	OpacityConst->R = 0.35f;
-	RingMat->GetExpressionCollection().AddExpression(OpacityConst);
-	RingMat->GetEditorOnlyData()->Opacity.Connect(0, OpacityConst);
-
-	RingMat->TwoSided = true;
-	RingMat->PreEditChange(nullptr);
-	RingMat->PostEditChange();
-
-	TargetHighlightCircle->SetMaterial(0, RingMat);
-#else
-	// Non-editor: use basic material fallback (won't be translucent but will be visible)
-	UMaterialInterface* BaseMat = LoadObject<UMaterial>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
-	if (BaseMat)
-	{
-		UMaterialInstanceDynamic* DynMat = UMaterialInstanceDynamic::Create(BaseMat, TargetHighlightCircle);
-		DynMat->SetVectorParameterValue(TEXT("Color"), HighlightColor);
-		TargetHighlightCircle->SetMaterial(0, DynMat);
-	}
-#endif
-
-	// Attach FIRST with relative transform, then set scale/location relative to parent
+	TargetHighlightCircle->CreateMeshSection(0, Positions, Indices, {}, UV, Colors, {}, false);
+	TargetHighlightCircle->SetMaterial(0, Material);
 	TargetHighlightCircle->RegisterComponent();
-	TargetHighlightCircle->AttachToComponent(TargetActor->GetRootComponent(),
-		FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-	TargetHighlightCircle->SetRelativeLocation(FVector(0.0f, 0.0f, -85.0f));
-	TargetHighlightCircle->SetRelativeScale3D(FVector(1.5f, 1.5f, 0.01f));
+	AlignTargetHighlightToFloor();
+}
 
-	UE_LOG(LogWowGameplay, Log, TEXT("Created target highlight circle for entity %llu"), TargetGuid);
+void AWowGameplayController::AlignTargetHighlightToFloor()
+{
+	if (!IsValid(TargetHighlightCircle)) return;
+	const auto* Actor = TargetHighlightCircle->GetOwner();
+	FVector Feet = Actor->GetActorLocation();
+	Feet.Z += NpcReferenceFeet.FindRef(TargetGuid);
+	FHitResult Floor;
+	if (FWowWorldCollision::FindFloor(GetWorld(), Feet, Actor, Floor, 60, 150))
+		TargetHighlightCircle->SetWorldLocationAndRotation(Floor.ImpactPoint + Floor.ImpactNormal * 3., FRotationMatrix::MakeFromZ(Floor.ImpactNormal).Rotator());
+	else
+		TargetHighlightCircle->SetWorldLocationAndRotation(Feet + FVector(0,0,2), FRotator::ZeroRotator);
 }
 
 void AWowGameplayController::CreatePartyFrame()

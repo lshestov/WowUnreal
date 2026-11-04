@@ -28,7 +28,7 @@ public:
 	FSlateFontInfo GetDefaultFont(int32 Size = 12) const;
 
 	/** Register a WoW font name mapping from FrameXML */
-	void RegisterFontMapping(const FString& WowFontName, const FString& InheritsFrom, int32 DefaultSize);
+	void RegisterFontMapping(const FString& WowFontName, const FString& InheritsFrom, int32 DefaultSize, const FString& FontFile = FString());
 	int32 GetFontSize(const FString& Name) const { const auto* Size=DefaultSizes.Find(Name); return Size?*Size:Name.Contains(TEXT("Small"))?10:12; }
 
 	/** Check if fonts are available */

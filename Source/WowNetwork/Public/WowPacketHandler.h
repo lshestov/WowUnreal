@@ -81,6 +81,7 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FOnGossipMenu, const FWowGossipMenu&);
 DECLARE_MULTICAST_DELEGATE(FOnQuestLogChanged);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnInitialSpells, const TArray<uint32>& /*SpellIds*/);
 DECLARE_MULTICAST_DELEGATE(FOnActionButtonsUpdated);
+DECLARE_DELEGATE_TwoParams(FOnWowAttackModeChanged, bool /* Ranged */, bool /* Active */);
 
 // Simple byte-stream reader for packet payloads
 struct FPacketReader
@@ -177,6 +178,9 @@ public:
     TMap<uint8,uint32> LocalCastRequests;
     uint8 PendingAttackCounter=0;
     bool HasPendingAttackCast=false;
+    bool LocalMeleeAttacking=false;
+    uint32 LocalAutoRepeatSpell=0;
+    FOnWowAttackModeChanged OnAttackModeChanged;
     void RecordCombat(FWowCombatEntry Entry);
 
     /** Known spell IDs (populated from SMSG_INITIAL_SPELLS) */
@@ -556,6 +560,8 @@ private:
     void RecordUnitDeath(uint64 Guid);
     void RecordAuraChanges(uint64 Guid,const TArray<FAuraInfo>& Previous,bool Initial);
     void HandleAttackStart(FPacketReader& R);
+    void SetLocalAutoRepeatSpell(uint32 Spell);
+    void HandleCancelAutoRepeat(FPacketReader& R);
     void HandleAttackStop(FPacketReader& R);
     void HandleAuraUpdate(FPacketReader& R);
     void HandleAuraUpdateAll(FPacketReader& R);

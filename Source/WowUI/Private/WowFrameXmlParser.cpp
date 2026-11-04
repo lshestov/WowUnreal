@@ -217,6 +217,7 @@ TArray<FWowXmlDirective> ParseXmlWithFXmlFallback(const FString& XmlContent, con
 			Dir.Type = FWowXmlDirective::EType::Font;
 			Dir.FontName = Child->GetAttribute(TEXT("name"));
 			Dir.FontInherits = Child->GetAttribute(TEXT("inherits"));
+			Dir.FontFile = Child->GetAttribute(TEXT("font"));
 
 			const FString FontHeightAttr = Child->GetAttribute(TEXT("height"));
 			if (!FontHeightAttr.IsEmpty())
@@ -1512,6 +1513,7 @@ TArray<FWowXmlDirective> FWowFrameXmlParser::ParseXml(const TArray<uint8>& Data,
 			Dir.Type = FWowXmlDirective::EType::Font;
 			Dir.FontName = UTF8_TO_TCHAR(Child.attribute("name").as_string());
 			Dir.FontInherits = UTF8_TO_TCHAR(Child.attribute("inherits").as_string());
+			Dir.FontFile = UTF8_TO_TCHAR(Child.attribute("font").as_string());
 			Dir.FontFlags = UTF8_TO_TCHAR(Child.attribute("flags").as_string());
             Dir.FontJustifyH=UTF8_TO_TCHAR(Child.attribute("justifyH").as_string()); Dir.FontJustifyV=UTF8_TO_TCHAR(Child.attribute("justifyV").as_string());
 			Dir.FontHeight = Child.attribute("height").as_float(0.0f);

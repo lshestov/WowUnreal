@@ -124,6 +124,28 @@ void FWowPacketHandler::HandleSpellStart(FPacketReader& R)
     CastFailures.Remove(Caster);
     OnCastState.ExecuteIfBound(Caster,Spell,0,Counter); OnSpellStart.Broadcast(Caster,Spell,Flags,Time);
 }
+void FWowPacketHandler::SetLocalAutoRepeatSpell(uint32 Spell)
+{
+    if(LocalAutoRepeatSpell==Spell) return;
+    if(LocalAutoRepeatSpell)
+    {
+        LocalAutoRepeatSpell=0;
+        OnAttackModeChanged.ExecuteIfBound(true,false);
+    }
+    if(Spell)
+    {
+        LocalAutoRepeatSpell=Spell;
+        OnAttackModeChanged.ExecuteIfBound(true,true);
+    }
+}
+
+void FWowPacketHandler::HandleCancelAutoRepeat(FPacketReader& R)
+{
+    uint64 Caster=0;
+    if(Guid(R,Caster) && !R.Remaining() && Caster && Caster==EntityManager.LocalPlayerGuid)
+        SetLocalAutoRepeatSpell(0);
+}
+
 void FWowPacketHandler::HandleSpellGo(FPacketReader& R)
 {
     uint64 Object=0,Caster=0,Target=0;
@@ -149,6 +171,9 @@ void FWowPacketHandler::HandleSpellGo(FPacketReader& R)
     }
     uint64 ExplicitTarget=0; if(!Targets(R,ExplicitTarget,&Launch) || !CastTail(R,Flags,Launch.TargetMask,true)) return; if(ExplicitTarget) Target=ExplicitTarget;
     Launch.ExplicitTargetGuid=ExplicitTarget;
+    // SPELL_ATTR2_AUTO_REPEAT distinguishes ranged auto attacks from ordinary shots.
+    if(Caster && Caster==EntityManager.LocalPlayerGuid && Definition && (Definition->AttributesEx2&0x20))
+        SetLocalAutoRepeatSpell(Spell);
     Launch.ReceivedAt=FPlatformTime::Seconds();
     if(RecentSpellLaunches.Num()>=256) for(auto It=RecentSpellLaunches.CreateIterator();It;++It) if(Launch.ReceivedAt-It.Value().ReceivedAt>5) It.RemoveCurrent();
     if(RecentSpellLaunches.Num()<256 || RecentSpellLaunches.Contains(Caster)) RecentSpellLaunches.Add(Caster,Launch);

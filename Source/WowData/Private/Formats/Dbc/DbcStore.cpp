@@ -231,6 +231,21 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         }
     }
 
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\CreatureType.dbc"), Parser) && Parser.GetFieldCount()>=18)
+    {
+        for(uint32 Row=0; Row<Parser.GetRecordCount(); ++Row)
+        {
+            for(uint32 Locale=1; Locale<=16; ++Locale)
+            {
+                FString Name=Parser.GetString(Row,Locale);
+                if(Name.IsEmpty()) continue;
+                CreatureTypeNames.Add(Parser.GetUInt(Row,0),MoveTemp(Name));
+                break;
+            }
+        }
+        ++Loaded;
+    }
+
     if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\CreatureDisplayInfoExtra.dbc"), Parser))
     {
         CreatureDisplayInfoExtraDbc.Load(Parser);

@@ -182,7 +182,7 @@ static uint64 ResolveDirectUnitGuid(const FWowLuaContext* Ctx, const FString& Un
 
     if (UnitToken.Equals(TEXT("mouseover"), ESearchCase::IgnoreCase))
     {
-        return 0;
+        return Ctx->EntityManager->FindUnit(Ctx->WorldMouseoverGuid) ? Ctx->WorldMouseoverGuid : 0;
     }
 
     if (UnitToken.Equals(TEXT("pet"), ESearchCase::IgnoreCase))
@@ -1980,37 +1980,32 @@ static int L_TogglePetAutocast(lua_State* L)
     return 0;
 }
 
+static FWowActionInvocation ActionAtSlot(lua_State* L, const FWowPacketHandler* Handler)
+{
+    const int32 Slot = SafeActionSlot(L);
+    return Handler && Handler->ActionButtons.IsValidIndex(Slot)
+        ? UWowConnectionManager::ResolveActionInvocation(Handler->ActionButtons[Slot], 0)
+        : FWowActionInvocation{};
+}
+
+static const FWowPacketHandler* ActionHandler(lua_State* L)
+{
+    const auto* Context = WowLuaApi::GetContext(L);
+    return Context && Context->ConnectionManager ? &Context->ConnectionManager->PacketHandler : nullptr;
+}
+
 static int L_IsCurrentAction(lua_State* L)
 {
-    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-    int32 Slot = SafeActionSlot(L);
+    const auto* Handler = ActionHandler(L);
+    lua_pushboolean(L, Handler && Handler->LocalMeleeAttacking && ActionAtSlot(L, Handler).Kind == EWowActionInvocationKind::AutoAttack);
+    return 1;
+}
 
-    if (Ctx && Ctx->ConnectionManager && Slot >= 0 && Slot < 144)
-    {
-        const TArray<uint32>& ActionButtons = Ctx->ConnectionManager->PacketHandler.ActionButtons;
-        if (Slot < ActionButtons.Num() && ActionButtons[Slot] != 0)
-        {
-            uint32 ActionData = ActionButtons[Slot];
-            uint8 ActionType = (ActionData >> 24) & 0xFF;
-            uint32 ActionId = ActionData & 0x00FFFFFF;
-
-            // Check if this is the auto-attack spell
-            if (ActionType == 0 && ActionId == 6603) // Auto Attack spell ID
-            {
-                // For now, return false for auto-attack detection
-                // This would need access to the gameplay controller's IsAutoAttacking state
-                lua_pushboolean(L, 0);
-                return 1;
-            }
-
-            // For other spells, check if they're currently being channeled
-            // This would require tracking channeling state in the packet handler
-            lua_pushboolean(L, 0);
-            return 1;
-        }
-    }
-
-    lua_pushboolean(L, 0);
+static int L_IsAutoRepeatAction(lua_State* L)
+{
+    const auto* Handler = ActionHandler(L);
+    const FWowActionInvocation Action = ActionAtSlot(L, Handler);
+    lua_pushboolean(L, Handler && Action.Kind == EWowActionInvocationKind::SpellCast && Action.ActionId == Handler->LocalAutoRepeatSpell);
     return 1;
 }
 
@@ -2072,27 +2067,7 @@ static int L_IsUsableAction(lua_State* L)
 
 static int L_IsAttackAction(lua_State* L)
 {
-    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-    int32 Slot = SafeActionSlot(L);
-
-    if (Ctx && Ctx->ConnectionManager && Slot >= 0 && Slot < 144)
-    {
-        const TArray<uint32>& ActionButtons = Ctx->ConnectionManager->PacketHandler.ActionButtons;
-        if (Slot < ActionButtons.Num() && ActionButtons[Slot] != 0)
-        {
-            uint32 ActionData = ActionButtons[Slot];
-            uint8 ActionType = (ActionData >> 24) & 0xFF;
-            uint32 ActionId = ActionData & 0x00FFFFFF;
-
-            if (ActionType == 0 && ActionId == 6603) // Attack spell ID in WoW
-            {
-                lua_pushboolean(L, 1);
-                return 1;
-            }
-        }
-    }
-
-    lua_pushboolean(L, 0);
+    lua_pushboolean(L, ActionAtSlot(L, ActionHandler(L)).Kind == EWowActionInvocationKind::AutoAttack);
     return 1;
 }
 
@@ -3414,7 +3389,7 @@ static TMap<FString, FString> CVarStorage;
 struct FChatWindowOptions
 {
     FString Name;
-    float FontSize = 12, Alpha = .2f;
+    float FontSize = 14, Alpha = .2f;
     FLinearColor Color = FLinearColor::Black;
     bool Shown = false, Locked = false, Uninteractable = false;
     int32 Dock = 0;
@@ -5137,16 +5112,12 @@ lua_pushboolean(L2, PLATFORM_MAC);
         return 8;
     });
     lua_register(L, "UnitCreatureType", [](lua_State* L2) -> int {
-        // UnitCreatureType(unit) → "Humanoid", "Beast", etc.
-        FWowEntity* Entity = ResolveUnit(L2, 1);
-        if (Entity && Entity->IsPlayer()) {
-            lua_pushstring(L2, "Humanoid");
-        } else if (Entity && Entity->IsUnit()) {
-            // TODO: Check creature type from NPC data when available
-            lua_pushstring(L2, "Humanoid");
-        } else {
-            lua_pushstring(L2, "Humanoid");
-        }
+        const auto* Unit = ResolveUnit(L2,1);
+        const auto* Context = WowLuaApi::GetContext(L2);
+        const auto* Handler = Context && Context->ConnectionManager ? &Context->ConnectionManager->PacketHandler : nullptr;
+        const uint32 Type = Unit && Unit->IsPlayer() ? 7 : Unit && Unit->IsUnit() && Handler ? Handler->CreatureTypes.FindRef(Unit->Entry) : 0;
+        const FString* Name = FDbcStore::Get().CreatureTypeName(Type);
+        if(Name) lua_pushstring(L2,TCHAR_TO_UTF8(**Name)); else lua_pushnil(L2);
         return 1;
     });
     lua_register(L, "UnitCreatureFamily", [](lua_State* L2) -> int {
@@ -5903,33 +5874,7 @@ lua_pushboolean(L2, PLATFORM_MAC);
     });
 
     lua_register(L, "MoneyFrame_Update", [](lua_State* L2) -> int { return 0; });
-    lua_register(L, "IsAutoRepeatAction", [](lua_State* L2) -> int {
-        // IsAutoRepeatAction(slot) → boolean (true if action is auto-attack)
-        int32 Slot = static_cast<int32>(luaL_checknumber(L2, 1)) - 1; // Convert to 0-based
-        // Slot 1 (0-based slot 0) is usually auto-attack
-        lua_pushboolean(L2, Slot == 0);
-        return 1;
-    });
-    lua_register(L, "IsAutoRepeatSpell", [](lua_State* L2) -> int {
-        // IsAutoRepeatSpell(slot) → boolean (true if spell is auto-repeat like Shoot)
-        int32 Slot = static_cast<int32>(luaL_checknumber(L2, 1)) - 1; // Convert to 0-based
-        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
-        if (Ctx && Ctx->ConnectionManager && Slot >= 0 && Slot < 144) {
-            const TArray<uint32>& ActionButtons = Ctx->ConnectionManager->PacketHandler.ActionButtons;
-            if (Slot < ActionButtons.Num()) {
-                uint32 Data = ActionButtons[Slot];
-                uint8 Type = (Data >> 24) & 0xFF;
-                uint32 SpellId = Data & 0x00FFFFFF;
-                // TODO: Check if spell is auto-repeat (like hunter Auto Shot)
-                lua_pushboolean(L2, false);
-            } else {
-                lua_pushboolean(L2, false);
-            }
-        } else {
-            lua_pushboolean(L2, false);
-        }
-        return 1;
-    });
+    lua_register(L, "IsAutoRepeatAction", L_IsAutoRepeatAction);
     lua_register(L, "OffhandHasWeapon", [](lua_State* L2) -> int {
         FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
         if (Ctx && Ctx->EntityManager)

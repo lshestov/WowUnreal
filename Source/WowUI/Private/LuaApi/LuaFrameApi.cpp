@@ -1684,6 +1684,7 @@ static int LF_FontStringSetFont(lua_State* L)
     };
     if(auto* Edit=GetEditBoxWidgetForTable(L)) { auto Style=Edit->GetWidgetStyle(); Style.SetFont(FontForEditor(Style.TextStyle.Font)); Edit->SetWidgetStyle(Style); }
     if(auto* Edit=GetMultiLineEditor(L)) { auto Style=Edit->WidgetStyle; Style.SetFont(FontForEditor(Style.Font)); Edit->SetWidgetStyle(Style); }
+    if(C && C->FrameManager) C->FrameManager->SetMessageFont(GetFrameHandle(L),UTF8_TO_TCHAR(FontPath),FontSize);
 
 	return 0;
 }

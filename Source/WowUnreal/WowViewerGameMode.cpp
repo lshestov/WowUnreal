@@ -12,8 +12,10 @@
 #include "Engine/World.h"
 #include "Engine/PostProcessVolume.h"
 #include "Engine/DirectionalLight.h"
+#include "Engine/PointLight.h"
 #include "Engine/StaticMeshActor.h"
 #include "Components/DirectionalLightComponent.h"
+#include "Components/PointLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Kismet/GameplayStatics.h"
@@ -24,8 +26,12 @@
 #include "WowLoginController.h"
 #include "WowCredentialStore.h"
 #include "WowEntity.h"
+#include "Coord/WowCoordinate.h"
+#include "Formats/Dbc/DbcStore.h"
 #include "TimerManager.h"
 #include "Engine/GameViewportClient.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Widgets/SViewport.h"
 #include "Components/CanvasPanel.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowGameMode, Log, All);
@@ -47,6 +53,20 @@ void ApplyWowViewerUiInputMode(APlayerController* PlayerController, const TShare
     InputMode.SetHideCursorDuringCapture(false);
     InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
     PlayerController->SetInputMode(InputMode);
+}
+
+void MountViewerFrameXml(UWowUIManager* UI, AWowWorldManager* WorldManager, APlayerController* Controller)
+{
+    if(!GEngine || !GEngine->GameViewport) return;
+    UCanvasPanel* Canvas=NewObject<UCanvasPanel>(UI);
+    Canvas->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+    const TSharedRef<SWidget> CanvasWidget=Canvas->TakeWidget();
+    const TSharedRef<SOverlay> Wrapper=SNew(SOverlay)
+        + SOverlay::Slot().HAlign(HAlign_Fill).VAlign(VAlign_Fill)[CanvasWidget];
+    GEngine->GameViewport->AddViewportWidgetContent(Wrapper,50);
+    UI->SetRootCanvas(Canvas);
+    ApplyWowViewerUiInputMode(Controller,CanvasWidget);
+    UI->LoadUI(WorldManager->GetMpqManager(),WorldManager->GetAssetCache());
 }
 }
 
@@ -249,29 +269,7 @@ void AWowViewerGameMode::SetupDefaultScene(UWorld* World)
         {
             if (UWowUIManager* UIManager = GI->GetSubsystem<UWowUIManager>())
             {
-                // Create a root canvas panel for the WoW UI frame system
-                if (GEngine && GEngine->GameViewport)
-                {
-                    UCanvasPanel* UIRootCanvas = NewObject<UCanvasPanel>(GetTransientPackage());
-                    UIRootCanvas->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-                    TSharedRef<SWidget> CanvasWidget = UIRootCanvas->TakeWidget();
-                    TSharedRef<SOverlay> Wrapper = SNew(SOverlay)
-                        + SOverlay::Slot()
-                        .HAlign(HAlign_Fill)
-                        .VAlign(VAlign_Fill)
-                        [
-                            CanvasWidget
-                        ];
-                    GEngine->GameViewport->AddViewportWidgetContent(Wrapper, 50);
-                    UIManager->SetRootCanvas(UIRootCanvas);
-                    if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
-                    {
-                        ApplyWowViewerUiInputMode(PC, CanvasWidget);
-                    }
-                    UE_LOG(LogWowGameMode, Log, TEXT("Created root canvas for WoW UI"));
-                }
-
-                UIManager->LoadUI(WorldManager->GetMpqManager(), WorldManager->GetAssetCache());
+                MountViewerFrameXml(UIManager,WorldManager,World->GetFirstPlayerController());
             }
         }
     }
@@ -410,30 +408,100 @@ void AWowViewerGameMode::SetupUITestScene(UWorld* World)
 {
     UE_LOG(LogWowGameMode, Log, TEXT("Starting UI test scene"));
 
-    SpawnDirectionalLight(World);
-    SpawnGroundPlane(World, FVector::ZeroVector, 10.0f);
+    SpawnGroundPlane(World, FVector::ZeroVector, 40.0f);
+    SpawnWorldManager(World);
+    GetWorldTimerManager().SetTimerForNextTick(this,&AWowViewerGameMode::PopulateUITestScene);
+}
 
-    // Teleport player
-    APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
-    if (PC && PC->GetPawn())
+void AWowViewerGameMode::PopulateUITestScene()
+{
+    auto* PC=Cast<AWowGameplayController>(GetWorld()->GetFirstPlayerController());
+    auto* Pawn=PC?Cast<AWowPlayerCharacter>(PC->GetPawn()):nullptr;
+    auto* WM=Cast<AWowWorldManager>(UGameplayStatics::GetActorOfClass(this,AWowWorldManager::StaticClass()));
+    if(!WM || !WM->GetMpqManager() || !GetGameInstance()) return;
+    if(!Pawn || !FDbcStore::Get().IsDeferredLoaded())
     {
-        PC->GetPawn()->SetActorLocation(FVector(0.0f, 0.0f, 200.0f));
+        GetWorldTimerManager().SetTimerForNextTick(this,&AWowViewerGameMode::PopulateUITestScene);
+        return;
     }
-
-    // Spawn world manager for MPQ access (terrain loading skipped via -testscene check)
-    AWowWorldManager* WM = SpawnWorldManager(World);
-
-    // Load UI
-    if (WM && WM->GetMpqManager())
+    auto* UI=GetGameInstance()->GetSubsystem<UWowUIManager>();
+    if(!UI) return;
+    if(auto* Sky=GetWorld()->SpawnActor<AWowSkyManager>())
     {
-        if (UGameInstance* GI = GetGameInstance())
+        Sky->TimeOfDay=600; Sky->TimeSpeed=0;
+    }
+    if(auto* Fill=GetWorld()->SpawnActor<APointLight>(FVector(-320,-170,300),FRotator::ZeroRotator))
+    {
+        auto* Light=CastChecked<UPointLightComponent>(Fill->GetLightComponent());
+        Light->SetMobility(EComponentMobility::Movable);
+        Light->SetIntensity(20000); Light->SetAttenuationRadius(1800);
+        Light->SetLightColor(FLinearColor(1,.97f,.92f));
+    }
+    PC->ConnectionManager=NewObject<UWowConnectionManager>(this);
+    PC->bOfflineUiPreview=true;
+    PC->BindEntityEvents();
+    Pawn->ApplyLoginSpawn(FVector::ZeroVector,0);
+    auto& Handler=PC->ConnectionManager->PacketHandler;
+    auto& Entities=Handler.EntityManager;
+    Entities.LocalPlayerGuid=1;
+    auto& Player=Entities.PromoteToTyped(1,WowTypeMask::PLAYER|WowTypeMask::UNIT);
+    Player.SetField(UnitField::BYTES_0,1|(8<<8)); // Human mage
+    Player.SetField(UnitField::DISPLAYID,49);
+    Player.SetField(UnitField::NATIVEDISPLAYID,49);
+    Player.SetField(UnitField::FACTIONTEMPLATE,1);
+    Player.SetField(UnitField::LEVEL,42);
+    Player.SetField(UnitField::HEALTH,1372); Player.SetField(UnitField::MAXHEALTH,1580);
+    Player.SetField(UnitField::POWER1,1920); Player.SetField(UnitField::MAXPOWER1,2260);
+    Handler.PlayerNameCache.Add(Player.Guid,TEXT("Aster"));
+    Handler.ActionButtons.SetNumZeroed(144);
+    Handler.ActionButtons[0]=133; Handler.ActionButtons[1]=168;
+    Handler.KnownSpells.Add(133); Handler.KnownSpells.Add(168);
+    // Seed the visible robe, pants, boots and staff from the actual mage starter outfit.
+    if(const auto* Outfit=FDbcStore::Get().CharStartOutfit().GetByRaceClassGender(1,8,0))
+    {
+        for(int32 I=0;I<UE_ARRAY_COUNT(Outfit->ItemIds);++I)
         {
-            if (UWowUIManager* UIManager = GI->GetSubsystem<UWowUIManager>())
+            const int32 Type=Outfit->ItemInventorySlots[I];
+            int32 Slot=INDEX_NONE;
+            switch(Type)
             {
-                UIManager->LoadUI(WM->GetMpqManager(), WM->GetAssetCache());
+            case 5: case 20: Slot=4; break;
+            case 7: Slot=6; break;
+            case 8: Slot=7; break;
+            case 17: Slot=15; break;
+            default: continue;
             }
+            if(Outfit->ItemIds[I]<=0 || Outfit->ItemDisplayIds[I]<=0) continue;
+            const uint32 Id=uint32(Outfit->ItemIds[I]);
+            auto& Item=Handler.ItemTemplates.FindOrAdd(Id);
+            Item.Id=Id; Item.DisplayId=Outfit->ItemDisplayIds[I]; Item.InventoryType=Type;
+            Player.SetField(PlayerField::VISIBLE_ITEM_BASE+Slot*2,Id);
         }
     }
+
+    constexpr uint32 WolfEntry=69;
+    auto& Wolf=Entities.PromoteToTyped(0xF130000045000001ull,WowTypeMask::UNIT);
+    Wolf.Entry=WolfEntry;
+    Wolf.SetField(UnitField::DISPLAYID,604); Wolf.SetField(UnitField::NATIVEDISPLAYID,604);
+    Wolf.SetField(UnitField::FACTIONTEMPLATE,7); // neutral creature faction
+    Wolf.SetField(UnitField::LEVEL,2);
+    Wolf.SetField(UnitField::HEALTH,55); Wolf.SetField(UnitField::MAXHEALTH,55);
+    Wolf.Movement.Position=FWowCoordinate::UEToWow(FVector(310,110,4));
+    Wolf.Movement.Orientation=PI*.8;
+    Handler.CreatureNameCache.Add(WolfEntry,TEXT("Young Wolf"));
+    Handler.CreatureTypes.Add(WolfEntry,1); // Beast, as supplied by SMSG_CREATURE_QUERY_RESPONSE.
+
+    Entities.OnEntityCreated.Broadcast(Player);
+    Entities.OnEntityCreated.Broadcast(Wolf);
+    MountViewerFrameXml(UI,WM,PC);
+    // At the end of real world entry the viewport regains focus after FrameXML is mounted.
+    if(GEngine && GEngine->GameViewport && FSlateApplication::IsInitialized())
+    {
+        ApplyWowViewerUiInputMode(PC,GEngine->GameViewport->GetGameViewportWidget());
+        FSlateApplication::Get().SetAllUserFocusToGameViewport(EFocusCause::SetDirectly);
+    }
+    Handler.OnActionButtonsUpdated.Broadcast();
+    UE_LOG(LogWowGameMode,Display,TEXT("Offline FrameXML preview: level 42 mage, two spells, neutral wolf; no server connection."));
 }
 
 void AWowViewerGameMode::SetupLoginScene(UWorld* World)

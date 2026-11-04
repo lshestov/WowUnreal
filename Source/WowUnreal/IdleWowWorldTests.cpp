@@ -8,6 +8,7 @@
 #include "WowWorldManager.h"
 #include "Formats/Dbc/DbcStore.h"
 #include "Components/SceneComponent.h"
+#include "Components/BoxComponent.h"
 #include "Coord/WowCoordinate.h"
 #include "TimerManager.h"
 #include "WowWmoRenderer.h"
@@ -88,6 +89,43 @@ bool FIdleWowServerMapSelection::RunTest(const FString&)
     TestTrue(TEXT("Switching maps destroys the old tile's separately spawned WMO actors"),Building->IsActorBeingDestroyed() && Tile->IsActorBeingDestroyed() && Manager->LoadedTiles.IsEmpty());
     TestTrue(TEXT("Unknown map IDs cannot replace the current terrain"),!Manager->SelectMap(MAX_uint32) && Manager->GetMapName()==TEXT("Azeroth"));
     Manager->Destroy(); World->DestroyWorld(false); GEngine->DestroyWorldContext(World); return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIdleWowWorldPickTest, "WowUnreal.World.MouseSelectionRespectsOcclusion",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FIdleWowWorldPickTest::RunTest(const FString& Parameters)
+{
+    UWorld* World=UWorld::CreateWorld(EWorldType::Game,false);
+    if (!TestNotNull(TEXT("Test world"),World)) return false;
+    GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+    auto* Controller=World->SpawnActor<AWowGameplayController>();
+    auto Box=[World](float X,ECollisionChannel Channel)
+    {
+        AActor* Actor=World->SpawnActor<AActor>();
+        auto* Shape=NewObject<UBoxComponent>(Actor);
+        Actor->SetRootComponent(Shape);
+        Shape->SetWorldLocation(FVector(X,0,0));
+        Shape->SetBoxExtent(FVector(50));
+        Shape->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+        Shape->SetCollisionObjectType(Channel);
+        Shape->SetCollisionResponseToAllChannels(Channel==ECC_Pawn?ECR_Ignore:ECR_Block);
+        Shape->SetCollisionResponseToChannel(ECC_Visibility,ECR_Block);
+        Shape->RegisterComponent();
+        return Actor;
+    };
+    constexpr uint64 Guid=0xF130000003000001ULL;
+    Controller->SpawnedEntityActors.Add(Guid,Box(300,ECC_Pawn));
+    Box(600,ECC_WorldStatic);
+    TestEqual(TEXT("Unit in front of terrain can be selected even though it ignores pawn movement"),
+        Controller->TraceWorldUnit(FVector::ZeroVector,FVector(900,0,0)),Guid);
+    TestEqual(TEXT("Click alongside the model finds no unit"),
+        Controller->TraceWorldUnit(FVector(0,100,0),FVector(900,100,0)),uint64(0));
+    Box(150,ECC_WorldStatic);
+    TestEqual(TEXT("A wall in front of the same unit blocks selection"),
+        Controller->TraceWorldUnit(FVector::ZeroVector,FVector(900,0,0)),uint64(0));
+    World->DestroyWorld(false);
+    GEngine->DestroyWorldContext(World);
+    return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIdleWowDeathLifetimeTest, "WowUnreal.World.DeathPreservesEntityUntilServerDestroy",

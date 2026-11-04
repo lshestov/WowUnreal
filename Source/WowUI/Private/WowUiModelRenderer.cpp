@@ -13,6 +13,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/BoxComponent.h"
 #include "Engine/SceneCapture2D.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/Texture2D.h"
@@ -234,9 +235,18 @@ void FWowUiModelRenderer::Tick(UWorld* World)
         const auto Bounds=Body->Bounds;
         // Animated M2 culling bounds cover every pose and are much larger than
         // a standing character. Frame its physical body instead of that box.
-        const auto* Capsule=Actor->FindComponentByClass<UCapsuleComponent>();
-        float HalfHeight=Capsule?Capsule->GetScaledCapsuleHalfHeight():FMath::Max(float(Bounds.BoxExtent.Z)*.5f,40.f);
-        FVector Focus=Capsule?Capsule->GetComponentLocation():Bounds.Origin;
+        float HalfHeight=FMath::Max(float(Bounds.BoxExtent.Z)*.5f,40.f);
+        FVector Focus=Bounds.Origin;
+        if(const auto* Capsule=Actor->FindComponentByClass<UCapsuleComponent>())
+        {
+            HalfHeight=Capsule->GetScaledCapsuleHalfHeight();
+            Focus=Capsule->GetComponentLocation();
+        }
+        else if(const auto* Selection=FindObjectFast<UBoxComponent>(Actor,TEXT("UnitSelection")))
+        {
+            HalfHeight=FMath::Max(float(Selection->Bounds.BoxExtent.Z),40.f);
+            Focus=Selection->Bounds.Origin;
+        }
         if(Body->DoesSocketExist(TEXT("WowPortraitHead")))
         {
             const FVector Head=Body->GetSocketLocation(TEXT("WowPortraitHead")); const FVector Feet=Body->GetComponentLocation();

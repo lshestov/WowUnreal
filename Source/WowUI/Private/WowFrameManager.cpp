@@ -293,7 +293,7 @@ bool FWowFrameManager::ReparentFrame(int64 Handle,int64 ParentHandle)
     if(!Canvas && ParentHandle==FindFrame(TEXT("UIParent"))) Canvas=RootCanvas.Get();
     if(!Canvas || !Entry->Widget.IsValid()) return false;
     Entry->Widget->RemoveFromParent(); auto* Slot=Canvas->AddChildToCanvas(Entry->Widget.Get());
-    if(Slot) Slot->SetZOrder(int32(Entry->Def.Strata)*1000+Entry->Def.FrameLevel);
+    if(Slot) Slot->SetZOrder(GetFrameSlotOrder(Entry->Def,ParentHandle,Entry->Def.FrameLevel));
     if(auto* OldParent=Frames.Find(Entry->ParentHandle)) OldParent->Children.Remove(Handle);
     if(auto* NewParent=Frames.Find(ParentHandle)) NewParent->Children.AddUnique(Handle);
     Entry->ParentHandle=ParentHandle; Entry->Def.Parent=ParentHandle<0?FString():GetFrameName(ParentHandle);
@@ -428,15 +428,15 @@ void FWowFrameManager::SetFrameStrata(int64 Handle, EWowFrameStrata Strata)
 	FFrameEntry* Entry = Frames.Find(Handle);
 	if (!Entry) return;
 
+	if (Entry->Def.Strata == Strata) return;
 	Entry->Def.Strata = Strata;
-
-	if (Entry->Widget.IsValid())
+	UpdateFrameSlotOrder(Handle, *Entry, Entry->Def.FrameLevel);
+	for (const int64 Child : Entry->Children)
 	{
-		if (UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(Entry->Widget->Slot))
-		{
-			Slot->SetZOrder(static_cast<int32>(Strata) * 1000 + Entry->Def.FrameLevel);
-		}
+		const auto& ChildEntry = Frames[Child];
+		UpdateFrameSlotOrder(Child, ChildEntry, ChildEntry.Def.FrameLevel);
 	}
+	bLayoutDirty = true;
 }
 
 void FWowFrameManager::SetFrameLevel(int64 Handle, int32 Level)
@@ -449,8 +449,9 @@ void FWowFrameManager::SetFrameLevel(int64 Handle, int32 Level)
 	for(const int64 Child:Descendants)
 	{
 		auto& E=Frames[Child]; E.Def.FrameLevel=FMath::Max(0,E.Def.FrameLevel+Delta);
-		if(E.Widget.IsValid()) if(auto* Slot=Cast<UCanvasPanelSlot>(E.Widget->Slot)) Slot->SetZOrder(int32(E.Def.Strata)*1000+E.Def.FrameLevel);
+		UpdateFrameSlotOrder(Child, E, E.Def.FrameLevel);
 	}
+	bLayoutDirty = true;
 }
 
 int64 FWowFrameManager::GetParentHandle(int64 Handle) const
@@ -1154,6 +1155,33 @@ void FWowFrameManager::CreateBackdrop(UCanvasPanel* Container,const FWowBackdrop
 
 // ── Widget Creation ──────────────────────────────────────────────────────────
 
+int32 FWowFrameManager::GetFrameSlotOrder(const FWowFrameDef& Def, int64 ParentHandle, int32 Level) const
+{
+	int32 Order = static_cast<int32>(Def.Strata) * 1000 + Level;
+	if (const auto* Parent = Frames.Find(ParentHandle); Parent && Parent->Widget.IsValid())
+	{
+		// A canvas holds both regions and child frames. Reserve its middle for
+		// the owner's backdrop and draw layers, independent of the owner's strata.
+		Order -= static_cast<int32>(Parent->Def.Strata) * 1000 + Parent->Def.FrameLevel;
+		Order += Order >= 0 ? 1000 : -1000;
+	}
+	// Background decoration wins the earlier paint position among tied siblings.
+	if (Def.Backdrop.IsSet() && Def.Layers.IsEmpty() && Def.Children.IsEmpty() && !Def.bEnableMouse && Def.Type == EWowFrameType::Frame)
+		--Order;
+	return Order;
+}
+
+void FWowFrameManager::UpdateFrameSlotOrder(int64 Handle, const FFrameEntry& Entry, int32 Level)
+{
+	UWidget* Widget = Entry.Widget.Get();
+	const auto* ScrollChild = ScrollChildHandles.Find(Entry.ParentHandle);
+	if (ScrollChild && *ScrollChild == Handle)
+		Widget = ScrollViewports.FindRef(Entry.ParentHandle).Get();
+	if (Widget)
+		if (auto* Slot = Cast<UCanvasPanelSlot>(Widget->Slot))
+			Slot->SetZOrder(GetFrameSlotOrder(Entry.Def, Entry.ParentHandle, Level));
+}
+
 UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 Handle, int64 ParentHandle)
 {
 	UCanvasPanel* Canvas = RootCanvas.Get();
@@ -1382,13 +1410,9 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 	// Add to parent canvas (may be root canvas or a parent frame's canvas)
 	UCanvasPanelSlot* Slot = ParentCanvas->AddChildToCanvas(Widget);
 
-	// Apply strata z-ordering (1000 per strata level + frame level offset)
 	if (Slot)
 	{
-		int32 ZOrder = static_cast<int32>(Def.Strata) * 1000 + Def.FrameLevel;
-		// Background-only frames share their siblings' frame level in FrameXML.
-		// Paint decoration before content, including nested scroll editors.
-		if(Def.Backdrop.IsSet() && Def.Layers.IsEmpty() && Def.Children.IsEmpty() && !Def.bEnableMouse && Def.Type==EWowFrameType::Frame) --ZOrder;
+		const int32 ZOrder = GetFrameSlotOrder(Def, ParentHandle, Def.FrameLevel);
 		Slot->SetZOrder(ZOrder);
 		UE_LOG(LogWowFrame, Verbose, TEXT("  Added to canvas: slot=%p ZOrder=%d"), Slot, ZOrder);
 	}
@@ -1669,6 +1693,7 @@ int64 FWowFrameManager::CreateFrame(const FWowFrameDef& Def)
 	{
 		EventSystem->CreateFrameObject(Handle, Resolved.Name, Resolved.FrameID);
         if(Resolved.Type==EWowFrameType::EditBox && !Resolved.EditFont.IsEmpty()) EventSystem->ApplyRegionFont(Resolved.Name,Resolved.EditFont);
+        if(!Resolved.MessageFont.IsEmpty()) EventSystem->ApplyRegionFont(Resolved.Name,Resolved.MessageFont);
 
 		if (Entry.ParentHandle != -1)
 		{
@@ -2027,6 +2052,16 @@ void FWowFrameManager::TickMessages(double Now)
         for(int32 I=0;I<State.Widgets.Num();++I) if(auto* Text=State.Widgets[I].Get()) {const int32 Index=State.Lines.Num()-1-State.Offset-I; if(State.Lines.IsValidIndex(Index)) Text->SetRenderOpacity(MessageOpacity(State,State.Lines[Index],Now));}
     }
 }
+void FWowFrameManager::SetMessageFont(int64 Handle, const FString& Path, float Height)
+{
+	auto* State = MessageFrames.Find(Handle);
+	if (!State || (State->FontPath == Path && State->FontHeight == Height)) return;
+	State->FontPath = Path;
+	State->FontHeight = Height;
+	State->AppliedFontScale = 0;
+	if (!State->Lines.IsEmpty()) DrawMessages(Handle);
+}
+
 void FWowFrameManager::DrawMessages(int64 Handle,double Now)
 {
 	if(Now<0) Now=FPlatformTime::Seconds();
@@ -2034,14 +2069,30 @@ void FWowFrameManager::DrawMessages(int64 Handle,double Now)
 	auto& State=MessageFrames.FindOrAdd(Handle); const auto R=GetLayoutRect(Handle);
 	const auto* Def=GetFrameDef(Handle);
 	const float Height=FMath::Max(float(R.W),14.f),Width=FMath::Max(float(R.Z),100.f);
-	const int32 Visible=FMath::Clamp(FMath::FloorToInt(Height/16),1,30);
+	const FString FontName = State.FontPath.IsEmpty() && Def ? Def->MessageFont : State.FontPath;
+	const float FontHeight = State.FontHeight>0 ? State.FontHeight : FontManager ? FontManager->GetFontSize(FontName) : 12;
+	const float RowSpacing = FontHeight+2;
+	const int32 Visible=FMath::Clamp(FMath::CeilToInt(Height/RowSpacing),1,30);
 	Canvas->SetClipping(EWidgetClipping::ClipToBounds);
+	const int32 Existing = State.Widgets.Num();
 	while(State.Widgets.Num()<Visible)
 	{
 		auto* Text=CreateTextBlock(Canvas); Text->SetVisibility(ESlateVisibility::HitTestInvisible);
 		Text->SetJustification(Def && Def->MessageJustifyH==TEXT("CENTER")?ETextJustify::Center:Def && Def->MessageJustifyH==TEXT("RIGHT")?ETextJustify::Right:ETextJustify::Left); Text->SetAutoWrapText(true);
-		if(FontManager) {const FString Font=Def?Def->MessageFont:FString(); Text->SetFont(Font.IsEmpty()?FontManager->GetDefaultFont(FMath::Max(1,FMath::RoundToInt(12*UIScale))):FontManager->GetFont(Font,FMath::Max(1,FMath::RoundToInt(FontManager->GetFontSize(Font)*UIScale))));}
 		Canvas->AddChildToCanvas(Text); State.Widgets.Add(Text);
+	}
+	// Update already displayed history on SetFont. New pooled rows use the
+	// same face and size as existing ones, including after a UI-scale change.
+	const int32 FirstFontRow = State.AppliedFontScale == UIScale ? Existing : 0;
+	if (FirstFontRow < State.Widgets.Num())
+	{
+		const int32 Pixels = FMath::Max(1,FMath::RoundToInt(FontHeight*UIScale));
+		FSlateFontInfo Font = GetDefault<UTextBlock>()->GetFont();
+		if (FontManager) Font = FontName.IsEmpty() ? FontManager->GetDefaultFont(Pixels) : FontManager->GetFont(FontName,Pixels);
+		else Font.Size = FMath::Max(1,FMath::RoundToInt(Pixels*.75f));
+		for (int32 I=FirstFontRow; I<State.Widgets.Num(); ++I)
+			if (auto* Label=State.Widgets[I].Get()) Label->SetFont(Font);
+		State.AppliedFontScale = UIScale;
 	}
 	float Bottom=State.InsertTop?0:Height*UIScale;
 	for(int32 I=0; I<State.Widgets.Num(); ++I) if(auto* Text=State.Widgets[I].Get())
@@ -2050,7 +2101,7 @@ void FWowFrameManager::DrawMessages(int64 Handle,double Now)
 		if(I>=Visible || Index<0 || (State.InsertTop?Bottom>=Height*UIScale:Bottom<=0)) { Text->SetVisibility(ESlateVisibility::Collapsed); continue; }
 		const auto& Line=State.Lines[Index]; Text->SetText(FText::FromString(Line.Text)); Text->SetColorAndOpacity(Line.Color); Text->SetWrapTextAt(Width*UIScale);
 		Text->TakeWidget(); if(auto* Label=Cast<UWowTextBlock>(Text)) Label->RefreshRichStyle();
-		Text->ForceLayoutPrepass(); const float RowHeight=FMath::Max(16*UIScale,Text->GetDesiredSize().Y);
+		Text->ForceLayoutPrepass(); const float RowHeight=FMath::Max(RowSpacing*UIScale,Text->GetDesiredSize().Y);
 		if(!State.InsertTop) Bottom-=RowHeight;
 		if(auto* Slot=Cast<UCanvasPanelSlot>(Text->Slot)) { Slot->SetAnchors(FAnchors(0,0)); Slot->SetAlignment(FVector2D::ZeroVector); Slot->SetPosition(FVector2D(0,Bottom)); Slot->SetSize(FVector2D(Width*UIScale,RowHeight)); Slot->SetZOrder(200); }
 		Text->SetRenderOpacity(MessageOpacity(State,Line,Now)); Text->SetVisibility(ESlateVisibility::HitTestInvisible); if(State.InsertTop) Bottom+=RowHeight;
@@ -2478,9 +2529,10 @@ void FWowFrameManager::DispatchClick(int64 Handle, const FString& Button, bool b
 	if (!EventSystem || Handle < 0) return;
 	if(const auto* Widget=GetButtonWidget(Handle); Widget && !Widget->GetIsEnabled()) return;
 
+    const FString PreviousButton=CurrentMouseButton; CurrentMouseButton=Button;
+    EventSystem->RunFrameClickScript(Handle, TEXT("PreClick"), Button, bMouseDown);
 	const FFrameEntry* Entry = Frames.Find(Handle);
 	if(Entry && Entry->Def.Type==EWowFrameType::CheckButton && Button==TEXT("LeftButton")) SetChecked(Handle,!GetChecked(Handle));
-    const FString PreviousButton=CurrentMouseButton; CurrentMouseButton=Button;
 
 	// Stock secure handlers now resolve wildcard attributes and execute their
 	// action in Lua. Keep native dispatch only for buttons without an OnClick;
@@ -2574,6 +2626,7 @@ void FWowFrameManager::DispatchClick(int64 Handle, const FString& Button, bool b
 	}
 
 	EventSystem->RunFrameClickScript(Handle, TEXT("OnClick"), Button, bMouseDown);
+    EventSystem->RunFrameClickScript(Handle, TEXT("PostClick"), Button, bMouseDown);
     CurrentMouseButton=PreviousButton;
 }
 
@@ -2605,10 +2658,11 @@ void FWowFrameManager::SetScrollChild(int64 ScrollFrameHandle,int64 ChildHandle)
         {
             Viewport=NewObject<UCanvasPanel>(Canvas); Viewport->SetClipping(EWidgetClipping::ClipToBoundsAlways);
             Viewport->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-            if(auto* Slot=Canvas->AddChildToCanvas(Viewport)) { Slot->SetAnchors(FAnchors(0,0,1,1)); Slot->SetOffsets(FMargin(0)); Slot->SetZOrder(int32(Child->Def.Strata)*1000+Child->Def.FrameLevel); }
+            if(auto* Slot=Canvas->AddChildToCanvas(Viewport)) { Slot->SetAnchors(FAnchors(0,0,1,1)); Slot->SetOffsets(FMargin(0)); }
             ScrollViewports.Add(ScrollFrameHandle,Viewport);
         }
         Child->Widget->RemoveFromParent(); Viewport->AddChildToCanvas(Child->Widget.Get());
+        UpdateFrameSlotOrder(ChildHandle,*Child,Child->Def.FrameLevel);
     }
     FrameRects.Reset(); bLayoutDirty=true;
 }

@@ -402,9 +402,8 @@ void FWowFrameManager::RefreshLayout()
     {
         const int64 Handle=Handles[I]; const auto& Entry=Frames[Handle];
         const int32 Level=FMath::Max(Entry.Def.FrameLevel, GroupLevels.FindRef(Handle));
-        if (Entry.Def.bAnonymous && Entry.Widget.IsValid())
-            if (auto* Slot=Cast<UCanvasPanelSlot>(Entry.Widget->Slot))
-                Slot->SetZOrder(static_cast<int32>(Entry.Def.Strata)*1000+Level);
+        if (Entry.Def.bAnonymous)
+            UpdateFrameSlotOrder(Handle, Entry, Level);
         const auto* Parent=Frames.Find(Entry.ParentHandle);
         if (Parent && Parent->Def.bAnonymous)
             GroupLevels.FindOrAdd(Entry.ParentHandle)=FMath::Max(GroupLevels.FindRef(Entry.ParentHandle),Level);

@@ -12,7 +12,6 @@ class UWowUIManager;
 class UWowGameUI;
 class AWowWorldManager;
 class UWowDeathManager;
-class UWowCursorManager;
 class UWowTooltipManager;
 class UWowM2EmitterComponent;
 class FMpqManager;
@@ -56,6 +55,8 @@ public:
     /** Connection manager for sending movement packets */
     UPROPERTY()
     TObjectPtr<UWowConnectionManager> ConnectionManager;
+    // The -testscene=ui preview renders the stock HUD with a disconnected local fixture.
+    bool bOfflineUiPreview = false;
 
     /** UI manager for event dispatch */
     UPROPERTY()
@@ -64,10 +65,6 @@ public:
     /** Death manager for player death handling */
     UPROPERTY()
     TObjectPtr<UWowDeathManager> DeathManager;
-
-    /** Cursor manager for WoW custom cursors */
-    UPROPERTY()
-    TObjectPtr<UWowCursorManager> CursorManager;
 
     /** Tooltip manager for entity tooltips */
     UPROPERTY()
@@ -84,11 +81,13 @@ public:
     void LogNpcCapture() const;
     void LogHudCapture() const;
     void InteractWithTarget();
+    uint64 GetWorldUnitAtScreen(float MouseX, float MouseY) const;
     bool IsNpcCaptureMoving() const;
 
 private:
     friend struct FWowGameplayProbe;
     friend class FIdleWowDeathLifetimeTest;
+    friend class FIdleWowWorldPickTest;
     TSharedPtr<struct FWowGameplayProbe> GameplayProbe;
     bool bGameplayProbeChecked=false;
     TOptional<FVector2D> GameplayProbePointer;
@@ -289,6 +288,7 @@ private:
     void OnLeftClick();
     void OnLeftClickReleased();
     void TryTargetUnderCursor();
+    uint64 TraceWorldUnit(const FVector& Start, const FVector& End) const;
     void TryTargetAtScreen(float MouseX,float MouseY);
     int64 GetUiFrameUnderCursor() const;
     bool HandleUiMousePress(const FString& Button, int64& PressedFrameHandle, bool bAllowDragDrop);
@@ -339,8 +339,9 @@ private:
 
     // Target selection highlight
     UPROPERTY()
-    TObjectPtr<UStaticMeshComponent> TargetHighlightCircle;
+    TObjectPtr<class UProceduralMeshComponent> TargetHighlightCircle;
     void UpdateTargetHighlight();
+    void AlignTargetHighlightToFloor();
 
     // Death + looting
     void OnEntityDeath(uint64 Guid);

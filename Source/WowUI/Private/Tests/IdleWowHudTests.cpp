@@ -1,5 +1,6 @@
 #include "Misc/AutomationTest.h"
 #include "WowFrameManager.h"
+#include "WowFontManager.h"
 #include "WowFrameXmlParser.h"
 #include "WowEventSystem.h"
 #include "WowLuaVM.h"
@@ -80,9 +81,19 @@ bool FHudAnonymousHierarchy::RunTest(const FString&)
     FHudFixture F;
     FWowFrameDef Parent; Parent.Name=TEXT("UnitPanel"); Parent.Parent=TEXT("UIParent"); Parent.Width=232; Parent.Height=100;
     Parent.Anchors.Add({EWowAnchorPoint::TOPLEFT,TEXT("UIParent"),EWowAnchorPoint::TOPLEFT,20,-10});
+    // PlayerFrame.xml puts its portrait in ARTWORK on a BACKGROUND-strata button.
+    // Its border and level label live in two nested anonymous groups.
+    Parent.Strata=EWowFrameStrata::BACKGROUND;
+    Parent.Type=EWowFrameType::Button;
+    FWowLayer PortraitLayer; PortraitLayer.Level=EWowDrawLayer::ARTWORK;
+    FWowTextureElement Portrait; Portrait.Name=TEXT("UnitPortrait"); PortraitLayer.Textures.Add(Portrait);
+    Parent.Layers.Add(PortraitLayer);
     FWowFrameDef Inner; Inner.bSetAllPoints=true;
     FWowFrameDef Second; Second.bSetAllPoints=true;
-    FWowLayer Layer; FWowTextureElement Border; Border.Name=TEXT("UnitBorder"); Layer.Textures.Add(Border); Second.Layers.Add(Layer);
+    FWowLayer Layer; Layer.Level=EWowDrawLayer::BACKGROUND;
+    FWowTextureElement Border; Border.Name=TEXT("UnitBorder"); Layer.Textures.Add(Border);
+    FWowFontStringElement Label; Label.Name=TEXT("UnitLevel"); Layer.FontStrings.Add(Label);
+    Second.Layers.Add(Layer);
     Inner.Children.Add(Second); Parent.Children.Add(Inner);
     const int64 H=F.Frames.CreateFrame(Parent);
     const auto Children=F.Frames.GetChildHandles(H);
@@ -104,6 +115,16 @@ bool FHudAnonymousHierarchy::RunTest(const FString&)
     const auto* TextGroupSlot=Cast<UCanvasPanelSlot>(F.Frames.GetWidgetForHandle(Children[0])->Slot);
     const auto* HealthSlot=Cast<UCanvasPanelSlot>(F.Frames.GetWidgetForHandle(HealthHandle)->Slot);
     TestTrue(TEXT("Anonymous text groups draw above sibling health fills"),TextGroupSlot && HealthSlot && TextGroupSlot->GetZOrder()>HealthSlot->GetZOrder());
+    const auto* PortraitImage=F.Frames.GetNamedTexture(TEXT("UnitPortrait"));
+    const auto* PortraitSlot=PortraitImage?Cast<UCanvasPanelSlot>(PortraitImage->Slot):nullptr;
+    const auto* LevelText=F.Frames.GetNamedFontString(TEXT("UnitLevel"));
+    const auto* LevelSlot=LevelText?Cast<UCanvasPanelSlot>(LevelText->Slot):nullptr;
+    TestTrue(TEXT("The badge and its level text paint above the player's ARTWORK portrait"),
+        TextGroupSlot && PortraitSlot && TextGroupSlot->GetZOrder()>PortraitSlot->GetZOrder() &&
+        LevelSlot && Slot && LevelText->GetParent()==Image->GetParent() && LevelSlot->GetZOrder()>Slot->GetZOrder());
+    F.Frames.SetFrameLevel(HealthHandle,0);
+    TestTrue(TEXT("A deliberately lower-level child still paints behind the parent's regions"),
+        HealthSlot && PortraitSlot && HealthSlot->GetZOrder()<PortraitSlot->GetZOrder());
     const char* Xml="<Ui><Frame name='Sized' virtual='true'><Size x='204' y='140'/></Frame></Ui>";
     TArray<uint8> Bytes; Bytes.Append(reinterpret_cast<const uint8*>(Xml),FCStringAnsi::Strlen(Xml));
     const auto Parsed=FWowFrameXmlParser::ParseXml(Bytes,TEXT("HudSizeFixture"));
@@ -140,6 +161,53 @@ bool FHudInlineXmlScript::RunTest(const FString&)
     TestTrue(TEXT("Inline code is retained separately from file references"),Directives[1].Type==FWowXmlDirective::EType::Script && Directives[1].FilePath.IsEmpty() && Directives[1].ScriptCode.Contains(TEXT("InlineValue < 11")) && Directives[2].FilePath==TEXT("Other.lua"));
     F.Frames.CreateFrame(Directives[0].FrameDef);
     TestTrue(TEXT("An inline script can initialize the frames already created before it"),F.Lua.ExecuteString(Directives[1].ScriptCode) && F.Lua.ExecuteString(TEXT("assert(InlineValue==10)")));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudStockChatFont, "WowUnreal.Hud.StockChatFont",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FHudStockChatFont::RunTest(const FString&)
+{
+    FString DataPath;
+    FMpqManager Mpq;
+    FWowFontManager Fonts;
+    if (!FParse::Value(FCommandLine::Get(), TEXT("wowdata="), DataPath) ||
+        !TestTrue(TEXT("Open stock MPQ fonts"), Mpq.Initialize(DataPath) && Fonts.Initialize(&Mpq))) return false;
+    FHudFixture F;
+    F.Frames.SetFontManager(&Fonts);
+    F.Frames.SetUIScale(1);
+    for (const TCHAR* File : {TEXT("Fonts.xml"), TEXT("FontStyles.xml"), TEXT("ChatFrame.xml")})
+    {
+        const FString Path = FString(TEXT("Interface\\FrameXML\\")) + File;
+        TArray<uint8> Bytes;
+        if (!TestTrue(*Path, Mpq.ReadFile(Path, Bytes))) return false;
+        for (const auto& Def : FWowFrameXmlParser::ParseXml(Bytes, Path))
+        {
+            if (Def.Type == FWowXmlDirective::EType::Font &&
+                (Def.FontName == TEXT("NumberFont_Shadow_Med") || Def.FontName == TEXT("ChatFontNormal") ||
+                 Def.FontName == TEXT("SystemFont_Shadow_Med1") || Def.FontName == TEXT("GameFontNormal")))
+                FWowEventSystem::RegisterFontDefinition(&F.Lua, &Fonts, Def);
+            if (Def.Type == FWowXmlDirective::EType::Frame && Def.FrameDef.Name == TEXT("ChatFrameTemplate"))
+                F.Frames.CreateFrame(Def.FrameDef);
+        }
+    }
+    TestEqual(TEXT("Other stock UI labels keep their own font"), Fonts.GetFont(TEXT("GameFontNormal")).TypefaceFontName, FName(TEXT("FRIZQT__")));
+    TestEqual(TEXT("Native lookup inherits the chat face"), Fonts.GetFont(TEXT("ChatFontNormal")).TypefaceFontName, FName(TEXT("ARIALN")));
+    if (!TestTrue(TEXT("The chat frame inherits the MPQ face and height before its first message"), F.Lua.ExecuteString(TEXT(R"LUA(
+        function ChatFrame_OnLoad() end
+        local frame=CreateFrame("ScrollingMessageFrame","StockChatProbe",UIParent,"ChatFrameTemplate")
+        frame:SetSize(400,110); frame:SetPoint("CENTER"); frame:Show()
+        local path,size=frame:GetFont()
+        assert(path:upper()=="FONTS\\ARIALN.TTF" and size==14)
+        frame:AddMessage("A message sent before changing the chat size")
+    )LUA")))) return false;
+    const auto* State = F.Frames.MessageFrames.Find(F.Frames.FindFrame(TEXT("StockChatProbe")));
+    if (!TestTrue(TEXT("An actual scrolling-message row is present"), State && !State->Widgets.IsEmpty() && State->Widgets[0].IsValid())) return false;
+    const auto* Row=State->Widgets[0].Get();
+    TestEqual(TEXT("The visible row uses the extracted narrow typeface"), Row->GetFont().TypefaceFontName, FName(TEXT("ARIALN")));
+    TestTrue(TEXT("Fourteen native pixels become eleven Slate points at unit scale"), Row->GetFont().Size==11);
+    F.Lua.ExecuteString(TEXT("local file,_,flags=StockChatProbe:GetFont(); StockChatProbe:SetFont(file,20,flags)"));
+    TestTrue(TEXT("Changing chat font size also updates a line already on screen"), Row->GetFont().TypefaceFontName==FName(TEXT("ARIALN")) && Row->GetFont().Size==15);
     return true;
 }
 
@@ -1471,7 +1539,14 @@ bool FHudMerchantApi::RunTest(const FString&)
     TestTrue(TEXT("An initially empty cursor texture becomes an opaque drawable brush"),CursorImage && CursorImage->GetRenderOpacity()==1 && CursorImage->GetBrush().DrawAs==ESlateBrushDrawType::Image && CursorImage->GetBrush().GetResourceObject());
     TestTrue(TEXT("Unpurchased goods cannot replace action-bar entries"),!Connection->PlaceCursorIntoActionSlot(0) && Connection->HasCursorMerchantPayload());
     Connection->CloseMerchant(); Cursor.Tick(F.Lua.GetState());
-    TestTrue(TEXT("Closing clears vendor selection and its visible icon"),!Connection->HasCursorPayload() && !F.Context.SoftwareCursorVisible);
+    TestTrue(TEXT("Releasing a held item restores the original pointing glove"),!Connection->HasCursorPayload() && F.Context.SoftwareCursorVisible &&
+        CursorImage && CursorImage->GetBrush().GetResourceObject()==F.Frames.LoadUITexture(TEXT("Interface\\Cursor\\Point")));
+    N.SetField(UnitField::HEALTH,10); N.SetField(UnitField::FLAGS,0x2); F.Context.WorldMouseoverGuid=2;
+    Cursor.Tick(F.Lua.GetState());
+    TestTrue(TEXT("The hovered vendor supplies the native unit and cursor"),F.Lua.ExecuteString(TEXT("assert(UnitExists('mouseover'))")) &&
+        CursorImage && CursorImage->GetBrush().GetResourceObject()==F.Frames.LoadUITexture(TEXT("Interface\\Cursor\\Buy")));
+    F.Frames.UpdateMouseHover(-1,-1); Cursor.Tick(F.Lua.GetState());
+    TestFalse(TEXT("The software cursor leaves the viewport with the pointer"),F.Context.SoftwareCursorVisible);
     return true;
 }
 
@@ -1866,6 +1941,57 @@ bool FHudMacroSequence::RunTest(const FString&)
         assert(SecureCmdOptionParse('[channeling:'..GetSpellInfo(740)..'] Channel')=='Channel' and SecureCmdOptionParse('[vehicleui] Vehicle; Normal')=='Normal')
         assert(select('#',UnitChannelInfo('player'))==8 and UnitCastingInfo('player')==nil)
     )LUA")));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudActionButtonHighlight,"WowUnreal.Hud.ActionButtonHighlight",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudActionButtonHighlight::RunTest(const FString&)
+{
+    FString Path;
+    if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false;
+    FMpqManager Mpq;
+    if(!Mpq.Initialize(Path)) return false;
+    auto& Dbc=FDbcStore::Get();
+    if(!Dbc.IsLoaded()) Dbc.LoadAll(Mpq);
+    if(!Dbc.IsDeferredLoaded()) Dbc.LoadDeferred(Mpq);
+    FHudFixture F;
+    TStrongObjectPtr<UWowConnectionManager> Connection(NewObject<UWowConnectionManager>());
+    auto& Handler=Connection->PacketHandler;
+    F.Context.ConnectionManager=Connection.Get();
+    F.Context.EntityManager=&Handler.EntityManager;
+    Handler.EntityManager.LocalPlayerGuid=1;
+    Handler.ActionButtons={133,6603,75,0x80000000u|75};
+
+    TArray<uint8> Bytes;
+    if(!Mpq.ReadFile(TEXT("Interface\\FrameXML\\ActionButton.lua"),Bytes)) return false;
+    Bytes.Add(0);
+    if(!TestTrue(TEXT("Load the original action button handlers"),F.Lua.ExecuteString(UTF8_TO_TCHAR(reinterpret_cast<const char*>(Bytes.GetData()))))) return false;
+    const FString Xml=TEXT("<Ui><CheckButton name='ActionProbe'><Scripts><PreClick>sequence=button..tostring(down)</PreClick><OnClick>sequence=sequence..':click'</OnClick><PostClick>sequence=sequence..':'..button..tostring(down); ActionButton_UpdateState(self,button,down)</PostClick></Scripts></CheckButton></Ui>");
+    FTCHARToUTF8 Utf8(*Xml);
+    Bytes.Reset(); Bytes.Append(reinterpret_cast<const uint8*>(Utf8.Get()),Utf8.Length());
+    const auto Parsed=FWowFrameXmlParser::ParseXml(Bytes,TEXT("ActionProbe"));
+    if(Parsed.Num()!=1) return false;
+    F.Frames.CreateFrame(Parsed[0].FrameDef);
+    const auto Check=[&](const TCHAR* Label,const TCHAR* Code){return TestTrue(Label,F.Lua.ExecuteString(Code));};
+    Check(TEXT("Ordinary spell stays unchecked at login and after a physical click"),TEXT("ActionProbe.action=1; ActionButton_UpdateState(ActionProbe); assert(not ActionProbe:GetChecked() and not IsAutoRepeatAction(1)); ActionProbe:Click(); assert(sequence=='LeftButtonfalse:click:LeftButtonfalse' and not ActionProbe:GetChecked())"));
+
+    TArray<uint8> Attack;
+    const uint64 Player=1,Victim=2;
+    Attack.Append(reinterpret_cast<const uint8*>(&Player),8);
+    Attack.Append(reinterpret_cast<const uint8*>(&Victim),8);
+    Handler.HandlePacket(WowOpcode::SMSG_ATTACKSTART,Attack);
+    Check(TEXT("Only the assigned melee action is current"),TEXT("assert(IsCurrentAction(2) and not IsCurrentAction(1) and not IsAutoRepeatAction(2)); ActionProbe.action=2; ActionButton_UpdateState(ActionProbe); assert(ActionProbe:GetChecked())"));
+    Handler.HandlePacket(WowOpcode::SMSG_ATTACKSTOP,{1,1,1,2,0,0,0,0});
+    Check(TEXT("Melee stop clears the checked texture"),TEXT("ActionButton_UpdateState(ActionProbe); assert(not ActionProbe:GetChecked())"));
+    // Local Auto Shot launch, no hits/misses, no explicit target.
+    TArray<uint8> Shot={1,1,1,1,0,75,0,0,0};
+    Shot.AddZeroed(14);
+    Handler.HandlePacket(WowOpcode::SMSG_SPELL_GO,Shot);
+    Check(TEXT("Only the active ranged spell is repeating, even with an equal item ID"),TEXT("assert(IsAutoRepeatSpell(75) and IsAutoRepeatAction(3) and not IsAutoRepeatAction(4) and not IsAutoRepeatAction(1))"));
+    Handler.HandlePacket(WowOpcode::SMSG_CANCEL_AUTO_REPEAT,{1,2});
+    Check(TEXT("Another actor's cancel does not clear the local spell"),TEXT("assert(IsAutoRepeatAction(3))"));
+    Handler.HandlePacket(WowOpcode::SMSG_CANCEL_AUTO_REPEAT,{1,1});
+    Check(TEXT("Local server cancellation clears the ranged border"),TEXT("assert(not IsAutoRepeatAction(3) and not IsAutoRepeatSpell(75))"));
     return true;
 }
 

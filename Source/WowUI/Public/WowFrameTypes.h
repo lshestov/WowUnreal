@@ -235,6 +235,7 @@ struct FWowXmlDirective
 	// For Font
 	FString FontName;
 	FString FontInherits;
+	FString FontFile;
 	float FontHeight = 0.f;
 	FString FontFlags;
 	TOptional<FLinearColor> FontColor;

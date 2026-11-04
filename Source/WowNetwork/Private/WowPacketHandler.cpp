@@ -54,6 +54,7 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(0x0150,&FWowPacketHandler::HandleSpellHealLog);
     Handlers.Add(WowOpcode::SMSG_ATTACKSTART,              &FWowPacketHandler::HandleAttackStart);
     Handlers.Add(WowOpcode::SMSG_ATTACKSTOP,               &FWowPacketHandler::HandleAttackStop);
+    Handlers.Add(WowOpcode::SMSG_CANCEL_AUTO_REPEAT,       &FWowPacketHandler::HandleCancelAutoRepeat);
     Handlers.Add(WowOpcode::SMSG_AURA_UPDATE,              &FWowPacketHandler::HandleAuraUpdate);
     Handlers.Add(WowOpcode::SMSG_AURA_UPDATE_ALL,          &FWowPacketHandler::HandleAuraUpdateAll);
     Handlers.Add(WowOpcode::SMSG_POWER_UPDATE,             &FWowPacketHandler::HandlePowerUpdate);
@@ -1034,6 +1035,11 @@ void FWowPacketHandler::HandleAttackStart(FPacketReader& R)
     uint64 AttackerGuid = R.ReadU64();
     uint64 VictimGuid = R.ReadU64();
     UE_LOG(LogWowPacket, Log, TEXT("SMSG_ATTACKSTART: attacker=%llu victim=%llu"), AttackerGuid, VictimGuid);
+    if(AttackerGuid && VictimGuid && AttackerGuid==EntityManager.LocalPlayerGuid && !LocalMeleeAttacking)
+    {
+        LocalMeleeAttacking=true;
+        OnAttackModeChanged.ExecuteIfBound(false,true);
+    }
     if(AttackerGuid==EntityManager.LocalPlayerGuid && HasPendingAttackCast) {HasPendingAttackCast=false; OnCastResult.ExecuteIfBound(AttackerGuid,6603,PendingAttackCounter,true,0);}
     OnAttackStart.Broadcast(AttackerGuid, VictimGuid);
 }
@@ -1045,6 +1051,11 @@ void FWowPacketHandler::HandleAttackStop(FPacketReader& R)
     uint64 VictimGuid = R.ReadPackedGuid();
     if(!R.CanRead(4)) return; R.ReadU32(); if(R.Remaining()) return;
     UE_LOG(LogWowPacket, Log, TEXT("SMSG_ATTACKSTOP: attacker=%llu victim=%llu"), AttackerGuid, VictimGuid);
+    if(AttackerGuid==EntityManager.LocalPlayerGuid && LocalMeleeAttacking)
+    {
+        LocalMeleeAttacking=false;
+        OnAttackModeChanged.ExecuteIfBound(false,false);
+    }
     if(AttackerGuid==EntityManager.LocalPlayerGuid && HasPendingAttackCast) {HasPendingAttackCast=false; OnCastResult.ExecuteIfBound(AttackerGuid,6603,PendingAttackCounter,false,0);}
     OnAttackStop.Broadcast(AttackerGuid, VictimGuid);
 }

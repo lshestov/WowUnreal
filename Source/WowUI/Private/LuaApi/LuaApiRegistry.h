@@ -67,6 +67,7 @@ struct FWowLuaContext
     uint64 CharacterStatGuid=0;
     TMap<uint16,uint32> CharacterStatFields;
     uint64 FocusGuid=0;
+    uint64 WorldMouseoverGuid=0;
     FString CursorTexture;
     bool CursorHidden=false,SoftwareCursorVisible=false;
 };

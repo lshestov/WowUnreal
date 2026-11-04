@@ -30,12 +30,16 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/BoxComponent.h"
 #include "Components/TextBlock.h"
 #include "Components/Image.h"
 #include "Engine/Texture2D.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Engine/World.h"
+#include "Engine/GameViewportClient.h"
+#include "Widgets/SViewport.h"
+#include "Layout/WidgetPath.h"
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -80,6 +84,8 @@ struct FWowGameplayProbe
     bool bJumpRequested=false,bJumpObserved=false;
     double FailureExitAt=0;
     uint32 LastEquippedItem=0;
+    uint64 PendingWorldClick=0;
+    FVector2D SlateClickPoint=FVector2D::ZeroVector;
     TWeakObjectPtr<UPrimitiveComponent> Avoiding;
     float AvoidSide=1;
     TMap<FString,TArray<double>> Profile;
@@ -165,6 +171,26 @@ struct FWowGameplayProbe
             if (Distance<Closest) { Closest=Distance; Guid=Pair.Key; }
         }
         return Guid;
+    }
+
+    bool RouteWorldClick(AWowGameplayController& C,bool Down)
+    {
+        auto* Client=C.GetWorld()->GetGameViewport();
+        const auto Window=Client?Client->GetWindow():nullptr;
+        const auto Viewport=Client?Client->GetGameViewportWidget():nullptr;
+        int32 Width=0,Height=0;
+        C.GetViewportSize(Width,Height);
+        if (!Window || !Viewport || Width<=0 || Height<=0) return false;
+        const FVector2D Screen=Viewport->GetCachedGeometry().GetAbsolutePositionAtCoordinates(
+            FVector2D(SlateClickPoint.X/Width,SlateClickPoint.Y/Height));
+        auto& Slate=FSlateApplication::Get();
+        const auto Path=Slate.LocateWindowUnderMouse(Screen,{Window.ToSharedRef()},false,0);
+        if (!Path.IsValid()) return false;
+        const TSet<FKey> Buttons=Down?TSet<FKey>{EKeys::LeftMouseButton}:TSet<FKey>{};
+        const FPointerEvent Event(FSlateApplication::CursorPointerIndex,Screen,Screen,Buttons,EKeys::LeftMouseButton,0,FModifierKeysState());
+        UE_LOG(LogTemp,Log,TEXT("GameplayProbe: Slate world click %s path=%s desktop=(%.1f,%.1f)"),Down?TEXT("down"):TEXT("up"),*Path.ToString(),Screen.X,Screen.Y);
+        TGuardValue<bool> Synthetic(C.bProbeSyntheticKeyboard,true);
+        return (Down?Slate.RoutePointerDownEvent(Path,Event):Slate.RoutePointerUpEvent(Path,Event)).IsEventHandled();
     }
 
     bool Walk(AWowGameplayController& C,const FVector& Point,float Range,bool AvoidObstacles=true)
@@ -392,6 +418,79 @@ struct FWowGameplayProbe
             bool IncludeDead=false; Step->TryGetBoolField(TEXT("includeDead"),IncludeDead);
             const uint64 Guid=FindEntry(C,Step->GetIntegerField(TEXT("entry")),IncludeDead);
             if (Guid) { C.SetTarget(Guid); Done=true; }
+        }
+        else if (Op==TEXT("click_world_unit") || Op==TEXT("click_world_unit_slate") || Op==TEXT("hover_world_unit"))
+        {
+            const bool ThroughSlate=Op==TEXT("click_world_unit_slate");
+            if (PendingWorldClick)
+            {
+                if (ThroughSlate)
+                {
+                    float X=0,Y=0;
+                    const bool SamePixel=C.GetMousePosition(X,Y) && FVector2D::Distance(FVector2D(X,Y),SlateClickPoint)<=2;
+                    const bool Released=RouteWorldClick(C,false);
+                    if (!SamePixel || !Released)
+                    {
+                        Failure=FString::Printf(TEXT("Slate click did not reach the expected viewport pixel (wanted %.0f,%.0f actual %.0f,%.0f released=%d)"),
+                            SlateClickPoint.X,SlateClickPoint.Y,X,Y,Released); Finish(C,false); return;
+                    }
+                }
+                else
+                {
+                    TGuardValue<bool> Synthetic(C.bProbeSyntheticKeyboard,true);
+                    C.InputKey(FInputKeyEventArgs::CreateSimulated(EKeys::LeftMouseButton,IE_Released,0.f));
+                }
+                Done=C.TargetGuid==PendingWorldClick && uint64(Connection->GetTargetGuid())==PendingWorldClick;
+                PendingWorldClick=0;
+                if (!Done) { Failure=TEXT("Left mouse input did not select the visible world unit"); Finish(C,false); return; }
+            }
+            else
+            {
+                const uint32 Entry=Step->GetIntegerField(TEXT("entry"));
+                int32 Width=0,Height=0;
+                C.GetViewportSize(Width,Height);
+                double Nearest=DBL_MAX;
+                uint64 Guid=0;
+                FVector2D Pointer;
+                for (const auto& Unit:C.SpawnedEntityActors)
+                {
+                    const auto* Entity=Handler.EntityManager.Find(Unit.Key);
+                    if (!Entity || Entity->Entry!=Entry || Entity->GetHealth()<=0 || !IsValid(Unit.Value)) continue;
+                    const auto* Body=FindObjectFast<UBoxComponent>(Unit.Value.Get(),TEXT("UnitSelection"));
+                    if (!Body) continue;
+                    const double Distance=FVector::DistSquared(Body->GetComponentLocation(),C.GetPawn()->GetActorLocation());
+                    FVector2D Point;
+                    if (Distance>=Nearest || !C.ProjectWorldLocationToScreen(Body->GetComponentLocation(),Point)
+                        || Point.X<0 || Point.X>=Width || Point.Y<0 || Point.Y>=Height) continue;
+                    if (C.UIManager->GetFrameManager()->HitTestFrames(Point.X,Point.Y)>=0 || C.GetWorldUnitAtScreen(Point.X,Point.Y)!=Unit.Key) continue;
+                    Guid=Unit.Key; Pointer=Point; Nearest=Distance;
+                }
+                if (Guid)
+                {
+                    C.GameplayProbePointer=Pointer;
+                    C.UIManager->GetFrameManager()->UpdateMouseHover(Pointer.X,Pointer.Y);
+                    if (Op==TEXT("hover_world_unit")) Done=true;
+                    else
+                    {
+                        if (C.TargetGuid==Guid) { Failure=TEXT("Clear or change the target before verifying a world click"); Finish(C,false); return; }
+                        if (ThroughSlate)
+                        {
+                            // Let the real viewport derive the pointer from the
+                            // Slate event. The target setter must read that pixel.
+                            C.GameplayProbePointer.Reset();
+                            SlateClickPoint=Pointer;
+                            if (!RouteWorldClick(C,true)) { Failure=TEXT("Slate could not route the click to the game window"); Finish(C,false); return; }
+                        }
+                        else
+                        {
+                            TGuardValue<bool> Synthetic(C.bProbeSyntheticKeyboard,true);
+                            C.InputKey(FInputKeyEventArgs::CreateSimulated(EKeys::LeftMouseButton,IE_Pressed,1.f));
+                        }
+                        PendingWorldClick=Guid;
+                    }
+                    UE_LOG(LogTemp,Log,TEXT("GameplayProbe: %s entry=%u guid=%llu viewport=(%.0f,%.0f)"),*Op,Entry,Guid,Pointer.X,Pointer.Y);
+                }
+            }
         }
         else if (Op==TEXT("pick_target"))
         {

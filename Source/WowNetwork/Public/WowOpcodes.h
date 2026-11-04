@@ -17,6 +17,7 @@ namespace WowOpcode
     inline constexpr uint16 CMSG_ATTACKSTOP             = 0x0142;
     inline constexpr uint16 SMSG_ATTACKSTART            = 0x0143;
     inline constexpr uint16 SMSG_ATTACKSTOP             = 0x0144;
+    inline constexpr uint16 SMSG_CANCEL_AUTO_REPEAT     = 0x029C;
     inline constexpr uint16 CMSG_TEXT_EMOTE             = 0x0104;
     inline constexpr uint16 CMSG_SET_ACTION_BUTTON      = 0x0128;
     inline constexpr uint16 CMSG_AUTH_SESSION            = 0x01ED;

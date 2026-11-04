@@ -51,6 +51,7 @@ public:
 
 	bool IsUILoaded() const { return bUILoaded; }
     bool HasSoftwareCursor() const;
+    FLinearColor GetUnitSelectionColor(uint64 Guid) const;
 
 	/** UI Window Management */
 	void ToggleBagWindow();
@@ -64,7 +65,7 @@ public:
 	void SetActorResolver(TFunction<AActor*(uint64)> Resolver);
     void SetKeyResolver(TFunction<bool(const FKey&)> Resolver);
     void SetAreaResolver(TFunction<uint32()> Resolver);
-	void TickWorldImages(UWorld* World);
+	void TickWorldImages(UWorld* World, uint64 MouseoverGuid);
 	void MapCommand(int32 Command);
 	void ProcessPendingReload();
 	void SetWorldUiVisible(bool Visible);
@@ -89,6 +90,7 @@ private:
 	FWowLuaContext* UIContext = nullptr;
 	bool bUILoaded = false;
     double NextItemComparisonUpdate=0;
+    uint32 WorldMouseoverType=0;
 
 	// UI Windows
 	TSharedPtr<SWowBagWindow> BagWindow;

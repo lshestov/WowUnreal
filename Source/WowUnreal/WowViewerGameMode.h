@@ -28,6 +28,7 @@ private:
     void SetupTerrainTestScene(UWorld* World);
     void SetupWmoTestScene(UWorld* World);
     void SetupUITestScene(UWorld* World);
+    void PopulateUITestScene();
     void SetupLoginScene(UWorld* World);
     void SetupNetworkTestScene(UWorld* World);
 

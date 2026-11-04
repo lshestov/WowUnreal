@@ -221,6 +221,12 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 	{ return LuaVM?WowLuaApi::CombatLogFlags(WowLuaApi::GetContext(LuaVM->GetState()),Guid):0x80000000u; });
 	if(ConnectionManager) ConnectionManager->PacketHandler.OnCombatLog.BindWeakLambda(this,[this](const FWowCombatEntry& Entry)
 	{ if(LuaVM) FWowCombatLogUi::Dispatch(LuaVM->GetState(),Entry); });
+    if(ConnectionManager) ConnectionManager->PacketHandler.OnAttackModeChanged.BindWeakLambda(this,[this](bool Ranged,bool Active)
+    {
+        if(!bUILoaded || !EventSystem) return;
+        if(Ranged) EventSystem->FireEvent(Active?TEXT("START_AUTOREPEAT_SPELL"):TEXT("STOP_AUTOREPEAT_SPELL"));
+        else EventSystem->FireEvent(Active?TEXT("PLAYER_ENTER_COMBAT"):TEXT("PLAYER_LEAVE_COMBAT"));
+    });
 	if(ConnectionManager) ConnectionManager->OnMacroUse.BindWeakLambda(this,[this](uint32 Id)
 	{
 		if(!LuaVM) return false;
@@ -461,8 +467,33 @@ void UWowUIManager::SetActorResolver(TFunction<AActor*(uint64)> Resolver)
 void UWowUIManager::SetAreaResolver(TFunction<uint32()> Resolver) {if(UIContext) UIContext->ResolveArea=MoveTemp(Resolver);}
 void UWowUIManager::SetKeyResolver(TFunction<bool(const FKey&)> Resolver) {if(UIContext) UIContext->KeyDown=MoveTemp(Resolver);}
 
-void UWowUIManager::TickWorldImages(UWorld* World)
+void UWowUIManager::TickWorldImages(UWorld* World, uint64 MouseoverGuid)
 {
+    if (bUILoaded && UIContext && LuaVM)
+    {
+        const bool Changed=UIContext->WorldMouseoverGuid!=MouseoverGuid;
+        const auto* Unit=MouseoverGuid && ConnectionManager ? ConnectionManager->PacketHandler.EntityManager.FindUnit(MouseoverGuid) : nullptr;
+        const uint32 Type=Unit && !Unit->IsPlayer() ? ConnectionManager->PacketHandler.CreatureTypes.FindRef(Unit->Entry) : 0;
+        // A creature query can complete while the pointer is stationary.
+        if(Changed || Type!=WorldMouseoverType)
+        {
+            UIContext->WorldMouseoverGuid=MouseoverGuid;
+            WorldMouseoverType=Type;
+            LuaVM->ExecuteString(TEXT(R"LUA(
+                if GameTooltip and GameTooltip_SetDefaultAnchor then
+                    if UnitExists('mouseover') then
+                        if not GameTooltip:IsVisible() or GameTooltip:IsOwned(UIParent) then
+                            GameTooltip_SetDefaultAnchor(GameTooltip, UIParent)
+                            GameTooltip:SetUnit('mouseover')
+                        end
+                    elseif GameTooltip:IsOwned(UIParent) and select(2, GameTooltip:GetUnit())=='mouseover' then
+                        GameTooltip:FadeOut()
+                    end
+                end
+            )LUA"),TEXT("=world_mouseover_tooltip"));
+            if(Changed) EventSystem->FireEvent(TEXT("UPDATE_MOUSEOVER_UNIT"));
+        }
+    }
     if(bUILoaded && LuaVM) WowLuaApi::UpdateMapArt(LuaVM->GetState());
     if(bUILoaded && CursorRenderer && LuaVM) CursorRenderer->Tick(LuaVM->GetState());
     if(ModelRenderer) ModelRenderer->Tick(World);
@@ -490,6 +521,12 @@ void UWowUIManager::TickWorldImages(UWorld* World)
         WowLuaApi::UpdateTrade(LuaVM->GetState());
         WowLuaApi::UpdateChannels(LuaVM->GetState());
     }
+}
+
+FLinearColor UWowUIManager::GetUnitSelectionColor(uint64 Guid) const
+{
+    const auto* Unit=UIContext && UIContext->EntityManager?UIContext->EntityManager->Find(Guid):nullptr;
+    return WowLuaApi::UnitSelectionColor(UIContext,Unit);
 }
 
 void UWowUIManager::MapCommand(int32 Command)
@@ -547,7 +584,7 @@ void UWowUIManager::SetWorldUiVisible(bool Visible)
     if(UIOverlay) UIOverlay->SetVisibility(Visible?EVisibility::SelfHitTestInvisible:EVisibility::Collapsed);
 }
 
-bool UWowUIManager::HasSoftwareCursor() const { return bUILoaded && UIContext && UIContext->SoftwareCursorVisible; }
+bool UWowUIManager::HasSoftwareCursor() const { return bUILoaded && UIContext && (UIContext->SoftwareCursorVisible || UIContext->CursorHidden); }
 
 void UWowUIManager::ToggleCharacterPanel()
 {

@@ -399,7 +399,7 @@ void FWowEventSystem::SetFrameScript(int64 Handle, const FString& ScriptName, co
 		Params = TEXT("self, elapsed, ...");
 	else if(ScriptName==TEXT("OnMinMaxChanged"))
         Params=TEXT("self, min, max, ...");
-	else if (ScriptName == TEXT("OnClick"))
+	else if (ScriptName == TEXT("OnClick") || ScriptName == TEXT("PreClick") || ScriptName == TEXT("PostClick"))
 		Params = TEXT("self, button, down, ...");
 	else if (ScriptName == TEXT("OnHyperlinkClick"))
 		Params = TEXT("self, link, text, button, ...");
@@ -809,7 +809,7 @@ void FWowEventSystem::ApplyRegionFont(const FString& RegionName,const FString& F
 void FWowEventSystem::RegisterFontDefinition(FWowLuaVM* VM,FWowFontManager* Fonts,const FWowXmlDirective& Definition)
 {
     if(Definition.FontName.IsEmpty()) return;
-    if(Fonts) Fonts->RegisterFontMapping(Definition.FontName,Definition.FontInherits,int32(Definition.FontHeight));
+    if(Fonts) Fonts->RegisterFontMapping(Definition.FontName,Definition.FontInherits,int32(Definition.FontHeight),Definition.FontFile);
 #if HAS_LUA
     if(!VM || !VM->GetState()) return;
     auto* L=VM->GetState(); const int32 Top=lua_gettop(L);
@@ -822,6 +822,7 @@ void FWowEventSystem::RegisterFontDefinition(FWowLuaVM* VM,FWowFontManager* Font
         if(lua_istable(L,-1)) for(const char* Key:{"__fontPath","__fontSize","__fontFlags","__textColorR","__textColorG","__textColorB","__textColorA","__justifyH","__justifyV"}) { lua_getfield(L,-1,Key); lua_setfield(L,Font,Key); }
         lua_pop(L,1);
     }
+    if(!Definition.FontFile.IsEmpty()) { lua_pushstring(L,TCHAR_TO_UTF8(*Definition.FontFile)); lua_setfield(L,Font,"__fontPath"); }
     if(Fonts || Definition.FontHeight>0) { lua_pushnumber(L,Definition.FontHeight>0?Definition.FontHeight:Fonts->GetFontSize(Definition.FontName)); lua_setfield(L,Font,"__fontSize"); }
     if(!Definition.FontFlags.IsEmpty()) { lua_pushstring(L,TCHAR_TO_UTF8(*Definition.FontFlags)); lua_setfield(L,Font,"__fontFlags"); }
     if(!Definition.FontJustifyH.IsEmpty()) { lua_pushstring(L,TCHAR_TO_UTF8(*Definition.FontJustifyH)); lua_setfield(L,Font,"__justifyH"); }

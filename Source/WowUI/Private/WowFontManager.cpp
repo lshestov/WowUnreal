@@ -92,7 +92,6 @@ bool FWowFontManager::Initialize(FMpqManager* Mpq)
 
 	bInitialized = true;
 	UE_LOG(LogWowFont, Log, TEXT("WoW font manager initialized successfully (%d fonts available)"), ExtractedCount);
-	UE_LOG(LogWowFont, Warning, TEXT("Note: TTF fonts extracted to %s may need system installation for proper loading"), *FontsDirectory);
 	return true;
 }
 
@@ -257,7 +256,7 @@ void FWowFontManager::SetupFontMappings()
 	UE_LOG(LogWowFont, Log, TEXT("Set up %d font mappings"), FontMappings.Num());
 }
 
-void FWowFontManager::RegisterFontMapping(const FString& WowFontName, const FString& InheritsFrom, int32 DefaultSize)
+void FWowFontManager::RegisterFontMapping(const FString& WowFontName, const FString& InheritsFrom, int32 DefaultSize, const FString& FontFile)
 {
 	DefaultSizes.Add(WowFontName,DefaultSize>0?DefaultSize:GetFontSize(InheritsFrom));
 	if (!bInitialized)
@@ -266,15 +265,23 @@ void FWowFontManager::RegisterFontMapping(const FString& WowFontName, const FStr
 		return;
 	}
 
-	// If this font inherits from another, copy its mapping
+	const FString FileName = FPaths::GetCleanFilename(FontFile.Replace(TEXT("\\"), TEXT("/"))).ToUpper();
+	if (AvailableFonts.Contains(FileName))
+	{
+		FontMappings.Add(WowFontName, FileName);
+		return;
+	}
+
+	// A derived font without its own available file keeps the parent's face.
 	if (!InheritsFrom.IsEmpty())
 	{
 		const FString* ParentTtf = FontMappings.Find(InheritsFrom);
 		if (ParentTtf)
 		{
-			FontMappings.Add(WowFontName, *ParentTtf);
 			UE_LOG(LogWowFont, Verbose, TEXT("Registered font mapping: %s -> %s (inherited from %s)"),
 				*WowFontName, **ParentTtf, *InheritsFrom);
+			const FString ParentFile = *ParentTtf;
+			FontMappings.Add(WowFontName, ParentFile);
 		}
 		else
 		{

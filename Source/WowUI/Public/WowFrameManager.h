@@ -234,6 +234,7 @@ public:
 	bool IsFrameKeyboardEnabled(int64 Handle) const;
 	bool IsFrameMouseWheelEnabled(int64 Handle) const;
 	FVector2D GetPointerPosition() const { return LastPointerPosition; }
+	bool IsPointerOverFrame() const { return HoverFrameHandle >= 0; }
     FString CurrentMouseButton=TEXT("LeftButton");
 	bool DispatchMouseWheel(int64 Handle,float Delta);
 	bool IsFrameClickRegistered(int64 Handle, const FString& Button, bool bMouseDown) const;
@@ -315,8 +316,18 @@ public:
 	void SetCooldown(int64 Handle, double StartTime, float Duration);
 	void TickCooldowns();
 	struct FMessage { FString Text; FLinearColor Color; int32 Id=0; double At=0; };
-	struct FMessageState { TArray<FMessage> Lines; TArray<TWeakObjectPtr<UTextBlock>> Widgets; int32 Offset=0,Limit=200; bool Hyperlinks=true,Fading=false,InsertTop=false; float TimeVisible=120,FadeDuration=3; };
+	struct FMessageState
+	{
+		TArray<FMessage> Lines;
+		TArray<TWeakObjectPtr<UTextBlock>> Widgets;
+		int32 Offset=0,Limit=200;
+		bool Hyperlinks=true,Fading=false,InsertTop=false;
+		float TimeVisible=120,FadeDuration=3;
+		FString FontPath;
+		float FontHeight=0,AppliedFontScale=0;
+	};
 	TMap<int64,FMessageState> MessageFrames;
+	void SetMessageFont(int64 Handle, const FString& Path, float Height);
 	void AddMessage(int64 Handle,const FString& Text,FLinearColor Color,int32 Id=0);
 	void ScrollMessages(int64 Handle,int32 Offset,bool Absolute=false);
 	void DrawMessages(int64 Handle,double Now=-1);
@@ -502,6 +513,8 @@ private:
     bool HasExternalRegionAnchors(const FWowFrameDef& Def);
 
 	UWidget* CreateWidgetForFrame(const FWowFrameDef& Def, int64 Handle, int64 ParentHandle = -1);
+	int32 GetFrameSlotOrder(const FWowFrameDef& Def, int64 ParentHandle, int32 Level) const;
+	void UpdateFrameSlotOrder(int64 Handle, const FFrameEntry& Entry, int32 Level);
 	void UpdateFrameVisibility(int64 Handle);
 
 	/** Create layer content (textures and fontstrings) inside a frame's canvas */

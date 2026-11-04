@@ -166,6 +166,12 @@ void WowLuaApi::RegisterSpellApi(lua_State* L)
         lua_pushinteger(S,T.Offset); lua_pushinteger(S,T.Count); lua_pushinteger(S,T.HighestOffset); lua_pushinteger(S,T.HighestCount); return 6;
     });
     RegisterSpell(L,"GetSpellName",SpellName); RegisterSpell(L,"GetSpellTexture",SpellTexture);
+    RegisterSpell(L,"IsAutoRepeatSpell",[](lua_State* S)->int {
+        const auto* Context=GetContext(S);
+        const uint32 Spell=Resolve(S);
+        lua_pushboolean(S,Spell && Context && Context->ConnectionManager && Context->ConnectionManager->PacketHandler.LocalAutoRepeatSpell==Spell);
+        return 1;
+    });
     RegisterSpell(L,"GetSpellCooldown",[](lua_State* S)->int { return PushSpellCooldown(S,Resolve(S)); });
     RegisterSpell(L,"GetSpellAutocast",[](lua_State* S)->int {
         auto* C=GetContext(S); const uint32 Id=Resolve(S); bool Allowed=false,Enabled=false;

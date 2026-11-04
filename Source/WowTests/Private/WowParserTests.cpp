@@ -3284,6 +3284,33 @@ bool FDbcParserAreaTable::RunTest(const FString& Parameters)
 // BLP Parser Tests (require MPQ data)
 // ====================================================================
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBlpCursorMask, "WowUnreal.Parser.BLP.CursorMask",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FBlpCursorMask::RunTest(const FString&)
+{
+    TArray<uint8> Data;
+    if (!WowTestUtils::GetMpq().ReadFile(TEXT("Interface\\Cursor\\Point.blp"), Data)) return false;
+    const auto Texture = FBlpParser::Parse(Data);
+    if (!TestTrue(TEXT("Read the original 32x32 paletted glove"), Texture.bIsValid && Texture.Width == 32 &&
+        Texture.Height == 32 && Texture.PixelFormat == EBlpPixelFormat::RGBA8 && Data[9] == 1)) return false;
+    uint32 Offset;
+    FMemory::Memcpy(&Offset, Data.GetData()+20, sizeof(Offset));
+    const int32 Pixels = 32*32;
+    if (Offset > uint32(Data.Num()) || uint32(Data.Num())-Offset < Pixels+Pixels/8) return false;
+    int32 Opaque = 0;
+    for (int32 I=0; I<Pixels; ++I)
+    {
+        const uint8 Alpha = (Data[Offset+Pixels+I/8] & (1u << (I%8))) ? 255 : 0;
+        if (Texture.MipLevels[0].Data[I*4+3] != Alpha) { AddError(TEXT("Cursor alpha differs from its MPQ mask")); return false; }
+        Opaque += Alpha != 0;
+    }
+    TestTrue(TEXT("Both the glove and its transparent surroundings are present"), Opaque > 0 && Opaque < Pixels);
+    // Exclude the mask from the declared mip, leaving later bytes in the file.
+    FMemory::Memcpy(Data.GetData()+84, &Pixels, sizeof(Pixels));
+    TestFalse(TEXT("A truncated alpha plane cannot read into the next mip"), FBlpParser::Parse(Data).bIsValid);
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBlpParserDxt, "WowUnreal.Parser.BLP.DxtTexture",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FBlpParserDxt::RunTest(const FString& Parameters)

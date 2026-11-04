@@ -66,26 +66,32 @@ FBlpTexture FBlpParser::ParsePaletted(const uint8* Data, uint32 DataSize, uint32
     FBlpTexture Result;
     const uint32 PalOff = sizeof(FBlpHeader);
     if (PalOff + 1024 > DataSize) return Result;
+    if (AlphaDepth != 0 && AlphaDepth != 1 && AlphaDepth != 4 && AlphaDepth != 8) return Result;
     const uint8* Pal = Data + PalOff;
     uint32 W = Width, H = Height;
     for (int32 i = 0; i < 16; i++)
     {
         if (MipOffsets[i] == 0 || MipSizes[i] == 0) break;
-        if (MipOffsets[i] + MipSizes[i] > DataSize) break;
-        uint32 Pixels = FMath::Max(W,1u) * FMath::Max(H,1u);
+        if (MipOffsets[i] > DataSize || MipSizes[i] > DataSize - MipOffsets[i]) break;
+        const uint64 PixelCount = uint64(FMath::Max(W,1u)) * FMath::Max(H,1u);
+        if (PixelCount > MAX_int32 / 4) break;
+        const uint32 Pixels = uint32(PixelCount);
+        if (Pixels + (PixelCount * AlphaDepth + 7) / 8 > MipSizes[i]) break;
         FBlpMipLevel& Mip = Result.MipLevels.AddDefaulted_GetRef();
         Mip.Width = FMath::Max(W,1u); Mip.Height = FMath::Max(H,1u);
         Mip.Data.SetNumUninitialized(Pixels * 4);
         const uint8* Idx = Data + MipOffsets[i];
-        for (uint32 p = 0; p < Pixels && p < MipSizes[i]; p++)
+        for (uint32 p = 0; p < Pixels; p++)
         {
             const uint8* C = Pal + Idx[p] * 4;
             Mip.Data[p*4+0] = C[2]; // R (palette is BGRA, output RGBA)
             Mip.Data[p*4+1] = C[1]; // G
             Mip.Data[p*4+2] = C[0]; // B
-            if (AlphaDepth == 8 && MipOffsets[i]+Pixels+p < DataSize)
+            if (AlphaDepth == 8)
                 Mip.Data[p*4+3] = Idx[Pixels+p];
-            else if (AlphaDepth == 4 && MipOffsets[i]+Pixels+p/2 < DataSize)
+            else if (AlphaDepth == 1)
+                Mip.Data[p*4+3] = (Idx[Pixels+p/8] & (1u << (p%8))) ? 255 : 0;
+            else if (AlphaDepth == 4)
             {
                 uint8 a = Idx[Pixels+p/2];
                 Mip.Data[p*4+3] = (p%2==0) ? ((a&0x0F)*17) : ((a>>4)*17);
