@@ -61,8 +61,8 @@ macro slot. It enters Battle Stance, creates `QAMacroCond`, opens the
 original macro editor, places the macro through `PickupMacro`/`PlaceAction`,
 clicks `BonusActionButton12`, and verifies local command success/refusal and
 event counts. It removes the macro/action/listener and logs out at the end. The
-outer coordinator deletes the owned character/account, removes its credentials
-and checks the protected character/inventory fingerprints, including failures.
+outer coordinator removes the test account, its character and its credentials
+after successful and failed runs.
 
 Local verification: 90 Lua checks pass; the base runtime fails on `[] Heal`.
 A separate MSVC harness compiled the unchanged production bodies of

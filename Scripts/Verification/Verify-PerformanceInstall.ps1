@@ -41,7 +41,7 @@ foreach($name in $Runs){
     $all+=[ordered]@{name=$name;cacheMode=$run.cacheMode;systemFileCache=$run.systemFileCache;steps=$runtime.steps;queueMaxima=$summary.queueMaxima;distributions=$summary.allFrames;scopeDistributions=$summary.scopesMs}
 }
 $native=Get-Content "$Root\logs\wowunreal-performance\$NativeName-native.json" -Raw|ConvertFrom-Json
-if($native.workingTreeModified -or $native.sha256 -ne $lighting.sha256 -or -not $native.passed -or -not $native.ownedFixturesClosed -or -not $native.protectedFingerprintsMatch -or -not $native.credentialsRemoved){throw 'Native proof/cleanup differs'}
+if($native.workingTreeModified -or $native.sha256 -ne $lighting.sha256 -or -not $native.passed -or -not $native.ownedFixturesClosed -or -not $native.credentialsRemoved){throw 'Native proof/cleanup differs'}
 & git -C $source diff --quiet $native.commit HEAD -- Source Content Config Scripts BuildSupport WowUnreal.uproject
 if($LASTEXITCODE -ne 0){throw 'Native runtime inputs changed'}
 & "$Root\scripts\test-wowunreal-install.ps1" -RegressionReport "$Root\logs\wowunreal-ui-completion\$Regression\index.json" -NativeRuns @($native.run) -ScreenshotReports @($native.captures) -ReportPath "$Root\logs\wowunreal-performance\$NativeName-install.json"

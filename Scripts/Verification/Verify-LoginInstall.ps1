@@ -50,6 +50,6 @@ $report=[ordered]@{timestamp=[DateTimeOffset]::Now.ToString('o');commit=$commit;
     sha256=$hashes[0];runtimeInputFiles=$inputs.Count;sourceFiles=$sourceFiles.Count;packageFiles=$packageFiles.Count;
     testsPassed=$reg.succeeded;testsWithWarnings=0;screenshotCount=$images;screenTransitions=$cycles;allFinalPngsIndividuallyReviewed=$true;
     resolutions=@($resolutions);runs=$evidence;runningClients=0;offlineLoginVerified=$true;nativeServerVerified=$false;
-    limitation='Offline screen transitions use spies. Real authentication, world entry and logout require a separate owned-account server run and protected-state baseline approval.'}
+    limitation='Offline screen transitions use spies. Verify authentication, world entry and logout with a disposable account on the server.'}
 $report|ConvertTo-Json -Depth 12|Set-Content "$Root/logs/wowunreal-login/install-verification.json"
 Write-Host "PASS installed published login $commit : $($reg.succeeded) clean tests, $images reviewed captures; native server QA remains separate"

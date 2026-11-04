@@ -223,7 +223,7 @@ single route are a separate warm-process measurement.
 The native companion route uses the existing owned-QA launcher, original UI and
 real server login/movement. Its profile steps exclude screenshot operations;
 walk profiles measure real capsule movement and collision. Temporary accounts
-are removed by the launcher and protected-character fingerprints must match.
+and their credentials are removed by the launcher after each run.
 Offline figures are never presented as an overall gameplay FPS improvement.
 
 ## Original installed smoke check

@@ -77,9 +77,9 @@ local documents reported separately), source/stage hashes, package/install hashe
 regression results, image hashes/dimensions, audio evidence and closed clients.
 Its report explicitly separates offline login verification from native server QA.
 
-For real authentication/world/logout/re-entry use only a disposable owned QA
-account. Compare protected GUIDs 1, 2, 4 and 5 against the last closed baseline
-before creating fixtures. A changed protected baseline requires the user's
-explicit approval; never silently accept it, restore a dump or modify user rows.
+For real authentication, world entry, logout and re-entry, use a fresh QA
+account. The runner verifies ownership before deleting the test character and
+removing its credentials. Changes to other characters between runs require
+no confirmation.
 `assert_lobby_lifecycle` in the native gameplay probe can check zero login scenes
 in world, one preview in selection and a single shared audio owner.

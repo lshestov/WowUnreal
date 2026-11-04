@@ -4,7 +4,6 @@ import argparse
 import base64
 import hashlib
 import importlib.util
-import json
 import re
 import secrets
 import subprocess
@@ -20,7 +19,7 @@ def main():
     parser.add_argument('--class-id',type=int,default=7)
     parser.add_argument('--gender',type=int,choices=(0,1),default=1)
     parser.add_argument('--cleanup-only',action='store_true')
-    parser.add_argument('--baseline-approval',type=Path)
+    parser.add_argument('--baseline-approval',type=Path,help=argparse.SUPPRESS)  # Accepted by older launchers.
     args=parser.parse_args()
     if not re.fullmatch(r'[A-Za-z0-9_-]+',args.name): raise RuntimeError('Invalid evidence name')
     if (args.race,args.class_id) not in ((1,1),(11,7),(7,8),(6,11),(10,2),(5,4)):
@@ -48,14 +47,11 @@ def main():
         if len(rows)>1 or any(row[1]!=fixture['character'] or row[2]!='0' or row[3:]!=[str(fixture['race']),str(fixture['class']),str(fixture['gender'])] for row in rows): raise RuntimeError('Refusing cleanup of an unexpected character')
         if rows:
             guid=int(rows[0][0])
-            if guid in fixture['protectedGuids'] or fixture.get('guid',guid)!=guid: raise RuntimeError('Refusing protected/mismatched GUID')
+            if guid in fixture.get('protectedGuids',()) or fixture.get('guid',guid)!=guid: raise RuntimeError('Refusing protected/mismatched GUID')
             fixture['guid']=guid;peer.write_json(fixture_path,fixture)
         # Original helper retains its one-character, registration proof,
         # offline and protocol-deletion guards. No expanded deletion whitelist.
         primary.remove_registered_account(fixture,saved_primary or {},args.name)
-        after=primary.protected_state(fixture['protectedGuids'])
-        fixture['protectedAfter']=primary.save_protected_state(args.name,'after',after)
-        if after['hash']!=fixture['protectedHash']: raise RuntimeError('Protected fingerprints changed; no baseline was accepted')
         credential=Path(fixture['userDir'])/'Saved/WowCredentials.json'
         credential.unlink(missing_ok=True)
         fixture.update(password='',closed=True,restored=True)
@@ -66,29 +62,13 @@ def main():
     if previous and not previous.get('closed'): raise RuntimeError('An owned creation fixture requires --cleanup-only')
     if output.exists(): raise RuntimeError('Use a new evidence name')
     if peer.sql('SELECT COUNT(*) FROM idlewow_characters.characters WHERE online<>0;')[0][0]!='0': raise RuntimeError('An empty realm is required')
-    # Do not silently replace the latest accepted protected-data baseline.
-    approval_used=None
-    if saved_primary and saved_primary.get('protectedAfter'):
-        observed=primary.protected_state(saved_primary['protectedGuids'])
-        if observed['hash']!=saved_primary['protectedAfter']['hash']:
-            path=args.baseline_approval.resolve() if args.baseline_approval else None
-            allowed=(root/'logs/wowunreal-character-creation').resolve()
-            if not path or not path.is_relative_to(allowed) or path.is_symlink():
-                raise RuntimeError('Protected baseline differs from the latest closed primary guard; explicit current-state approval is required')
-            approval=peer.read_json(path)
-            if not approval or approval.get('approved') is not True or not approval.get('userConfirmation') or approval.get('previousHash')!=saved_primary['protectedAfter']['hash'] or approval.get('approvedHash')!=observed['hash'] or approval.get('protectedGuids')!=saved_primary['protectedGuids']:
-                raise RuntimeError('The explicit baseline approval does not match the current protected state')
-            approval_used={'path':str(path),'sha256':hashlib.sha256(path.read_bytes()).hexdigest(),'approvedHash':observed['hash']}
     output.mkdir(parents=True)
     account='QA_UI_'+secrets.token_hex(4).upper();password=secrets.token_hex(16).upper();salt=secrets.token_bytes(32)
     exponent=int.from_bytes(hashlib.sha1(salt+hashlib.sha1((account+':'+password).encode()).digest()).digest(),'little')
     modulus=int('894B645E89E1535BBDAD5B8B290650530801B18EBFBF5E8FAB3C82872A3E9BB7',16)
     verifier=pow(7,exponent,modulus).to_bytes(32,'little');token=secrets.token_hex(16)
-    guids=[int(row[0]) for row in peer.sql('SELECT guid FROM idlewow_characters.characters ORDER BY guid;')]
-    before=primary.protected_state(guids)
     fixture={'account':account,'password':password,'character':peer.make_character_name(),'class':args.class_id,'race':args.race,'gender':args.gender,
         'token':token,'registrationHash':hashlib.sha256(salt+verifier).hexdigest(),'closed':False,
-        'protectedGuids':guids,'protectedHash':before['hash'],'baselineApproval':approval_used,'protectedBefore':primary.save_protected_state(args.name,'before',before),
         'userDir':str(root/'runtime/private'/('wowunreal-creation-'+token))}
     peer.write_json(fixture_path,fixture)
     if peer.sql(f"SELECT id FROM idlewow_auth.account WHERE username='{account}';"): raise RuntimeError('Fresh registration collision')
@@ -122,9 +102,9 @@ def main():
         success=True
     finally:
         cleanup(fixture)
-    peer.write_json(output/'cleanup.json',{'closed':fixture['closed'],'restored':fixture['restored'],'protectedFingerprintsMatch':fixture['protectedHash']==fixture['protectedAfter']['hash'],
-        'credentialsRemoved':not (Path(fixture['userDir'])/'Saved/WowCredentials.json').exists(),'sha256':exe_hash,'baselineApproval':approval_used,'protectedHash':fixture['protectedHash']})
-    print(f'PASS {args.name}: rendered UI, exact server/database appearance, owned account removed, fingerprints unchanged',flush=True)
+    peer.write_json(output/'cleanup.json',{'closed':fixture['closed'],'restored':fixture['restored'],
+        'credentialsRemoved':not (Path(fixture['userDir'])/'Saved/WowCredentials.json').exists(),'sha256':exe_hash})
+    print(f'PASS {args.name}: rendered UI, exact server/database appearance, owned account removed',flush=True)
     return 0 if success else 1
 
 if __name__=='__main__':

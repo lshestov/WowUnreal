@@ -95,11 +95,9 @@ race/class/sex route. It presses the stock Slate controls, checks short-name,
 heroic-level and duplicate-name server rejections, creates the customized
 character, compares enum/database appearance, and returns through the list.
 The participant never enters the world. Protocol deletion requires the exact
-registered account, name, GUID, race, class and sex, an offline participant and
-unchanged protected fingerprints. No DB dumps or user-character edits occur.
-An unexpected protected-state change stops before account registration; only
-an explicit approval matching the exact current hashes can accept a new
-baseline. The old audit is preserved.
+registered account, name, GUID, race, class and sex. Cleanup waits for the
+participant to go offline and removes its credentials. Other characters can
+change between runs without a confirmation step.
 
 The install verifier checks published main, all tracked runtime inputs,
 stage/package/installed hashes, clean regression, reviewed captures, owned

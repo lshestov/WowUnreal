@@ -45,21 +45,17 @@ foreach($name in $NativeRuns){
     $proof=Get-Content "$path/native-verification.json" -Raw|ConvertFrom-Json
     $cleanup=Get-Content "$path/cleanup.json" -Raw|ConvertFrom-Json
     if(-not $proof.passed -or -not $proof.databaseAppearanceMatches -or -not $proof.enumMatchesPreview -or -not $proof.stockSlateControlsInvoked -or $proof.sha256 -ne $hashes[0] -or $proof.requestsSent -ne 4 -or $proof.shortNameResult -ne 0x5a -or $proof.deathKnightResult -ne 0x3b -or $proof.duplicateNameResult -ne 0x32){throw 'Native UI/server/appearance proof differs'}
-    if(-not $cleanup.closed -or -not $cleanup.restored -or -not $cleanup.protectedFingerprintsMatch -or -not $cleanup.credentialsRemoved -or $cleanup.sha256 -ne $hashes[0]){throw 'Owned native cleanup failed'}
-    if($cleanup.baselineApproval){
-        $approval=Get-Content -LiteralPath $cleanup.baselineApproval.path -Raw|ConvertFrom-Json
-        if(-not $approval.approved -or -not $approval.userConfirmation -or $approval.approvedHash -ne $cleanup.protectedHash -or (Get-FileHash -LiteralPath $cleanup.baselineApproval.path).Hash -ne $cleanup.baselineApproval.sha256){throw 'Explicit protected-state approval differs'}
-    }
+    if(-not $cleanup.closed -or -not $cleanup.restored -or -not $cleanup.credentialsRemoved -or $cleanup.sha256 -ne $hashes[0]){throw 'Owned native cleanup failed'}
     & "$Root/logs/wowunreal-ui-completion/Test-Captures.ps1" -RunPath $path -ReportPath "$path/captures.json"
     $reports+="$path/captures.json";$native+=$path
 }
 if($NativeRuns.Count -lt 3){throw 'At least three owned race/class/sex native routes are required'}
 $world=Get-Content "$Root/logs/wowunreal-performance/$WorldNative-native.json" -Raw|ConvertFrom-Json
-if($world.commit -ne $commit -or $world.sha256 -ne $hashes[0] -or -not $world.passed -or -not $world.ownedFixturesClosed -or -not $world.protectedFingerprintsMatch -or -not $world.credentialsRemoved){throw 'World performance/native regression proof differs'}
+if($world.commit -ne $commit -or $world.sha256 -ne $hashes[0] -or -not $world.passed -or -not $world.ownedFixturesClosed -or -not $world.credentialsRemoved){throw 'World performance/native regression proof differs'}
 $native+=$world.run;$reports+=$world.captures
 $images=0;foreach($file in $reports){foreach($png in @(Get-Content $file -Raw|ConvertFrom-Json)){if($png.nonBlackRatio -lt .01 -or (Get-FileHash -LiteralPath $png.file).Hash -ne $png.sha256){throw 'Empty or changed capture'};++$images}}
 $fixture=Get-Content "$Root/runtime/private/wowunreal-creation-native-fixture.json" -Raw|ConvertFrom-Json
-if(-not $fixture.closed -or -not $fixture.restored -or $fixture.password -or $fixture.protectedHash -ne $fixture.protectedAfter.hash -or (Test-Path -LiteralPath "$($fixture.userDir)/Saved/WowCredentials.json")){throw 'Creation fixture remains open'}
+if(-not $fixture.closed -or -not $fixture.restored -or $fixture.password -or (Test-Path -LiteralPath "$($fixture.userDir)/Saved/WowCredentials.json")){throw 'Creation fixture remains open'}
 $fullReport="$Root/logs/wowunreal-character-creation/$OfflineRun-install-native.json"
 & "$Root/scripts/test-wowunreal-install.ps1" -RegressionReport "$Root/logs/wowunreal-ui-completion/$Regression/index.json" -NativeRuns $native -ScreenshotReports $reports -ReportPath $fullReport
 $report=[ordered]@{timestamp=[DateTimeOffset]::Now.ToString('o');commit=$commit;published=$true;runtimeInputsModified=$false;

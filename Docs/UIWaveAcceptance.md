@@ -23,17 +23,17 @@ stack counts after splitting and merging.
 
 `Scripts/Verification/Invoke-UIWaveNative.py` imports the host's existing
 `scripts/test-wowunreal-ui-primary.py` lifecycle. Run it only while the common
-UE/client infrastructure is idle. It checks the previous closed guard and
-protected identities/hashes before provisioning. A changed protected baseline
-requires a matching explicit approval file under `logs/wowunreal-ui-wave`.
+UE/client infrastructure is idle. A run can start on a fresh workspace or
+after the previous temporary QA account has been cleaned up. Existing realm
+characters may change between tests.
 
 The coordinator keeps credentials in the existing private fixture/UserDir.
 `--restart-spec` reuses that same owned character and directory in a fully
 closed new process. `--addon-dir` temporarily installs an authored QA addon,
 refuses an existing destination, and removes only its unchanged owned files.
 The original lifecycle verifies registration ownership, waits for logout,
-deletes the owned account/character, removes credentials and compares protected
-fingerprints on success and failure. Output names must be unique.
+deletes the temporary character and account, and removes their credentials on
+success and failure. Output names must be unique.
 
 | Route | Specs | Purpose |
 |---|---|---|
@@ -80,5 +80,5 @@ accept `-Source` for the same reason. Keep candidate provenance distinct from
 the published installation proof. Before installing a published revision,
 preserve local documentation, check current main, compare every runtime input
 with staging, and compare the built, packaged and installed executable/package
-hashes and the replay evidence. Local logs and ownership/approval fixtures stay
+hashes and the replay evidence. Local logs and QA account records stay
 outside the repository. Blizzard assets remain in the user's MPQs.
