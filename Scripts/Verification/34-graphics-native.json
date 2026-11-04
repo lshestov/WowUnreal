@@ -1,44 +1,187 @@
 {
-  "qaLevel":20,
-  "qaGm":false,
-  "steps":[
-    {"op":"wait_world","timeout":180},
-    {"op":"wait_floor","timeout":90},
-    {"op":"time","minutes":540},
-    {"op":"lua","code":"assert(not IdleWowUIState.__graphicsOriginalEffects); local original={}; for _,name in ipairs({'farclip','terrainMip','particleDensity','environmentDetail','groundEffectDensity','groundEffectDist','baseMip','extShadowQuality','textureFilteringMode','weatherDensity','componentTextureLevel','specular','ffxGlow','ffxDeath','projectedTextures'}) do original[name]=GetCVar(name) end; IdleWowUIState.__graphicsOriginalEffects=original; SetCVar('particleDensity',1); SetCVar('environmentDetail',1); ToggleGameMenu()"},
-    {"op":"click_frame","name":"GameMenuButtonOptions"},
-    {"op":"lua","code":"OptionsFrame_OpenToCategory(VideoOptionsFrame,VideoOptionsEffectsPanel.name); local p0,p1=VideoOptionsEffectsPanelParticleDensity:GetMinMaxValues(); local e0,e1=VideoOptionsEffectsPanelEnvironmentDetail:GetMinMaxValues(); assert(math.abs(p0-0.1)<0.000001 and p1==1 and e0==0.5 and e1==1.5)"},
-    {"op":"drag_frame","name":"VideoOptionsEffectsPanelParticleDensity","dx":-500,"dy":0},
-    {"op":"drag_frame","name":"VideoOptionsEffectsPanelEnvironmentDetail","dx":-500,"dy":0},
-    {"op":"lua","code":"assert(tonumber(GetCVar('particleDensity'))==1 and tonumber(GetCVar('environmentDetail'))==1)"},
-    {"op":"click_frame","name":"VideoOptionsFrameApply"},
-    {"op":"lua","code":"assert(tonumber(GetCVar('particleDensity'))==0.1 and tonumber(GetCVar('environmentDetail'))==0.5)"},
-    {"op":"wait","seconds":3},
-    {"op":"inspect_render_settings","label":"apply-minimum"},
-    {"op":"capture","name":"stock-graphics-apply-minimum"},
-    {"op":"drag_frame","name":"VideoOptionsEffectsPanelParticleDensity","dx":500,"dy":0},
-    {"op":"drag_frame","name":"VideoOptionsEffectsPanelEnvironmentDetail","dx":500,"dy":0},
-    {"op":"click_frame","name":"VideoOptionsFrameApply"},
-    {"op":"lua","code":"assert(tonumber(GetCVar('particleDensity'))==1 and tonumber(GetCVar('environmentDetail'))==1.5)"},
-    {"op":"wait","seconds":3},
-    {"op":"inspect_render_settings","label":"apply-maximum"},
-    {"op":"capture","name":"stock-graphics-apply-maximum"},
-    {"op":"drag_frame","name":"VideoOptionsEffectsPanelParticleDensity","dx":-500,"dy":0},
-    {"op":"drag_frame","name":"VideoOptionsEffectsPanelEnvironmentDetail","dx":-500,"dy":0},
-    {"op":"click_frame","name":"VideoOptionsFrameCancel"},
-    {"op":"lua","code":"assert(tonumber(GetCVar('particleDensity'))==1 and tonumber(GetCVar('environmentDetail'))==1.5); VideoOptionsFrame:Show(); OptionsFrame_OpenToCategory(VideoOptionsFrame,VideoOptionsEffectsPanel.name)"},
-    {"op":"inspect_render_settings","label":"cancel-keeps-maximum"},
-    {"op":"click_frame","name":"VideoOptionsFrameDefaults"},
-    {"op":"lua","code":"local p=StaticPopup_FindVisible('CONFIRM_RESET_VIDEO_SETTINGS'); assert(p); GraphicsDefaultsButton=p:GetName()..'Button3'"},
-    {"op":"click_frame","nameFromGlobal":"GraphicsDefaultsButton"},
-    {"op":"lua","code":"assert(tonumber(GetCVar('particleDensity'))==1 and tonumber(GetCVar('environmentDetail'))==1); assert(VideoOptionsEffectsPanelParticleDensity:GetValue()==1 and VideoOptionsEffectsPanelEnvironmentDetail:GetValue()==1)"},
-    {"op":"inspect_render_settings","label":"defaults"},
-    {"op":"capture","name":"stock-graphics-defaults"},
-    {"op":"drag_frame","name":"VideoOptionsEffectsPanelEnvironmentDetail","dx":500,"dy":0},
-    {"op":"click_frame","name":"VideoOptionsFrameOkay"},
-    {"op":"lua","code":"GameMenuFrame:Hide(); assert(tonumber(GetCVar('particleDensity'))==1 and tonumber(GetCVar('environmentDetail'))==1.5); ReloadUI()"},
-    {"op":"lua_wait","condition":"VideoOptionsEffectsPanel and IdleWowUIState.__graphicsOriginalEffects and tonumber(GetCVar('particleDensity'))==1 and tonumber(GetCVar('environmentDetail'))==1.5","timeout":15},
-    {"op":"inspect_render_settings","label":"reload-keeps-maximum"},
-    {"op":"capture","name":"world-graphics-after-reload"}
-  ]
+  "qaLevel": 20,
+  "qaGm": false,
+  "steps": [
+    {
+      "op": "wait_world",
+      "timeout": 180
+    },
+    {
+      "op": "wait_floor",
+      "timeout": 90
+    },
+    {
+      "op": "time",
+      "minutes": 540
+    },
+    {
+      "op": "lua",
+      "code": "assert(not IdleWowUIState.__graphicsOriginalEffects); local original={}; for _,name in ipairs({'farclip','terrainMip','particleDensity','environmentDetail','groundEffectDensity','groundEffectDist','baseMip','extShadowQuality','textureFilteringMode','weatherDensity','componentTextureLevel','specular','ffxGlow','ffxDeath','projectedTextures'}) do original[name]=GetCVar(name) end; IdleWowUIState.__graphicsOriginalEffects=original; SetCVar('particleDensity',1); SetCVar('environmentDetail',1); ToggleGameMenu()"
+    },
+    {
+      "op": "click_frame",
+      "name": "GameMenuButtonOptions"
+    },
+    {
+      "op": "lua",
+      "code": "OptionsFrame_OpenToCategory(VideoOptionsFrame,VideoOptionsEffectsPanel.name); local p0,p1=VideoOptionsEffectsPanelParticleDensity:GetMinMaxValues(); local e0,e1=VideoOptionsEffectsPanelEnvironmentDetail:GetMinMaxValues(); assert(math.abs(p0-0.1)<0.000001 and p1==1 and e0==0.5 and e1==1.5)"
+    },
+    {
+      "op": "drag_frame",
+      "name": "VideoOptionsEffectsPanelParticleDensity",
+      "dx": -500,
+      "dy": 0
+    },
+    {
+      "op": "drag_frame",
+      "name": "VideoOptionsEffectsPanelEnvironmentDetail",
+      "dx": -500,
+      "dy": 0
+    },
+    {
+      "op": "lua",
+      "code": "assert(tonumber(GetCVar('particleDensity'))==1 and tonumber(GetCVar('environmentDetail'))==1)"
+    },
+    {
+      "op": "click_frame",
+      "name": "VideoOptionsFrameApply"
+    },
+    {
+      "op": "lua",
+      "code": "assert(tonumber(GetCVar('particleDensity'))==0.1 and tonumber(GetCVar('environmentDetail'))==0.5)"
+    },
+    {
+      "op": "wait",
+      "seconds": 3
+    },
+    {
+      "op": "inspect_render_settings",
+      "label": "apply-minimum"
+    },
+    {
+      "op": "capture",
+      "name": "stock-graphics-apply-minimum"
+    },
+    {
+      "op": "drag_frame",
+      "name": "VideoOptionsEffectsPanelParticleDensity",
+      "dx": 500,
+      "dy": 0
+    },
+    {
+      "op": "drag_frame",
+      "name": "VideoOptionsEffectsPanelEnvironmentDetail",
+      "dx": 500,
+      "dy": 0
+    },
+    {
+      "op": "click_frame",
+      "name": "VideoOptionsFrameApply"
+    },
+    {
+      "op": "lua",
+      "code": "assert(tonumber(GetCVar('particleDensity'))==1 and tonumber(GetCVar('environmentDetail'))==1.5)"
+    },
+    {
+      "op": "wait",
+      "seconds": 3
+    },
+    {
+      "op": "inspect_render_settings",
+      "label": "apply-maximum"
+    },
+    {
+      "op": "capture",
+      "name": "stock-graphics-apply-maximum"
+    },
+    {
+      "op": "drag_frame",
+      "name": "VideoOptionsEffectsPanelParticleDensity",
+      "dx": -500,
+      "dy": 0
+    },
+    {
+      "op": "drag_frame",
+      "name": "VideoOptionsEffectsPanelEnvironmentDetail",
+      "dx": -500,
+      "dy": 0
+    },
+    {
+      "op": "click_frame",
+      "name": "VideoOptionsFrameCancel"
+    },
+    {
+      "op": "click_frame",
+      "name": "GameMenuButtonOptions"
+    },
+    {
+      "op": "lua",
+      "code": "assert(tonumber(GetCVar('particleDensity'))==1 and tonumber(GetCVar('environmentDetail'))==1.5); OptionsFrame_OpenToCategory(VideoOptionsFrame,VideoOptionsEffectsPanel.name)"
+    },
+    {
+      "op": "inspect_render_settings",
+      "label": "cancel-keeps-maximum"
+    },
+    {
+      "op": "click_frame",
+      "name": "VideoOptionsFrameDefaults"
+    },
+    {
+      "op": "lua",
+      "code": "local p=StaticPopup_FindVisible('CONFIRM_RESET_VIDEO_SETTINGS'); assert(p); GraphicsDefaultsButton=p:GetName()..'Button3'"
+    },
+    {
+      "op": "click_frame",
+      "nameFromGlobal": "GraphicsDefaultsButton"
+    },
+    {
+      "op": "lua",
+      "code": "assert(tonumber(GetCVar('particleDensity'))==1 and tonumber(GetCVar('environmentDetail'))==1); assert(VideoOptionsEffectsPanelParticleDensity:GetValue()==1 and VideoOptionsEffectsPanelEnvironmentDetail:GetValue()==1)"
+    },
+    {
+      "op": "inspect_render_settings",
+      "label": "defaults"
+    },
+    {
+      "op": "capture",
+      "name": "stock-graphics-defaults"
+    },
+    {
+      "op": "drag_frame",
+      "name": "VideoOptionsEffectsPanelEnvironmentDetail",
+      "dx": 500,
+      "dy": 0
+    },
+    {
+      "op": "click_frame",
+      "name": "VideoOptionsFrameOkay"
+    },
+    {
+      "op": "lua",
+      "code": "GameMenuFrame:Hide(); assert(tonumber(GetCVar('particleDensity'))==1 and tonumber(GetCVar('environmentDetail'))==1.5); ReloadUI()"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "VideoOptionsEffectsPanel and IdleWowUIState.__graphicsOriginalEffects and tonumber(GetCVar('particleDensity'))==1 and tonumber(GetCVar('environmentDetail'))==1.5",
+      "timeout": 15
+    },
+    {
+      "op": "inspect_render_settings",
+      "label": "reload-keeps-maximum"
+    },
+    {
+      "op": "capture",
+      "name": "world-graphics-after-reload"
+    },
+    {
+      "op": "lua",
+      "code": "Logout()"
+    },
+    {
+      "op": "wait_character_select",
+      "timeout": 60
+    }
+  ],
+  "width": 1280,
+  "height": 900
 }

@@ -1,0 +1,546 @@
+{
+  "qaLevel": 80,
+  "qaGm": true,
+  "qaSpells": [
+    42833
+  ],
+  "qaSpawnEntry": 1531,
+  "width": 1280,
+  "height": 900,
+  "steps": [
+    {
+      "op": "wait_world",
+      "timeout": 180
+    },
+    {
+      "op": "wait_floor",
+      "timeout": 90
+    },
+    {
+      "op": "time",
+      "minutes": 540
+    },
+    {
+      "op": "wait",
+      "seconds": 2
+    },
+    {
+      "op": "lua",
+      "code": "SetCVar('autoLootDefault','0'); WEDamage=0; WECast=0; WEListener=CreateFrame('Frame'); WEListener:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED'); WEListener:SetScript('OnEvent',function(self,event,stamp,kind,source,...) if source==UnitGUID('player') then if kind=='SPELL_DAMAGE' then WEDamage=WEDamage+1 elseif kind=='SPELL_CAST_SUCCESS' then WECast=WECast+1 end end end); PickupSpell(42833); PlaceAction(1); ClearCursor(); SendChatMessage('.gm off','SAY')"
+    },
+    {
+      "op": "select_entry",
+      "entry": 1531,
+      "includeDead": true,
+      "timeout": 25
+    },
+    {
+      "op": "lua",
+      "code": "if UnitHealth('target')==0 then SendChatMessage('.respawn','SAY') end"
+    },
+    {
+      "op": "wait",
+      "seconds": 2
+    },
+    {
+      "op": "select_entry",
+      "entry": 1531,
+      "timeout": 25
+    },
+    {
+      "op": "approach",
+      "range": 20,
+      "timeout": 45
+    },
+    {
+      "op": "wait",
+      "seconds": 1
+    },
+    {
+      "op": "frame_camera_target",
+      "distance": 450
+    },
+    {
+      "op": "wait",
+      "seconds": 0.5
+    },
+    {
+      "op": "capture",
+      "name": "01-owned-world"
+    },
+    {
+      "op": "click_action",
+      "index": 1
+    },
+    {
+      "op": "lua_wait",
+      "condition": "UnitHealth('target')==0",
+      "timeout": 15
+    },
+    {
+      "op": "lua",
+      "code": "assert(WEDamage>0,'server damage event from local caster'); print('QA_COMBAT_COUNTS damage='..WEDamage..' castSuccess='..WECast); WEListener:UnregisterAllEvents()"
+    },
+    {
+      "op": "capture",
+      "name": "02-combat-server-result"
+    },
+    {
+      "op": "approach",
+      "range": 2.5,
+      "timeout": 45
+    },
+    {
+      "op": "interact"
+    },
+    {
+      "op": "wait_loot",
+      "timeout": 15
+    },
+    {
+      "op": "wait",
+      "seconds": 1
+    },
+    {
+      "op": "lua",
+      "code": "assert(LootFrame:IsVisible() and GetNumLootItems()>0); WELootMoney=GetMoney(); WELootExpected={}; for i=1,GetNumLootItems() do local link=GetLootSlotLink(i); if link then local id=tonumber(link:match('item:(%d+)')); local _,_,count=GetLootSlotInfo(i); WELootExpected[id]=GetItemCount(id)+count end end"
+    },
+    {
+      "op": "capture",
+      "name": "03-server-loot"
+    },
+    {
+      "op": "loot_all"
+    },
+    {
+      "op": "wait",
+      "seconds": 2
+    },
+    {
+      "op": "lua",
+      "code": "assert(not LootFrame:IsShown()); for id,count in pairs(WELootExpected) do assert(GetItemCount(id)>=count,'acknowledged loot item') end; assert(GetMoney()>=WELootMoney); SendChatMessage('.respawn','SAY'); SendChatMessage('.gm on','SAY')"
+    },
+    {
+      "op": "lua",
+      "code": "assert(GetItemCount(7073)==0 and not CursorHasItem(),'clean stack fixture'); SendChatMessage('.additem 7073 5','SAY')"
+    },
+    {
+      "op": "wait",
+      "seconds": 2
+    },
+    {
+      "op": "lua",
+      "code": "assert(GetItemCount(7073)==5,'server created QA stack'); for s=1,16 do if GetContainerItemID(0,s)==7073 then QASourceSlot=s elseif not GetContainerItemID(0,s) and not QADestSlot then QADestSlot=s end end; assert(QASourceSlot and QADestSlot,'two backpack positions'); ToggleBackpack(); for i=1,NUM_CONTAINER_FRAMES do local f=_G['ContainerFrame'..i]; if f:IsVisible() and f:GetID()==0 then QASourceButton=_G[f:GetName()..'Item'..(f.size+1-QASourceSlot)]; QADestButton=_G[f:GetName()..'Item'..(f.size+1-QADestSlot)] end end; assert(QASourceButton and QADestButton,'original backpack buttons'); QASourceName=QASourceButton:GetName(); QADestName=QADestButton:GetName()"
+    },
+    {
+      "op": "wait",
+      "seconds": 1
+    },
+    {
+      "op": "input_key",
+      "name": "LeftShift",
+      "event": "press"
+    },
+    {
+      "op": "click_frame",
+      "nameFromGlobal": "QASourceName"
+    },
+    {
+      "op": "input_key",
+      "name": "LeftShift",
+      "event": "release"
+    },
+    {
+      "op": "lua",
+      "code": "assert(not IsModifiedClick(),'Shift release must clear modified-click state even while StackSplitFrame consumes key-up')"
+    },
+    {
+      "op": "lua",
+      "code": "assert(StackSplitFrame:IsVisible())"
+    },
+    {
+      "op": "input_text",
+      "text": "2"
+    },
+    {
+      "op": "capture",
+      "name": "stock-inventory-split-selection"
+    },
+    {
+      "op": "click_frame",
+      "name": "StackSplitCancelButton"
+    },
+    {
+      "op": "lua",
+      "code": "assert(not CursorHasItem() and select(2,GetContainerItemInfo(0,QASourceSlot))==5,'split cancel leaves stack'); SplitContainerItem(0,QASourceSlot,5); assert(CursorHasItem() and select(3,GetContainerItemInfo(0,QASourceSlot)),'full stack selection locks source')"
+    },
+    {
+      "op": "key",
+      "name": "Escape"
+    },
+    {
+      "op": "lua",
+      "code": "assert(not CursorHasItem() and not select(3,GetContainerItemInfo(0,QASourceSlot)),'escape releases selection')"
+    },
+    {
+      "op": "input_key",
+      "name": "LeftShift",
+      "event": "press"
+    },
+    {
+      "op": "click_frame",
+      "nameFromGlobal": "QASourceName"
+    },
+    {
+      "op": "input_key",
+      "name": "LeftShift",
+      "event": "release"
+    },
+    {
+      "op": "lua",
+      "code": "assert(not IsModifiedClick(),'Shift release must clear modified-click state even while StackSplitFrame consumes key-up')"
+    },
+    {
+      "op": "lua",
+      "code": "assert(StackSplitFrame:IsVisible())"
+    },
+    {
+      "op": "input_text",
+      "text": "2"
+    },
+    {
+      "op": "click_frame",
+      "name": "StackSplitOkayButton"
+    },
+    {
+      "op": "lua",
+      "code": "assert(CursorHasItem() and select(2,GetContainerItemInfo(0,QASourceSlot))==5 and select(3,GetContainerItemInfo(0,QASourceSlot)),'pending split does not mutate inventory')"
+    },
+    {
+      "op": "click_frame",
+      "nameFromGlobal": "QADestName"
+    },
+    {
+      "op": "wait",
+      "seconds": 2
+    },
+    {
+      "op": "lua",
+      "code": "local a=select(2,GetContainerItemInfo(0,QASourceSlot)); local b=select(2,GetContainerItemInfo(0,QADestSlot)); local n=GetItemCount(7073); local held=CursorHasItem(); assert(not held and a==3 and b==2 and n==5,'split source='..tostring(a)..' destination='..tostring(b)..' total='..n..' cursor='..tostring(held)); assert(_G[QASourceName..'Count']:GetText()=='3' and _G[QADestName..'Count']:GetText()=='2','visible counts refreshed')"
+    },
+    {
+      "op": "capture",
+      "name": "stock-inventory-server-split"
+    },
+    {
+      "op": "click_frame",
+      "nameFromGlobal": "QADestName"
+    },
+    {
+      "op": "click_frame",
+      "nameFromGlobal": "QASourceName"
+    },
+    {
+      "op": "wait",
+      "seconds": 2
+    },
+    {
+      "op": "lua",
+      "code": "assert(GetItemCount(7073)==5 and select(2,GetContainerItemInfo(0,QASourceSlot))==5 and GetContainerItemID(0,QADestSlot)==nil,'server merged stacks')"
+    },
+    {
+      "op": "capture",
+      "name": "04-stacks-merged"
+    },
+    {
+      "op": "lua",
+      "code": "CloseAllBags()"
+    },
+    {
+      "op": "click_frame",
+      "name": "CharacterMicroButton"
+    },
+    {
+      "op": "lua",
+      "code": "RichLink=GetInventoryItemLink('player',5); assert(RichLink and not ChatFrame1EditBox:IsMultiLine()); ChatFrame_OpenChat('Offer: today')"
+    },
+    {
+      "op": "wait",
+      "seconds": 0.3
+    },
+    {
+      "op": "lua",
+      "code": "assert(ChatFrame1EditBox.setText==0); ChatFrame1EditBox:SetCursorPosition(6); assert(ChatFrame1EditBox:GetCursorPosition()==6)"
+    },
+    {
+      "op": "wait",
+      "seconds": 0.3
+    },
+    {
+      "op": "lua",
+      "code": "assert(ChatFrame1EditBox:GetCursorPosition()==6,'cursor after focus='..ChatFrame1EditBox:GetCursorPosition())"
+    },
+    {
+      "op": "input_key",
+      "name": "LeftShift",
+      "event": "press"
+    },
+    {
+      "op": "click_frame",
+      "name": "CharacterChestSlot"
+    },
+    {
+      "op": "input_key",
+      "name": "LeftShift",
+      "event": "release"
+    },
+    {
+      "op": "lua",
+      "code": "assert(not IsModifiedClick(),'Shift release must clear modified-click state even while StackSplitFrame consumes key-up')"
+    },
+    {
+      "op": "lua",
+      "code": "assert(ChatFrame1EditBox:GetText()=='Offer: '..RichLink..' today', 'raw='..ChatFrame1EditBox:GetText()..' cursor='..ChatFrame1EditBox:GetCursorPosition()); assert(ChatFrame1EditBox:GetCursorPosition()==7+#RichLink); RichChest=GetInventoryItemID('player',5)"
+    },
+    {
+      "op": "move_pointer",
+      "x": 0.8,
+      "y": 0.6
+    },
+    {
+      "op": "capture",
+      "name": "chat-link-label-and-quality"
+    },
+    {
+      "op": "lua",
+      "code": "HideUIPanel(CharacterFrame); ChatFrame1EditBox:SetCursorPosition(7)"
+    },
+    {
+      "op": "input_text",
+      "text": "rare "
+    },
+    {
+      "op": "lua",
+      "code": "assert(ChatFrame1EditBox:GetText()=='Offer: rare '..RichLink..' today'); assert(ChatFrame1EditBox:GetCursorPosition()==12); ChatFrame1EditBox:SetCursorPosition(12)"
+    },
+    {
+      "op": "input_key",
+      "name": "Right",
+      "event": "press",
+      "slate": true
+    },
+    {
+      "op": "input_key",
+      "name": "Right",
+      "event": "release",
+      "slate": true
+    },
+    {
+      "op": "lua",
+      "code": "assert(ChatFrame1EditBox:GetCursorPosition()==12+#RichLink)"
+    },
+    {
+      "op": "move_pointer",
+      "x": 0.8,
+      "y": 0.6
+    },
+    {
+      "op": "capture",
+      "name": "chat-text-and-atomic-link-caret"
+    },
+    {
+      "op": "input_key",
+      "name": "BackSpace",
+      "event": "press",
+      "slate": true
+    },
+    {
+      "op": "input_key",
+      "name": "BackSpace",
+      "event": "release",
+      "slate": true
+    },
+    {
+      "op": "lua",
+      "code": "assert(ChatFrame1EditBox:GetText()=='Offer: rare  today' and ChatFrame1EditBox:GetCursorPosition()==12)"
+    },
+    {
+      "op": "move_pointer",
+      "x": 0.8,
+      "y": 0.6
+    },
+    {
+      "op": "capture",
+      "name": "chat-link-removed-as-a-whole"
+    },
+    {
+      "op": "lua",
+      "code": "ChatFrame1EditBox:Insert(RichLink); assert(ChatFrame1EditBox:GetText()=='Offer: rare '..RichLink..' today'); ChatEdit_DeactivateChat(ChatFrame1EditBox); ChatFrame_OpenChat('/w '..UnitName('player')..' ')"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "ChatFrame1EditBox:GetAttribute('chatType')=='WHISPER'",
+      "timeout": 8
+    },
+    {
+      "op": "lua",
+      "code": "RichToken='RichQA'..math.floor(GetTime()*1000); RichBefore=ChatFrame1:GetNumMessages(); RichWitness=CreateFrame('Frame'); RichWitness:RegisterEvent('CHAT_MSG_WHISPER'); RichWitness:SetScript('OnEvent',function(self,event,message) if message and message:find(RichToken,1,true) and message:find('|Hitem:',1,true) then RichReceived=true end end); ChatFrame1EditBox:SetText(RichToken..' '..RichLink)"
+    },
+    {
+      "op": "move_pointer",
+      "x": 0.8,
+      "y": 0.6
+    },
+    {
+      "op": "capture",
+      "name": "chat-self-whisper-with-item-label"
+    },
+    {
+      "op": "input_text",
+      "text": "\n"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "RichReceived and ChatFrame1:GetNumMessages()>RichBefore",
+      "timeout": 12
+    },
+    {
+      "op": "lua",
+      "code": "assert(not ChatFrame1EditBox:IsShown() and GetInventoryItemID('player',5)==RichChest)"
+    },
+    {
+      "op": "move_pointer",
+      "x": 0.8,
+      "y": 0.6
+    },
+    {
+      "op": "capture",
+      "name": "chat-self-whisper-server-echo"
+    },
+    {
+      "op": "lua",
+      "code": "ReloadUI()"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "ChatFrame1EditBox~=nil",
+      "timeout": 12
+    },
+    {
+      "op": "lua",
+      "code": "RichLink=GetInventoryItemLink('player',5); ChatFrame_OpenChat('')"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "ChatFrame1EditBox.setText==0",
+      "timeout": 8
+    },
+    {
+      "op": "lua",
+      "code": "ChatFrame1EditBox:SetText('До '..RichLink..' после'); ChatFrame1EditBox:SetCursorPosition(#'До '); assert(ChatFrame1EditBox:GetCursorPosition()==#'До ')"
+    },
+    {
+      "op": "input_text",
+      "text": "ещё "
+    },
+    {
+      "op": "lua",
+      "code": "assert(ChatFrame1EditBox:GetText()=='До ещё '..RichLink..' после' and ChatFrame1EditBox:GetCursorPosition()==#'До ещё ')"
+    },
+    {
+      "op": "move_pointer",
+      "x": 0.8,
+      "y": 0.6
+    },
+    {
+      "op": "capture",
+      "name": "chat-cyrillic-link-after-reload"
+    },
+    {
+      "op": "key",
+      "name": "Escape"
+    },
+    {
+      "op": "lua",
+      "code": "assert(not ChatFrame1EditBox:IsShown())"
+    },
+    {
+      "op": "profile",
+      "seconds": 3
+    },
+    {
+      "op": "lua",
+      "code": "Logout()"
+    },
+    {
+      "op": "wait_character_select",
+      "timeout": 60
+    },
+    {
+      "op": "wait",
+      "seconds": 2
+    },
+    {
+      "op": "collect_garbage"
+    },
+    {
+      "op": "assert_lobby_lifecycle",
+      "loginScenes": 0,
+      "previews": 1,
+      "glueMusic": true
+    },
+    {
+      "op": "capture",
+      "name": "05-owned-character-selection"
+    },
+    {
+      "op": "enter_character"
+    },
+    {
+      "op": "wait_world",
+      "timeout": 180
+    },
+    {
+      "op": "wait_floor",
+      "timeout": 90
+    },
+    {
+      "op": "lua",
+      "code": "assert(GetItemCount(7073)==5 and not CursorHasItem(),'inventory survives world reentry')"
+    },
+    {
+      "op": "wait",
+      "seconds": 3
+    },
+    {
+      "op": "capture",
+      "name": "06-world-reentry"
+    },
+    {
+      "op": "lua",
+      "code": "Logout()"
+    },
+    {
+      "op": "wait_character_select",
+      "timeout": 60
+    },
+    {
+      "op": "wait",
+      "seconds": 3
+    },
+    {
+      "op": "collect_garbage"
+    },
+    {
+      "op": "assert_lobby_lifecycle",
+      "loginScenes": 0,
+      "previews": 1,
+      "glueMusic": true
+    },
+    {
+      "op": "capture",
+      "name": "07-final-character-selection"
+    }
+  ],
+  "qaSpawnOffset": 25
+}

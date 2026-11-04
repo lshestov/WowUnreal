@@ -53,23 +53,25 @@ Engine automation is isolated in `IdleWowMacroConditionTests.cpp`:
 - Existing `WowUnreal.Hud.MacroFlow`, `WowUnreal.Hud.MacroSequences` and
   `WowUnreal.Hud.ModifiedClicks` should also remain green.
 
-`Scripts/Verification/34-macro-conditions-native.json` is a 15-step stock action
-bar scenario for the acceptance session's gameplay runner. It requires the
-existing `Smrleadhcwxg` QA character, empty action 84, no selected target/focus,
-known Heroic Strike (78), and one free character macro slot. It creates only `QAMacroCond`, opens the
+`Scripts/Verification/34-macro-conditions-native.json` is a 21-step stock action
+bar scenario for `Invoke-UIWaveNative.py`. The owned lifecycle provisions a fresh
+level-20 Human Warrior with Heroic Strike (78) and Battle Stance (2457). The
+scenario checks empty action 84, no selected target/focus and a free character
+macro slot. It enters Battle Stance, creates `QAMacroCond`, opens the
 original macro editor, places the macro through `PickupMacro`/`PlaceAction`,
 clicks `BonusActionButton12`, and verifies local command success/refusal and
-event counts. It removes the macro/action/listener at the end. The acceptance
-runner must restore owned state on interruption as for existing macro scenarios.
-No spells, inventory, money or server fixtures are changed. Existing native
-`test-wowunreal-macro-roundtrip.ps1` remains the server success/rejection check.
+event counts. It removes the macro/action/listener and logs out at the end. The
+outer coordinator deletes the owned character/account, removes its credentials
+and checks the protected character/inventory fingerprints, including failures.
 
 Local verification: 90 Lua checks pass; the base runtime fails on `[] Heal`.
 A separate MSVC harness compiled the unchanged production bodies of
 `L_IsFlying`, `L_IsFalling`, `L_IsSwimming` and `L_IsStealthed` against test context
 objects and the local DBC aura values: 24 state assertions pass. This does not
-replace compiling WowUI or running the new UE automation tests. Full UE build,
-runtime screenshots and server tests are reserved for the acceptance session.
+replace compiling WowUI or running the new UE automation tests. Acceptance also
+passed the Editor and packaged Development builds, the complete 250-test suite
+(three existing missing-MPQ-fixture warnings), and the 21-step owned native
+scenario. Its two FScreenshotRequest captures were validated and inspected.
 
 Remaining state-provider gaps found during the audit: `mouseover` currently
 resolves to zero; `UnitCreatureFamily` returns an empty string; `UnitHasVehicleUI`

@@ -1,13 +1,44 @@
 {
-  "qaLevel":20,
-  "qaGm":false,
-  "steps":[
-    {"op":"wait_world","timeout":180},
-    {"op":"wait_floor","timeout":90},
-    {"op":"lua","code":"assert(IdleWowUIState.__graphicsOriginalEffects,'Use the same owned account/user directory from the preceding graphics routes'); assert(tonumber(GetCVar('particleDensity'))==0.1 and tonumber(GetCVar('environmentDetail'))==0.5)"},
-    {"op":"inspect_render_settings","label":"full-restart-keeps-minimum"},
-    {"op":"capture","name":"world-graphics-after-minimum-full-restart"},
-    {"op":"lua","code":"local original=IdleWowUIState.__graphicsOriginalEffects; for name,value in pairs(original) do SetCVar(name,value) end; for name,value in pairs(original) do local live=GetCVar(name); assert(live==value or (tonumber(live) and tonumber(value) and math.abs(tonumber(live)-tonumber(value))<0.00001),name) end; IdleWowUIState.__graphicsOriginalEffects=nil"},
-    {"op":"inspect_render_settings","label":"original-preferences-restored"}
-  ]
+  "qaLevel": 20,
+  "qaGm": false,
+  "steps": [
+    {
+      "op": "wait_world",
+      "timeout": 180
+    },
+    {
+      "op": "wait_floor",
+      "timeout": 90
+    },
+    {
+      "op": "lua",
+      "code": "assert(IdleWowUIState.__graphicsOriginalEffects,'Use the same owned account/user directory from the preceding graphics routes'); assert(tonumber(GetCVar('particleDensity'))==0.1 and tonumber(GetCVar('environmentDetail'))==0.5)"
+    },
+    {
+      "op": "inspect_render_settings",
+      "label": "full-restart-keeps-minimum"
+    },
+    {
+      "op": "capture",
+      "name": "world-graphics-after-minimum-full-restart"
+    },
+    {
+      "op": "lua",
+      "code": "local original=IdleWowUIState.__graphicsOriginalEffects; for name,value in pairs(original) do SetCVar(name,value) end; for name,value in pairs(original) do local live=GetCVar(name); assert(live==value or (tonumber(live) and tonumber(value) and math.abs(tonumber(live)-tonumber(value))<0.00001),name) end; IdleWowUIState.__graphicsOriginalEffects=nil"
+    },
+    {
+      "op": "inspect_render_settings",
+      "label": "original-preferences-restored"
+    },
+    {
+      "op": "lua",
+      "code": "Logout()"
+    },
+    {
+      "op": "wait_character_select",
+      "timeout": 60
+    }
+  ],
+  "width": 1280,
+  "height": 900
 }

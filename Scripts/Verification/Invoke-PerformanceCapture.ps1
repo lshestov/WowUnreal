@@ -1,11 +1,14 @@
 param(
     [Parameter(Mandatory)][ValidatePattern('^[a-zA-Z0-9_-]+$')][string]$Name,
     [string]$Root='D:\Games\idle_wow',
+    [string]$Source,
     [string]$Spec,
     [ValidateSet('fresh-process-existing-project-cache','fresh-process-isolated-project-cache')]
     [string]$CacheMode='fresh-process-existing-project-cache'
 )
 $ErrorActionPreference='Stop'
+if(-not $Source){$Source=Join-Path $Root 'src/WowUnreal'}
+$provenance=& (Join-Path $Source 'Scripts/Verification/Get-RuntimeProvenance.ps1') -Source $Source
 if(-not $Spec){$Spec=Join-Path $PSScriptRoot '17-performance-world.json'}
 $exe=Join-Path $Root 'runtime\client-wowunreal\WowUnreal\Binaries\Win64\WowUnreal.exe'
 $output=Join-Path $Root "logs\wowunreal-performance\$Name"
@@ -34,8 +37,8 @@ if(Select-String "$output\client.log" -Pattern 'Authenticating with|Connecting t
 $expected=Get-Content $Spec -Raw|ConvertFrom-Json
 if(@(Get-ChildItem -LiteralPath $output -Filter '*.png').Count -ne $expected.steps.Count){throw 'Incomplete captures'}
 & "$Root\logs\wowunreal-ui-completion\Test-Captures.ps1" -RunPath $output -ReportPath "$output\captures.json"
-[ordered]@{timestamp=$start.ToString('o');commit=(& git -C "$Root\src\WowUnreal" rev-parse HEAD).Trim();
-    workingTreeModified=[bool](& git -C "$Root\src\WowUnreal" status --porcelain);sha256=(Get-FileHash -LiteralPath $exe).Hash;
+[ordered]@{timestamp=$start.ToString('o');commit=$provenance.commit;source=$Source;
+    workingTreeModified=$provenance.workingTreeModified;runtimeInputsModified=$provenance.runtimeInputsModified;sha256=(Get-FileHash -LiteralPath $exe).Hash;
     spec=$Spec;specSha256=(Get-FileHash -LiteralPath $Spec).Hash;cacheMode=$CacheMode;
     process='new';systemFileCache='uncontrolled; not cleared; potentially warm';projectUserDir=$userDir;
     networkLogin=$false;databaseAccess=$false;serverOperations=$false;wallSeconds=$elapsed;steps=$report.steps;directory=$output}|

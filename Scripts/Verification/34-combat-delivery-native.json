@@ -1,0 +1,192 @@
+{
+  "qaClass": 5,
+  "qaLevel": 20,
+  "qaSpells": [
+    139,
+    2050,
+    585
+  ],
+  "qaGm": false,
+  "width": 1280,
+  "height": 900,
+  "steps": [
+    {
+      "op": "wait_world",
+      "timeout": 180
+    },
+    {
+      "op": "wait_floor",
+      "timeout": 90
+    },
+    {
+      "op": "lua",
+      "code": "-- 3.3.5a addon listener. Run on a disposable QA character alongside Blizzard_CombatLog.\n-- Preserve nil holes and the exact tuple length: #row is not an argument count.\nif IdleCombatProbe then IdleCombatProbe:Stop() end\nlocal probe = {all={}, filtered={}, errors={}}\nIdleCombatProbe = probe\nlocal function pack(...) return {n=select('#', ...), ...} end\nlocal function same(a,b)\n    assert(a.n==b.n, 'combat tuple length differs')\n    for i=1,a.n do\n        assert(a[i]==b[i] and type(a[i])==type(b[i]), 'combat tuple field '..i..' differs')\n    end\nend\nlocal frame=CreateFrame('Frame')\nprobe.frame=frame\nfor _,event in ipairs({'COMBAT_LOG_EVENT_UNFILTERED','COMBAT_LOG_EVENT','UI_ERROR_MESSAGE'}) do frame:RegisterEvent(event) end\nframe:SetScript('OnEvent',function(self,event,...)\n    if event=='UI_ERROR_MESSAGE' then table.insert(probe.errors,pack(...)); return end\n    local row=pack(...)\n    same(row,pack(CombatLogGetCurrentEventInfo()))\n    assert(type(row[1])=='number' and type(row[2])=='string')\n    assert(type(row[3])=='string' and row[3]:match('^0x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x$'))\n    assert(type(row[6])=='string' and row[6]:match('^0x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x$'))\n    assert(type(row[5])=='number' and type(row[8])=='number')\n    table.insert(event=='COMBAT_LOG_EVENT_UNFILTERED' and probe.all or probe.filtered,row)\nend)\nfunction probe:Begin(events,spell,source,destination)\n    self.all={}; self.filtered={}; self.errors={}\n    CombatLogResetFilter()\n    if events~=nil then CombatLogAddFilter(events,source or UnitGUID('player'),destination,spell) end\nend\nfunction probe:Count(event,spell,filtered)\n    local n=0\n    for _,row in ipairs(filtered and self.filtered or self.all) do\n        if row[2]==event and (spell==nil or row[9]==spell) then n=n+1 end\n    end\n    return n\nend\nfunction probe:Expect(event,spell,count,filtered)\n    assert(self:Count(event,spell,filtered)==count, event..' unexpected count')\nend\nfunction probe:CheckHistory()\n    -- History can include older rows; compare the suffix delivered to this listener.\n    assert(CombatLogGetNumEntries(true)>=#self.all)\n    if #self.all==0 then return end\n    assert(CombatLogSetCurrentEntry(0,true))\n    for i=#self.all,1,-1 do\n        same(self.all[i],pack(CombatLogGetCurrentEntry()))\n        if i>1 then assert(CombatLogAdvanceEntry(-1,true)) end\n    end\nend\nfunction probe:Stop()\n    self.frame:UnregisterAllEvents()\n    self.frame:SetScript('OnEvent',nil)\n    CombatLogResetFilter()\nend\n\nLoadAddOn('Blizzard_CombatLog'); assert(ChatFrame2); FCF_SelectDockFrame(ChatFrame2); IdleCombatProbe:Begin('SPELL_CAST_SUCCESS,SPELL_AURA_APPLIED',139); CastSpellByName(GetSpellInfo(139),'player')"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "IdleCombatProbe:Count('SPELL_CAST_SUCCESS',139)==1 and IdleCombatProbe:Count('SPELL_AURA_APPLIED',139)==1",
+      "timeout": 12
+    },
+    {
+      "op": "lua",
+      "code": "IdleCombatProbe:Expect('SPELL_CAST_SUCCESS',139,1,true); IdleCombatProbe:Expect('SPELL_AURA_APPLIED',139,1,true); IdleCombatProbe:CheckHistory()"
+    },
+    {
+      "op": "capture",
+      "name": "combat-instant-success-and-aura"
+    },
+    {
+      "op": "lua",
+      "code": "IdleCombatProbe:Begin('SPELL_PERIODIC_HEAL',139)"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "IdleCombatProbe:Count('SPELL_PERIODIC_HEAL',139,true)>0",
+      "timeout": 10
+    },
+    {
+      "op": "lua",
+      "code": "for _,row in ipairs(IdleCombatProbe.filtered) do assert(row[2]=='SPELL_PERIODIC_HEAL' and row[9]==139 and row.n==15 and type(row[12])=='number' and type(row[13])=='number' and type(row[14])=='number' and (row[15]==nil or row[15]==1)) end; IdleCombatProbe:CheckHistory(); IdleCombatProbe:Begin('SPELL_CAST_FAILED',585); CastSpellByName(GetSpellInfo(585),'player')"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "IdleCombatProbe:Count('SPELL_CAST_FAILED',585)==1",
+      "timeout": 12
+    },
+    {
+      "op": "lua",
+      "code": "IdleCombatProbe:Expect('SPELL_CAST_FAILED',585,1,true); assert(#IdleCombatProbe.errors==1); local found; for _,r in ipairs(IdleCombatProbe.all) do if r[2]=='SPELL_CAST_FAILED' then assert(r[6]=='0x0000000000000000' and r[7]==nil); found=true end end; assert(found); IdleCombatProbe:CheckHistory()"
+    },
+    {
+      "op": "capture",
+      "name": "combat-server-rejection"
+    },
+    {
+      "op": "wait",
+      "seconds": 1.7
+    },
+    {
+      "op": "lua",
+      "code": "IdleCombatProbe:Begin('SPELL_CAST_START,SPELL_CAST_FAILED',2050); CastSpellByName(GetSpellInfo(2050),'player')"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "UnitCastingInfo('player')~=nil",
+      "timeout": 5
+    },
+    {
+      "op": "lua",
+      "code": "SpellStopCasting()"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "IdleCombatProbe:Count('SPELL_CAST_FAILED',2050)==1",
+      "timeout": 12
+    },
+    {
+      "op": "lua",
+      "code": "IdleCombatProbe:Expect('SPELL_CAST_START',2050,1); IdleCombatProbe:Expect('SPELL_CAST_START',2050,1,true); IdleCombatProbe:Expect('SPELL_CAST_FAILED',2050,1,true); assert(#IdleCombatProbe.errors==1); IdleCombatProbe:CheckHistory()"
+    },
+    {
+      "op": "capture",
+      "name": "combat-interruption-1"
+    },
+    {
+      "op": "wait",
+      "seconds": 1.7
+    },
+    {
+      "op": "lua",
+      "code": "IdleCombatProbe:Begin('SPELL_CAST_START,SPELL_CAST_FAILED',2050); CastSpellByName(GetSpellInfo(2050),'player')"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "UnitCastingInfo('player')~=nil",
+      "timeout": 5
+    },
+    {
+      "op": "lua",
+      "code": "SpellStopCasting()"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "IdleCombatProbe:Count('SPELL_CAST_FAILED',2050)==1",
+      "timeout": 12
+    },
+    {
+      "op": "lua",
+      "code": "IdleCombatProbe:Expect('SPELL_CAST_START',2050,1); IdleCombatProbe:Expect('SPELL_CAST_START',2050,1,true); IdleCombatProbe:Expect('SPELL_CAST_FAILED',2050,1,true); assert(#IdleCombatProbe.errors==1); IdleCombatProbe:CheckHistory()"
+    },
+    {
+      "op": "capture",
+      "name": "combat-interruption-2"
+    },
+    {
+      "op": "wait",
+      "seconds": 1.7
+    },
+    {
+      "op": "lua",
+      "code": "IdleCombatProbe:Begin('SPELL_CAST_START,SPELL_HEAL',2050); CastSpellByName(GetSpellInfo(2050),'player')"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "IdleCombatProbe:Count('SPELL_HEAL',2050)==1",
+      "timeout": 12
+    },
+    {
+      "op": "lua",
+      "code": "IdleCombatProbe:Expect('SPELL_HEAL',2050,1,true); IdleCombatProbe:Expect('SPELL_CAST_FAILED',2050,0); IdleCombatProbe:CheckHistory()"
+    },
+    {
+      "op": "capture",
+      "name": "combat-completed-timed-heal"
+    },
+    {
+      "op": "lua",
+      "code": "IdleCombatProbe:Begin('',139); CastSpellByName(GetSpellInfo(139),'player')"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "IdleCombatProbe:Count('SPELL_CAST_SUCCESS',139)==1",
+      "timeout": 12
+    },
+    {
+      "op": "lua",
+      "code": "assert(#IdleCombatProbe.filtered==0 and #IdleCombatProbe.all>0); IdleCombatProbe:Stop(); CancelUnitBuff('player',GetSpellInfo(139))"
+    },
+    {
+      "op": "wait",
+      "seconds": 1
+    },
+    {
+      "op": "lua",
+      "code": "local function pack(...) return {n=select('#',...),...} end; CombatLogResetFilter(); CombatLogSetCurrentEntry(0,true); IdleWowUIState.__waveCombatHistory={count=CombatLogGetNumEntries(true),row=pack(CombatLogGetCurrentEntry())}; assert(IdleWowUIState.__waveCombatHistory.count>0); ReloadUI()"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "IdleWowUIState and IdleWowUIState.__waveCombatHistory and IdleCombatProbe==nil",
+      "timeout": 30
+    },
+    {
+      "op": "lua",
+      "code": "-- 3.3.5a addon listener. Run on a disposable QA character alongside Blizzard_CombatLog.\n-- Preserve nil holes and the exact tuple length: #row is not an argument count.\nif IdleCombatProbe then IdleCombatProbe:Stop() end\nlocal probe = {all={}, filtered={}, errors={}}\nIdleCombatProbe = probe\nlocal function pack(...) return {n=select('#', ...), ...} end\nlocal function same(a,b)\n    assert(a.n==b.n, 'combat tuple length differs')\n    for i=1,a.n do\n        assert(a[i]==b[i] and type(a[i])==type(b[i]), 'combat tuple field '..i..' differs')\n    end\nend\nlocal frame=CreateFrame('Frame')\nprobe.frame=frame\nfor _,event in ipairs({'COMBAT_LOG_EVENT_UNFILTERED','COMBAT_LOG_EVENT','UI_ERROR_MESSAGE'}) do frame:RegisterEvent(event) end\nframe:SetScript('OnEvent',function(self,event,...)\n    if event=='UI_ERROR_MESSAGE' then table.insert(probe.errors,pack(...)); return end\n    local row=pack(...)\n    same(row,pack(CombatLogGetCurrentEventInfo()))\n    assert(type(row[1])=='number' and type(row[2])=='string')\n    assert(type(row[3])=='string' and row[3]:match('^0x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x$'))\n    assert(type(row[6])=='string' and row[6]:match('^0x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x$'))\n    assert(type(row[5])=='number' and type(row[8])=='number')\n    table.insert(event=='COMBAT_LOG_EVENT_UNFILTERED' and probe.all or probe.filtered,row)\nend)\nfunction probe:Begin(events,spell,source,destination)\n    self.all={}; self.filtered={}; self.errors={}\n    CombatLogResetFilter()\n    if events~=nil then CombatLogAddFilter(events,source or UnitGUID('player'),destination,spell) end\nend\nfunction probe:Count(event,spell,filtered)\n    local n=0\n    for _,row in ipairs(filtered and self.filtered or self.all) do\n        if row[2]==event and (spell==nil or row[9]==spell) then n=n+1 end\n    end\n    return n\nend\nfunction probe:Expect(event,spell,count,filtered)\n    assert(self:Count(event,spell,filtered)==count, event..' unexpected count')\nend\nfunction probe:CheckHistory()\n    -- History can include older rows; compare the suffix delivered to this listener.\n    assert(CombatLogGetNumEntries(true)>=#self.all)\n    if #self.all==0 then return end\n    assert(CombatLogSetCurrentEntry(0,true))\n    for i=#self.all,1,-1 do\n        same(self.all[i],pack(CombatLogGetCurrentEntry()))\n        if i>1 then assert(CombatLogAdvanceEntry(-1,true)) end\n    end\nend\nfunction probe:Stop()\n    self.frame:UnregisterAllEvents()\n    self.frame:SetScript('OnEvent',nil)\n    CombatLogResetFilter()\nend\n\nlocal saved=IdleWowUIState.__waveCombatHistory; assert(CombatLogGetNumEntries(true)>=saved.count); local found=false; CombatLogSetCurrentEntry(0,true); for j=1,100 do local row={n=select('#',CombatLogGetCurrentEntry()),CombatLogGetCurrentEntry()}; local same=row.n==saved.row.n; if same then for i=1,row.n do if row[i]~=saved.row[i] or type(row[i])~=type(saved.row[i]) then same=false; break end end end; if same then found=true; break end; if not CombatLogAdvanceEntry(-1,true) then break end end; assert(found,'retained combat tuple after ReloadUI'); IdleWowUIState.__waveCombatHistory=nil; FCF_SelectDockFrame(ChatFrame2)"
+    },
+    {
+      "op": "capture",
+      "name": "combat-history-after-reload"
+    },
+    {
+      "op": "lua",
+      "code": "IdleCombatProbe:Stop()"
+    },
+    {
+      "op": "lua",
+      "code": "Logout()"
+    },
+    {
+      "op": "wait_character_select",
+      "timeout": 60
+    }
+  ]
+}
