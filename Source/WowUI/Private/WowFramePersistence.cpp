@@ -2,7 +2,7 @@
 #include "WowPlacedFrameLayout.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
-#include "Misc/LexFromString.h"
+#include "String/LexFromString.h"
 #include "Misc/Paths.h"
 
 namespace
