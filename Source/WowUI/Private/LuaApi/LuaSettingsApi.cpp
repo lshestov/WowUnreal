@@ -3,6 +3,7 @@
 #include "WowEventSystem.h"
 #include "WowFrameManager.h"
 #include "WowAudioManager.h"
+#include "WowRenderSettings.h"
 #include "WowSavedVariables.h"
 #include "WowAddonLoader.h"
 #include "Formats/Dbc/DbcStore.h"
@@ -84,7 +85,12 @@ bool NativeValue(lua_State* L,const FString& Name,FString& Value)
         Value=FString::SanitizeFloat(C && C->FrameManager?C->FrameManager->GetUIScale():1.f);
         return true;
     }
-    if(!World(L)) return false;
+    auto* W=World(L); if(!W) return false;
+    if(auto* Render=W->GetSubsystem<UWowRenderSettings>())
+    {
+        if(Name==TEXT("particledensity")) {Value=FString::SanitizeFloat(Render->GetParticleDensity()); return true;}
+        if(Name==TEXT("environmentdetail")) {Value=FString::SanitizeFloat(Render->GetEnvironmentDetail()); return true;}
+    }
     const auto* Settings=UGameUserSettings::GetGameUserSettings();
     if(Name.StartsWith(TEXT("sound_"))) if(auto* Manager=ResolveAudioManager(L); Manager && Manager->GetUiOption(Name,Value)) return true;
     if(Name==TEXT("gamma")) Value=FString::SanitizeFloat(GEngine?GEngine->DisplayGamma/2.2f:1.f);
@@ -106,7 +112,12 @@ bool NativeValue(lua_State* L,const FString& Name,FString& Value)
 }
 void ApplyNative(lua_State* L,const FString& Name,const FString& Value)
 {
-    if(!World(L)) return;
+    auto* W=World(L); if(!W) return;
+    if(auto* Render=W->GetSubsystem<UWowRenderSettings>())
+    {
+        if(Name==TEXT("particledensity")) {Render->SetParticleDensity(FCString::Atof(*Value)); return;}
+        if(Name==TEXT("environmentdetail")) {Render->SetEnvironmentDetail(FCString::Atof(*Value)); return;}
+    }
     if(Name.StartsWith(TEXT("sound_"))) if(auto* Manager=ResolveAudioManager(L); Manager && Manager->SetUiOption(Name,Value)) return;
     auto* Settings=UGameUserSettings::GetGameUserSettings(); if(!Settings) return;
     const bool Enabled=Value.ToBool() || FCString::Atof(*Value)!=0;
@@ -180,7 +191,7 @@ TArray<FIntPoint> Resolutions()
 void WowLuaApi::ApplySavedUiSettings(lua_State* L)
 {
     lua_getglobal(L,"IdleWowUIState");
-    if(lua_istable(L,-1)) { lua_pushnil(L); while(lua_next(L,-2)) { if(lua_type(L,-2)==LUA_TSTRING && lua_isstring(L,-1)) { const FString Key=UTF8_TO_TCHAR(lua_tostring(L,-2)); if(Key.StartsWith(TEXT("cvar_"))) ApplyNative(L,Key.Mid(5),UTF8_TO_TCHAR(lua_tostring(L,-1))); } lua_pop(L,1); } } lua_pop(L,1);
+    if(lua_istable(L,-1)) { lua_pushnil(L); while(lua_next(L,-2)) { if(lua_type(L,-2)==LUA_TSTRING && lua_isstring(L,-1)) { const FString Key=UTF8_TO_TCHAR(lua_tostring(L,-2)); if(Key.StartsWith(TEXT("cvar_"))) ApplyNative(L,Key.Mid(5),SettingValue(Key.Mid(5),UTF8_TO_TCHAR(lua_tostring(L,-1)))); } lua_pop(L,1); } } lua_pop(L,1);
 }
 void WowLuaApi::RegisterSettingsApi(lua_State* L)
 {

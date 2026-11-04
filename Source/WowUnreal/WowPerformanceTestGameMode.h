@@ -5,6 +5,7 @@
 #include "WowPerformanceTestGameMode.generated.h"
 
 class AWowSkyManager;
+class UWowM2EmitterComponent;
 
 /** Replays real MPQ streaming routes. No accounts, network or substitute geometry. */
 UCLASS()
@@ -18,6 +19,7 @@ protected:
     virtual void SetupTestScene(UWorld* World, AWowWorldManager* WorldManager) override;
 private:
     UPROPERTY() TObjectPtr<AWowSkyManager> Sky;
+    UPROPERTY() TObjectPtr<UWowM2EmitterComponent> GraphicsEffect;
     TArray<TSharedPtr<FJsonValue>> Steps, Results;
     TMap<FString,TArray<double>> Ordinary, Capture;
     FString Output, Frames;

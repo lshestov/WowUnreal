@@ -3,6 +3,8 @@
 #include "StaticMeshResources.h"
 #include "WowStreamingProfile.h"
 #include "WowM2LightSubsystem.h"
+#include "WowRenderSettings.h"
+#include "WowRenderPolicy.h"
 #include "WowWorldCollision.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "WowRuntimeMeshMaterials.h"
@@ -261,6 +263,9 @@ UStaticMeshComponent* FWowDoodadManager::SpawnSingleDoodad(
     MeshComp->SetWorldScale3D(FVector(ScaleVal));
     MeshComp->SetMobility(EComponentMobility::Static);
     MeshComp->RegisterComponent();
+
+    if(auto* Settings=ParentActor->GetWorld()->GetSubsystem<UWowRenderSettings>())
+        Settings->RegisterDoodad(MeshComp,WowRenderPolicy::DoodadFadeLevel(SM->GetBoundingBox().TransformBy(FTransform(MeshComp->GetComponentQuat(),FVector::ZeroVector,MeshComp->GetComponentScale())).GetSize().GetMax()/FWowCoordinate::SCALE));
 
     if (const auto Model = GetOrParseM2(M2Path, Mpq))
     {
@@ -571,51 +576,64 @@ TArray<UInstancedStaticMeshComponent*> FWowDoodadManager::SpawnDoodadsInstanced(
         UStaticMesh* SM = GetOrCreateStaticMesh(M2Path, Mpq, Cache);
         if (!SM) continue;
 
-        // Use plain ISM instead of HISMC — more reliable bounds for runtime meshes
-        FName CompName = *FString::Printf(TEXT("ISM_%s"), *FPaths::GetBaseFilename(M2Path));
-        UInstancedStaticMeshComponent* ISM = NewObject<UInstancedStaticMeshComponent>(ParentActor, CompName);
-        ISM->SetupAttachment(ParentActor->GetRootComponent());
-        ISM->SetStaticMesh(SM);
-        ISM->SetCastShadow(true);
-        ISM->SetCastContactShadow(true);
-        ISM->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-        ISM->SetMobility(EComponentMobility::Static);
-        ISM->bNeverDistanceCull = true;
-
-        // Override materials on the ISM component
-        for (int32 MatIdx = 0; MatIdx < SM->GetStaticMaterials().Num(); ++MatIdx)
+        // A single model can have placements in different Wrath size bands.
+        // Keep all placements/collision; split only their visual cull distances.
+        TArray<const FAdtDoodadPlacement*> FadeGroups[5];
+        for(const auto* Placement:GroupPlacements)
         {
-            if (SM->GetStaticMaterials()[MatIdx].MaterialInterface)
+            const FTransform Shape(FWowCoordinate::WowRotationToUE(Placement->Rotation.X,Placement->Rotation.Y,Placement->Rotation.Z),FVector::ZeroVector,FVector(Placement->GetScaleFloat()));
+            const int32 Level=WowRenderPolicy::DoodadFadeLevel(SM->GetBoundingBox().TransformBy(Shape).GetSize().GetMax()/FWowCoordinate::SCALE);
+            FadeGroups[Level].Add(Placement);
+        }
+        for(int32 Level=0;Level<5;++Level)
+        {
+            const auto& BandPlacements=FadeGroups[Level]; if(BandPlacements.IsEmpty()) continue;
+            // Use plain ISM instead of HISMC — more reliable bounds for runtime meshes
+            FName CompName = *FString::Printf(TEXT("ISM_%s_Fade%d"), *FPaths::GetBaseFilename(M2Path),Level);
+            UInstancedStaticMeshComponent* ISM = NewObject<UInstancedStaticMeshComponent>(ParentActor, CompName);
+            ISM->SetupAttachment(ParentActor->GetRootComponent());
+            ISM->SetStaticMesh(SM);
+            ISM->SetCastShadow(true);
+            ISM->SetCastContactShadow(true);
+            ISM->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+            ISM->SetMobility(EComponentMobility::Static);
+            if(auto* Settings=ParentActor->GetWorld()->GetSubsystem<UWowRenderSettings>()) Settings->RegisterDoodad(ISM,Level);
+
+            // Override materials on the ISM component
+            for (int32 MatIdx = 0; MatIdx < SM->GetStaticMaterials().Num(); ++MatIdx)
             {
-                ISM->SetMaterial(MatIdx, SM->GetStaticMaterials()[MatIdx].MaterialInterface);
+                if (SM->GetStaticMaterials()[MatIdx].MaterialInterface)
+                {
+                    ISM->SetMaterial(MatIdx, SM->GetStaticMaterials()[MatIdx].MaterialInterface);
+                }
             }
+
+            // Must register BEFORE adding instances so the component transform is set
+            ISM->RegisterComponent();
+
+            // Add all instances for this model
+            for (const FAdtDoodadPlacement* Placement : BandPlacements)
+            {
+                FVector UEPos = FWowCoordinate::AdtToUE(
+                    Placement->Position.X, Placement->Position.Y, Placement->Position.Z);
+                float ScaleVal = Placement->GetScaleFloat();
+                FRotator Rot = FWowCoordinate::WowRotationToUE(
+                    Placement->Rotation.X, Placement->Rotation.Y, Placement->Rotation.Z);
+
+                FTransform InstanceTransform(Rot, UEPos, FVector(ScaleVal));
+                ISM->AddInstance(InstanceTransform, /*bWorldSpace=*/true);
+                if(CollisionModel && !CollisionModel->Lights.IsEmpty()) if(auto* Lights=ParentActor->GetWorld()->GetSubsystem<UWowM2LightSubsystem>())
+                    Lights->RegisterModel(ISM,CollisionModel,InstanceTransform.GetRelativeTransform(ISM->GetComponentTransform()));
+                if (CollisionModel)
+                    FWowWorldCollision::AppendM2(*CollisionModel,
+                        InstanceTransform.GetRelativeTransform(ParentActor->GetRootComponent()->GetComponentTransform()), CollisionVertices, CollisionIndices);
+            }
+
+            ISM->MarkRenderStateDirty();
+
+            Result.Add(ISM);
+            TotalInstances += BandPlacements.Num();
         }
-
-        // Must register BEFORE adding instances so the component transform is set
-        ISM->RegisterComponent();
-
-        // Add all instances for this model
-        for (const FAdtDoodadPlacement* Placement : GroupPlacements)
-        {
-            FVector UEPos = FWowCoordinate::AdtToUE(
-                Placement->Position.X, Placement->Position.Y, Placement->Position.Z);
-            float ScaleVal = Placement->GetScaleFloat();
-            FRotator Rot = FWowCoordinate::WowRotationToUE(
-                Placement->Rotation.X, Placement->Rotation.Y, Placement->Rotation.Z);
-
-            FTransform InstanceTransform(Rot, UEPos, FVector(ScaleVal));
-            ISM->AddInstance(InstanceTransform, /*bWorldSpace=*/true);
-            if(CollisionModel && !CollisionModel->Lights.IsEmpty()) if(auto* Lights=ParentActor->GetWorld()->GetSubsystem<UWowM2LightSubsystem>())
-                Lights->RegisterModel(ISM,CollisionModel,InstanceTransform.GetRelativeTransform(ISM->GetComponentTransform()));
-            if (CollisionModel)
-                FWowWorldCollision::AppendM2(*CollisionModel,
-                    InstanceTransform.GetRelativeTransform(ParentActor->GetRootComponent()->GetComponentTransform()), CollisionVertices, CollisionIndices);
-        }
-
-        ISM->MarkRenderStateDirty();
-
-        Result.Add(ISM);
-        TotalInstances += GroupPlacements.Num();
     }
 
     FWowWorldCollision::Create(ParentActor->GetRootComponent(), TEXT("DoodadCollision"), CollisionVertices, CollisionIndices);

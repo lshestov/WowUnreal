@@ -1,0 +1,8 @@
+{
+  "steps": [
+    {"name":"graphics-minimum","map":0,"initial":1,"position":[-8930,-117,95],"target":[-9020,-65,87],"duration":8,"settle":3,"particleDensity":0.1,"environmentDetail":0.5,"graphicsEffect":"Spells\\Fire_Precast_Hand.m2"},
+    {"name":"graphics-density-maximum","map":0,"position":[-8930,-117,95],"target":[-9020,-65,87],"duration":8,"settle":3,"particleDensity":1,"environmentDetail":0.5,"graphicsEffect":"Spells\\Fire_Precast_Hand.m2"},
+    {"name":"graphics-maximum","map":0,"position":[-8930,-117,95],"target":[-9020,-65,87],"duration":8,"settle":3,"particleDensity":1,"environmentDetail":1.5,"graphicsEffect":"Spells\\Fire_Precast_Hand.m2"},
+    {"name":"graphics-density-minimum","map":0,"position":[-8930,-117,95],"target":[-9020,-65,87],"duration":8,"settle":3,"particleDensity":0.1,"environmentDetail":1.5,"graphicsEffect":"Spells\\Fire_Precast_Hand.m2"}
+  ]
+}

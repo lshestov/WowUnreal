@@ -1,4 +1,6 @@
 #include "WowM2EmitterComponent.h"
+#include "WowRenderSettings.h"
+#include "WowRenderPolicy.h"
 #include "Formats/M2Types.h"
 #include "Formats/BlpParser.h"
 #include "Mpq/MpqManager.h"
@@ -337,9 +339,18 @@ void UWowM2EmitterComponent::Emit(int32 Index,float TimeMs)
 void UWowM2EmitterComponent::TickComponent(float Delta,ELevelTick Type,FActorComponentTickFunction* Function)
 {
     Super::TickComponent(Delta,Type,Function); if(!Model || !Mesh) return;
-    const double Now=FPlatformTime::Seconds(); const float Elapsed=FMath::Max(0.f,float(Now-LastAt)),Step=FMath::Min(Elapsed,.1f),TimeMs=float((Now-StartedAt)*1000); LastAt=Now;
+    const double Now=FPlatformTime::Seconds(); const float Elapsed=FMath::Max(0.f,float(Now-LastAt)),TimeMs=float((Now-StartedAt)*1000); LastAt=Now;
     if(Emitting && Now>=EmitUntil) StopEmitting();
     AnimateBones(TimeMs);
+    AdvanceParticles(Elapsed,TimeMs);
+    UpdateRibbons(Elapsed,AnimationTimeMs);
+    Render(); if(!Emitting && !ModelVisible && Particles.IsEmpty() && !RibbonNodes.ContainsByPredicate([](const auto& Nodes){return !Nodes.IsEmpty();})) DestroyComponent();
+}
+void UWowM2EmitterComponent::AdvanceParticles(float Elapsed,float TimeMs)
+{
+    const float Step=FMath::Min(Elapsed,.1f);
+    const auto* Settings=GetWorld()->GetSubsystem<UWowRenderSettings>();
+    const float Density=!bGlueScene && Settings?Settings->GetParticleDensity():1.f;
     TArray<int32> Counts; Counts.Init(0,ActiveEmitters.Num());
     for(int32 I=Particles.Num()-1;I>=0;--I)
     {
@@ -349,16 +360,13 @@ void UWowM2EmitterComponent::TickComponent(float Delta,ELevelTick Type,FActorCom
         const float Gravity=SampleTrack(E.GravityTrack);
         P.Velocity.Z-=Gravity*FWowCoordinate::SCALE*Step; P.Velocity*=FMath::Exp(-FMath::Max(0.f,E.Drag)*Step); P.Position+=P.Velocity*Step; ++Counts[P.Emitter];
     }
-    if(Emitting && Now<EmitUntil) for(int32 I=0;I<ActiveEmitters.Num();++I)
+    if(Emitting) for(int32 I=0;I<ActiveEmitters.Num();++I)
     {
         const auto& E=Model->ParticleEmitters[ActiveEmitters[I]];
         if(SampleTrack(E.VisibilityTrack,1)<=0) continue;
-        Accumulators[I]+=FMath::Clamp(SampleTrack(E.RateTrack),0.f,1000.f)*Step;
-        const int32 Count=FMath::Min3(FMath::FloorToInt32(Accumulators[I]),32,PerEmitterCapacity-Counts[I]); Accumulators[I]=FMath::Fmod(Accumulators[I],1.);
+        const int32 Count=WowRenderPolicy::EmitCount(Accumulators[I],SampleTrack(E.RateTrack),Step,Density,PerEmitterCapacity-Counts[I]);
         for(int32 N=0;N<Count;++N) Emit(I,TimeMs);
     }
-    UpdateRibbons(Elapsed,AnimationTimeMs);
-    Render(); if(!Emitting && !ModelVisible && Particles.IsEmpty() && !RibbonNodes.ContainsByPredicate([](const auto& Nodes){return !Nodes.IsEmpty();})) DestroyComponent();
 }
 void UWowM2EmitterComponent::Render()
 {

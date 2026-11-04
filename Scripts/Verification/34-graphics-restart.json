@@ -1,0 +1,17 @@
+{
+  "qaLevel":20,
+  "qaGm":false,
+  "steps":[
+    {"op":"wait_world","timeout":180},
+    {"op":"wait_floor","timeout":90},
+    {"op":"lua","code":"assert(IdleWowUIState.__graphicsOriginalEffects,'Use the same owned account/user directory from 34-graphics-native, without resetting SavedVariables'); assert(tonumber(GetCVar('particleDensity'))==1 and tonumber(GetCVar('environmentDetail'))==1.5)"},
+    {"op":"inspect_render_settings","label":"full-restart-keeps-maximum"},
+    {"op":"capture","name":"world-graphics-after-full-restart"},
+    {"op":"lua","code":"VideoOptionsFrame:Show(); OptionsFrame_OpenToCategory(VideoOptionsFrame,VideoOptionsEffectsPanel.name)"},
+    {"op":"drag_frame","name":"VideoOptionsEffectsPanelParticleDensity","dx":-500,"dy":0},
+    {"op":"drag_frame","name":"VideoOptionsEffectsPanelEnvironmentDetail","dx":-500,"dy":0},
+    {"op":"click_frame","name":"VideoOptionsFrameOkay"},
+    {"op":"lua","code":"GameMenuFrame:Hide(); assert(tonumber(GetCVar('particleDensity'))==0.1 and tonumber(GetCVar('environmentDetail'))==0.5)"},
+    {"op":"inspect_render_settings","label":"save-minimum-for-second-restart"}
+  ]
+}

@@ -6,6 +6,9 @@
 #include "WowWmoArea.h"
 #include "WowAssetCache.h"
 #include "WowDoodadManager.h"
+#include "WowRenderSettings.h"
+#include "WowM2EmitterComponent.h"
+#include "WowGraphicsSnapshot.h"
 #include "WowCharacterBuilder.h"
 #include "Coord/WowCoordinate.h"
 #include "Formats/Dbc/DbcStore.h"
@@ -76,6 +79,22 @@ void AWowPerformanceTestGameMode::StartStep()
     From=Position(Step,TEXT("position")); To=Position(Step,TEXT("end"),From); Target=Position(Step,TEXT("target"),To+FVector(100,0,0));
     auto* PC=UGameplayStatics::GetPlayerController(this,0); if(!PC || !PC->GetPawn()){Finish(false,TEXT("No camera")); return;}
     PC->GetPawn()->SetActorLocation(From); PC->SetControlRotation((Target-From).Rotation());
+    // Optional graphics comparison reuses the real world route and source M2.
+    if(auto* Settings=GetWorld()->GetSubsystem<UWowRenderSettings>())
+    {
+        double Value;
+        if(Step->TryGetNumberField(TEXT("particleDensity"),Value)) Settings->SetParticleDensity(Value);
+        if(Step->TryGetNumberField(TEXT("environmentDetail"),Value)) Settings->SetEnvironmentDetail(Value);
+    }
+    if(IsValid(GraphicsEffect)) GraphicsEffect->DestroyComponent(); GraphicsEffect=nullptr;
+    FString EffectPath;
+    if(Step->TryGetStringField(TEXT("graphicsEffect"),EffectPath))
+    {
+        GraphicsEffect=NewObject<UWowM2EmitterComponent>(PC->GetPawn()); GraphicsEffect->SetupAttachment(PC->GetPawn()->GetRootComponent());
+        GraphicsEffect->RegisterComponent(); GraphicsEffect->SetWorldLocation(Position(Step,TEXT("effectPosition"),From+(Target-From).GetSafeNormal()*500));
+        if(!GraphicsEffect->Initialize(FWowDoodadManager::GetOrParseM2(EffectPath,WM->GetMpqManager()),WM->GetMpqManager(),WM->GetAssetCache(),60))
+        {Finish(false,TEXT("Graphics comparison source effect unavailable")); return;}
+    }
     WM->FollowStreamingActor(PC->GetPawn()); WM->EnableTerrainStreaming();
     if(Number(Step,TEXT("initial"),0)>0) WM->LoadTilesAroundPosition(From,2);
     Ordinary.Reset(); Capture.Reset(); PhaseStarted=FPlatformTime::Seconds(); IdleSince=ShotAt=0; ShotRequested=false;
@@ -133,12 +152,14 @@ TSharedPtr<FJsonObject> AWowPerformanceTestGameMode::Snapshot() const
     {O->SetNumberField(TEXT("lightSources"),L->GetSourceCount()); O->SetNumberField(TEXT("lightPending"),L->GetPendingCount());}
     const auto P=FWowCoordinate::UEToWow(To); const auto Room=UWowWmoAreaComponent::Locate(GetWorld(),To,0);
     O->SetStringField(TEXT("position"),P.ToString()); O->SetNumberField(TEXT("area"),CachedWorldManager->GetAreaAt(To)); O->SetBoolField(TEXT("indoors"),Room.Indoors);
+    if(Steps[Index]->AsObject()->HasField(TEXT("environmentDetail"))) O->SetObjectField(TEXT("graphics"),WowGraphicsSnapshot(GetWorld(),UGameplayStatics::GetPlayerController(this,0)));
     return O;
 }
 void AWowPerformanceTestGameMode::Tick(float DT)
 {
     Super::Tick(DT); if(Finished || Index<0 || Index>=Steps.Num()) return;
     const double Now=FPlatformTime::Seconds(),WallMs=(Now-Previous)*1000.; Previous=Now;
+    if(IsValid(GraphicsEffect)) GraphicsEffect->ExtendEmission(Now+60);
     if(Now-Started>1200){Finish(false,TEXT("1200 second route timeout")); return;}
     const auto Step=Steps[Index]->AsObject(); const FString Name=Step->GetStringField(TEXT("name"));
     auto& Samples=DiagnosticFrames>0?Capture:Ordinary;

@@ -15,6 +15,7 @@ class UMaterialInstanceDynamic;
 UCLASS(ClassGroup=(WowAssets))
 class WOWASSETS_API UWowM2EmitterComponent : public USceneComponent
 {
+    friend class FGraphicsParticleDensity;
     GENERATED_BODY()
 public:
     UWowM2EmitterComponent();
@@ -78,5 +79,6 @@ private:
     UPROPERTY() TArray<TObjectPtr<UTexture2D>> Textures;
     UPROPERTY() TArray<TObjectPtr<UMaterialInstanceDynamic>> Materials;
     void Emit(int32 Index,float TimeMs);
+    void AdvanceParticles(float Elapsed,float TimeMs);
     void Render();
 };

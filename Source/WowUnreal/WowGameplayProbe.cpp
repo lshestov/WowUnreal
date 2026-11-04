@@ -13,6 +13,7 @@
 #include "WowSpellMissile.h"
 #include "WowPlayerCharacter.h"
 #include "WowM2EmitterComponent.h"
+#include "WowGraphicsSnapshot.h"
 #include "WowLoginScene.h"
 #include "WowCharacterPreview.h"
 #include "WowAudioManager.h"
@@ -665,6 +666,7 @@ struct FWowGameplayProbe
             Inspections->SetObjectField(TEXT("talent-state"),Row); Done=true;
         }
         else if (Op==TEXT("bags")) { C.UIManager->ToggleBagWindow(); C.UIManager->ToggleCharacterPanel(); Done=true; }
+        else if(Op==TEXT("inspect_render_settings")) {Inspections->SetObjectField(TEXT("graphics:")+Step->GetStringField(TEXT("label")),WowGraphicsSnapshot(C.GetWorld(),&C)); Done=true;}
         else if (Op==TEXT("lua")) { Done=C.UIManager->GetLuaVM()->ExecuteString(Step->GetStringField(TEXT("code")),TEXT("=GameplayProbe")); if (!Done) { Failure=TEXT("Lua assertion failed"); Finish(C,false); return; } }
         else if(Op==TEXT("lua_wait"))
         {
