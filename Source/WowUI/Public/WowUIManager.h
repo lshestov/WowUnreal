@@ -60,7 +60,7 @@ public:
 	void ToggleCharacterPanel();
 	void ShowBankWindow();
 	void HideBankWindow();
-	bool IsPointerOverWindow() const;
+	bool IsPointerOverWindow(FVector2D DesktopPosition) const;
 
 	/** Update inventory from player entity */
 	void UpdateInventory();
@@ -76,6 +76,8 @@ private:
 	void InitializeCore();
     void OnMailLockItems(int32 Index,uint64 Guid);
 	UPROPERTY() TObjectPtr<UCanvasPanel> RootCanvas;
+	UPROPERTY() TObjectPtr<UCanvasPanel> CursorCanvas;
+	TSharedPtr<SWidget> CursorViewportRoot;
 	FMpqManager* LoadedMpq = nullptr;
 	FWowAssetCache* LoadedCache = nullptr;
 	bool bReloadRequested = false;

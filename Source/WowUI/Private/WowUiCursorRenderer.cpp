@@ -2,6 +2,8 @@
 #include "WowFrameManager.h"
 #include "WowConnectionManager.h"
 #include "LuaApi/LuaApiRegistry.h"
+#include "Components/CanvasPanel.h"
+#include "Components/CanvasPanelSlot.h"
 #include "Components/Image.h"
 #include "Components/TextBlock.h"
 
@@ -91,16 +93,21 @@ void FWowUiCursorRenderer::Tick(lua_State* L)
         FWowFontStringElement Number; Number.Name=TEXT("IdleWowCursorCount"); Number.Inherits=TEXT("NumberFontNormal"); Number.Width=32; Number.Height=16; Number.JustifyH=TEXT("RIGHT"); Number.bHasJustifyH=true;
         FWowAnchor A; A.Point=A.RelativePoint=EWowAnchorPoint::BOTTOMRIGHT; Number.Anchors.Add(A); Layer.FontStrings.Add(Number); Def.Layers.Add(Layer);
         Handle=Frames.CreateFrame(Def);
+        if (auto* Widget = Frames.GetWidgetForHandle(Handle))
+        {
+            Widget->RemoveFromParent();
+            CursorCanvas.AddChildToCanvas(Widget)->SetSize(FVector2D(Def.Width, Def.Height) * Frames.GetUIScale());
+        }
     }
     // A pointer move must not invalidate the layout of every stock frame.
     const float ParentScale=Frames.GetEffectiveFrameScale(Frames.FindFrame(TEXT("UIParent")));
-    const FVector2D Position=(Pointer/(FMath::Max(.001f,Frames.GetScreenScale()*ParentScale))+
-        (Held?FVector2D(-16,-16):FVector2D::ZeroVector))*Frames.GetUIScale();
+    const float ScreenScale = FMath::Max(.001f, Frames.GetScreenScale());
+    const FVector2D Position = (Pointer / ScreenScale - (Held ? FVector2D(16,16) * ParentScale : FVector2D::ZeroVector)) * Frames.GetUIScale();
     if(auto* Widget=Frames.GetWidgetForHandle(Handle))
     {
         // WoW cursor art is 32 physical pixels. Dragged inventory icons
         // still use the action bar's scale and are centred on the pointer.
-        const float Scale=Held?1.f:1.f/FMath::Max(.001f,Frames.GetScreenScale()*ParentScale);
+        const float Scale=Held?ParentScale:1.f/ScreenScale;
         if(!Widget->GetRenderTransform().Scale.Equals(FVector2D(Scale),.001f)) Widget->SetRenderScale(FVector2D(Scale));
         if(!Position.Equals(PreviousPosition,.01f)) { Widget->SetRenderTranslation(Position); PreviousPosition=Position; }
     }

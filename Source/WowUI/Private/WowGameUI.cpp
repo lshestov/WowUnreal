@@ -18,12 +18,19 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowGameUI, Log, All);
 
-static FWowQuestDetails FormatQuest(const FWowQuestDetails& Input,UWowConnectionManager* Connection)
+static FString FormatNpcText(const FString& Text, UWowConnectionManager* Connection)
 {
-    auto Quest=Input; const auto* P=Connection?Connection->PacketHandler.EntityManager.GetLocalPlayer():nullptr;
-    const auto* Race=P?FDbcStore::Get().ChrRaces().GetById(P->GetRaceId()):nullptr;
-    for(auto* Text:{&Quest.Title,&Quest.Details,&Quest.Objectives})
-        *Text=WowQuestText(*Text,Connection?Connection->GetCharacterName():FString(),P?P->GetClassId():0,Race?Race->Name:FString(),P && P->GetGenderId()==1);
+    const auto* Player = Connection ? Connection->PacketHandler.EntityManager.GetLocalPlayer() : nullptr;
+    const auto* Race = Player ? FDbcStore::Get().ChrRaces().GetById(Player->GetRaceId()) : nullptr;
+    return WowQuestText(Text, Connection ? Connection->GetCharacterName() : FString(),
+        Player ? Player->GetClassId() : 0, Race ? Race->Name : FString(), Player && Player->GetGenderId() == 1);
+}
+
+static FWowQuestDetails FormatQuest(const FWowQuestDetails& Input, UWowConnectionManager* Connection)
+{
+    auto Quest = Input;
+    for (auto* Text : {&Quest.Title, &Quest.Details, &Quest.Objectives})
+        *Text = FormatNpcText(*Text, Connection);
     return Quest;
 }
 UWowGameUI::UWowGameUI()
@@ -36,7 +43,7 @@ bool UWowGameUI::CloseActiveWindow()
     if(TradeWindow.IsValid() && TradeWindow->GetVisibility().IsVisible()) { OnCancelTrade(); return true; }
     if(VendorWindow.IsValid() && VendorWindow->GetVisibility().IsVisible()) { OnCloseVendor(); return true; }
     if(LootWindow.IsValid() && LootWindow->GetVisibility().IsVisible()) { OnCloseLoot(); return true; }
-    if(QuestDialog.IsValid() && QuestDialog->GetVisibility().IsVisible()) { OnQuestDecline(); return true; }
+    if(QuestDialog.IsValid() && QuestDialog->GetVisibility().IsVisible()) { HideQuestDialog(); return true; }
     return false;
 }
 
@@ -151,7 +158,17 @@ void UWowGameUI::HideQuestDialog()
 
 void UWowGameUI::ShowGossip(const FWowGossipMenu& Menu)
 {
-    PrepareQuestDialog(Menu.Guid); QuestDialog->ShowGossip(Menu);
+    PrepareQuestDialog(Menu.Guid);
+    if (!QuestDialog) return;
+    auto DisplayMenu = Menu;
+    DisplayMenu.Greeting = FormatNpcText(Menu.Greeting, ConnectionManager);
+    QuestDialog->ShowGossip(DisplayMenu);
+}
+
+void UWowGameUI::UpdateGossipGreeting(const FString& Text)
+{
+    if (QuestDialog && QuestDialog->GetVisibility().IsVisible() && QuestDialog->GetCurrentQuestId() == 0)
+        QuestDialog->UpdateGossipGreeting(FormatNpcText(Text, ConnectionManager));
 }
 
 void UWowGameUI::SelectGossipQuest(uint32 Id)
@@ -179,12 +196,11 @@ uint32 UWowGameUI::GetShownQuestId() const { return QuestDialog.IsValid()?QuestD
 void UWowGameUI::LootAll() { OnLootAll(); }
 void UWowGameUI::CloseLoot() { OnCloseLoot(); HideLootWindow(); }
 
-bool UWowGameUI::IsPointerOverWindow() const
+bool UWowGameUI::IsPointerOverWindow(FVector2D DesktopPosition) const
 {
-    if (!FSlateApplication::IsInitialized()) return false;
-    const auto Pointer=FSlateApplication::Get().GetCursorPos();
+    if (!WindowRoot || !WindowRoot->GetVisibility().IsVisible()) return false;
     for (const TSharedPtr<SWidget>& Widget : {TSharedPtr<SWidget>(QuestDialog),TSharedPtr<SWidget>(LootWindow),TSharedPtr<SWidget>(VendorWindow),TSharedPtr<SWidget>(TradeWindow)})
-        if (Widget.IsValid() && Widget->GetVisibility().IsVisible() && Widget->GetCachedGeometry().IsUnderLocation(Pointer)) return true;
+        if (Widget.IsValid() && Widget->GetVisibility().IsVisible() && Widget->GetCachedGeometry().IsUnderLocation(DesktopPosition)) return true;
     return false;
 }
 

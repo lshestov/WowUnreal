@@ -106,7 +106,7 @@ void FWowFontManager::Shutdown()
 	}
 }
 
-FSlateFontInfo FWowFontManager::GetFont(const FString& WowFontName, float Size) const
+FSlateFontInfo FWowFontManager::GetFont(const FString& WowFontName, float Size, EFontHinting Hinting) const
 {
 	if (!bInitialized)
 	{
@@ -119,9 +119,9 @@ FSlateFontInfo FWowFontManager::GetFont(const FString& WowFontName, float Size) 
 	if (!TtfFileName)
 	{
 		const FString Requested=FPaths::GetCleanFilename(WowFontName.Replace(TEXT("\\"),TEXT("/"))).ToUpper();
-		if(const auto* Direct=AvailableFonts.Find(Requested)) return CreateFontFromFile(*Direct,Size);
+		if(const auto* Direct=AvailableFonts.Find(Requested)) return CreateFontFromFile(*Direct,Size,Hinting);
 		UE_LOG(LogWowFont, Verbose, TEXT("Unknown WoW font name '%s', using default"), *WowFontName);
-		return GetDefaultFont(Size);
+		return GetDefaultFont(Size,Hinting);
 	}
 
 	// Find the actual file path
@@ -129,13 +129,13 @@ FSlateFontInfo FWowFontManager::GetFont(const FString& WowFontName, float Size) 
 	if (!FilePath)
 	{
 		UE_LOG(LogWowFont, Warning, TEXT("TTF file '%s' not available, using default"), **TtfFileName);
-		return GetDefaultFont(Size);
+		return GetDefaultFont(Size,Hinting);
 	}
 
-	return CreateFontFromFile(*FilePath, Size);
+	return CreateFontFromFile(*FilePath, Size, Hinting);
 }
 
-FSlateFontInfo FWowFontManager::GetDefaultFont(float Size) const
+FSlateFontInfo FWowFontManager::GetDefaultFont(float Size, EFontHinting Hinting) const
 {
 	if (!bInitialized)
 	{
@@ -146,13 +146,13 @@ FSlateFontInfo FWowFontManager::GetDefaultFont(float Size) const
 	const FString* FrizqtPath = AvailableFonts.Find(TEXT("FRIZQT__.TTF"));
 	if (FrizqtPath)
 	{
-		return CreateFontFromFile(*FrizqtPath, Size);
+		return CreateFontFromFile(*FrizqtPath, Size, Hinting);
 	}
 
 	// Fallback to any available font
 	for (const auto& FontPair : AvailableFonts)
 	{
-		return CreateFontFromFile(FontPair.Value, Size);
+		return CreateFontFromFile(FontPair.Value, Size, Hinting);
 	}
 
 	// Last resort: engine default font
@@ -183,7 +183,7 @@ bool FWowFontManager::ExtractFont(FMpqManager* Mpq, const FString& MpqPath, cons
 	return true;
 }
 
-FSlateFontInfo FWowFontManager::CreateFontFromFile(const FString& FilePath, float Size) const
+FSlateFontInfo FWowFontManager::CreateFontFromFile(const FString& FilePath, float Size, EFontHinting Hinting) const
 {
 	// Create a font info using UE5.7's new API
 	FSlateFontInfo FontInfo;
@@ -199,8 +199,7 @@ FSlateFontInfo FWowFontManager::CreateFontFromFile(const FString& FilePath, floa
 	FString FontName = FPaths::GetBaseFilename(FilePath);
 	TypefaceEntry.Name = FName(*FontName);
 
-	// Create font data from the file path with default hinting and loading policy
-	TypefaceEntry.Font = FFontData(FilePath, EFontHinting::Default, EFontLoadingPolicy::LazyLoad);
+	TypefaceEntry.Font = FFontData(FilePath, Hinting, EFontLoadingPolicy::LazyLoad);
 
 	CompositeFont->DefaultTypeface.Fonts.Add(TypefaceEntry);
 	// enUS MPQ fonts omit Cyrillic. Use the engine's packaged font for missing

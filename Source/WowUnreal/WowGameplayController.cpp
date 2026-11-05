@@ -451,6 +451,10 @@ void AWowGameplayController::BindEntityEvents()
 		if (GameUI) GameUI->ShowGossip(Menu);
 	});
     ConnectionManager->PacketHandler.OnGossipClosed.AddLambda([this](){if(GameUI) GameUI->HideQuestDialog();});
+    ConnectionManager->PacketHandler.OnGossipGreetingUpdated.AddLambda([this](const FWowGossipMenu& Menu)
+    {
+        if (GameUI) GameUI->UpdateGossipGreeting(Menu.Greeting);
+    });
 	ConnectionManager->PacketHandler.OnQuestLogChanged.AddLambda([this]()
 	{
 		if(ConnectionManager) for(const auto& Quest:ConnectionManager->PacketHandler.QuestLog) ConnectionManager->RequestQuestTemplate(Quest.QuestId);
@@ -1107,15 +1111,14 @@ void AWowGameplayController::Tick(float DeltaTime)
 	if (UIManager && UIManager->GetFrameManager())
 	{
 		uint64 PartStarted=FPlatformTime::Cycles64();
-		float MX=0, MY=0;
-		if(GameplayProbePointer.IsSet()) { MX=GameplayProbePointer->X; MY=GameplayProbePointer->Y; }
-		if (GameplayProbePointer.IsSet() || GetMousePosition(MX, MY))
+		FVector2D Pointer;
+		const bool OverNativeWindow = IsPointerOverNativeWindow(&Pointer, !GameplayProbe.IsValid());
+		if (Pointer.X >= 0 && Pointer.Y >= 0)
 		{
-			if(PressedLeftMouseFrameHandle>=0 && !bDraggingUi && FVector2D::DistSquared(UiDragOrigin,FVector2D(MX,MY))>25)
+			if(PressedLeftMouseFrameHandle>=0 && !bDraggingUi && FVector2D::DistSquared(UiDragOrigin,Pointer)>25)
 				bDraggingUi=UIManager->GetFrameManager()->DispatchDragStart(PressedLeftMouseFrameHandle,TEXT("LeftButton"));
-			UIManager->GetFrameManager()->UpdateMouseHover(MX, MY);
 		}
-		else UIManager->GetFrameManager()->UpdateMouseHover(-1,-1);
+		UIManager->GetFrameManager()->UpdateMouseHover(Pointer.X, Pointer.Y, OverNativeWindow);
 		LastHoverMilliseconds=FPlatformTime::ToMilliseconds64(FPlatformTime::Cycles64()-PartStarted);
 		PartStarted=FPlatformTime::Cycles64();
 
@@ -1129,9 +1132,8 @@ void AWowGameplayController::Tick(float DeltaTime)
 		// Update cooldown overlay animations
 		UIManager->GetFrameManager()->TickCooldowns();
 		const auto* Frames = UIManager->GetFrameManager();
-		const FVector2D Pointer = Frames->GetPointerPosition();
 		const bool OverWorld = Pointer.X >= 0 && Pointer.Y >= 0 && !Frames->IsPointerOverFrame()
-			&& !UIManager->IsPointerOverWindow() && !(GameUI && GameUI->IsPointerOverWindow());
+			&& !OverNativeWindow;
 		UIManager->TickWorldImages(GetWorld(), OverWorld ? GetWorldUnitAtScreen(Pointer.X, Pointer.Y) : 0);
         CurrentMouseCursor=UIManager->HasSoftwareCursor()?EMouseCursor::None:EMouseCursor::Default;
 		LastWidgetMilliseconds=FPlatformTime::ToMilliseconds64(FPlatformTime::Cycles64()-PartStarted);
@@ -1382,8 +1384,10 @@ bool AWowGameplayController::InputKey(const FInputKeyEventArgs& Params)
 	}
 	if(Params.Event==IE_Pressed && UIManager && UIManager->GetFrameManager() && (Params.Key==EKeys::MouseScrollUp || Params.Key==EKeys::MouseScrollDown))
     {
-        float UiMouseX=0,UiMouseY=0; GetMousePosition(UiMouseX,UiMouseY); auto* Frames=UIManager->GetFrameManager();
-        if(Frames->DispatchMouseWheel(Frames->HitTestFrames(UiMouseX,UiMouseY,true),Params.Key==EKeys::MouseScrollUp?1.f:-1.f)) return true;
+        FVector2D Pointer;
+        if (IsPointerOverNativeWindow(&Pointer)) return true;
+        auto* Frames=UIManager->GetFrameManager();
+        if(Frames->DispatchMouseWheel(Frames->HitTestFrames(Pointer.X,Pointer.Y,true),Params.Key==EKeys::MouseScrollUp?1.f:-1.f)) return true;
     }
 	if (Params.Event == IE_Pressed
 		&& IsWowUiConsumingKeyboardInput()
@@ -1420,6 +1424,43 @@ bool AWowGameplayController::InputKey(const FInputKeyEventArgs& Params)
 	return Super::InputKey(Params);
 }
 
+bool AWowGameplayController::IsPointerOverNativeWindow(FVector2D* OutViewportPixel, bool bUseLiveSlateCursor) const
+{
+	if (OutViewportPixel) *OutViewportPixel = FVector2D(-1, -1);
+	const auto Viewport = GetWowGameViewportWidget();
+	int32 Width = 0, Height = 0;
+	GetViewportSize(Width, Height);
+	if (!Viewport || !FSlateApplication::IsInitialized() || Width <= 0 || Height <= 0) return false;
+
+	const auto& Geometry = Viewport->GetCachedGeometry();
+	const FVector2D LocalSize = Geometry.GetLocalSize();
+	if (LocalSize.GetMin() <= 0) return false;
+	const FVector2D ViewportSize(Width, Height);
+	FVector2D Pixel, Desktop;
+	if (bUseLiveSlateCursor && !GameplayProbePointer.IsSet())
+	{
+		// Native controls receive mouse moves even when the scene viewport does not.
+		Desktop = FSlateApplication::Get().GetCursorPos();
+		Pixel = Geometry.AbsoluteToLocal(Desktop) / LocalSize * ViewportSize;
+	}
+	else
+	{
+		// Input delivered to the game must hit-test the pixel of that viewport event.
+		// The pointer may have moved again by the time the gameplay binding executes.
+		if (GameplayProbePointer.IsSet()) Pixel = *GameplayProbePointer;
+		else
+		{
+			float X, Y;
+			if (!GetMousePosition(X, Y)) return false;
+			Pixel = FVector2D(X, Y);
+		}
+		Desktop = Geometry.GetAbsolutePositionAtCoordinates(Pixel / ViewportSize);
+	}
+	if (!Geometry.IsUnderLocation(Desktop)) return false;
+	if (OutViewportPixel) *OutViewportPixel = Pixel;
+	return (GameUI && GameUI->IsPointerOverWindow(Desktop)) || (UIManager && UIManager->IsPointerOverWindow(Desktop));
+}
+
 int64 AWowGameplayController::GetUiFrameUnderCursor() const
 {
 	if (!UIManager || !UIManager->GetFrameManager())
@@ -1427,15 +1468,9 @@ int64 AWowGameplayController::GetUiFrameUnderCursor() const
 		return -1;
 	}
 
-	float MouseX = 0.0f;
-	float MouseY = 0.0f;
-	if(GameplayProbePointer.IsSet()) { MouseX=GameplayProbePointer->X; MouseY=GameplayProbePointer->Y; }
-	if (!GameplayProbePointer.IsSet() && !GetMousePosition(MouseX, MouseY))
-	{
-		return -1;
-	}
-
-	return UIManager->GetFrameManager()->HitTestFrames(MouseX, MouseY);
+	FVector2D Pointer;
+	if (IsPointerOverNativeWindow(&Pointer) || Pointer.X < 0 || Pointer.Y < 0) return -1;
+	return UIManager->GetFrameManager()->HitTestFrames(Pointer.X, Pointer.Y);
 }
 
 bool AWowGameplayController::HandleUiMousePress(const FString& Button, int64& PressedFrameHandle, bool bAllowDragDrop)
@@ -1492,9 +1527,13 @@ bool AWowGameplayController::HandleUiMouseRelease(const FString& Button, int64& 
 	if(Button==TEXT("LeftButton") && bDraggingUi)
 	{
 		bDraggingUi=false;
-		const int64 Destination=GetUiFrameUnderCursor();
-		if(Destination<0 && ConnectionManager) { if(!RequestCursorItemDeletion()) ConnectionManager->DropActionCursor(); }
-		else FrameManager->DispatchReceiveDrag(Destination);
+		FVector2D Pointer;
+		if (!IsPointerOverNativeWindow(&Pointer))
+		{
+			const int64 Destination = FrameManager->HitTestFrames(Pointer.X, Pointer.Y);
+			if (Destination >= 0) FrameManager->DispatchReceiveDrag(Destination);
+			else if (ConnectionManager && !RequestCursorItemDeletion()) ConnectionManager->DropActionCursor();
+		}
 		FrameManager->DispatchDragStop(ReleasedFrameHandle,Button);
 		return true;
 	}
@@ -1509,7 +1548,7 @@ bool AWowGameplayController::HandleUiMouseRelease(const FString& Button, int64& 
 
 void AWowGameplayController::OnLeftClick()
 {
-	if ((GameUI && GameUI->IsPointerOverWindow()) || (UIManager && UIManager->IsPointerOverWindow())) return;
+	if (IsPointerOverNativeWindow()) return;
 	if (HandleUiMousePress(TEXT("LeftButton"), PressedLeftMouseFrameHandle, true))
 	{
 		return; // Don't target through UI
@@ -2063,7 +2102,7 @@ void AWowGameplayController::OnServerAttackStop(uint64 AttackerGuid, uint64 Vict
 
 void AWowGameplayController::OnRightClick()
 {
-	if ((GameUI && GameUI->IsPointerOverWindow()) || (UIManager && UIManager->IsPointerOverWindow())) return;
+	if (IsPointerOverNativeWindow()) return;
 	if (HandleUiMousePress(TEXT("RightButton"), PressedRightMouseFrameHandle, false))
 	{
 		return; // Don't interact through UI

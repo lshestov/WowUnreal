@@ -44,19 +44,23 @@ public:
     /** Hide the quest dialog */
     void CloseDialog();
     void ShowGossip(const FWowGossipMenu& Menu);
+    void UpdateGossipGreeting(const FString& Greeting);
     void AcceptCurrentQuest();
     void CompleteCurrentQuest();
     uint32 GetCurrentQuestId() const { return CurrentQuest.QuestId; }
 
 private:
     FSlateBrush Background[4];
-    FSlateBrush PanelHighlight, CloseHighlight, AvailableIcon, ActiveIcon, GossipIcon, Book, GreetingFooter;
+    FSlateBrush PanelHighlight, CloseHighlight, AvailableIcon, ActiveIcon, GossipIcon, Book, GreetingFooter, SectionDivider;
     FButtonStyle PanelStyle, CloseStyle, RowStyle;
     TSharedRef<SWidget> PanelButton(const FString& Label, FOnClicked Action, float Width = 78.f, bool bClose = false);
     TSharedRef<SWidget> GossipRow(const FString& Label, const FSlateBrush* Icon, FOnClicked Action, bool bEnabled = true);
-    TArray<TStrongObjectPtr<class UTexture2D>> Artwork;
-    FSlateFontInfo TitleFont, BodyFont, ButtonFont;
+    TSharedRef<class STextBlock> WrappedText(const FString& Text,const FTextBlockStyle& Style,float Width) const;
+    TArray<TStrongObjectPtr<UObject>> Artwork;
+    FTextBlockStyle TitleText, BodyText, RowText, CaptionText, RewardNumber;
     TSharedPtr<class STextBlock> NpcName;
+    TSharedPtr<class SBox> GreetingBlock;
+    TSharedPtr<class STextBlock> GreetingText;
     TWeakObjectPtr<class UImage> Portrait;
     FOnQuestDialogAccept OnQuestAccept;
     FOnQuestDialogComplete OnQuestComplete;
@@ -68,6 +72,7 @@ private:
     TSharedPtr<SHorizontalBox> ButtonArea;
 
     FWowQuestDetails CurrentQuest;
+    bool bUsesGossipFrame = false;
     bool bIsRewardDialog = false;
     int32 SelectedRewardChoice = 0;
 

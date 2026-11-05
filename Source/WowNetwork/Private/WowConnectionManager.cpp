@@ -131,6 +131,7 @@ void UWowConnectionManager::SelectRealm(int32 I)
             PacketHandler.SpellCooldowns.Reset(); PacketHandler.SpellCooldownInfo.Reset(); PacketHandler.CombatHistory.Reset(); PacketHandler.Casts.Reset(); PacketHandler.RecentSpellLaunches.Reset(); PendingGroundSpell=0; PacketHandler.CastFailures.Reset(); PacketHandler.LocalCastRequests.Reset(); PacketHandler.HasPendingAttackCast=false;
             PacketHandler.ResetGroupState(); PacketHandler.PetActionBar=FWowPetActionBarState(); PacketHandler.ResetChannels();
             PacketHandler.ResetMapState();
+            PacketHandler.ResetGossipState();
             PacketHandler.Merchant.Clear(); PacketHandler.CurrentBankerGuid=0; ResetMailState(); ResetTradeState();
             PacketHandler.ResetLootState();
             RepairCursor=false; PacketHandler.GuildCanRepair=false; PacketHandler.GuildRepairRequested=false; PacketHandler.GuildRepairId=0; PacketHandler.GuildWithdrawMoney=0; PacketHandler.ResetGuildState(); PacketHandler.ResetInspectState(); PacketHandler.ArenaIdentities.Reset(); PacketHandler.ResetPvpState(); PacketHandler.ResetLfgState(); PacketHandler.ResetAchievementState(); PacketHandler.ItemRefunds.Empty(); PacketHandler.RequestedItemRefunds.Empty(); PacketHandler.TotalPlayedTime=0; PacketHandler.PlayedTimeReceived=0; PacketHandler.PlayedTimeRequested=false;
@@ -1571,6 +1572,7 @@ void UWowConnectionManager::Disconnect()
     CancelGlyphUse();
     PacketHandler.ResetChannels();
     PacketHandler.ResetMapState();
+    PacketHandler.ResetGossipState();
     if (WorldSocket.IsValid())
     {
         WorldSocket->Disconnect();

@@ -126,7 +126,12 @@ void UWowUIManager::InitializeCore()
 	WowLuaApi::SetContext(LuaVM->GetState(), UIContext);
 	ModelRenderer=MakeShared<FWowUiModelRenderer>(*FrameManager,*UIContext);
 	MapRenderer=MakeShared<FWowUiMapRenderer>(*FrameManager,*UIContext);
-    CursorRenderer=MakeShared<FWowUiCursorRenderer>(*FrameManager,*UIContext);
+    if (!CursorCanvas)
+    {
+        CursorCanvas = NewObject<UCanvasPanel>(this);
+        CursorCanvas->SetVisibility(ESlateVisibility::HitTestInvisible);
+    }
+    CursorRenderer=MakeShared<FWowUiCursorRenderer>(*FrameManager,*UIContext,*CursorCanvas);
 	FrameManager->OnMapCommand=[this](int32 Command){ MapCommand(Command); };
 	FrameManager->OnPortrait=[this](const FString& Name,uint64 Guid){ ModelRenderer->Portrait(Name,Guid); };
 	FrameManager->OnUnitModel=[this](int64 Handle,uint64 Guid){ ModelRenderer->Model(Handle,Guid); };
@@ -145,6 +150,10 @@ void UWowUIManager::Deinitialize()
 	ModelRenderer.Reset();
 	MapRenderer.Reset();
     CursorRenderer.Reset();
+    if (CursorViewportRoot && GEngine && GEngine->GameViewport)
+        GEngine->GameViewport->RemoveViewportWidgetContent(CursorViewportRoot.ToSharedRef());
+    CursorViewportRoot.Reset();
+    CursorCanvas = nullptr;
 	if (NativeWindowRoot.IsValid() && GEngine && GEngine->GameViewport) GEngine->GameViewport->RemoveViewportWidgetContent(NativeWindowRoot.ToSharedRef());
 	NativeWindowRoot.Reset();
 	if (LuaVM && LuaVM->GetState())
@@ -456,6 +465,12 @@ void UWowUIManager::SetRootCanvas(UCanvasPanel* Canvas)
 					return Viewport.Y/768.f/FMath::Max(Dpi,.01f);
 				})[UIOverlay.ToSharedRef()];
 			GEngine->GameViewport->AddViewportWidgetContent(NativeWindowRoot.ToSharedRef(), 80);
+            // The pointing glove and held items share one visual above both FrameXML and native windows.
+            if (CursorCanvas && !CursorViewportRoot)
+            {
+                CursorViewportRoot = CursorCanvas->TakeWidget();
+                GEngine->GameViewport->AddViewportWidgetContent(CursorViewportRoot.ToSharedRef(), MAX_int32);
+            }
 		}
 
 		UE_LOG(LogWowUIManager, Log, TEXT("Created bag and character panel UI"));
@@ -582,6 +597,7 @@ void UWowUIManager::ProcessPendingReload()
     auto Spell=FrameManager->OnSecureSpellDispatch;
     ModelRenderer.Reset(); MapRenderer.Reset(); CursorRenderer.Reset();
     RootCanvas->ClearChildren();
+    CursorCanvas->ClearChildren();
     WowLuaApi::ClearContext(LuaVM->GetState());
     delete UIContext; UIContext=nullptr;
     LuaVM->Shutdown(); EventSystem.Reset(); FrameManager.Reset(); FontManager.Reset(); LuaVM.Reset();
@@ -603,6 +619,7 @@ void UWowUIManager::ProcessPendingReload()
 void UWowUIManager::SetWorldUiVisible(bool Visible)
 {
     if(RootCanvas) RootCanvas->SetVisibility(Visible?ESlateVisibility::SelfHitTestInvisible:ESlateVisibility::Collapsed);
+    if(CursorCanvas) CursorCanvas->SetVisibility(Visible?ESlateVisibility::HitTestInvisible:ESlateVisibility::Collapsed);
     if(UIOverlay) UIOverlay->SetVisibility(Visible?EVisibility::SelfHitTestInvisible:EVisibility::Collapsed);
 }
 
@@ -634,12 +651,11 @@ void UWowUIManager::HideBankWindow()
 	}
 }
 
-bool UWowUIManager::IsPointerOverWindow() const
+bool UWowUIManager::IsPointerOverWindow(FVector2D DesktopPosition) const
 {
-    if (!FSlateApplication::IsInitialized()) return false;
-    const auto Pointer=FSlateApplication::Get().GetCursorPos();
+    if (!UIOverlay || !UIOverlay->GetVisibility().IsVisible()) return false;
     for (const TSharedPtr<SWidget>& Widget : {TSharedPtr<SWidget>(BagWindow),TSharedPtr<SWidget>(CharacterPanel),TSharedPtr<SWidget>(BankWindow)})
-        if (Widget.IsValid() && Widget->GetVisibility().IsVisible() && Widget->GetCachedGeometry().IsUnderLocation(Pointer)) return true;
+        if (Widget.IsValid() && Widget->GetVisibility().IsVisible() && Widget->GetCachedGeometry().IsUnderLocation(DesktopPosition)) return true;
     return false;
 }
 

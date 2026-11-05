@@ -31,6 +31,7 @@ FWowPacketHandler::FWowPacketHandler()
     // Register handlers
     Handlers.Add(0x02A5,&FWowPacketHandler::HandleForcedReactions);
     Handlers.Add(WowOpcode::SMSG_GOSSIP_MESSAGE, &FWowPacketHandler::HandleGossipMessage);
+    Handlers.Add(WowOpcode::SMSG_NPC_TEXT_UPDATE, &FWowPacketHandler::HandleNpcTextUpdate);
     Handlers.Add(WowOpcode::SMSG_GOSSIP_COMPLETE, &FWowPacketHandler::HandleGossipComplete);
     Handlers.Add(WowOpcode::SMSG_ITEM_QUERY_SINGLE_RESPONSE, &FWowPacketHandler::HandleItemQueryResponse);
     Handlers.Add(WowOpcode::SMSG_QUESTGIVER_QUEST_LIST, &FWowPacketHandler::HandleQuestgiverQuestList);

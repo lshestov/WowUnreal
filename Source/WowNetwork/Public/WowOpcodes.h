@@ -187,6 +187,8 @@ namespace WowOpcode
     inline constexpr uint16 SMSG_GOSSIP_MESSAGE          = 0x017D;
     inline constexpr uint16 CMSG_GOSSIP_SELECT_OPTION    = 0x017C;
     inline constexpr uint16 SMSG_GOSSIP_COMPLETE         = 0x017E;
+    inline constexpr uint16 CMSG_NPC_TEXT_QUERY          = 0x017F;
+    inline constexpr uint16 SMSG_NPC_TEXT_UPDATE         = 0x0180;
 
     // Quest system opcodes
     inline constexpr uint16 CMSG_QUESTGIVER_HELLO        = 0x0182;

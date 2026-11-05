@@ -293,6 +293,7 @@ private:
     uint64 TraceWorldUnit(const FVector& Start, const FVector& End) const;
     void TryTargetAtScreen(float MouseX,float MouseY);
     int64 GetUiFrameUnderCursor() const;
+    bool IsPointerOverNativeWindow(FVector2D* OutViewportPixel = nullptr, bool bUseLiveSlateCursor = false) const;
     bool HandleUiMousePress(const FString& Button, int64& PressedFrameHandle, bool bAllowDragDrop);
     bool HandleUiMouseRelease(const FString& Button, int64& PressedFrameHandle);
     bool RequestCursorItemDeletion();

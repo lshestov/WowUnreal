@@ -189,6 +189,7 @@ public:
     /** Quest log entries */
     TArray<FWowQuestLogEntry> QuestLog;
     FWowGossipMenu GossipMenu;
+    void ResetGossipState();
     FWowQuestDetails QuestDetails;
     FWowLootState Loot;
     uint32 LootOpenSerial=0;
@@ -453,6 +454,7 @@ public:
     FOnProficiencySet OnProficiencySet;
     FOnGossipMessage OnGossipMessage;
     FOnGossipMenu OnGossipMenu;
+    FOnGossipMenu OnGossipGreetingUpdated;
     FSimpleMulticastDelegate OnGossipClosed;
     FOnQuestLogChanged OnQuestLogChanged;
     FOnInitialSpells OnInitialSpells;
@@ -674,6 +676,15 @@ private:
 
     // ── NPC interaction handlers ────────────────────────────────────────────
     void HandleGossipMessage(FPacketReader& R);
+    struct FNpcTextOption
+    {
+        float Weight = 0;
+        FString Male;
+        FString Female;
+    };
+    TMap<uint32, TArray<FNpcTextOption>> NpcTextCache;
+    void SelectGossipGreeting(const TArray<FNpcTextOption>& Options);
+    void HandleNpcTextUpdate(FPacketReader& R);
     void HandleGossipComplete(FPacketReader& R);
 
     // ── Mail system handlers ────────────────────────────────────────────────

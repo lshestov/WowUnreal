@@ -199,6 +199,16 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGameplayGossipPackets,"WowUnreal.Gameplay.Goss
 bool FGameplayGossipPackets::RunTest(const FString&)
 {
     FWowPacketHandler Handler;
+    auto& Speaker = Handler.EntityManager.PromoteToTyped(123, WowTypeMask::OBJECT | WowTypeMask::UNIT);
+    Speaker.SetField(UnitField::BYTES_0, 1u << 16);
+    int32 TextQueries = 0;
+    TArray<uint8> Query;
+    Handler.OnSendPacket.BindLambda([&](uint32 Opcode, const TArray<uint8>& Data)
+    {
+        if (Opcode == WowOpcode::CMSG_NPC_TEXT_QUERY) { ++TextQueries; Query = Data; }
+    });
+    int32 Updates = 0;
+    Handler.OnGossipGreetingUpdated.AddLambda([&](const FWowGossipMenu&) { ++Updates; });
     FWire Menu;
     Menu.Add(uint64(123)).Add(uint32(99)).Add(uint32(777)).Add(uint32(1))
         .Add(uint32(8)).Add(uint8(0)).Add(uint8(0)).Add(uint32(0)).Text("Tell me more.").Text("")
@@ -208,11 +218,41 @@ bool FGameplayGossipPackets::RunTest(const FString&)
     TestEqual(TEXT("Text id"),Handler.GossipMenu.TextId,uint32(777));
     TestEqual(TEXT("Conversation option is retained for UI"),Handler.GossipMenu.Options.Num(),1);
     TestEqual(TEXT("Quest option is retained for UI"),Handler.GossipMenu.Quests.Num(),1);
+    FPacketReader Sent(Query);
+    TestTrue(TEXT("The greeting query sends the text ID followed by the speaker's full GUID"),
+        Query.Num() == 12 && Sent.ReadU32() == 777 && Sent.ReadU64() == 123);
+    FWire NpcText;
+    NpcText.Add(uint32(777));
+    for (int32 Index = 0; Index < 8; ++Index)
+    {
+        NpcText.Add(Index == 2 ? 1.f : 0.f)
+            .Text(Index == 2 ? "Male greeting" : Index == 0 ? "Unused variant" : "")
+            .Text(Index == 2 ? "Female greeting" : "");
+        for (int32 Field = 0; Field < 7; ++Field) NpcText.Add(uint32(0));
+    }
+    auto Cut = NpcText.Data;
+    Cut.Pop();
+    Handler.HandlePacket(WowOpcode::SMSG_NPC_TEXT_UPDATE, Cut);
+    TestTrue(TEXT("A truncated last variant cannot supply partial greeting text"),
+        Handler.GossipMenu.Greeting.IsEmpty() && Updates == 0);
+    Handler.HandlePacket(WowOpcode::SMSG_NPC_TEXT_UPDATE, NpcText.Data);
+    TestTrue(TEXT("The asynchronous reply selects the weighted greeting for the speaker"),
+        Handler.GossipMenu.Greeting == TEXT("Female greeting") && Updates == 1);
+    Handler.HandlePacket(WowOpcode::SMSG_GOSSIP_MESSAGE, Menu.Data);
+    TestTrue(TEXT("Reopening the same text ID immediately uses its cached reply"),
+        Handler.GossipMenu.Greeting == TEXT("Female greeting") && TextQueries == 1);
     FWire QuestList;
     QuestList.Add(uint64(123)).Text("Welcome").Add(uint32(0)).Add(uint32(0)).Add(uint8(1))
         .Add(uint32(7)).Add(uint32(2)).Add(uint32(2)).Add(uint32(0)).Add(uint8(0)).Text("Kobold Camp Cleanup");
     Handler.HandlePacket(WowOpcode::SMSG_QUESTGIVER_QUEST_LIST,QuestList.Data);
     TestTrue(TEXT("Questgiver-only list also opens a selectable quest"),Handler.GossipMenu.Quests.Num()==1 && Handler.GossipMenu.Quests[0].Id==7);
+    Handler.HandlePacket(WowOpcode::SMSG_NPC_TEXT_UPDATE, NpcText.Data);
+    TestTrue(TEXT("Late gossip text cannot overwrite the direct quest-list greeting"),
+        Handler.GossipMenu.bQuestList && Handler.GossipMenu.Greeting == TEXT("Welcome") && Updates == 1);
+    Handler.ResetGossipState();
+    Handler.HandlePacket(WowOpcode::SMSG_GOSSIP_MESSAGE, Menu.Data);
+    TestTrue(TEXT("A new session queries the new realm's localized NPC text"),
+        Handler.GossipMenu.Greeting.IsEmpty() && TextQueries == 2);
     return true;
 }
 

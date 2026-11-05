@@ -286,6 +286,7 @@ struct FWowGossipMenu
 {
     uint64 Guid = 0;
     uint32 MenuId = 0, TextId = 0;
+    bool bQuestList = false;
     FString Greeting;
     TArray<FWowGossipOption> Options;
     TArray<FWowGossipQuest> Quests;

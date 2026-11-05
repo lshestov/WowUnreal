@@ -45,6 +45,9 @@
 #include "Engine/World.h"
 #include "Engine/GameViewportClient.h"
 #include "Widgets/SViewport.h"
+#include "Widgets/Text/STextBlock.h"
+#include "Fonts/CompositeFont.h"
+#include "Layout/Children.h"
 #include "Layout/WidgetPath.h"
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
@@ -55,6 +58,7 @@
 #include "UObject/GarbageCollection.h"
 #include "UnrealClient.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Framework/Application/SlateUser.h"
 #include "Framework/Application/IInputProcessor.h"
 
 // Native probe callbacks drive the test. Consume physical input in this test
@@ -73,6 +77,19 @@ public:
     bool HandleMouseButtonDoubleClickEvent(FSlateApplication&,const FPointerEvent&) override { return true; }
     bool HandleMouseWheelOrGestureEvent(FSlateApplication&,const FPointerEvent&,const FPointerEvent*) override { return true; }
 };
+
+namespace
+{
+TSharedPtr<SWidget> FindVisibleWidget(TSharedRef<SWidget> Root, TFunctionRef<bool(SWidget&)> Match)
+{
+    if (!Root->GetVisibility().IsVisible()) return nullptr;
+    if (Match(Root.Get())) return Root;
+    FChildren* Children = Root->GetChildren();
+    for (int32 Index = 0; Children && Index < Children->Num(); ++Index)
+        if (auto Found = FindVisibleWidget(Children->GetChildAt(Index), Match)) return Found;
+    return nullptr;
+}
+}
 
 // Explicit development probe. It invokes the same controller/UI callbacks as
 // ordinary input, waits for server state, captures rendered frames and exits.
@@ -101,6 +118,8 @@ struct FWowGameplayProbe
     double PreviousProfileTime=0;
     TSharedPtr<FJsonObject> Inspections=MakeShared<FJsonObject>();
     TSharedPtr<FWowProbeInputGuard> InputGuard;
+    TSharedPtr<FSlateVirtualUserHandle> DialogPointerUser;
+    TWeakPtr<SWidget> ExpectedDialogHover;
     TUniquePtr<FWowUiTestPeer> Peers[4];
     FWowUiTestPeer* Peer=nullptr;
     TSharedPtr<FJsonObject> FinalReport;
@@ -200,6 +219,111 @@ struct FWowGameplayProbe
         UE_LOG(LogTemp,Log,TEXT("GameplayProbe: Slate world click %s path=%s desktop=(%.1f,%.1f)"),Down?TEXT("down"):TEXT("up"),*Path.ToString(),Screen.X,Screen.Y);
         TGuardValue<bool> Synthetic(C.bProbeSyntheticKeyboard,true);
         return (Down?Slate.RoutePointerDownEvent(Path,Event):Slate.RoutePointerUpEvent(Path,Event)).IsEventHandled();
+    }
+
+    bool ProbeDialog(AWowGameplayController& C, const FJsonObject& Step, const FString& Op)
+    {
+        auto* Client = C.GetWorld()->GetGameViewport();
+        const auto Window = Client ? Client->GetWindow() : nullptr;
+        const auto Viewport = Client ? Client->GetGameViewportWidget() : nullptr;
+        if (!Window || !Viewport) return false;
+
+        const auto Dialog = FindVisibleWidget(Window.ToSharedRef(), [](SWidget& Widget) {
+            return Widget.GetType() == TEXT("SWowQuestDialog");
+        });
+        if (Op == TEXT("wait_dialog_closed")) return !Dialog;
+        if (!Dialog) return false;
+        FString Label, Tag;
+        Step.TryGetStringField(TEXT("text"), Label);
+        Step.TryGetStringField(TEXT("tag"), Tag);
+        if (Label.IsEmpty() && Tag.IsEmpty()) return false;
+        const bool InspectText = Op == TEXT("wait_dialog_text");
+        const auto MatchesText = [&](SWidget& Widget) {
+            if (Widget.GetType() != TEXT("STextBlock")) return false;
+            const FString Text = static_cast<STextBlock&>(Widget).GetText().ToString();
+            return InspectText ? Text.Contains(Label) : Text == Label;
+        };
+        if (InspectText)
+        {
+            const auto Found = FindVisibleWidget(Dialog.ToSharedRef(), MatchesText);
+            if (!Found) return false;
+            FString Face;
+            if (!Step.TryGetStringField(TEXT("face"), Face)) return true;
+            const auto& Text = static_cast<const STextBlock&>(*Found);
+            const auto Font = Text.GetFont();
+            const auto* Composite = Font.GetCompositeFont();
+            const bool Unhinted = Composite && !Composite->DefaultTypeface.Fonts.IsEmpty() &&
+                Composite->DefaultTypeface.Fonts[0].Font.GetHinting() == EFontHinting::None;
+            const auto Measured = MakeShared<FJsonObject>();
+            Measured->SetStringField(TEXT("face"), Font.TypefaceFontName.ToString());
+            Measured->SetNumberField(TEXT("points"), Font.Size);
+            Measured->SetNumberField(TEXT("letterSpacing"), Font.LetterSpacing);
+            Measured->SetBoolField(TEXT("unhinted"), Unhinted);
+            Inspections->SetObjectField(Step.GetStringField(TEXT("label")), Measured);
+            if (Font.TypefaceFontName != FName(*Face) || !Unhinted ||
+                !FMath::IsNearlyEqual(Font.Size, float(Step.GetNumberField(TEXT("points")))))
+            {
+                Failure = FString::Printf(TEXT("Unexpected font for '%s': %s %.2f pt, unhinted=%d"),
+                    *Label, *Font.TypefaceFontName.ToString(), Font.Size, Unhinted);
+                Finish(C,false);
+                return false;
+            }
+            return true;
+        }
+
+        const auto Button = FindVisibleWidget(Dialog.ToSharedRef(), [&](SWidget& Widget) {
+            return Widget.GetType() == TEXT("SButton") && Widget.IsEnabled() &&
+                (Tag.IsEmpty() ? FindVisibleWidget(Widget.AsShared(), MatchesText).IsValid() : Widget.GetTag() == FName(*Tag));
+        });
+        if (!Button || Button->GetCachedGeometry().GetLocalSize().GetMin() < 1) return false;
+
+        // Hit the actual arranged row. Dispatch through Slate, including its
+        // hit-test grid and SButton handlers, exactly as a mouse click would.
+        const FVector2D Screen = Button->GetCachedGeometry().GetAbsolutePositionAtCoordinates(FVector2D(.55,.5));
+        auto& Slate = FSlateApplication::Get();
+        // Give the probe its own pointer so a stationary hardware mouse cannot
+        // undo the hovered state between the routed move and the rendered capture.
+        if (!DialogPointerUser) DialogPointerUser = Slate.FindOrCreateVirtualUser(0);
+        const uint32 User = DialogPointerUser->GetUserIndex();
+        const auto Path = Slate.LocateWindowUnderMouse(Screen, {Window.ToSharedRef()}, false, User);
+        if (!Path.IsValid() || !Path.ContainsWidget(Button.Get())) return false;
+        int32 Width, Height;
+        C.GetViewportSize(Width, Height);
+        const auto& Geometry = Viewport->GetCachedGeometry();
+        const FVector2D LocalSize = Geometry.GetLocalSize();
+        if (LocalSize.GetMin() < 1 || Width < 1 || Height < 1) return false;
+        const FVector2D Pixel = Geometry.AbsoluteToLocal(Screen) / LocalSize * FVector2D(Width, Height);
+        C.GameplayProbePointer = Pixel;
+        const TSet<FKey> NoButtons;
+        const FPointerEvent Move(User, FSlateApplication::CursorPointerIndex, Screen, Screen, NoButtons,
+            EKeys::Invalid, 0, FModifierKeysState());
+        Slate.RoutePointerMoveEvent(Path, Move, false);
+        if (!Button->IsHovered()) return false;
+        bool Click = false;
+        Step.TryGetBoolField(TEXT("click"), Click);
+        if (Click)
+        {
+            const TSet<FKey> PressedButtons{EKeys::LeftMouseButton};
+            const FPointerEvent Down(User, FSlateApplication::CursorPointerIndex, Screen, Screen,
+                PressedButtons, EKeys::LeftMouseButton, 0, FModifierKeysState());
+            const FPointerEvent Up(User, FSlateApplication::CursorPointerIndex, Screen, Screen,
+                NoButtons, EKeys::LeftMouseButton, 0, FModifierKeysState());
+            const bool Pressed = Slate.RoutePointerDownEvent(Path, Down).IsEventHandled();
+            const bool Released = Slate.RoutePointerUpEvent(Path, Up).IsEventHandled();
+            if (!Pressed || !Released)
+            {
+                Failure = FString::Printf(TEXT("Dialog button did not handle click: %s"), Tag.IsEmpty() ? *Label : *Tag);
+                return false;
+            }
+        }
+        if (Click) ExpectedDialogHover.Reset();
+        else ExpectedDialogHover = Button;
+        const auto Row = MakeShared<FJsonObject>();
+        Row->SetNumberField(TEXT("x"), Pixel.X);
+        Row->SetNumberField(TEXT("y"), Pixel.Y);
+        Row->SetBoolField(TEXT("click"), Click);
+        Inspections->SetObjectField(Step.GetStringField(TEXT("label")), Row);
+        return true;
     }
 
     bool Walk(AWowGameplayController& C,const FVector& Point,float Range,bool AvoidObstacles=true)
@@ -811,6 +935,7 @@ struct FWowGameplayProbe
         }
         else if (Op==TEXT("quest")) { if (C.GameUI->GetShownQuestId()!=uint32(Step->GetIntegerField(TEXT("id")))) C.GameUI->SelectGossipQuest(Step->GetIntegerField(TEXT("id"))); Done=true; }
         else if (Op==TEXT("wait_dialog")) Done=C.GameUI->GetShownQuestId()==uint32(Step->GetIntegerField(TEXT("id")));
+        else if (Op==TEXT("dialog_button") || Op==TEXT("wait_dialog_text") || Op==TEXT("wait_dialog_closed")) Done=ProbeDialog(C,*Step,Op);
         else if (Op==TEXT("accept")) { C.GameUI->AcceptQuest(); Done=true; }
         else if (Op==TEXT("abandon_quest")) { Connection->SendQuestAbandon(Step->GetIntegerField(TEXT("id"))); Done=true; }
         else if (Op==TEXT("complete")) { C.GameUI->CompleteQuest(); Done=true; }
@@ -1060,6 +1185,15 @@ struct FWowGameplayProbe
         }
         else if (Op==TEXT("capture"))
         {
+            bool RequireDialogHover = false;
+            Step->TryGetBoolField(TEXT("requireDialogHover"), RequireDialogHover);
+            const auto Hovered = ExpectedDialogHover.Pin();
+            if (RequireDialogHover && (!Hovered || !Hovered->IsHovered()))
+            {
+                Failure = TEXT("Dialog control lost hover before its screenshot");
+                Finish(C,false);
+                return;
+            }
             const FString Path=Output/(Step->GetStringField(TEXT("name"))+TEXT(".png"));
             if (!bInvoked) { FScreenshotRequest::RequestScreenshot(Path,true,false); bInvoked=true; }
             else Done=IFileManager::Get().FileSize(*Path)>0;

@@ -53,6 +53,7 @@ public:
     /** Hide quest dialog */
     void HideQuestDialog();
     void ShowGossip(const FWowGossipMenu& Menu);
+    void UpdateGossipGreeting(const FString& Text);
     void SelectGossipQuest(uint32 QuestId);
     void SelectGossipOption(uint32 OptionId);
     void AcceptQuest();
@@ -60,7 +61,7 @@ public:
     void LootAll();
     void CloseLoot();
     uint32 GetShownQuestId() const;
-    bool IsPointerOverWindow() const;
+    bool IsPointerOverWindow(FVector2D DesktopPosition) const;
     bool CloseActiveWindow();
 
     /** Show or refresh the trade window */

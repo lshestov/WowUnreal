@@ -52,9 +52,76 @@ void FWowPacketHandler::HandleGossipMessage(FPacketReader& R)
     }
     if (!R.CanRead(4) || !ReadQuests(R,R.ReadU32(),Menu.Quests)) return;
     GossipMenu=MoveTemp(Menu);
+    if (const auto* Cached = NpcTextCache.Find(GossipMenu.TextId))
+    {
+        SelectGossipGreeting(*Cached);
+    }
+    else if (GossipMenu.TextId && GossipMenu.Guid)
+    {
+        TArray<uint8> Query;
+        Query.Append(reinterpret_cast<const uint8*>(&GossipMenu.TextId), sizeof(GossipMenu.TextId));
+        Query.Append(reinterpret_cast<const uint8*>(&GossipMenu.Guid), sizeof(GossipMenu.Guid));
+        OnSendPacket.ExecuteIfBound(WowOpcode::CMSG_NPC_TEXT_QUERY, Query);
+    }
     UE_LOG(LogWowInteraction,Log,TEXT("Gossip: guid=%llu menu=%u options=%d quests=%d"),GossipMenu.Guid,GossipMenu.MenuId,GossipMenu.Options.Num(),GossipMenu.Quests.Num());
     OnGossipMessage.Broadcast(GossipMenu.Guid,GossipMenu.TextId,GossipMenu.MenuId);
     OnGossipMenu.Broadcast(GossipMenu);
+}
+
+void FWowPacketHandler::ResetGossipState()
+{
+    GossipMenu = FWowGossipMenu();
+    NpcTextCache.Reset();
+}
+
+void FWowPacketHandler::SelectGossipGreeting(const TArray<FNpcTextOption>& Options)
+{
+    GossipMenu.Greeting.Reset();
+    if (Options.IsEmpty()) return;
+    double TotalWeight = 0;
+    for (const auto& Option : Options) TotalWeight += Option.Weight;
+    // Some server greetings (including its generic greeting) have only zero weights.
+    const FNpcTextOption* Selected = &Options[0];
+    double Roll = TotalWeight * FMath::FRand();
+    for (const auto& Option : Options)
+    {
+        if (Option.Weight <= 0) continue;
+        Selected = &Option;
+        Roll -= Option.Weight;
+        if (Roll <= 0) break;
+    }
+    const auto* Speaker = EntityManager.FindUnit(GossipMenu.Guid);
+    const bool Female = Speaker && Speaker->GetGenderId() == 1;
+    const bool UseFemaleText = Selected->Male.IsEmpty() || (Female && !Selected->Female.IsEmpty());
+    GossipMenu.Greeting = UseFemaleText ? Selected->Female : Selected->Male;
+}
+
+void FWowPacketHandler::HandleNpcTextUpdate(FPacketReader& R)
+{
+    if (!R.CanRead(4)) return;
+    const uint32 TextId = R.ReadU32();
+    if (!TextId) return;
+    TArray<FNpcTextOption> Options;
+    // 12340 sends all eight records, each with two C strings, a language and three emote pairs.
+    for (int32 Index = 0; Index < 8; ++Index)
+    {
+        if (!R.CanRead(34)) return;
+        FNpcTextOption Option;
+        Option.Weight = R.ReadFloat();
+        if (!FMath::IsFinite(Option.Weight) || Option.Weight < 0) return;
+        Option.Male = R.ReadCString();
+        Option.Female = R.ReadCString();
+        if (!R.CanRead(28)) return;
+        R.Skip(28);
+        if (!Option.Male.IsEmpty() || !Option.Female.IsEmpty()) Options.Add(MoveTemp(Option));
+    }
+    if (R.Remaining()) return;
+    const auto& Cached = NpcTextCache.Add(TextId, MoveTemp(Options));
+    if (GossipMenu.Guid && GossipMenu.TextId == TextId)
+    {
+        SelectGossipGreeting(Cached);
+        OnGossipGreetingUpdated.Broadcast(GossipMenu);
+    }
 }
 
 void FWowPacketHandler::HandleGossipComplete(FPacketReader& R)
@@ -63,7 +130,7 @@ void FWowPacketHandler::HandleQuestgiverQuestList(FPacketReader& R)
 {
     if (!R.CanRead(9)) return;
     FWowGossipMenu Menu;
-    Menu.Guid=R.ReadU64(); Menu.Greeting=R.ReadCString();
+    Menu.bQuestList=true; Menu.Guid=R.ReadU64(); Menu.Greeting=R.ReadCString();
     if (!R.CanRead(9)) return;
     R.Skip(8); const uint8 Count=R.ReadU8();
     if (!ReadQuests(R,Count,Menu.Quests)) return;

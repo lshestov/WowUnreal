@@ -1599,7 +1599,10 @@ bool FHudMerchantApi::RunTest(const FString&)
     T.RequiredLevel=21; TestFalse(TEXT("Level requirement remains authoritative"),WowLuaApi::CanUseItem(&F.Context,T)); T.RequiredLevel=0;
     T.AllowableClass=2; TestFalse(TEXT("Wrong class is unusable"),WowLuaApi::CanUseItem(&F.Context,T)); T.AllowableClass=MAX_uint32;
     T.RequiredSpell=123; TestFalse(TEXT("Required learned spell is checked"),WowLuaApi::CanUseItem(&F.Context,T)); H.KnownSpells.Add(123); TestTrue(TEXT("Known required spell is accepted"),WowLuaApi::CanUseItem(&F.Context,T));
-    Connection->PickupMerchantCursor(1); FWowUiCursorRenderer Cursor(F.Frames,F.Context); F.Frames.UpdateMouseHover(200,200); Cursor.Tick(F.Lua.GetState());
+    TStrongObjectPtr<UCanvasPanel> CursorCanvas(NewObject<UCanvasPanel>());
+    Connection->PickupMerchantCursor(1); FWowUiCursorRenderer Cursor(F.Frames,F.Context,*CursorCanvas); F.Frames.UpdateMouseHover(200,200); Cursor.Tick(F.Lua.GetState());
+    const auto* CursorFrame = F.Frames.GetWidgetForHandle(F.Frames.FindFrame(TEXT("IdleWowCursor")));
+    TestTrue(TEXT("Held items render on the separate viewport cursor layer"), CursorFrame && CursorFrame->GetParent() == CursorCanvas.Get());
     H.ItemTemplates[117].InventoryType=13;
     TestTrue(TEXT("Equipment highlighting accepts matching slots only"),F.Lua.ExecuteString(TEXT("assert(CursorCanGoInSlot(16) and CursorCanGoInSlot(17) and not CursorCanGoInSlot(1))")));
     TestTrue(TEXT("Merchant pickup renders a visible icon and retains source identity"),F.Context.SoftwareCursorVisible && Connection->GetCursorMerchantItemId()==117 && F.Frames.GetNamedTexture(TEXT("IdleWowCursorIcon")));

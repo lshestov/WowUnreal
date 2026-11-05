@@ -2460,11 +2460,11 @@ bool FWowFrameManager::DispatchEditBoxEscapePressed()
 	return false;
 }
 
-void FWowFrameManager::UpdateMouseHover(float ScreenX, float ScreenY)
+void FWowFrameManager::UpdateMouseHover(float ScreenX, float ScreenY, bool bNativeWindowUnderPointer)
 {
 	LastPointerPosition=FVector2D(ScreenX,ScreenY);
 	UpdateFrameMovement(); UpdateSliderPointer();
-	int64 NewHover = HitTestFrames(ScreenX, ScreenY);
+	const int64 NewHover = bNativeWindowUnderPointer ? -1 : HitTestFrames(ScreenX, ScreenY);
 
 	if (NewHover != HoverFrameHandle)
 	{

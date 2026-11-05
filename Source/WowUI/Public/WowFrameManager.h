@@ -286,7 +286,7 @@ public:
 
 	/** Update mouse hover state — call once per frame from Tick.
 	 *  Dispatches OnEnter/OnLeave events to Lua scripts. */
-	void UpdateMouseHover(float ScreenX, float ScreenY);
+	void UpdateMouseHover(float ScreenX, float ScreenY, bool bNativeWindowUnderPointer = false);
 
 	/** Poll EditBox/Slider widgets for changes and dispatch Lua events.
 	 *  Call once per frame from Tick. */
