@@ -1,0 +1,28 @@
+{
+  "qaClass": 8, "qaLevel": 70, "qaSpells": [66], "qaGm": false,
+  "qaSpawnEntry": 829, "qaSpawnOffset": 3,
+  "width": 1280, "height": 900,
+  "steps": [
+    {"op":"wait_world","timeout":180},
+    {"op":"wait_floor","timeout":90},
+    {"op":"time","minutes":630},
+    {"op":"select_entry","entry":829,"timeout":30},
+    {"op":"frame_camera_target","distance":560,"sideView":true},
+    {"op":"lua","code":"ClearTarget()"},
+    {"op":"hover_world_unit","entry":829,"timeout":20},
+    {"op":"inspect_unit_overhead","entry":829,"marker":"","showName":true,"subtitle":"<General Supplies>","label":"adlin-subtitle","timeout":15},
+    {"op":"lua_wait","condition":"GameTooltip:IsVisible() and GameTooltip:IsOwned(UIParent) and GameTooltipTextLeft1:GetText()=='Adlin Pridedrift' and GameTooltipTextLeft2:GetText()=='General Supplies'","timeout":10},
+    {"op":"capture","name":"01-adlin-general-supplies"},
+    {"op":"select_entry","entry":853,"timeout":20},
+    {"op":"frame_camera_target","distance":580,"sideView":true},
+    {"op":"move_pointer","x":0.74,"y":0.35},
+    {"op":"inspect_unit_overhead","entry":853,"marker":"","showName":true,"subtitle":"","label":"mountaineer-no-subtitle","timeout":15},
+    {"op":"wait_no_spell_effect","entry":853,"spell":18950,"phase":"aura","requireAura":true,"label":"ordinary","timeout":15},
+    {"op":"capture","name":"02-guard-normal"},
+    {"op":"lua","code":"CastSpellByID(66,'player')"},
+    {"op":"wait_spell_effect","entry":853,"spell":18950,"phase":"aura","requireAura":true,"minParticles":10,"minGeometry":1,"label":"invisible","timeout":16},
+    {"op":"capture","name":"03-guard-during-invisibility"},
+    {"op":"wait_no_spell_effect","entry":853,"spell":18950,"phase":"aura","requireAura":true,"label":"visible-again","timeout":35},
+    {"op":"capture","name":"04-guard-after-invisibility"}
+  ]
+}

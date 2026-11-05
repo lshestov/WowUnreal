@@ -231,6 +231,19 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         }
     }
 
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\Exhaustion.dbc"), Parser) && Parser.GetFieldCount()==23)
+    {
+        RestStates.Reset();
+        for (uint32 Row=0; Row<Parser.GetRecordCount(); ++Row)
+        {
+            auto& State=RestStates.Add(Parser.GetUInt(Row,0));
+            State.Factor=Parser.GetFloat(Row,2);
+            for (uint32 Locale=5; Locale<21 && State.Name.IsEmpty(); ++Locale)
+                State.Name=Parser.GetString(Row,Locale);
+        }
+        ++Loaded;
+    }
+
     if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\CreatureType.dbc"), Parser) && Parser.GetFieldCount()>=18)
     {
         for(uint32 Row=0; Row<Parser.GetRecordCount(); ++Row)

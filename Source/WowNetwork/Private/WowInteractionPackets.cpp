@@ -146,7 +146,9 @@ void FWowPacketHandler::HandleQuestgiverQuestDetails(FPacketReader& R)
     Quest.QuestGiverGuid=R.ReadU64(); R.ReadU64(); // divider GUID, present in 3.3.5a
     Quest.QuestId=R.ReadU32(); Quest.Title=R.ReadCString(); Quest.Details=R.ReadCString(); Quest.Objectives=R.ReadCString();
     if (!R.CanRead(10)) return;
-    R.Skip(10); // activateAccept, flags, suggested players, finished
+    R.ReadU8(); // activateAccept
+    Quest.bAutoAccepted = (R.ReadU32() & 0x00080000u) != 0; // QUEST_FLAGS_AUTO_ACCEPT
+    R.Skip(5); // suggested players, finished
     if (!ReadRewards(R,Quest)) return;
     QuestDetails=MoveTemp(Quest);
     UE_LOG(LogWowInteraction,Log,TEXT("QuestDetails: id=%u title=%s choices=%d"),QuestDetails.QuestId,*QuestDetails.Title,QuestDetails.ChoiceRewards.Num());
@@ -166,6 +168,15 @@ void FWowPacketHandler::HandleQuestgiverOfferReward(FPacketReader& R)
     QuestDetails=MoveTemp(Quest);
     UE_LOG(LogWowInteraction,Log,TEXT("QuestReward: id=%u choices=%d"),QuestDetails.QuestId,QuestDetails.ChoiceRewards.Num());
     OnQuestRewardDialog.Broadcast(QuestDetails);
+}
+
+void FWowPacketHandler::HandleQuestgiverQuestComplete(FPacketReader& R)
+{
+    if (R.Remaining() != 6 * sizeof(uint32)) return;
+    const uint32 QuestId = R.ReadU32();
+    const uint32 Experience = R.ReadU32();
+    R.Skip(4 * sizeof(uint32)); // Money, honor, talent points and arena points.
+    if (QuestId) OnQuestRewarded.Broadcast(QuestId, Experience);
 }
 
 void FWowPacketHandler::HandleLootResponse(FPacketReader& R)

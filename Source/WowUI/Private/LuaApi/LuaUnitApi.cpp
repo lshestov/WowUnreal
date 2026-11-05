@@ -73,6 +73,8 @@ void WowLuaApi::UpdateCharacterStats(lua_State* L)
     if(C->CharacterStatGuid!=P->Guid) { C->CharacterStatFields.Reset(); C->CharacterStatGuid=P->Guid; }
     struct FWatch {uint16 First,Count; const TCHAR* Event;};
     const FWatch Watches[]={
+        {PlayerField::XP,2,TEXT("PLAYER_XP_UPDATE")}, // Current and next-level XP arrive as player fields.
+        {PlayerField::REST_STATE_EXPERIENCE,1,TEXT("UPDATE_EXHAUSTION")},
         {UnitField::STAT0,15,TEXT("UNIT_STATS")},
         {UnitField::BASE+0x005D,21,TEXT("UNIT_RESISTANCES")},
         {UnitField::BASE+0x0038,3,TEXT("UNIT_ATTACK_SPEED")},
@@ -94,6 +96,18 @@ void WowLuaApi::UpdateCharacterStats(lua_State* L)
         const auto* Before=C->CharacterStatFields.Find(Index);
         if(!Before || *Before!=Value) {C->CharacterStatFields.Add(Index,Value); Changed.Add(Watch.Event);}
     }
+    // The rest-state byte also changes independently of the rested XP pool.
+    // A state transition carries no unit argument in build 12340.
+    const uint32 RestState=P->GetFieldByte(PlayerField::BYTES_2,3);
+    const auto* PreviousRestState=C->CharacterStatFields.Find(PlayerField::BYTES_2);
+    const bool RestStateChanged=!PreviousRestState || *PreviousRestState!=RestState;
+    if(RestStateChanged)
+    {
+        C->CharacterStatFields.Add(PlayerField::BYTES_2,RestState);
+        Changed.Remove(TEXT("UPDATE_EXHAUSTION"));
+        if(C->EventSystem) C->EventSystem->FireEvent(TEXT("UPDATE_EXHAUSTION"));
+    }
+
     // Publish after the complete snapshot, so original handlers read one state.
     if(C->EventSystem) for(const auto& Event:Changed)
         C->EventSystem->FireEvent(Event,Event==TEXT("COMBAT_RATING_UPDATE")?TArray<FString>():TArray<FString>{TEXT("player")});

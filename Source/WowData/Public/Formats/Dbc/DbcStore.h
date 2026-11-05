@@ -57,6 +57,8 @@ public:
     struct FTitle { uint32 Mask=0; FString Male,Female; };
     const FTitle* Title(uint32 Mask) const { return Titles.Find(Mask); }
     const FString* CreatureTypeName(uint32 Id) const { return CreatureTypeNames.Find(Id); }
+    struct FRestState { FString Name; float Factor=0; };
+    const FRestState* RestState(uint32 Id) const { return RestStates.Find(Id); }
     uint32 MaxTitleIndex() const { return TitleMax; }
     uint32 QuestXP(uint32 Level,uint32 Difficulty) const { const auto* Row=QuestXPValues.Find(Level); return Row && Row->IsValidIndex(Difficulty)?(*Row)[Difficulty]:0; }
     int32 QuestReputation(int32 ValueId) const { const auto* Value=QuestReputationValues.Find(ValueId); return Value?*Value:0; }
@@ -177,6 +179,7 @@ private:
     TMap<FName,TMap<uint32,float>> StatRatios;
     TMap<uint32,FTitle> Titles;
     TMap<uint32,FString> CreatureTypeNames;
+    TMap<uint32,FRestState> RestStates;
     TMap<uint32,uint32> TitleMasks;
     TMap<uint32,TArray<uint32>> QuestXPValues;
     TMap<int32,int32> QuestReputationValues;

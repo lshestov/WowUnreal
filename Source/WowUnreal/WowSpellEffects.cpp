@@ -184,7 +184,10 @@ void AWowGameplayController::UpdateSpellEffects()
         if(!Active) It.RemoveCurrent();
     }
     TSet<FString> Active;
-    const auto Keep=[&](const FString& Key,uint64 Unit,uint64 Caster,uint32 Spell,uint8 Counter,bool Channel,uint32 Kit,uint32 Done,double End)
+    const auto* Viewer = Handler.EntityManager.GetLocalPlayer();
+    const uint8 ViewerAuraVision = Viewer ? Viewer->GetFieldByte(PlayerField::FIELD_BYTES2, 3) : 0;
+    const auto CanSeeAura = [ViewerAuraVision](uint32 Mask) { return !Mask || (Mask & ViewerAuraVision) != 0; };
+    const auto Keep=[&](const FString& Key,uint64 Unit,uint64 Caster,uint32 Spell,uint8 Counter,bool Channel,uint32 Kit,uint32 Done,double End,uint32 RequiredAuraVisionMask=0)
     {
         if(!Kit || End<=Now || !SpellActor(Unit)) return; Active.Add(Key);
         auto* State=PersistentSpellEffects.Find(Key);
@@ -192,6 +195,7 @@ void AWowGameplayController::UpdateSpellEffects()
         {
             if(PersistentSpellEffects.Num()>=256) return;
             FVisualState New; New.Unit=Unit; New.Caster=Caster; New.Spell=Spell; New.Counter=Counter; New.Channel=Channel; New.DoneKit=Done;
+            New.RequiredAuraVisionMask = RequiredAuraVisionMask;
             New.Components=SpawnSpellKit(SpellActor(Unit),Kit,FMath::Min(60.f,float(End-Now)+.25f),Channel?TEXT("channel"):TEXT("aura"),Spell,Caster,Counter);
             State=&PersistentSpellEffects.Add(Key,MoveTemp(New));
         }
@@ -207,9 +211,13 @@ void AWowGameplayController::UpdateSpellEffects()
         const auto* Entity=Handler.EntityManager.Find(Guid); if(!Entity) return;
         for(int32 Slot=0;Slot<Entity->Auras.Num();++Slot)
         {
-            const auto& A=Entity->Auras[Slot]; if(!A.bActive) continue; const auto* V=SpellVisual(A.SpellId); if(!V) continue;
+            const auto& A=Entity->Auras[Slot]; if(!A.bActive) continue;
+            const auto& Dbc = FDbcStore::Get();
+            const auto* Spell = Dbc.Spells().GetById(A.SpellId);
+            if (!Spell || !CanSeeAura(Spell->RequiredAuraVisionMask)) continue;
+            const auto* V = Dbc.SpellVisuals().GetById(Spell->SpellVisual[0]); if(!V) continue;
             const double End=A.DurationMs?A.UpdatedAt+A.RemainingMs/1000.:Now+60;
-            Keep(FString::Printf(TEXT("aura:%llu:%d:%u:%llu"),Guid,Slot,A.SpellId,A.CasterGuid),Guid,A.CasterGuid,A.SpellId,0,false,V->StateKit,V->StateDoneKit,End);
+            Keep(FString::Printf(TEXT("aura:%llu:%d:%u:%llu"),Guid,Slot,A.SpellId,A.CasterGuid),Guid,A.CasterGuid,A.SpellId,0,false,V->StateKit,V->StateDoneKit,End,Spell->RequiredAuraVisionMask);
         }
     };
     for(const auto& Pair:Handler.EntityManager.GetAll()) if(Pair.Value->IsDynamicObject())
@@ -245,8 +253,14 @@ void AWowGameplayController::UpdateSpellEffects()
     Auras(Handler.EntityManager.LocalPlayerGuid); for(const auto& Pair:SpawnedEntityActors) Auras(Pair.Key);
     for(auto It=PersistentSpellEffects.CreateIterator();It;++It) if(!Active.Contains(It.Key()))
     {
-        const auto& State=It.Value(); for(const auto& Weak:State.Components) if(auto* E=Weak.Get()) E->StopEmitting();
-        if(SpellActor(State.Unit)) SpawnSpellKit(SpellActor(State.Unit),State.DoneKit,0,TEXT("state-done"),State.Spell,State.Caster,State.Counter);
+        const auto& State=It.Value();
+        const bool Visible = CanSeeAura(State.RequiredAuraVisionMask);
+        for(const auto& Weak:State.Components) if(auto* E=Weak.Get())
+        {
+            if (Visible) E->StopEmitting();
+            else E->DestroyComponent();
+        }
+        if(Visible && SpellActor(State.Unit)) SpawnSpellKit(SpellActor(State.Unit),State.DoneKit,0,TEXT("state-done"),State.Spell,State.Caster,State.Counter);
         It.RemoveCurrent();
     }
     for(auto It=LastVisualLaunches.CreateIterator();It;++It) if(Now-It.Value().ReceivedAt>65) It.RemoveCurrent();

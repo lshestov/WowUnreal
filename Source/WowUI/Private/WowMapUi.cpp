@@ -33,6 +33,27 @@ const FMapUiDbc::FArea* Current(FWowLuaContext* C)
 bool Inside(const FVector2D& P) {return P.X>=0 && P.Y>=0 && P.X<=1 && P.Y<=1;}
 }
 FWowMapUiView& WowMapUi::View(FWowLuaContext* C) {if(!C->Map) C->Map=MakeShared<FWowMapUiView>(); return *C->Map;}
+const FString* WowMapUi::QuestObjectiveName(FWowLuaContext* Context, uint32 EncodedEntry)
+{
+    auto& Connection = *Context->ConnectionManager;
+    const auto& Handler = Connection.PacketHandler;
+    if (EncodedEntry & 0x80000000u)
+    {
+        const uint32 ObjectId = EncodedEntry & 0x7fffffffu;
+        if (const auto* Object = Handler.GameObjectTemplates.Find(ObjectId)) return &Object->Name;
+        Connection.RequestGameObjectTemplate(ObjectId);
+        return nullptr;
+    }
+    if (const FString* Name = Handler.CreatureNameCache.Find(EncodedEntry)) return Name;
+    const double Now = FPlatformTime::Seconds();
+    auto& Requests = View(Context).ObjectiveNameRequests;
+    if (EncodedEntry && Requests.FindRef(EncodedEntry) <= Now)
+    {
+        Requests.Add(EncodedEntry, Now + 15);
+        Connection.SendCreatureQuery(EncodedEntry, 0);
+    }
+    return nullptr;
+}
 TArray<const FMapUiDbc::FArea*> WowMapUi::Continents()
 {
     TArray<const FMapUiDbc::FArea*> Rows; for(const auto& A:Data().Areas()) if(!A.AreaId) Rows.Add(&A); return Rows;

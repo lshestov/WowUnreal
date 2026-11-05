@@ -174,6 +174,7 @@ public:
 	void SetFrameBackdropBorderColor(int64 Handle,const FLinearColor& Color);
 	void SetFrameBackdrop(int64 Handle,const TOptional<FWowBackdrop>& Backdrop);
 	void LoadTextureDefinition(const FWowTextureElement& Texture,const FString& Parent);
+	void RegisterFontStringTemplate(const FWowFontStringElement& Definition);
 	void SetButtonFont(int64 Handle,const FString& State,const FString& Font);
 
 	/** Set frame strata and level */
@@ -406,6 +407,8 @@ private:
 	TMap<FString, int64> NameToHandle;
 	TMap<FString, FWowFrameDef> Templates;
 	TMap<FString,FWowTextureElement> TextureTemplates;
+	TMap<FString, FWowFontStringElement> FontStringTemplates;
+	void ResolveFontStringTemplate(FWowFontStringElement& Region) const;
 	FWowTextureElement ResolveTexture(const FWowTextureElement& Texture,int32 Depth=0) const;
 
 	/** Tooltip state storage */

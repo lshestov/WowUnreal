@@ -198,6 +198,9 @@ bool ProcessXmlDirectivesRecursive(
 		case FWowXmlDirective::EType::Texture:
             if(FrameManager) FrameManager->LoadTextureDefinition(Dir.TextureDef,Dir.TextureParent);
             break;
+		case FWowXmlDirective::EType::FontStringTemplate:
+			if (FrameManager) FrameManager->RegisterFontStringTemplate(Dir.FontStringDef);
+			break;
         case FWowXmlDirective::EType::Font:
             FWowEventSystem::RegisterFontDefinition(LuaVM,FrameManager?FrameManager->GetFontManager():nullptr,Dir);
 			break;

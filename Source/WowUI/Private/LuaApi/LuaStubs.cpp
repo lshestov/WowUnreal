@@ -4241,10 +4241,37 @@ static int L_UnitXPMax(lua_State* L)
 
 static int L_GetXPExhaustion(lua_State* L)
 {
-    // TODO: Implement rested XP when the update field is available
-    // For now, return 0 (no rested XP)
-    lua_pushnumber(L, 0);
+    const auto* Context = WowLuaApi::GetContext(L);
+    const auto* Player = Context && Context->EntityManager ? Context->EntityManager->GetLocalPlayer() : nullptr;
+    const auto* Rested = FDbcStore::Get().RestState(1);
+    if (Player && Player->GetFieldByte(PlayerField::BYTES_2,3)==1 && Rested)
+        lua_pushnumber(L, Player->GetField(PlayerField::REST_STATE_EXPERIENCE) * lua_Number(Rested->Factor));
+    else
+        lua_pushnil(L);
     return 1;
+}
+
+static int L_GetRestState(lua_State* L)
+{
+    const auto* Context = WowLuaApi::GetContext(L);
+    const auto* Player = Context && Context->EntityManager ? Context->EntityManager->GetLocalPlayer() : nullptr;
+    // Our FrameXML can enter the world before the initial player fields arrive.
+    // Use the unbonused DBC row until the server supplies the actual state.
+    const uint8 ServerState = Player ? Player->GetFieldByte(PlayerField::BYTES_2,3) : 0;
+    const uint8 Id = ServerState ? ServerState : 2;
+    if (const auto* State = FDbcStore::Get().RestState(Id))
+    {
+        lua_pushinteger(L, Id);
+        lua_pushstring(L, TCHAR_TO_UTF8(*State->Name));
+        lua_pushnumber(L, State->Factor);
+    }
+    else
+    {
+        lua_pushnil(L);
+        lua_pushnil(L);
+        lua_pushnil(L);
+    }
+    return 3;
 }
 
 static int L_BNGetNumFriends(lua_State* L)
@@ -4693,6 +4720,7 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "UnitXP", L_UnitXP);
     lua_register(L, "UnitXPMax", L_UnitXPMax);
     lua_register(L, "GetXPExhaustion", L_GetXPExhaustion);
+    lua_register(L, "GetRestState", L_GetRestState);
 
     // Locale / client
     lua_register(L, "GetLocale", L_GetLocale);
@@ -5393,33 +5421,6 @@ lua_pushboolean(L2, PLATFORM_MAC);
     });
     lua_register(L, "UnitXP", L_UnitXP);
     lua_register(L, "UnitXPMax", L_UnitXPMax);
-    lua_register(L, "GetXPExhaustion", [](lua_State* L2) -> int {
-        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
-        if (!Ctx || !Ctx->EntityManager)
-        {
-            lua_pushnil(L2);
-            return 1;
-        }
-
-        // Get player entity
-        FWowEntity* Player = Ctx->EntityManager->Find(Ctx->EntityManager->LocalPlayerGuid);
-        if (!Player || !Player->IsPlayer())
-        {
-            lua_pushnil(L2);
-            return 1;
-        }
-
-        // Rested XP is typically stored in player fields but exact field is TBD
-        // For now return 0 but maintain proper return type (number)
-        lua_pushnumber(L2, 0);
-        return 1;
-    });
-    lua_register(L, "GetRestState", [](lua_State* L2) -> int {
-        lua_pushnumber(L2, 1);
-        lua_pushstring(L2, "Normal");
-        lua_pushnumber(L2, 1);
-        return 3;
-    });
 
     // Security/Addon
     lua_register(L, "issecure", [](lua_State* L2) -> int { lua_pushboolean(L2, 1); return 1; });

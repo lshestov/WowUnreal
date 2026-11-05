@@ -1,5 +1,6 @@
 #include "WowTextBlock.h"
 #include "WowEntity.h"
+#include "WowConnectionManager.h"
 #include "WowUiText.h"
 #include "LuaApiRegistry.h"
 #include "WowMapUi.h"
@@ -1643,7 +1644,7 @@ static int LF_FontStringSetTextColor(lua_State* L)
 	if (UTextBlock* TextBlock = GetTextBlockWidgetForTable(L, 1))
 	{
 		FLinearColor TextColor(R, G, B, A);
-		TextBlock->SetColorAndOpacity(FSlateColor(TextColor));
+		UWowTextBlock::SetWowTextColor(*TextBlock, TextColor);
 		if(auto* Rich=Cast<UWowTextBlock>(TextBlock)) Rich->RefreshRichStyle();
 	}
     if(auto* Edit=GetEditBoxWidgetForTable(L)) Edit->SetForegroundColor(FLinearColor(R,G,B,A));
@@ -1718,6 +1719,7 @@ static int LF_FontStringGetStringWidth(lua_State* L)
 {
 	if(auto* TextBlock=GetTextBlockWidgetForTable(L,1))
 	{
+        if (const auto* Label = Cast<UWowTextBlock>(TextBlock); Label && !Label->HasDisplayContent()) { lua_pushnumber(L,0); return 1; }
         const float Wrap=TextBlock->GetWrapTextAt(); const bool Auto=TextBlock->GetAutoWrapText(); TextBlock->SetAutoWrapText(false); TextBlock->SetWrapTextAt(0);
 		if(auto* Rich=Cast<UWowTextBlock>(TextBlock)) Rich->RefreshRichStyle();
 		TextBlock->TakeWidget()->Invalidate(EInvalidateWidgetReason::Prepass); TextBlock->ForceLayoutPrepass();
@@ -1855,7 +1857,6 @@ static int LF_CreateFontString(lua_State* L)
     if(Key.IsEmpty()) { lua_pushnil(L); return 1; }
     lua_getglobal(L,TCHAR_TO_UTF8(*Key));
     if(Name.IsEmpty()) { lua_pushboolean(L,1); lua_setfield(L,-2,"__anonymous"); }
-    lua_getfield(L,-1,"SetFontObject"); lua_pushvalue(L,-2); lua_pushstring(L,TCHAR_TO_UTF8(*Inherits)); lua_call(L,2,0);
     return 1;
 }
 // Global CreateTexture(name, parent, drawLayer, inherits, subLevel) - WoW 3.3.5 API
@@ -2630,7 +2631,7 @@ static int LF_SetFontObject(lua_State* L)
         else { auto Info=Text->GetFont(); Info.Size=FMath::Max(1,FMath::RoundToInt(Size*Scale*.75f)); Text->SetFont(Info); }
         FLinearColor Color; float* Components[]={&Color.R,&Color.G,&Color.B,&Color.A}; const char* Keys[]={"__textColorR","__textColorG","__textColorB","__textColorA"};
         for(int32 I=0;I<4;++I) { lua_getfield(L,2,Keys[I]); *Components[I]=luaL_optnumber(L,-1,1); lua_pop(L,1); }
-        Text->SetColorAndOpacity(Color);
+        UWowTextBlock::SetWowTextColor(*Text, Color);
     }
     const int32 Source=2;
     const auto Apply=[&](const char* Method,std::initializer_list<const char*> Keys)
@@ -3240,6 +3241,11 @@ static int LF_TooltipSetUnit(lua_State* L)
 		const FString Guild=Read("GetGuildInfo");
 		if(!Guild.IsEmpty()) Ctx->FrameManager->TooltipAddLine(TooltipHandle,TEXT("<")+Guild+TEXT(">"),0,1,0,false);
 	}
+	else if (Ctx->ConnectionManager)
+	{
+		if (const auto* Title = Ctx->ConnectionManager->PacketHandler.GetCreatureTitle(*Entity))
+			Ctx->FrameManager->TooltipAddLine(TooltipHandle, *Title, 1, 1, 1, false);
+	}
 	lua_getglobal(L,"LEVEL"); const FString LevelLabel=lua_isstring(L,-1)?UTF8_TO_TCHAR(lua_tostring(L,-1)):TEXT("Level"); lua_pop(L,1);
 	FString Details=LevelLabel+TEXT(" ")+FString::FromInt(Entity->GetLevel());
 	const FString Race=Entity->IsPlayer()?Read("UnitRace"):TEXT("");
@@ -3736,7 +3742,7 @@ static const luaL_Reg FrameMethods[] =
 	{"SetTextColor", LF_FontStringSetTextColor},
 	{"GetTextColor", [](lua_State* L) -> int {
 		const auto* Text=GetTextBlockWidgetForTable(L);
-		auto Color=Text?Text->GetColorAndOpacity().GetSpecifiedColor():FLinearColor::White;
+		auto Color=Text?UWowTextBlock::GetWowTextColor(*Text):FLinearColor::White;
 		if(!Text) { float* Parts[]={&Color.R,&Color.G,&Color.B,&Color.A}; const char* Keys[]={"__textColorR","__textColorG","__textColorB","__textColorA"}; for(int32 I=0;I<4;++I) { lua_getfield(L,1,Keys[I]); *Parts[I]=luaL_optnumber(L,-1,1); lua_pop(L,1); } }
 		lua_pushnumber(L,Color.R); lua_pushnumber(L,Color.G); lua_pushnumber(L,Color.B); lua_pushnumber(L,Color.A); return 4;
 	}},

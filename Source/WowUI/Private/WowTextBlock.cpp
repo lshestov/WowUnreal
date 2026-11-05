@@ -17,6 +17,30 @@ FString EscapeLabel(FString Text)
 {
     return Text.Replace(TEXT("&"),TEXT("&amp;")).Replace(TEXT("<"),TEXT("&lt;")).Replace(TEXT(">"),TEXT("&gt;"));
 }
+
+FLinearColor ToSlateTextColor(const FLinearColor& Color)
+{
+    FLinearColor Linear = FLinearColor::FromSRGBColor(Color.ToFColor(false));
+    Linear.A = Color.A;
+    return Linear;
+}
+}
+
+void UWowTextBlock::SetWowTextColor(UTextBlock& Widget, const FLinearColor& Color)
+{
+    // FrameXML and Lua use display RGB. Keep their numbers for GetTextColor
+    // and only convert to linear when handing a color to Slate.
+    if (auto* Label = Cast<UWowTextBlock>(&Widget)) Label->WowTextColor = Color;
+    Widget.SetColorAndOpacity(ToSlateTextColor(Color));
+}
+
+FLinearColor UWowTextBlock::GetWowTextColor(const UTextBlock& Widget)
+{
+    if (const auto* Label = Cast<UWowTextBlock>(&Widget)) return Label->WowTextColor;
+    const FLinearColor Linear = Widget.GetColorAndOpacity().GetSpecifiedColor();
+    FLinearColor Color = Linear.ToFColorSRGB().ReinterpretAsLinear();
+    Color.A = Linear.A;
+    return Color;
 }
 FWowLabelMarkup UWowTextBlock::ParseMarkup(const FString& Text)
 {
@@ -153,7 +177,7 @@ public:
         if(Hex.Len()==8)
         {
             const uint32 Value=FCString::Strtoui64(*Hex,nullptr,16);
-            Style.SetColorAndOpacity(FLinearColor(float((Value>>16)&255)/255,float((Value>>8)&255)/255,float(Value&255)/255,float(Value>>24)/255));
+            Style.SetColorAndOpacity(FLinearColor::FromSRGBColor(FColor((Value>>16)&255,(Value>>8)&255,Value&255,Value>>24)));
         }
         return FSlateTextRun::Create(Info,Model,Style,FTextRange(Begin,Model->Len()));
     }

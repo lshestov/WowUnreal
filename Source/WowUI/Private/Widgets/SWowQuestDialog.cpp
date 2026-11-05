@@ -68,7 +68,9 @@ void SWowQuestDialog::Construct(const FArguments& InArgs)
         Background[I].DrawAs=ESlateBrushDrawType::Image;
         Background[I].SetUVRegion(FBox2f(FVector2f::ZeroVector,FVector2f(W/float(I%2?128:256),H/256.f)));
         Canvas->AddSlot().Alignment(FVector2D::ZeroVector).Offset(FMargin(I%2?256:0,I/2?256:0,W,H))
-            [SNew(SImage).Image(&Background[I]).Visibility(EVisibility::HitTestInvisible)];
+            [SNew(SImage).Image_Lambda([this,I]() -> const FSlateBrush* {
+                return I == 3 && CurrentQuest.bAutoAccepted && !bIsRewardDialog && AutoAcceptBottomRight.GetResourceObject() ? &AutoAcceptBottomRight : &Background[I];
+            }).Visibility(EVisibility::HitTestInvisible)];
     }
     Canvas->AddSlot().Alignment(FVector2D::ZeroVector).Offset_Lambda([this]() {
         return bUsesGossipFrame ? FMargin(77,20,249,20) : FMargin(74.5f,20,235,20);
@@ -145,6 +147,8 @@ void SWowQuestDialog::SetPresentation(FWowFrameManager& Frames, const FString& N
     Load(GossipIcon,TEXT("Interface\\GossipFrame\\GossipGossipIcon"));
     Load(Book,TEXT("Interface\\QuestFrame\\UI-QuestLog-BookIcon"));
     Load(GreetingFooter,TEXT("Interface\\QuestFrame\\UI-Quest-BotLeftPatch"));
+    Load(AutoAcceptBottomRight,TEXT("Interface\\QuestFrame\\UI-QuestGreeting-BotRight-blank"));
+    AutoAcceptBottomRight.SetUVRegion(static_cast<FBox2f>(Background[3].GetUVRegion()));
     Load(SectionDivider,TEXT("Interface\\QuestFrame\\UI-HorizontalBreak"));
     if (auto* Fonts=Frames.GetFontManager(); Fonts && Fonts->IsInitialized())
     {
@@ -442,14 +446,17 @@ void SWowQuestDialog::RefreshContent()
     {
         ButtonArea->AddSlot().AutoWidth()[PanelButton(TEXT("Accept"),FOnClicked::CreateSP(this,&SWowQuestDialog::OnAcceptClicked),77)];
         ButtonArea->AddSlot().FillWidth(1)[SNew(SSpacer)];
-        ButtonArea->AddSlot().AutoWidth()[PanelButton(TEXT("Decline"),FOnClicked::CreateSP(this,&SWowQuestDialog::OnDeclineClicked))];
+        if (!CurrentQuest.bAutoAccepted)
+            ButtonArea->AddSlot().AutoWidth()[PanelButton(TEXT("Decline"),FOnClicked::CreateSP(this,&SWowQuestDialog::OnDeclineClicked))];
     }
 
 }
 
 FReply SWowQuestDialog::OnAcceptClicked()
 {
-    if (OnQuestAccept.IsBound())
+    // QuestFrameDetailPanel uses its single Accept button to dismiss an
+    // auto-accepted quest. The server has already written the journal slot.
+    if (!CurrentQuest.bAutoAccepted && OnQuestAccept.IsBound())
     {
         OnQuestAccept.Execute(CurrentQuest.QuestGiverGuid, CurrentQuest.QuestId);
     }

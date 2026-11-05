@@ -676,6 +676,7 @@ void AWowGameplayController::BindEntityEvents()
 			}
 		});
 
+	ConnectionManager->PacketHandler.OnQuestRewarded.AddUObject(this, &AWowGameplayController::OnQuestRewarded);
 	ConnectionManager->PacketHandler.OnQuestRewardDialog.AddLambda(
 		[this](const FWowQuestDetails& QuestDetails)
 		{
@@ -2785,18 +2786,6 @@ void AWowGameplayController::UpdateXPBar()
 	uint32 NextLevelXP = PlayerEntity->GetField(PlayerField::NEXT_LEVEL_XP);
 	int32 Level = PlayerEntity->GetLevel();
 
-	// Track XP changes and fire events
-	static uint32 LastKnownXP = 0;
-	if (CurrentXP != LastKnownXP && LastKnownXP > 0)
-	{
-		FireUIEvent(TEXT("PLAYER_XP_UPDATE"));
-		LastKnownXP = CurrentXP;
-	}
-	else if (LastKnownXP == 0)
-	{
-		LastKnownXP = CurrentXP;
-	}
-
 	// Handle max level case
 	if (NextLevelXP == 0 || Level >= 80) // Max level for 3.3.5a
 	{
@@ -4032,6 +4021,22 @@ void AWowGameplayController::OnChatMessage(uint8 Type, uint32 Language, uint64 S
 
     if (UIManager && UIManager->GetEventSystem())
         UIManager->GetEventSystem()->FireChatMessage(Type, Language, SenderGuid, SenderName, Message, Channel, Achievement);
+}
+
+void AWowGameplayController::OnQuestRewarded(uint32 QuestId, uint32 Experience)
+{
+	if (!UIManager || !UIManager->GetEventSystem() || !ConnectionManager) return;
+	const auto& Packets = ConnectionManager->PacketHandler;
+	const auto* Quest = Packets.QuestTemplates.Find(QuestId);
+	FString Title = Quest ? Quest->Title : FString();
+	if (Title.IsEmpty() && Packets.QuestDetails.QuestId == QuestId)
+		Title = Packets.QuestDetails.Title;
+
+	const auto* Events = UIManager->GetEventSystem();
+	if (!Title.IsEmpty())
+		OnChatMessage(0, 0, 0, FString(), Events->ResolveText(TEXT("ERR_QUEST_COMPLETE_S")).Replace(TEXT("%s"), *Title), FString(), 0);
+	if (Experience)
+		OnChatMessage(0, 0, 0, FString(), Events->ResolveText(TEXT("ERR_QUEST_REWARD_EXP_I")).Replace(TEXT("%d"), *LexToString(Experience)), FString(), 0);
 }
 
 void AWowGameplayController::OnEmote(uint64 EntityGuid, uint32 EmoteId)

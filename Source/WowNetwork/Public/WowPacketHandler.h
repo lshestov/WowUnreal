@@ -46,6 +46,7 @@ DECLARE_DELEGATE_TwoParams(FOnSendPacket, uint32 /*Opcode*/, const TArray<uint8>
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnOpcodeReceived, uint16 /*Opcode*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnQuestAccepted, uint32 /*QuestId*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnQuestComplete, uint32 /*QuestId*/);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnQuestRewarded, uint32 /*QuestId*/, uint32 /*Experience*/);
 DECLARE_MULTICAST_DELEGATE(FOnTalentsUpdated);
 DECLARE_MULTICAST_DELEGATE(FOnFriendListUpdated);
 DECLARE_MULTICAST_DELEGATE(FOnGuildRosterUpdated);
@@ -272,6 +273,12 @@ public:
     TMap<uint32, FString> CreatureNameCache;
     TMap<uint32,uint32> CreatureTypes;
     TMap<uint32, FString> CreatureTitleCache;
+    const FString* GetCreatureTitle(const FWowEntity& Unit) const
+    {
+        if (!Unit.IsUnit() || Unit.IsPlayer() || Unit.GetField(UnitField::PETNUMBER)) return nullptr;
+        const FString* Title = CreatureTitleCache.Find(Unit.Entry);
+        return Title && !Title->IsEmpty() ? Title : nullptr;
+    }
 
     /** World states (field -> value) */
     TMap<uint32, uint32> WorldStates;
@@ -421,6 +428,7 @@ public:
     FOnQuestRewardDialog OnQuestRewardDialog;
     FOnQuestAccepted OnQuestAccepted;
     FOnQuestComplete OnQuestComplete;
+    FOnQuestRewarded OnQuestRewarded;
     FOnTalentsUpdated OnTalentsUpdated;
     FOnFriendListUpdated OnFriendListUpdated;
     FOnGuildRosterUpdated OnGuildRosterUpdated;
@@ -585,6 +593,7 @@ private:
     void HandleQuestQueryResponse(FPacketReader& R);
     void HandleQuestgiverQuestDetails(FPacketReader& R);
     void HandleQuestgiverOfferReward(FPacketReader& R);
+    void HandleQuestgiverQuestComplete(FPacketReader& R);
     void HandleQuestUpdateAddKill(FPacketReader& R);
     void HandleQuestUpdateComplete(FPacketReader& R);
 

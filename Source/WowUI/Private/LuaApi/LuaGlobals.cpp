@@ -856,9 +856,7 @@ R"LUA(ENU_MENU_LEVEL = 1
         function GetCurrentResolution() return 1 end
         function GetScreenResolutions() return "1920x1080" end
         function GetBillingTimeRested() return 0, 0, 0, 0 end
-        function GetRestState() return 1, "", 1 end
         function IsXPUserDisabled() return false end
-        -- UnitXP, UnitXPMax, GetXPExhaustion now implemented in C++ (LuaStubs.cpp)
         function GetWatchedFactionInfo() return nil end
         function TextStatusBar_Initialize(bar) end
         function TextStatusBar_UpdateTextString(bar) end

@@ -300,22 +300,43 @@ bool FHudFontAlignment::RunTest(const FString&)
     FHudFixture F;
     const char* Xml=R"XML(<Ui>
       <Font name="AlignedBase" justifyH="LEFT" justifyV="BOTTOM"/><Font name="AlignedDerived" inherits="AlignedBase"/>
+      <FontString name="WatchFontTemplate" inherits="AlignedDerived" virtual="true" justifyH="LEFT" justifyV="MIDDLE"><Size><AbsDimension x="0" y="16"/></Size></FontString>
       <Frame name="AlignedPanel" parent="UIParent"><Size x="300" y="100"/><Anchors><Anchor point="CENTER"/></Anchors><Layers><Layer>
         <FontString name="AlignedDefault" text="Centered title"><Size x="280" y="20"/><Anchors><Anchor point="TOP"/></Anchors></FontString>
         <FontString name="AlignedInherited" inherits="AlignedDerived" text="Inherited"><Size x="280" y="20"/><Anchors><Anchor point="CENTER"/></Anchors></FontString>
         <FontString name="AlignedOverride" inherits="AlignedDerived" text="Override" justifyH="RIGHT" justifyV="TOP"><Size x="280" y="20"/><Anchors><Anchor point="BOTTOM"/></Anchors></FontString>
+        <FontString name="WatchLine" inherits="WatchFontTemplate" text="- 0/8 Kobold Vermin"><Size x="160"/></FontString>
+        <FontString name="WatchOverride" inherits="WatchFontTemplate" justifyH="RIGHT"><Size y="22"/></FontString>
       </Layer></Layers></Frame></Ui>)XML";
     TArray<uint8> Bytes; Bytes.Append(reinterpret_cast<const uint8*>(Xml),FCStringAnsi::Strlen(Xml));
     const auto Parsed=FWowFrameXmlParser::ParseXml(Bytes,TEXT("FontAlignmentFixture"));
-    for(const auto& Dir:Parsed) if(Dir.Type==FWowXmlDirective::EType::Font) FWowEventSystem::RegisterFontDefinition(&F.Lua,nullptr,Dir); else if(Dir.Type==FWowXmlDirective::EType::Frame) F.Frames.CreateFrame(Dir.FrameDef);
+    for (const auto& Dir : Parsed)
+    {
+        if (Dir.Type == FWowXmlDirective::EType::Font) FWowEventSystem::RegisterFontDefinition(&F.Lua,nullptr,Dir);
+        else if (Dir.Type == FWowXmlDirective::EType::FontStringTemplate) F.Frames.RegisterFontStringTemplate(Dir.FontStringDef);
+        else if (Dir.Type == FWowXmlDirective::EType::Frame) F.Frames.CreateFrame(Dir.FrameDef);
+    }
     TestTrue(TEXT("Default, inherited and explicit XML alignment reach rendered labels"),F.Lua.ExecuteString(TEXT(R"LUA(
         assert(AlignedDefault:GetJustifyH()=='CENTER' and AlignedDefault:GetJustifyV()=='MIDDLE')
         assert(AlignedInherited:GetJustifyH()=='LEFT' and AlignedInherited:GetJustifyV()=='BOTTOM')
         assert(AlignedOverride:GetJustifyH()=='RIGHT' and AlignedOverride:GetJustifyV()=='TOP')
+        assert(WatchLine:GetJustifyH()=='LEFT' and WatchLine:GetJustifyV()=='MIDDLE')
+        assert(WatchLine:GetHeight()==16 and WatchLine:GetWidth()==160)
+        WatchLine:SetTextColor(.75,.61,0,.5)
+        local r,g,b,a=WatchLine:GetTextColor()
+        assert(math.abs(r-.75)<.0001 and math.abs(g-.61)<.0001 and b==0 and a==.5)
+        assert(WatchOverride:GetJustifyH()=='RIGHT' and WatchOverride:GetHeight()==22)
         local plain=AlignedPanel:CreateFontString('AlignedDynamic'); assert(plain:GetJustifyH()=='CENTER')
         local inherited=AlignedPanel:CreateFontString('AlignedDynamicInherited',nil,'AlignedDerived'); assert(inherited:GetJustifyH()=='LEFT' and inherited:GetJustifyV()=='BOTTOM')
         inherited:SetJustifyH('RIGHT'); assert(inherited:GetJustifyH()=='RIGHT')
+        local watch=AlignedPanel:CreateFontString('WatchDynamic',nil,'WatchFontTemplate')
+        assert(watch:GetJustifyH()=='LEFT' and watch:GetJustifyV()=='MIDDLE' and watch:GetHeight()==16)
+        watch:SetPoint('LEFT', AlignedPanel); watch:SetShadowOffset(1,-1); watch:SetText(nil)
+        assert(watch:GetWidth()==1 and watch:GetStringWidth()==0)
+        watch:SetText('- '); assert(watch:GetWidth()>1 and watch:GetStringWidth()>0)
     )LUA")));
+    const auto* WatchText = F.Frames.GetNamedFontString(TEXT("WatchLine"));
+    TestTrue(TEXT("Watch title retains the stock display RGB in Slate"), WatchText && WatchText->GetColorAndOpacity().GetSpecifiedColor().ToFColorSRGB() == FColor(191,156,0,128));
     return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudUnitReactions,"WowUnreal.Hud.UnitReactions",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
@@ -990,9 +1011,9 @@ bool FHudTextureTemplates::RunTest(const FString&)
     if(Normal) { const FBox2f UV=Normal->GetBrush().GetUVRegion(); TestTrue(TEXT("Inherited atlas crop retained"),UV.bIsValid && FMath::IsNearlyEqual(UV.Max.X,.625f) && FMath::IsNearlyEqual(UV.Max.Y,.6875f)); }
     TestTrue(TEXT("Font getters use inherited stock styles"),F.Lua.ExecuteString(TEXT("assert(SkinButton:GetNormalFontObject()==GameFontHighlight); SkinButton:SetDisabledFontObject(GameFontDisable); SkinButton:Disable()")));
     const auto* Text=F.Frames.GetPrimaryTextWidget(Handle);
-    TestTrue(TEXT("Disabled caption receives the disabled font color"),Text && FMath::IsNearlyEqual(Text->GetColorAndOpacity().GetSpecifiedColor().R,.5f));
+    TestTrue(TEXT("Disabled caption receives the disabled font color"),Text && Text->GetColorAndOpacity().GetSpecifiedColor().ToFColorSRGB().R==128);
     TestTrue(TEXT("Normal font can change through original Lua API"),F.Lua.ExecuteString(TEXT("SkinButton:Enable(); SkinButton:SetNormalFontObject(GameFontNormal); assert(SkinButton:GetNormalFontObject()==GameFontNormal)")));
-    TestTrue(TEXT("Updated normal caption color is visible"),Text && FMath::IsNearlyEqual(Text->GetColorAndOpacity().GetSpecifiedColor().G,.8f));
+    TestTrue(TEXT("Updated normal caption color is visible"),Text && Text->GetColorAndOpacity().GetSpecifiedColor().ToFColorSRGB().G==204);
     return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudMinimapTracking,"WowUnreal.Hud.MinimapTracking",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
@@ -1167,6 +1188,11 @@ bool FHudWorldMap::RunTest(const FString&)
         assert(GetNumBattlefieldVehicles()==0 and GetBattlefieldVehicleInfo(1)==nil)
     )LUA")));
     FWowQuestLogEntry Q; Q.QuestId=783; H.QuestLog.Add(Q); FWowQuestTemplate T; T.Id=783; T.CreatureId[0]=1; T.CreatureCount[0]=5; T.CompletedText=TEXT("Return to Marshal McBride"); H.QuestTemplates.Add(783,T);
+    TestTrue(TEXT("An uncached quest target requests its name without inventing an objective"),F.Lua.ExecuteString(TEXT("assert(GetQuestLogLeaderBoard(1,1)=='…')")) && WowMapUi::View(&F.Context).ObjectiveNameRequests.Contains(1));
+    H.CreatureNameCache.Add(1,TEXT("Kobold Vermin"));
+    H.QuestTemplates[783].CreatureId[1]=0x80000002u; H.QuestTemplates[783].CreatureCount[1]=1;
+    H.GameObjectTemplates.FindOrAdd(2).Name=TEXT("Supply Crate");
+    TestTrue(TEXT("Creature and gameobject objectives resolve their own template namespaces"),F.Lua.ExecuteString(TEXT("assert(GetQuestLogLeaderBoard(1,1)=='Kobold Vermin: 0/5'); local text,kind=GetQuestLogLeaderBoard(2,1); assert(text=='Supply Crate: 0/1' and kind=='object')")));
     FWowPacketHandler::FQuestPoi Poi; Poi.MapId=0; Poi.AreaId=30; Poi.Objective=0; Poi.Points={{-8900,-100},{-8880,-100},{-8880,-80},{-8900,-80}}; H.QuestPois.Add(783,{Poi});
     auto ReturnPoi=Poi; ReturnPoi.Objective=-1; ReturnPoi.AreaId=301; H.QuestPois[783].Insert(ReturnPoi,0);
     TestTrue(TEXT("Real quest polygons and objective indexes feed original map APIs"),F.Lua.ExecuteString(TEXT(R"LUA(
@@ -2779,6 +2805,65 @@ bool FHudTextureAnimations::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudRestedExperience,"WowUnreal.Hud.RestedExperience",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudRestedExperience::RunTest(const FString&)
+{
+    FString DataPath;
+    if (!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),DataPath)) { AddError(TEXT("Supply -wowdata=<existing Data>")); return false; }
+    FMpqManager Mpq;
+    if (!Mpq.Initialize(DataPath) || (!FDbcStore::Get().IsLoaded() && !FDbcStore::Get().LoadAll(Mpq))) return false;
+    FHudFixture F;
+    FWowEntityManager Entities;
+    F.Context.EntityManager=&Entities;
+    TArray<uint8> Source;
+    if (!Mpq.ReadFile(TEXT("Interface\\FrameXML\\MainMenuBar.lua"),Source)) return false;
+    Source.Add(0);
+    if (!TestTrue(TEXT("Load the original Wrath exhaustion handler"),F.Lua.ExecuteString(UTF8_TO_TCHAR(reinterpret_cast<const char*>(Source.GetData()))))) return false;
+    if (!TestTrue(TEXT("Install the XP bar and original world-entry handler"),F.Lua.ExecuteString(TEXT(R"LUA(
+        MainMenuExpBar=CreateFrame('StatusBar','MainMenuExpBar',UIParent)
+        MainMenuExpBar:SetSize(1024,13)
+        MainMenuBarMaxLevelBar=CreateFrame('Frame','MainMenuBarMaxLevelBar',UIParent)
+        MainMenuBarMaxLevelBar:Hide()
+        ExhaustionTick=CreateFrame('Frame','ExhaustionTick',MainMenuExpBar)
+        ExhaustionTickHighlight=ExhaustionTick:CreateTexture()
+        ExhaustionLevelFillBar=MainMenuExpBar:CreateTexture()
+        RestBarEvents=0
+        ExhaustionTick:SetScript('OnEvent',function(self,event,...) ExhaustionTick_OnEvent(self,event,...); RestBarEvents=RestBarEvents+1 end)
+        ExhaustionTick_OnLoad(ExhaustionTick)
+        function AssertNormalRestBar(calls)
+            local id,name,factor=GetRestState()
+            local r,g,b=MainMenuExpBar:GetStatusBarColor()
+            assert(id==2 and type(name)=='string' and name~='' and factor==1 and not GetXPExhaustion())
+            assert(RestBarEvents==calls and not ExhaustionTick:IsShown() and math.abs(r-.58)<.001 and g==0 and math.abs(b-.55)<.001)
+        end
+    )LUA")))) return false;
+    F.Events.FireEvent(TEXT("PLAYER_ENTERING_WORLD"));
+    TestTrue(TEXT("Wrath initializes a normal bar before the player object arrives"),F.Lua.ExecuteString(TEXT("AssertNormalRestBar(1)")));
+
+    Entities.LocalPlayerGuid=1;
+    auto& Player=Entities.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER);
+    Player.SetField(PlayerField::NEXT_LEVEL_XP,400);
+    F.Events.FireEvent(TEXT("PLAYER_ENTERING_WORLD"));
+    TestTrue(TEXT("Wrath initializes the same bar while the rest-state byte is still zero"),F.Lua.ExecuteString(TEXT("AssertNormalRestBar(2)")));
+    Player.SetField(PlayerField::BYTES_2,2u<<24);
+    TestTrue(TEXT("Observe exhaustion changes from the player fields"),F.Lua.ExecuteString(TEXT("RestWatch=CreateFrame('Frame'); RestWatch.count=0; RestWatch:RegisterEvent('UPDATE_EXHAUSTION'); RestWatch:SetScript('OnEvent',function(self,event,unit) self.count=self.count+1; self.unit=unit end)")));
+    WowLuaApi::UpdateCharacterStats(F.Lua.GetState());
+    TestTrue(TEXT("Normal state uses the unbonused bar and no exhaustion tick"),F.Lua.ExecuteString(TEXT("local id,name,factor=GetRestState(); assert(id==2 and type(name)=='string' and name~='' and factor==1 and GetXPExhaustion()==nil and RestWatch.count==1 and RestWatch.unit==nil)")));
+    Player.SetField(PlayerField::BYTES_2,1u<<24);
+    Player.SetField(PlayerField::REST_STATE_EXPERIENCE,45);
+    WowLuaApi::UpdateCharacterStats(F.Lua.GetState());
+    TestTrue(TEXT("Rested pool uses the multiplier from Exhaustion.dbc"),F.Lua.ExecuteString(TEXT("local id,name,factor=GetRestState(); assert(id==1 and type(name)=='string' and name~='' and factor==2 and GetXPExhaustion()==90 and RestWatch.count==2 and RestWatch.unit==nil)")));
+    Player.SetField(PlayerField::REST_STATE_EXPERIENCE,22);
+    WowLuaApi::UpdateCharacterStats(F.Lua.GetState());
+    Player.SetField(PlayerField::BYTES_2,(1u<<24)|(7u<<16));
+    WowLuaApi::UpdateCharacterStats(F.Lua.GetState());
+    TestTrue(TEXT("Rested pool updates carry player; unrelated bytes do not change rest"),F.Lua.ExecuteString(TEXT("assert(GetXPExhaustion()==44 and RestWatch.count==3 and RestWatch.unit=='player')")));
+    Player.SetField(PlayerField::BYTES_2,6u<<24);
+    WowLuaApi::UpdateCharacterStats(F.Lua.GetState());
+    TestTrue(TEXT("Recruit-a-friend uses its own DBC row with no rested pool"),F.Lua.ExecuteString(TEXT("local id,_,factor=GetRestState(); assert(id==6 and factor==2 and GetXPExhaustion()==nil)")));
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudAuthoritativeSpellStats,"WowUnreal.Hud.AuthoritativeSpellStats",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FHudAuthoritativeSpellStats::RunTest(const FString&)
 {
@@ -2792,9 +2877,19 @@ bool FHudAuthoritativeSpellStats::RunTest(const FString&)
     const auto FloatField=[&P](uint16 Index,float Value) {uint32 Bits=0; FMemory::Memcpy(&Bits,&Value,sizeof(Bits)); P.SetField(Index,Bits);};
     FloatField(UnitField::BASE+0x0022,3.25f); FloatField(UnitField::BASE+0x0029,.75f);
     F.Context.ConnectionManager=Connection.Get(); F.Context.EntityManager=&E;
-    TestTrue(TEXT("Register actual character-panel event contracts"),F.Lua.ExecuteString(TEXT("StatEvents={}; StatWatcher=CreateFrame('Frame'); for _,event in ipairs({'UNIT_STATS','PLAYER_DAMAGE_DONE_MODS','UNIT_RESISTANCES','COMBAT_RATING_UPDATE','UNIT_ATTACK_SPEED','UNIT_DAMAGE','UNIT_RANGED_ATTACK_POWER','UNIT_RANGEDDAMAGE','UNIT_LEVEL'}) do StatWatcher:RegisterEvent(event) end; StatWatcher:SetScript('OnEvent',function(self,event,unit) assert(event=='COMBAT_RATING_UPDATE' and unit==nil or unit=='player'); StatEvents[event]=(StatEvents[event] or 0)+1 end)")));
+    P.SetField(PlayerField::NEXT_LEVEL_XP,400);
+    TestTrue(TEXT("Register actual character-panel event contracts"),F.Lua.ExecuteString(TEXT("StatEvents={}; StatWatcher=CreateFrame('Frame'); for _,event in ipairs({'UNIT_STATS','PLAYER_DAMAGE_DONE_MODS','UNIT_RESISTANCES','COMBAT_RATING_UPDATE','UNIT_ATTACK_SPEED','UNIT_DAMAGE','UNIT_RANGED_ATTACK_POWER','UNIT_RANGEDDAMAGE','UNIT_LEVEL','PLAYER_XP_UPDATE'}) do StatWatcher:RegisterEvent(event) end; StatWatcher:SetScript('OnEvent',function(self,event,unit) assert(event=='COMBAT_RATING_UPDATE' and unit==nil or unit=='player'); StatEvents[event]=(StatEvents[event] or 0)+1 end)")));
     WowLuaApi::UpdateCharacterStats(F.Lua.GetState()); WowLuaApi::UpdateCharacterStats(F.Lua.GetState());
     TestTrue(TEXT("Initial changes publish once and unchanged polling is silent"),F.Lua.ExecuteString(TEXT("assert(StatEvents.UNIT_STATS==1 and StatEvents.PLAYER_DAMAGE_DONE_MODS==1 and StatEvents.UNIT_RESISTANCES==1 and StatEvents.COMBAT_RATING_UPDATE==1)")));
+    TestTrue(TEXT("New character has one initial XP bar update"),F.Lua.ExecuteString(TEXT("assert(StatEvents.PLAYER_XP_UPDATE==1 and UnitXP('player')==0 and UnitXPMax('player')==400)")));
+    P.SetField(PlayerField::XP,40);
+    WowLuaApi::UpdateCharacterStats(F.Lua.GetState());
+    TestTrue(TEXT("First XP gain refreshes FrameXML from zero"),F.Lua.ExecuteString(TEXT("assert(StatEvents.PLAYER_XP_UPDATE==2 and UnitXP('player')==40)")));
+    P.SetField(PlayerField::XP,0);
+    P.SetField(PlayerField::NEXT_LEVEL_XP,900);
+    WowLuaApi::UpdateCharacterStats(F.Lua.GetState());
+    WowLuaApi::UpdateCharacterStats(F.Lua.GetState());
+    TestTrue(TEXT("Level rollover publishes the new XP and range together once"),F.Lua.ExecuteString(TEXT("assert(StatEvents.PLAYER_XP_UPDATE==3 and UnitXP('player')==0 and UnitXPMax('player')==900)")));
     TestTrue(TEXT("School-specific bonuses use signed authoritative fields rather than intellect"),F.Lua.ExecuteString(TEXT("for school=1,7 do local expected=100+(school-1)*7; if school==5 then expected=-20 end; assert(GetSpellBonusDamage(school)==expected) end; assert(GetSpellBonusHealing()==73)")));
     TestTrue(TEXT("Mana regeneration retains both server rates and Wrath rounding behavior"),F.Lua.ExecuteString(TEXT("local normal,casting=GetManaRegen(); assert(math.abs(normal-3.251)<.00001 and math.abs(casting-.751)<.00001)")));
     P.SetField(PlayerField::BASE+0x03FF+2,0); P.SetField(PlayerField::BASE+0x0406+2,0); P.SetField(PlayerField::BASE+0x0414,0);

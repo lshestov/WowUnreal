@@ -15,6 +15,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogWowXml, Log, All);
 static bool IsFrameTypeTag(const FString& Tag);
 static FWowFrameDef ParseFrameNode(const FXmlNode* Node);
 static FWowTextureElement ParseTextureNode(const FXmlNode* Node);
+static FWowFontStringElement ParseFontStringNode(const FXmlNode* Node);
 static FLinearColor ParseColor(const FXmlNode* Node);
 
 namespace
@@ -199,6 +200,13 @@ TArray<FWowXmlDirective> ParseXmlWithFXmlFallback(const FString& XmlContent, con
 			FWowXmlDirective Dir;
 			Dir.Type = FWowXmlDirective::EType::Frame;
 			Dir.FrameDef = ParseFrameNode(Child);
+			Directives.Add(MoveTemp(Dir));
+		}
+		else if (Tag.Equals(TEXT("FontString"), ESearchCase::IgnoreCase) && Child->GetAttribute(TEXT("virtual")).ToBool())
+		{
+			FWowXmlDirective Dir;
+			Dir.Type = FWowXmlDirective::EType::FontStringTemplate;
+			Dir.FontStringDef = ParseFontStringNode(Child);
 			Directives.Add(MoveTemp(Dir));
 		}
         else if(Tag.Equals(TEXT("Texture"),ESearchCase::IgnoreCase))
@@ -549,6 +557,7 @@ static FWowTextureElement ParseTextureNode(const FXmlNode* Node)
 static FWowFontStringElement ParseFontStringNode(const FXmlNode* Node)
 {
 	FWowFontStringElement FS;
+	FS.bHasHidden = !Node->GetAttribute(TEXT("hidden")).IsEmpty();
 	FS.bHidden = Node->GetAttribute(TEXT("hidden")).Equals(TEXT("true"), ESearchCase::IgnoreCase);
 	FS.Name = Node->GetAttribute(TEXT("name"));
 	FS.ParentKey = Node->GetAttribute(TEXT("parentKey"));
@@ -564,6 +573,12 @@ static FWowFontStringElement ParseFontStringNode(const FXmlNode* Node)
 	// Size
 	const FXmlNode* SizeNode = Node->FindChildNode(TEXT("Size"));
 	ParseSize(SizeNode, FS.Width, FS.Height);
+	if (SizeNode)
+	{
+		const FXmlNode* Dim = SizeNode->FindChildNode(TEXT("AbsDimension"));
+		FS.bHasWidth = !SizeNode->GetAttribute(TEXT("x")).IsEmpty() || (Dim && !Dim->GetAttribute(TEXT("x")).IsEmpty());
+		FS.bHasHeight = !SizeNode->GetAttribute(TEXT("y")).IsEmpty() || (Dim && !Dim->GetAttribute(TEXT("y")).IsEmpty());
+	}
 
 	// Anchors
 	const FXmlNode* AnchorsNode = Node->FindChildNode(TEXT("Anchors"));
@@ -996,6 +1011,7 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 					else if (TexTag == TEXT("FontString"))
 					{
 						FWowFontStringElement FS;
+						FS.bHasHidden = bool(Tex.attribute("hidden"));
 						FS.bHidden = Tex.attribute("hidden").as_bool(false);
 						FS.Name = UTF8_TO_TCHAR(Tex.attribute("name").as_string());
 						FS.ParentKey = UTF8_TO_TCHAR(Tex.attribute("parentKey").as_string());
@@ -1015,6 +1031,8 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 							{
 								FS.Width = FSAbsDim.attribute("x").as_float(0.0f);
 								FS.Height = FSAbsDim.attribute("y").as_float(0.0f);
+								FS.bHasWidth = bool(FSAbsDim.attribute("x"));
+								FS.bHasHeight = bool(FSAbsDim.attribute("y"));
 							}
 						}
 
@@ -1524,7 +1542,7 @@ TArray<FWowXmlDirective> FWowFrameXmlParser::ParseXml(const TArray<uint8>& Data,
 				Directives.Add(Dir);
 			}
 		}
-        else if(TagName==TEXT("Texture"))
+        else if(TagName==TEXT("Texture") || (TagName==TEXT("FontString") && Child.attribute("virtual").as_bool()))
         {
             pugi::xml_document D; auto Frame=D.append_child("Frame"); Frame.append_child("Layers").append_child("Layer").append_copy(Child);
             const auto Parsed=ParseFrameNode_Pugi(Frame);
@@ -1532,6 +1550,13 @@ TArray<FWowXmlDirective> FWowFrameXmlParser::ParseXml(const TArray<uint8>& Data,
             {
                 FWowXmlDirective Dir; Dir.Type=FWowXmlDirective::EType::Texture; Dir.TextureDef=Parsed.Layers[0].Textures[0]; Dir.TextureParent=UTF8_TO_TCHAR(Child.attribute("parent").as_string()); Directives.Add(MoveTemp(Dir));
             }
+			else if (!Parsed.Layers.IsEmpty() && !Parsed.Layers[0].FontStrings.IsEmpty())
+			{
+				FWowXmlDirective Dir;
+				Dir.Type = FWowXmlDirective::EType::FontStringTemplate;
+				Dir.FontStringDef = Parsed.Layers[0].FontStrings[0];
+				Directives.Add(MoveTemp(Dir));
+			}
         }
 		else if (TagName == TEXT("Font"))
 		{

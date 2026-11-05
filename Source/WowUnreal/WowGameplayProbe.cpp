@@ -38,6 +38,7 @@
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextBlock.h"
+#include "Components/ProgressBar.h"
 #include "Components/Image.h"
 #include "Engine/Texture2D.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -736,10 +737,14 @@ struct FWowGameplayProbe
             const bool Show = Step->GetBoolField(TEXT("showName"));
             const bool Painted = Info && Info->LastNamePaint && GFrameCounter - Info->LastNamePaint <= 2;
             Done = Info && Info->ShowName == Show && Painted == Show && Model == Expected;
+            FString Subtitle;
+            if (Done && Step->TryGetStringField(TEXT("subtitle"), Subtitle))
+                Done = Info->Subtitle.ToString() == Subtitle;
             if (Done)
             {
                 auto State = MakeShared<FJsonObject>();
                 State->SetStringField(TEXT("name"), Info->Name.ToString());
+                State->SetStringField(TEXT("subtitle"), Info->Subtitle.ToString());
                 State->SetBoolField(TEXT("nameVisible"), Info->ShowName);
                 State->SetBoolField(TEXT("painted"), Painted);
                 if (Painted)
@@ -810,9 +815,20 @@ struct FWowGameplayProbe
         {
             const uint32 Spell=Step->GetIntegerField(TEXT("spell")); const FString Phase=Step->GetStringField(TEXT("phase"));
             const FName SpellTag(*FString::Printf(TEXT("spell:%u"),Spell)),PhaseTag(*FString::Printf(TEXT("phase:%s"),*Phase));
+            uint32 Entry = 0;
+            Step->TryGetNumberField(TEXT("entry"), Entry);
+            const uint64 Guid = Entry ? FindEntry(C, Entry) : 0;
+            const auto* Unit = Guid ? Handler.EntityManager.FindUnit(Guid) : nullptr;
+            const auto* TargetActor = Guid ? C.SpellActor(Guid) : nullptr;
+            bool RequireAura = false;
+            Step->TryGetBoolField(TEXT("requireAura"), RequireAura);
+            const bool HasAura = Unit && Unit->Auras.ContainsByPredicate([Spell](const FAuraInfo& Aura) {
+                return Aura.bActive && Aura.SpellId == Spell;
+            });
             int32 Components=0,Particles=0,Geometry=0; TArray<TSharedPtr<FJsonValue>> Models,Ids;
             for(TActorIterator<AActor> It(C.GetWorld());It;++It)
             {
+                if (Entry && *It != TargetActor) continue;
                 TInlineComponentArray<UWowM2EmitterComponent*> Effects(*It);
                 for(auto* Effect:Effects) if(Effect->ComponentHasTag(SpellTag) && Effect->ComponentHasTag(PhaseTag))
                 {
@@ -823,8 +839,26 @@ struct FWowGameplayProbe
             }
             double Minimum=1; Step->TryGetNumberField(TEXT("minComponents"),Minimum);
             double MinParticles=0,MinGeometry=0; Step->TryGetNumberField(TEXT("minParticles"),MinParticles); Step->TryGetNumberField(TEXT("minGeometry"),MinGeometry);
-            Done=Op==TEXT("wait_no_spell_effect")?Components==0:Components>=Minimum && Particles>=MinParticles && Geometry>=MinGeometry;
-            if(Done) {const auto Row=MakeShared<FJsonObject>(); Row->SetNumberField(TEXT("components"),Components); Row->SetNumberField(TEXT("particles"),Particles); Row->SetNumberField(TEXT("geometryPasses"),Geometry); Row->SetArrayField(TEXT("models"),Models); Row->SetArrayField(TEXT("ids"),Ids); FString Label; Step->TryGetStringField(TEXT("label"),Label); Inspections->SetObjectField(FString::Printf(TEXT("effect:%u:%s:%s"),Spell,*Phase,*Label),Row);}
+            const bool ExpectedEffect = Op==TEXT("wait_no_spell_effect") ? Components==0 : Components>=Minimum && Particles>=MinParticles && Geometry>=MinGeometry;
+            Done = ExpectedEffect && (!Entry || TargetActor) && (!RequireAura || HasAura);
+            if (Done)
+            {
+                const auto Row = MakeShared<FJsonObject>();
+                Row->SetNumberField(TEXT("components"), Components);
+                Row->SetNumberField(TEXT("particles"), Particles);
+                Row->SetNumberField(TEXT("geometryPasses"), Geometry);
+                Row->SetArrayField(TEXT("models"), Models);
+                Row->SetArrayField(TEXT("ids"), Ids);
+                if (Unit)
+                {
+                    Row->SetBoolField(TEXT("serverAuraActive"), HasAura);
+                    if (const auto* Viewer = Handler.EntityManager.GetLocalPlayer())
+                        Row->SetNumberField(TEXT("viewerAuraVision"), Viewer->GetFieldByte(PlayerField::FIELD_BYTES2, 3));
+                }
+                FString Label;
+                Step->TryGetStringField(TEXT("label"),Label);
+                Inspections->SetObjectField(FString::Printf(TEXT("effect:%u:%s:%s"),Spell,*Phase,*Label),Row);
+            }
         }
         else if(Op==TEXT("wait_cast_particles"))
         {
@@ -933,7 +967,17 @@ struct FWowGameplayProbe
             if(Handler.GossipMenu.Guid==C.TargetGuid) for(const auto& Option:Handler.GossipMenu.Options) if(!Text.IsEmpty() && Option.Text.Contains(Text,ESearchCase::IgnoreCase))
             {C.GameUI->SelectGossipOption(Option.Id); Done=true; break;}
         }
-        else if (Op==TEXT("quest")) { if (C.GameUI->GetShownQuestId()!=uint32(Step->GetIntegerField(TEXT("id")))) C.GameUI->SelectGossipQuest(Step->GetIntegerField(TEXT("id"))); Done=true; }
+        else if (Op==TEXT("quest"))
+        {
+            const uint32 Id = Step->GetIntegerField(TEXT("id"));
+            Done = C.GameUI->GetShownQuestId() == Id;
+            if (!Done && Handler.GossipMenu.Guid == C.TargetGuid &&
+                Handler.GossipMenu.Quests.ContainsByPredicate([Id](const FWowGossipQuest& Quest){ return Quest.Id == Id; }))
+            {
+                C.GameUI->SelectGossipQuest(Id);
+                Done = true;
+            }
+        }
         else if (Op==TEXT("wait_dialog")) Done=C.GameUI->GetShownQuestId()==uint32(Step->GetIntegerField(TEXT("id")));
         else if (Op==TEXT("dialog_button") || Op==TEXT("wait_dialog_text") || Op==TEXT("wait_dialog_closed")) Done=ProbeDialog(C,*Step,Op);
         else if (Op==TEXT("accept")) { C.GameUI->AcceptQuest(); Done=true; }
@@ -1129,7 +1173,20 @@ struct FWowGameplayProbe
                 }
                 if(const auto* Texture=Cast<UTexture2D>(Resource)) { Row->SetNumberField(TEXT("textureWidth"),Texture->GetSizeX()); Row->SetNumberField(TEXT("textureHeight"),Texture->GetSizeY()); Row->SetBoolField(TEXT("textureResource"),Texture->GetResource()!=nullptr); }
             }
-            Inspections->SetObjectField(Name,Row); Done=true;
+            if (const auto* Bar = Frames->GetStatusBarWidget(Handle))
+                Row->SetNumberField(TEXT("percent"), Bar->GetPercent());
+            if (Name == TEXT("MainMenuExpBar"))
+            {
+                if (const auto* Player = Handler.EntityManager.GetLocalPlayer())
+                {
+                    Row->SetNumberField(TEXT("xp"), Player->GetField(PlayerField::XP));
+                    Row->SetNumberField(TEXT("xpMax"), Player->GetField(PlayerField::NEXT_LEVEL_XP));
+                    Row->SetNumberField(TEXT("playerLevel"), Player->GetLevel());
+                }
+            }
+            FString Label = Name;
+            Step->TryGetStringField(TEXT("label"), Label);
+            Inspections->SetObjectField(Label,Row); Done=true;
         }
         else if(Op==TEXT("assert_key_state"))
         {

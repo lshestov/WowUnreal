@@ -256,6 +256,7 @@ struct FWowQuestDetails
 {
     uint64 QuestGiverGuid = 0;
     uint32 QuestId = 0;
+    bool bAutoAccepted = false;
     FString Title;
     FString Details;
     FString Objectives;

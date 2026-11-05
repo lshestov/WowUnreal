@@ -143,6 +143,7 @@ namespace UnitField
     inline constexpr uint16 NATIVEDISPLAYID      = BASE + 0x003E;
     inline constexpr uint16 MOUNTDISPLAYID       = BASE + 0x003F;
     inline constexpr uint16 BYTES_1              = BASE + 0x0044; // byte0=StandState, byte1=PetTalents, byte2=StandFlags, byte3=AnimTier
+    inline constexpr uint16 PETNUMBER            = BASE + 0x0045;
     inline constexpr uint16 DYNAMIC_FLAGS        = BASE + 0x0049;
     inline constexpr uint16 CREATED_BY_SPELL     = BASE + 0x004B;
     inline constexpr uint16 NPC_EMOTESTATE       = BASE + 0x004D;
@@ -176,6 +177,7 @@ namespace PlayerField
     inline constexpr uint16 FLAGS         = BASE + 0x0002;
     inline constexpr uint16 BYTES         = BASE + 0x0005;
     inline constexpr uint16 BYTES_2       = BASE + 0x0006;
+    inline constexpr uint16 FIELD_BYTES2  = BASE + 0x0439; // Private player field; byte 3 holds aura vision.
     inline constexpr uint16 XP            = BASE + 0x01E6;
     inline constexpr uint16 NEXT_LEVEL_XP = BASE + 0x01E7;
     inline constexpr uint16 SKILL_INFO = BASE + 0x01E8; // 128 triples: id, rank/max, temporary/permanent bonus
@@ -183,6 +185,7 @@ namespace PlayerField
     inline constexpr uint16 GLYPH_SLOTS_1 = BASE + 0x048C; // Six GlyphSlot.dbc IDs.
     inline constexpr uint16 GLYPHS_1 = BASE + 0x0492; // Six active GlyphProperties.dbc IDs.
     inline constexpr uint16 GLYPHS_ENABLED = BASE + 0x0498;
+    inline constexpr uint16 REST_STATE_EXPERIENCE = BASE + 0x03FD;
     inline constexpr uint16 COINAGE       = BASE + 0x03FE;
 
     // Combat ratings (crit, hit, haste, etc.) - 25 values starting at offset from UNIT_END

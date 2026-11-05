@@ -169,6 +169,22 @@ bool FGameplayQuestPackets::RunTest(const FString&)
     const auto Accept=UWowConnectionManager::BuildQuestAcceptPacket(1,7);
     const TArray<uint8> Expected={1,0,0,0,0,0,0,0,7,0,0,0,0,0,0,0};
     TestTrue(TEXT("Accept includes the server's final uint32 field"),Accept==Expected);
+
+    FWire Receipt;
+    Receipt.Add(uint32(783)).Add(uint32(40)).Add(uint32(0)).Add(uint32(0)).Add(uint32(0)).Add(uint32(0));
+    int32 Receipts=0;
+    Handler.OnQuestRewarded.AddLambda([&](uint32 QuestId,uint32 Experience) {
+        ++Receipts;
+        TestEqual(TEXT("Reward belongs to the turned-in quest"),QuestId,uint32(783));
+        TestEqual(TEXT("Reward uses the actual awarded XP"),Experience,uint32(40));
+    });
+    Handler.HandlePacket(0x0191,Receipt.Data);
+    TestEqual(TEXT("Build 12340 questgiver completion confirms a reward"),Receipts,1);
+    Receipt.Data.Pop();
+    Handler.HandlePacket(0x0191,Receipt.Data);
+    FWire ObjectivesDone; ObjectivesDone.Add(uint32(783));
+    Handler.HandlePacket(WowOpcode::SMSG_QUEST_UPDATE_COMPLETE,ObjectivesDone.Data);
+    TestEqual(TEXT("Neither a partial receipt nor finished objectives announce a reward"),Receipts,1);
     return true;
 }
 

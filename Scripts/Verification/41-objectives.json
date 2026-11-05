@@ -1,0 +1,32 @@
+{
+  "qaClass": 1, "qaLevel": 1, "qaGm": false, "qaSpawnEntry": 823, "qaSpawnOffset": 3,
+  "width": 1280, "height": 900,
+  "steps": [
+    {"op":"wait_world","timeout":140}, {"op":"wait_floor","timeout":80},
+    {"op":"time","minutes":630},
+    {"op":"select_entry","entry":823,"timeout":30}, {"op":"interact"},
+    {"op":"wait_menu","timeout":15}, {"op":"quest","id":783,"timeout":15},
+    {"op":"wait_dialog","id":783,"timeout":15}, {"op":"wait_quest","id":783,"timeout":15},
+    {"op":"dialog_button","text":"Accept","label":"acknowledge-willem","click":true,"timeout":8}, {"op":"wait_dialog_closed","timeout":8},
+    {"op":"walk","position":[-8920,-110,83],"timeout":65},
+    {"op":"select_entry","entry":197,"timeout":30}, {"op":"approach","range":3,"timeout":65},
+    {"op":"interact"}, {"op":"wait_menu","timeout":15}, {"op":"quest","id":783,"timeout":15},
+    {"op":"wait_dialog","id":783,"timeout":15}, {"op":"dialog_button","text":"Complete Quest","label":"turn-in","click":true,"timeout":8},
+    {"op":"wait_quest_removed","id":783,"timeout":15},
+    {"op":"wait_dialog","id":7,"timeout":15}, {"op":"wait_quest","id":7,"timeout":15},
+    {"op":"dialog_button","text":"Accept","label":"acknowledge-kobold-quest","click":true,"timeout":8}, {"op":"wait_dialog_closed","timeout":8},
+    {"op":"move_pointer","x":0.58,"y":0.50},
+    {"op":"lua_wait","condition":"WatchFrameLines:IsVisible() and WatchFrameTitle:GetText()==OBJECTIVES_TRACKER_LABEL..' (1)' and WATCHFRAME_QUESTLINES[2] and WATCHFRAME_QUESTLINES[1].text:GetText()=='Kobold Camp Cleanup' and WATCHFRAME_QUESTLINES[2].text:GetText()=='0/8 Kobold Vermin'","timeout":18},
+    {"op":"lua_wait","condition":"(function() local title,goal=WATCHFRAME_QUESTLINES[1].text,WATCHFRAME_QUESTLINES[2]; return title:GetJustifyH()=='LEFT' and goal.text:GetJustifyH()=='LEFT' and goal.dash:GetJustifyH()=='LEFT' and goal.dash:GetText()==QUEST_DASH and goal.dash:GetWidth()>0 and math.abs(title:GetLeft()-goal.dash:GetLeft())<2 and math.abs(goal.text:GetLeft()-goal.dash:GetRight())<2 and goal.text:GetLeft()-title:GetLeft()<16 end)()","timeout":8},
+    {"op":"lua_wait","condition":"(function() local r,g,b=WATCHFRAME_QUESTLINES[1].text:GetTextColor(); local x,y,z=WATCHFRAME_QUESTLINES[2].text:GetTextColor(); return math.abs(r-.75)<.001 and math.abs(g-.61)<.001 and b==0 and math.abs(x-.8)<.001 and math.abs(y-.8)<.001 and math.abs(z-.8)<.001 end)()","timeout":5},
+    {"op":"inspect_frame","name":"WatchFrame","label":"expanded-tracker"},
+    {"op":"capture","name":"01-kobold-objectives-expanded"},
+    {"op":"click_frame","name":"WatchFrameCollapseExpandButton"},
+    {"op":"lua_wait","condition":"WatchFrame.collapsed and not WatchFrameLines:IsVisible() and WatchFrameCollapseExpandButton:IsVisible()","timeout":8},
+    {"op":"capture","name":"02-kobold-objectives-collapsed"},
+    {"op":"click_frame","name":"WatchFrameCollapseExpandButton"},
+    {"op":"move_pointer","x":0.58,"y":0.50},
+    {"op":"lua_wait","condition":"not WatchFrame.collapsed and WatchFrameLines:IsVisible() and WATCHFRAME_QUESTLINES[2] and WATCHFRAME_QUESTLINES[2].text:GetText()=='0/8 Kobold Vermin'","timeout":8},
+    {"op":"capture","name":"03-kobold-objectives-reopened"}
+  ]
+}

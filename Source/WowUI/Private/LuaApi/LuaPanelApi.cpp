@@ -5,6 +5,7 @@
 #include "WowEventSystem.h"
 #include "WowSavedVariables.h"
 #include "WowUiText.h"
+#include "WowMapUi.h"
 #include "Formats/Dbc/DbcStore.h"
 #include "GameFramework/GameUserSettings.h"
 #include "UnrealClient.h"
@@ -224,14 +225,19 @@ void WowLuaApi::RegisterPanelApi(lua_State* L)
         for(int32 I=0; I<4; ++I) if(T->CreatureId[I] && ++Row==Wanted)
         {
             Current=(Counters>>(I*16))&0xffff; Required=T->CreatureCount[I]; Type=(T->CreatureId[I]&0x80000000)?TEXT("object"):TEXT("monster"); Text=T->ObjectiveText[I];
-            if(Text.IsEmpty()) { const auto* Name=C->ConnectionManager->PacketHandler.CreatureNameCache.Find(T->CreatureId[I]); Text=Name?*Name:FString::Printf(TEXT("Objective %d"),I+1); }
+            if(Text.IsEmpty())
+            {
+                if(const auto* Name=WowMapUi::QuestObjectiveName(C,T->CreatureId[I])) Text=*Name;
+            }
         }
         for(int32 I=0; I<6; ++I) if(T->ItemId[I] && ++Row==Wanted)
         {
             Current=CountItem(C,T->ItemId[I]); Required=T->ItemCount[I]; Type=TEXT("item"); C->ConnectionManager->RequestItemTemplate(T->ItemId[I]); const auto* Item=C->ConnectionManager->PacketHandler.ItemTemplates.Find(T->ItemId[I]); Text=Item?Item->Name:TEXT("Retrieving item information...");
         }
         if(!Required) { lua_pushnil(S); return 1; }
-        Text+=FString::Printf(TEXT(": %u/%u"),Current,Required); lua_pushstring(S,TCHAR_TO_UTF8(*Text)); lua_pushstring(S,TCHAR_TO_UTF8(*Type)); lua_pushboolean(S,Current>=Required); return 3;
+        if (Text.IsEmpty()) Text=TEXT("…");
+        else Text+=FString::Printf(TEXT(": %u/%u"),Current,Required);
+        lua_pushstring(S,TCHAR_TO_UTF8(*Text)); lua_pushstring(S,TCHAR_TO_UTF8(*Type)); lua_pushboolean(S,Current>=Required); return 3;
     });
     RegisterPanel(L,"GetQuestLogTimeLeft",[](lua_State* S)->int { auto* C=GetContext(S); const auto* Q=SelectedQuest(C,luaL_optinteger(S,1,0)); const auto* P=C && C->EntityManager?C->EntityManager->GetLocalPlayer():nullptr; const uint16 F=Q?QuestField(C,Q->QuestId):0; const uint32 Expiry=P && F?P->GetField(F+4):0; if(Expiry) lua_pushnumber(S,FMath::Max(double(Expiry-FDateTime::UtcNow().ToUnixTimestamp()),0.0)); else lua_pushnil(S); return 1; });
     RegisterPanel(L,"GetQuestTimers",[](lua_State* S)->int { auto* C=GetContext(S); const auto* P=C && C->EntityManager?C->EntityManager->GetLocalPlayer():nullptr; int32 Count=0; if(C && C->ConnectionManager && P) { const auto& Log=C->ConnectionManager->PacketHandler.QuestLog; for(int32 I=0; I<Log.Num(); ++I) { const uint16 F=QuestField(C,Log[I].QuestId); if(F && P->GetField(F+4)) { lua_pushinteger(S,I+1); ++Count; } } } return Count; });

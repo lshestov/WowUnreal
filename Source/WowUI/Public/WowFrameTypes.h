@@ -86,6 +86,9 @@ struct FWowFontStringElement
 {
 	bool bHasColor = false;
 	bool bHidden = false;
+	bool bHasHidden = false;
+	bool bHasWidth = false;
+	bool bHasHeight = false;
 	FString Name;
 	FString ParentKey;
 	FString Inherits;
@@ -222,12 +225,13 @@ struct WOWUI_API FWowFrameDef
 /** Directive from XML parsing */
 struct FWowXmlDirective
 {
-	enum class EType { Frame, Include, Script, Font, Texture };
+	enum class EType { Frame, Include, Script, Font, Texture, FontStringTemplate };
 	EType Type;
 
 	// For Frame
 	FWowFrameDef FrameDef;
 	FWowTextureElement TextureDef;
+	FWowFontStringElement FontStringDef;
 	FString TextureParent;
 
 	// For Include/Script

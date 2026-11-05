@@ -16,6 +16,7 @@ struct FWowMapBlob
 struct FWowMapUiView
 {
     uint32 WorldRevision=MAX_uint32,QuestRevision=MAX_uint32,PoiRevision=MAX_uint32,ExplorationHash=0,QuestHash=0;
+    uint32 ObjectiveNamesHash = 0;
     TMap<int64,FWowMapBlob> Blobs;
     TArray<uint32> VisibleQuests;
     float IconOverlap=0,IconPush=0;
@@ -35,6 +36,7 @@ struct FSelection
 };
 struct FLandmark {FString Name,Description; uint32 Icon=0,Link=0; bool Graveyard=false; FVector2D Point=FVector2D::ZeroVector;};
 FWowMapUiView& View(FWowLuaContext* Context);
+const FString* QuestObjectiveName(FWowLuaContext* Context, uint32 EncodedEntry);
 TArray<const FMapUiDbc::FArea*> Continents();
 TArray<const FMapUiDbc::FArea*> Zones(int32 Continent);
 FSelection Selection(FWowLuaContext* Context);

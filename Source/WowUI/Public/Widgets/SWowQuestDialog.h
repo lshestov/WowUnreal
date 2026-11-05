@@ -51,6 +51,7 @@ public:
 
 private:
     FSlateBrush Background[4];
+    FSlateBrush AutoAcceptBottomRight;
     FSlateBrush PanelHighlight, CloseHighlight, AvailableIcon, ActiveIcon, GossipIcon, Book, GreetingFooter, SectionDivider;
     FButtonStyle PanelStyle, CloseStyle, RowStyle;
     TSharedRef<SWidget> PanelButton(const FString& Label, FOnClicked Action, float Width = 78.f, bool bClose = false);

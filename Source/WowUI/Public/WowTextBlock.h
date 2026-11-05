@@ -44,7 +44,10 @@ public:
     void SetPixelSpacing(float Value);
     float GetPixelSpacing() const { return PixelSpacing; }
     static FWowLabelMarkup ParseMarkup(const FString& Text);
+    static void SetWowTextColor(UTextBlock& Widget, const FLinearColor& Color);
+    static FLinearColor GetWowTextColor(const UTextBlock& Widget);
     const FWowLabelMarkup& Markup() const { return Parsed; }
+    bool HasDisplayContent() const { return !GetText().IsEmpty() || !Parsed.Icons.IsEmpty(); }
     TArray<FWowHyperlinkRect> HyperlinkRects() const;
     TOptional<FWowLabelMarkup::FLink> HyperlinkAt(FVector2D Local) const;
     virtual void SynchronizeProperties() override;
@@ -60,6 +63,7 @@ private:
     ETextJustify::Type LabelJustification=ETextJustify::Left;
     FWowLabelMarkup Parsed;
     FString OriginalText;
+    FLinearColor WowTextColor = FLinearColor::White;
     bool HasOriginal=false;
     FString VerticalJustification=TEXT("MIDDLE");
     bool WordWrapping=true,NonSpaceWrapping=false;

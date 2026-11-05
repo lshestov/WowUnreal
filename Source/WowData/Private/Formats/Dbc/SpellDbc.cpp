@@ -273,6 +273,9 @@ bool FSpellDbc::Load(const FDbcParser& Parser)
         E.Speed = Parser.GetFloat(i, 47);
         E.StackAmount = Parser.GetUInt(i, 49);
 
+        const uint32 RequiredVision = Parser.GetUInt(i, 221);
+        E.RequiredAuraVisionMask = RequiredVision >= 1 && RequiredVision <= 32 ? 1u << (RequiredVision - 1) : 0;
+
         // Effect arrays
         for (int32 j = 0; j < 3; ++j)
         {
@@ -290,6 +293,10 @@ bool FSpellDbc::Load(const FDbcParser& Parser)
             E.EffectImplicitTargetB[j] = Parser.GetUInt(i, 89 + j);
             E.EffectApplyAuraName[j] = Parser.GetUInt(i, 95 + j);
             E.EffectMiscValue[j] = static_cast<int32>(Parser.GetUInt(i, 110 + j));
+            // Build 12340 also gates detection visuals implicitly through their aura effects.
+            if (E.EffectApplyAuraName[j] == 17) E.RequiredAuraVisionMask |= 0x20; // MOD_STEALTH_DETECT
+            if (E.EffectApplyAuraName[j] == 19 && (E.EffectMiscValue[j] == 0 || E.EffectMiscValue[j] == 10))
+                E.RequiredAuraVisionMask |= 0x40; // MOD_INVISIBILITY_DETECT
             E.EffectMiscValueB[j] = Parser.GetUInt(i,113+j);
             E.EffectTriggerSpell[j] = Parser.GetUInt(i, 116 + j);
         }

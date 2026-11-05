@@ -82,12 +82,20 @@ public:
             Font.Size = FMath::Max(1.f, FMath::RoundToFloat(Font.Size * FMath::Clamp(1.15f - Distance * .012f, .75f, 1.f) * float(Size.Y / 900.)));
             Font.OutlineSettings.OutlineSize = 1;
             Font.OutlineSettings.OutlineColor = FLinearColor::Black;
-            const FVector2D Extent = Measure->Measure(Info.Name, Font);
-            if (Extent.X <= 0 || Extent.Y <= 0) continue;
+            const FVector2D NameSize = Measure->Measure(Info.Name, Font);
+            if (NameSize.X <= 0 || NameSize.Y <= 0) continue;
+            const FVector2D SubtitleSize = Info.Subtitle.IsEmpty() ? FVector2D::ZeroVector : FVector2D(Measure->Measure(Info.Subtitle, Font));
+            const FVector2D Extent(FMath::Max(NameSize.X, SubtitleSize.X), NameSize.Y + SubtitleSize.Y);
             const FVector2D Origin = Pixel * PixelsToLocal - FVector2D(Extent.X * .5, Extent.Y);
             if (Origin.X + Extent.X <= 0 || Origin.Y + Extent.Y <= 0 || Origin.X >= Size.X || Origin.Y >= Size.Y) continue;
-            const auto Paint = Geometry.ToPaintGeometry(FVector2f(Extent), FSlateLayoutTransform(FVector2f(Origin)));
-            FSlateDrawElement::MakeText(Elements, Layer, Paint, Info.Name, Font, ESlateDrawEffect::None, Info.Color);
+            const auto DrawLine = [&](const FText& Text, const FVector2D& LineSize, double OffsetY)
+            {
+                const FVector2D LineOrigin = Origin + FVector2D((Extent.X - LineSize.X) * .5, OffsetY);
+                const auto Paint = Geometry.ToPaintGeometry(FVector2f(LineSize), FSlateLayoutTransform(FVector2f(LineOrigin)));
+                FSlateDrawElement::MakeText(Elements, Layer, Paint, Text, Font, ESlateDrawEffect::None, Info.Color);
+            };
+            DrawLine(Info.Name, NameSize, 0);
+            if (!Info.Subtitle.IsEmpty()) DrawLine(Info.Subtitle, SubtitleSize, NameSize.Y);
             Info.LastNamePaint = GFrameCounter;
             Info.NamePixelRect = FVector4(Origin.X / PixelsToLocal.X, Origin.Y / PixelsToLocal.Y, Extent.X / PixelsToLocal.X, Extent.Y / PixelsToLocal.Y);
         }
@@ -145,7 +153,8 @@ void AWowGameplayController::RefreshUnitOverheads()
         // All build-12340 TalkToMe models use one upright billboard bone with a vertical Stand track.
         const FVector Anchor = OverheadAnchor(*Info.Selection.Get());
         const float Time = Info.MarkerPeriod > 0 ? FMath::Fmod(float(Now), Info.MarkerPeriod) : 0;
-        const float Lift = Info.MarkerHeight.Eval(Time, 0.f) + (Info.ShowName ? 27.f : 3.f);
+        const int32 NameLines = Info.ShowName ? (Info.Subtitle.IsEmpty() ? 1 : 2) : 0;
+        const float Lift = Info.MarkerHeight.Eval(Time, 0.f) + 3.f + 24.f * NameLines;
         Marker->SetWorldLocationAndRotation(Anchor + FVector(0, 0, Lift), FRotator(0, (Camera - Anchor).Rotation().Yaw - 90, 0));
     }
     if (Now < NextOverheadUpdate) return;
@@ -217,7 +226,7 @@ void AWowGameplayController::RefreshUnitOverheads()
         }
         if (Marker) Marker->SetVisibility(Model != nullptr && Marker->GetStaticMesh());
         Info.ShowName = false;
-        if (!Nearby || !ShowNames) continue;
+        if (!Nearby || (!ShowNames && TargetGuid != Pair.Key)) continue;
         const auto* Name = Handler.CreatureNameCache.Find(Entity->Entry);
         if (!Name || Name->IsEmpty()) continue;
         const FVector Anchor = OverheadAnchor(*Box);
@@ -229,6 +238,9 @@ void AWowGameplayController::RefreshUnitOverheads()
         Query.AddIgnoredActor(GetPawn());
         if (GetWorld()->LineTraceTestByChannel(Camera, Anchor, ECC_Visibility, Query)) continue;
         if (Info.Name.ToString() != *Name) Info.Name = FText::FromString(*Name);
+        const FString* Title = Handler.GetCreatureTitle(*Entity);
+        const FString Subtitle = Title ? FString::Printf(TEXT("<%s>"), **Title) : FString();
+        if (Info.Subtitle.ToString() != Subtitle) Info.Subtitle = FText::FromString(Subtitle);
         Info.Color = UIManager->GetUnitSelectionColor(Pair.Key);
         Info.ShowName = true;
     }

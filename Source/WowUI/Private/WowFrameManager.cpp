@@ -322,14 +322,50 @@ bool FWowFrameManager::ReparentRegion(const FString& Name,int64 ParentHandle)
     FrameRects.Reset(); bLayoutDirty=true; return true;
 }
 
+void FWowFrameManager::RegisterFontStringTemplate(const FWowFontStringElement& Definition)
+{
+	if (!Definition.Name.IsEmpty())
+	{
+		FWowFontStringElement Resolved = Definition;
+		ResolveFontStringTemplate(Resolved);
+		FontStringTemplates.Add(Definition.Name, MoveTemp(Resolved));
+	}
+}
+
+void FWowFrameManager::ResolveFontStringTemplate(FWowFontStringElement& Region) const
+{
+	const FWowFontStringElement* Base = FontStringTemplates.Find(Region.Inherits);
+	if (!Base) return;
+
+	// Region templates can override a named font object and supply layout defaults.
+	// Keep the underlying font object for SetFontObject and apply the region overrides last.
+	Region.Inherits = Base->Inherits;
+	if (!Region.bHasJustifyH && Base->bHasJustifyH) { Region.JustifyH = Base->JustifyH; Region.bHasJustifyH = true; }
+	if (!Region.bHasJustifyV && Base->bHasJustifyV) { Region.JustifyV = Base->JustifyV; Region.bHasJustifyV = true; }
+	if (!Region.bHasColor && Base->bHasColor) { Region.Color = Base->Color; Region.bHasColor = true; }
+	if (!Region.bHasWidth && Base->bHasWidth) { Region.Width = Base->Width; Region.bHasWidth = true; }
+	if (!Region.bHasHeight && Base->bHasHeight) { Region.Height = Base->Height; Region.bHasHeight = true; }
+	if (!Region.bHasHidden && Base->bHasHidden) { Region.bHidden = Base->bHidden; Region.bHasHidden = true; }
+	if (Region.Text.IsEmpty()) Region.Text = Base->Text;
+	if (Region.FontHeight <= 0) Region.FontHeight = Base->FontHeight;
+	if (Region.FontFlags.IsEmpty()) Region.FontFlags = Base->FontFlags;
+	if (Region.Anchors.IsEmpty()) Region.Anchors = Base->Anchors;
+}
+
 FString FWowFrameManager::CreateFontStringRegion(int64 Parent,const FString& Name,const FString& Inherits)
 {
     auto* Canvas=Cast<UCanvasPanel>(GetWidgetForHandle(Parent)); if(!Canvas && Parent==FindFrame(TEXT("UIParent"))) Canvas=RootCanvas.Get();
     if(!Canvas) return {};
     FString Key=Name; if(Key.IsEmpty()) { int32 Id=RegionLayouts.Num(); do { Key=FString::Printf(TEXT("_DynamicFontString%d"),Id++); } while(NamedFontStringWidgets.Contains(Key)); }
     FWowFrameDef Def; Def.Name=GetFrameName(Parent); const auto Rect=GetLayoutRect(Parent); Def.Width=Rect.Z; Def.Height=Rect.W;
-    FWowLayer Layer; Layer.Level=EWowDrawLayer::OVERLAY; FWowFontStringElement Text; Text.Name=Key; Text.Inherits=Inherits; Layer.FontStrings.Add(Text); Def.Layers.Add(Layer);
-    CreateLayerContent(Canvas,Def,Parent); SetRegionPoint(Key,FWowAnchor(),true); return Key;
+    FWowLayer Layer; Layer.Level=EWowDrawLayer::OVERLAY;
+    FWowFontStringElement Text; Text.Name=Key; Text.Inherits=Inherits;
+    ResolveFontStringTemplate(Text);
+    for (auto& Anchor : Text.Anchors) Anchor.RelativeTo.ReplaceInline(TEXT("$parent"), *Def.Name);
+    Layer.FontStrings.Add(Text); Def.Layers.Add(Layer);
+    CreateLayerContent(Canvas,Def,Parent);
+    if (Text.Anchors.IsEmpty()) SetRegionPoint(Key,FWowAnchor(),true);
+    return Key;
 }
 
 FString FWowFrameManager::CreateTextureRegion(int64 Parent,const FString& Name,const FString& LayerName,const FString& Inherits)
@@ -1038,7 +1074,7 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 			}
 
 			// Apply color
-			TextWidget->SetColorAndOpacity(FSlateColor(FS.Color));
+			UWowTextBlock::SetWowTextColor(*TextWidget, FS.Color);
 
 			// Apply font from font manager or fallback to default
 			FSlateFontInfo FontInfo;
@@ -1101,7 +1137,7 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
                 if(FS.bHasJustifyH) TextWidget->SetJustification(FS.JustifyH==TEXT("LEFT")?ETextJustify::Left:FS.JustifyH==TEXT("RIGHT")?ETextJustify::Right:ETextJustify::Center);
                 if(FS.bHasJustifyV) if(auto* Label=Cast<UWowTextBlock>(TextWidget)) Label->SetVerticalJustification(FS.JustifyV);
 				if(FS.FontHeight>0) TextWidget->SetFont(FontInfo);
-				if(FS.bHasColor) TextWidget->SetColorAndOpacity(FS.Color);
+				if(FS.bHasColor) UWowTextBlock::SetWowTextColor(*TextWidget, FS.Color);
 				// Warn if fontstring name still contains unresolved $parent
 				if (FS.Name.Contains(TEXT("$parent")))
 				{
@@ -1323,7 +1359,7 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 				const FString Caption=EventSystem?EventSystem->ResolveText(Def.ButtonText):Def.ButtonText;
 				ButtonText->SetText(FText::FromString(Caption));
 				ButtonText->SetJustification(ETextJustify::Center);
-				ButtonText->SetColorAndOpacity(FLinearColor(1,.82f,0));
+				UWowTextBlock::SetWowTextColor(*ButtonText, FLinearColor(1,.82f,0));
 				FSlateFontInfo FontInfo = FontManager?FontManager->GetDefaultFont(FMath::RoundToInt(12.f*UIScale)):ButtonText->GetFont();
 				if(!FontManager) FontInfo.Size=FMath::Max(1,FMath::RoundToInt(9.f*UIScale));
 				ButtonText->SetFont(FontInfo);
@@ -1557,6 +1593,7 @@ void FWowFrameManager::ResolveParentReferences(FWowFrameDef& Def, const FString&
 		// Resolve in fontstring elements
 		for (FWowFontStringElement& FontString : Layer.FontStrings)
 		{
+			ResolveFontStringTemplate(FontString);
 			if(FontString.Name.IsEmpty() && !FontString.ParentKey.IsEmpty()) { FString Suffix=FontString.ParentKey; Suffix[0]=FChar::ToUpper(Suffix[0]); FontString.Name=FrameName+Suffix; }
 			// Resolve fontstring name: $parentName → PlayerFrameName
 			if (FontString.Name.Contains(TEXT("$parent")) && !FrameName.IsEmpty())
@@ -2136,7 +2173,7 @@ void FWowFrameManager::DrawMessages(int64 Handle,double Now)
 	{
 		const int32 Index=State.Lines.Num()-1-State.Offset-I;
 		if(I>=Visible || Index<0 || (State.InsertTop?Bottom>=Height*UIScale:Bottom<=0)) { Text->SetVisibility(ESlateVisibility::Collapsed); continue; }
-		const auto& Line=State.Lines[Index]; Text->SetText(FText::FromString(Line.Text)); Text->SetColorAndOpacity(Line.Color); Text->SetWrapTextAt(Width*UIScale);
+		const auto& Line=State.Lines[Index]; Text->SetText(FText::FromString(Line.Text)); UWowTextBlock::SetWowTextColor(*Text, Line.Color); Text->SetWrapTextAt(Width*UIScale);
 		auto* Label=CastChecked<UWowTextBlock>(Text);
 		Label->TakeWidget(); Label->RefreshRichStyle(UIScale);
 		const float RowHeight=FMath::Max(RowSpacing*UIScale,Label->MeasureRenderedText(State.TextLayoutScale).Y);
@@ -3065,7 +3102,7 @@ void FWowFrameManager::TooltipUpdateDisplay(int64 TooltipHandle)
             {
                 Label->SetText(FText::FromString(Text)); Label->SetAutoWrapText(false);
                 Label->SetWrapTextAt(Wrap?ContentWidth*UIScale:0);
-                Label->SetColorAndOpacity(FSlateColor(Color)); Label->SetVisibility(ESlateVisibility::Visible);
+                UWowTextBlock::SetWowTextColor(*Label, Color); Label->SetVisibility(ESlateVisibility::Visible);
                 const FVector2D Size=Desired(Label);
                 const float PixelsHigh=FMath::CeilToFloat(Size.Y*TextLayoutScale);
                 Height=FMath::Max(Height,PixelsHigh/RawViewportScale);

@@ -205,6 +205,7 @@ FVector2D FWowFrameManager::GetRegionSize(const FString& Name)
     {
         Widget->TakeWidget(); Widget->ForceLayoutPrepass(); auto Size=Widget->GetDesiredSize()/FMath::Max(UIScale,.001f);
         if(const auto* Image=Cast<UImage>(Widget)) Size=Image->GetBrush().DrawAs==ESlateBrushDrawType::NoDrawType?FVector2D::ZeroVector:FVector2D(Image->GetBrush().ImageSize);
+        if (const auto* Label = Cast<UWowTextBlock>(Widget); Label && !Label->HasDisplayContent()) Size.X=1;
         return FVector2D(Layout.Width>0?Layout.Width:Size.X,Layout.Height>0?Layout.Height:Size.Y);
     }
     // GetFrameRect measures the requested region and its anchor dependencies.
@@ -495,7 +496,9 @@ void FWowFrameManager::ApplyElementAnchors(UWidget* Widget, UCanvasPanel* Parent
             // Fractional DPI/parent scales can clip the final glyph at its
             // advance boundary. Reserve a physical pixel for glyph overhang.
             const float Pixel=1/FMath::Max(.001f,RawViewportScale*OwnerScale);
-            Width=FMath::CeilToFloat(Desired.X/Pixel)*Pixel+Pixel;
+            // CSimpleFontString::GetWidth uses one UI unit for an empty
+            // region. There is no glyph or shadow to reserve space for.
+            Width=Label && !Label->HasDisplayContent() ? 1.f : FMath::CeilToFloat(Desired.X/Pixel)*Pixel+Pixel;
         }
         // WoW permits glyphs to extend beyond a FontString's nominal height.
         // Give Slate its full line box so short XML labels keep their baseline.

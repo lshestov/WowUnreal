@@ -56,6 +56,7 @@ struct FSpellDbcEntry
     uint32 EffectMiscValueB[3];
     uint32 EffectTriggerSpell[3];
     uint32 SpellVisual[2];
+    uint32 RequiredAuraVisionMask = 0;
     uint32 SpellIconID;
     uint32 ActiveIconID;
     FString SpellName;
