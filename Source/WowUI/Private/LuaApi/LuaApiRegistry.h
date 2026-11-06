@@ -75,7 +75,7 @@ struct FWowLuaContext
 
 namespace WowLuaApi
 {
-    void RegisterAll(lua_State* L);
+    WOWUI_API void RegisterAll(lua_State* L);
     void RegisterGlobals(lua_State* L);
     void RegisterStubs(lua_State* L);
     void RegisterItemApi(lua_State* L);
@@ -171,7 +171,7 @@ namespace WowLuaApi
     int SetAuraTooltip(lua_State* L,const char* DefaultFilter);
 
     /** Store game context pointer in Lua registry for API functions to use */
-    void SetContext(lua_State* L, FWowLuaContext* Ctx);
+    WOWUI_API void SetContext(lua_State* L, FWowLuaContext* Ctx);
 
     /** Clear context from Lua registry (call before VM shutdown to prevent use-after-free) */
     void ClearContext(lua_State* L);
