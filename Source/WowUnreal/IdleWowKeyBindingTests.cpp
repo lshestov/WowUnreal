@@ -67,6 +67,31 @@ bool FIdleWowNativeBindingsTest::RunTest(const FString&)
     TestEqual(TEXT("A bound mouse wheel does not also reach camera zoom"),Controller->GetInputAnalogKeyState(EKeys::MouseWheelAxis),0.f);
     TestEqual(TEXT("Second side button uses the stock API name"),FWowKeyBindings::KeyName(EKeys::ThumbMouseButton2),FString(TEXT("BUTTON5")));
     TestEqual(TEXT("OEM punctuation keeps its assignable WoW key name"),FWowKeyBindings::KeyName(EKeys::Semicolon),FString(TEXT(";")));
+    Check(TEXT("Create a UI mouse capture with bound primary buttons"),TEXT(R"LUA(
+        MouseUps=0; MouseClicks=0
+        MouseCapture=CreateFrame('Button','MouseCapture',UIParent)
+        MouseCapture:SetScript('OnMouseDown',function(self,button) self.pressed=button end)
+        MouseCapture:SetScript('OnMouseUp',function(self,button) assert(self.pressed==button); self.pressed=nil; MouseUps=MouseUps+1 end)
+        MouseCapture:SetScript('OnClick',function() MouseClicks=MouseClicks+1 end)
+        SetBinding('BUTTON1','TOGGLESPELLBOOK'); SetBinding('BUTTON2','TOGGLESPELLBOOK')
+    )LUA"));
+    const int64 MouseCapture=UI->FrameManager->FindFrame(TEXT("MouseCapture"));
+    for(const bool Right:{false,true})
+    {
+        const FKey Button=Right?EKeys::RightMouseButton:EKeys::LeftMouseButton;
+        // Seed the already-recorded UI down without requiring a viewport in
+        // this unit fixture; the release uses the real native controller path.
+        Controller->APlayerController::InputKey(FInputKeyEventArgs::CreateSimulated(Button,IE_Pressed,1.f));
+        Controller->PlayerInput->ProcessInputStack({},1.f/60,false);
+        UI->FrameManager->DispatchMouseDown(MouseCapture,Right?TEXT("RightButton"):TEXT("LeftButton"));
+        auto& Captured=Right?Controller->PressedRightMouseFrameHandle:Controller->PressedLeftMouseFrameHandle;
+        Captured=MouseCapture;
+        Controller->GameplayProbePointer=FVector2D(-1,-1);
+        Input(Button,IE_Released,0);
+        TestEqual(TEXT("Leaving a UI frame releases its original primary-button capture"),Captured,int64(-1));
+    }
+    Check(TEXT("UI-origin releases neither click the frame nor execute its world binding"),TEXT("assert(MouseUps==2 and MouseClicks==0 and BookToggles==6); SetBinding('BUTTON1'); SetBinding('BUTTON2'); MouseCapture:Hide()"));
+    Controller->GameplayProbePointer.Reset();
     Check(TEXT("Bind two physical keys to the same movement action"),TEXT("SetBinding('F6','MOVEFORWARD'); SetBinding('F7','MOVEFORWARD')"));
     Input(EKeys::F6); Input(EKeys::F7); Input(EKeys::F6,IE_Released,0);
     TestTrue(TEXT("Releasing one alias cannot release another held movement key"),Controller->IsInputKeyDown(EKeys::W));

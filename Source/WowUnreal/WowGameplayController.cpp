@@ -1370,6 +1370,9 @@ bool AWowGameplayController::InputKey(const FInputKeyEventArgs& Params)
 	}
 	if(Params.Event==IE_Released) for(const auto& Held:HeldBindingKeys) if(Held.Value==Params.Key) return true;
 	if(Params.Event==IE_Released && HeldBindingCommands.Remove(Params.Key)) return true;
+	// An unmatched primary release belongs to the original world/UI press.
+	// Crossing out of a frame must not resolve a new binding and swallow its up.
+	if(Params.Event==IE_Released && (Params.Key==EKeys::LeftMouseButton || Params.Key==EKeys::RightMouseButton)) return Super::InputKey(Params);
 	if(Params.Event==IE_Repeat && (HeldBindingCommands.Contains(Params.Key) || HeldBindingKeys.Contains(Params.Key))) return true;
 	if(Params.Event==IE_Pressed && UIManager && UIManager->GetFrameManager() && Wheel)
     {
