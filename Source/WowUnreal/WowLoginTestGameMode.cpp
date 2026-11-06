@@ -1,6 +1,7 @@
 #include "WowLoginTestGameMode.h"
 #include "WowLoginController.h"
 #include "WowLoginWidget.h"
+#include "WowLoginPreferences.h"
 #include "WowLoginScene.h"
 #include "WowCharacterPreview.h"
 #include "WowAudioManager.h"
@@ -54,6 +55,41 @@ void AWowLoginTestGameMode::Tick(float Delta)
     const auto S=Steps[Index]->AsObject();if(Now-Started<S->GetNumberField(TEXT("at"))) return;
     const FString Action=S->GetStringField(TEXT("action"));auto* Audio=Controller->MenuAudio.Get();
     if(Action==TEXT("capture")){}
+    else if(Action==TEXT("remember"))
+    {
+        auto Widget=Controller->LoginWidget;
+        if(!Widget){Finish(false,TEXT("Remember-account step requires the login form"));return;}
+        Widget->SetCredentials(TEXT("localhost:3730"),TEXT("SampleAccount"),TEXT("sample"));
+        const bool Expected=S->GetBoolField(TEXT("expectedRemember"));
+        FWowLoginPreferences Before;
+        Before.Load();
+        const int32 Previous=Submits;
+        // Exercise a real change even when a previous replay left the desired
+        // checkbox state. This also saves the newly entered sample fields.
+        const int32 Clicks=Before.bRememberAccount==Expected?2:1;
+        for(int32 I=0;I<Clicks;++I)
+            if(!Widget->PressStockControl(TEXT("RememberAccount")))
+            {Finish(false,TEXT("Remember-account checkbox input failed"));return;}
+        FWowLoginPreferences After;
+        if(!After.Load() || After.bRememberAccount!=Expected || After.Server!=TEXT("localhost:3730") ||
+            After.AccountName!=(Expected?FString(TEXT("SampleAccount")):FString()) || Submits!=Previous)
+        {Finish(false,TEXT("Remember-account preference did not persist independently of login"));return;}
+    }
+    else if(Action==TEXT("control"))
+    {
+        const FString Name=S->GetStringField(TEXT("name"));
+        const int32 Previous=Submits;
+        if(!Controller->LoginWidget || !Controller->LoginWidget->PressStockControl(FName(*Name)))
+        {Finish(false,FString::Printf(TEXT("Login control input failed: %s"),*Name));return;}
+        FString Option;
+        if(S->TryGetStringField(TEXT("option"),Option))
+        {
+            FString Value;
+            if(!Audio->GetUiOption(Option,Value) || Value!=S->GetStringField(TEXT("expectedValue")))
+            {Finish(false,FString::Printf(TEXT("Login option did not change: %s"),*Option));return;}
+        }
+        if(Submits!=Previous){Finish(false,TEXT("Presentation control unexpectedly submitted login"));return;}
+    }
     else if(Action==TEXT("expansion"))
     {
         const int32 Version=S->GetIntegerField(TEXT("version"));
@@ -112,6 +148,8 @@ void AWowLoginTestGameMode::Tick(float Delta)
     }
     else {Finish(false,TEXT("Unknown login replay action"));return;}
     auto Row=MakeShared<FJsonObject>();Row->SetStringField(TEXT("action"),Action);Row->SetNumberField(TEXT("elapsed"),Now-Started);
+    if(Action==TEXT("remember")) Row->SetBoolField(TEXT("rememberAccount"),S->GetBoolField(TEXT("expectedRemember")));
+    if(Action==TEXT("control")) Row->SetStringField(TEXT("control"),S->GetStringField(TEXT("name")));
     Row->SetBoolField(TEXT("playing"),Audio->IsGlueMusicPlaying());Row->SetNumberField(TEXT("pcmBytes"),Audio->GetGlueGeneratedBytes());Row->SetNumberField(TEXT("gain"),Audio->GetMusicGain());Row->SetNumberField(TEXT("effects"),Audio->GetGlueEffectCount());
     int32 Scenes=0,Previews=0,Audios=0;for(TActorIterator<AWowLoginScene> It(GetWorld());It;++It) ++Scenes;for(TActorIterator<AWowCharacterPreview> It(GetWorld());It;++It) ++Previews;for(TActorIterator<AWowAudioManager> It(GetWorld());It;++It) ++Audios;
     Row->SetNumberField(TEXT("scenes"),Scenes);Row->SetNumberField(TEXT("previews"),Previews);

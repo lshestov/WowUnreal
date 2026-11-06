@@ -1,6 +1,7 @@
 #include "WowLoginController.h"
 #include "WowConnectionManager.h"
 #include "WowLoginWidget.h"
+#include "WowLoginPreferences.h"
 #include "WowRealmSelectWidget.h"
 #include "WowCharacterSelectWidget.h"
 #include "WowCharacterCreateWidget.h"
@@ -1034,6 +1035,15 @@ void AWowLoginController::ShowLoginScreen()
             LoginWidget->SetCredentials(ServerStr, Cred.Username, Cred.Password);
             UE_LOG(LogWowLogin, Log, TEXT("Prefilled credentials for %s@%s"), *Cred.Username, *ServerStr);
         }
+    }
+
+    // Manual login remembers only the account name. Explicit autologin keeps
+    // using the selected saved credential, including its existing password.
+    FWowLoginPreferences Preferences;
+    if (!bAutoLoginActive && Preferences.Load())
+    {
+        LoginWidget->SetCredentials(Preferences.Server,
+            Preferences.bRememberAccount ? Preferences.AccountName : FString(), FString());
     }
 
     UpdateLoginScene();

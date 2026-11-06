@@ -23,6 +23,7 @@ public:
     const FSlateBrush* Icon(const FString& Path,const FString& Table,const FString& Token);
     FString String(const FString& Key) const;
     FSlateFontInfo Font(int32 Size,bool Title=false) const;
+    FSlateFontInfo EditFont(int32 Size) const;
     TArray<FWowCreationLight> Lights(const FString& Token);
 private:
     FMpqManager* Mpq=nullptr;
@@ -32,5 +33,5 @@ private:
     TMap<FString,TSharedPtr<FButtonStyle>> Buttons;
     TSharedPtr<FScrollBarStyle> ScrollStyle;
     TUniquePtr<FWowLuaVM> Strings;
-    FString FontPath,TitleFontPath;
+    FString FontPath,TitleFontPath,EditFontPath;
 };

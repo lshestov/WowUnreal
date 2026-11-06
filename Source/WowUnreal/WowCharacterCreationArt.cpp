@@ -26,6 +26,7 @@ FWowCharacterCreationArt::FWowCharacterCreationArt(FMpqManager* InMpq):Mpq(InMpq
         return FString();
     };
     FontPath=Extract(TEXT("FRIZQT__.TTF")); TitleFontPath=Extract(TEXT("MORPHEUS.TTF"));
+    EditFontPath=Extract(TEXT("ARIALN.TTF"));
 }
 FWowCharacterCreationArt::~FWowCharacterCreationArt()=default;
 const FSlateBrush* FWowCharacterCreationArt::Brush(const FString& Path,FVector2f Min,FVector2f Max,ESlateBrushMirrorType::Type Mirror,bool Additive)
@@ -114,6 +115,15 @@ FSlateFontInfo FWowCharacterCreationArt::Font(int32 Size,bool Title) const
     FSlateFontInfo Info; Info.Size=FMath::Max(1,FMath::RoundToInt(Size*.75f));
     auto Composite=MakeShared<FCompositeFont>();FTypefaceEntry Face;
     Face.Name=TEXT("Glue");Face.Font=FFontData(Path,EFontHinting::Default,EFontLoadingPolicy::LazyLoad);
+    Composite->DefaultTypeface.Fonts.Add(Face);Composite->FallbackTypeface.Typeface=FCoreStyle::GetDefaultFont()->DefaultTypeface;
+    Info.CompositeFont=Composite;Info.TypefaceFontName=Face.Name;return Info;
+}
+FSlateFontInfo FWowCharacterCreationArt::EditFont(int32 Size) const
+{
+    if(EditFontPath.IsEmpty()) return FCoreStyle::GetDefaultFontStyle("Regular",Size);
+    FSlateFontInfo Info;Info.Size=FMath::Max(1,FMath::RoundToInt(Size*.75f));
+    auto Composite=MakeShared<FCompositeFont>();FTypefaceEntry Face;
+    Face.Name=TEXT("GlueEdit");Face.Font=FFontData(EditFontPath,EFontHinting::Default,EFontLoadingPolicy::LazyLoad);
     Composite->DefaultTypeface.Fonts.Add(Face);Composite->FallbackTypeface.Typeface=FCoreStyle::GetDefaultFont()->DefaultTypeface;
     Info.CompositeFont=Composite;Info.TypefaceFontName=Face.Name;return Info;
 }

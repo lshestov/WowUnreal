@@ -21,7 +21,8 @@ class UWowBackdropWidget;
 class SWowLoginWidget : public SCompoundWidget
 {
 public:
-    SLATE_BEGIN_ARGS(SWowLoginWidget) {}
+    SLATE_BEGIN_ARGS(SWowLoginWidget) : _PersistPreferences(true) {}
+    SLATE_ARGUMENT(bool, PersistPreferences)
     SLATE_END_ARGS()
 
     void Construct(const FArguments& InArgs);
@@ -45,17 +46,25 @@ public:
 
 private:
     void BuildStockLayout();
+    void InitializeStyles();
+    TSharedRef<SButton> MakeButton(FName Id,const FString& Text,FOnClicked Action,int32 Size=15,TAttribute<bool> Selected=false);
+    TSharedRef<SButton> MakeCheckBox(FName Id,const FString& Text,TAttribute<bool> Checked,FSimpleDelegate Toggle);
+    void SavePreferences();
     TUniquePtr<FWowCharacterCreationArt> Art;
     TWeakObjectPtr<AWowLoginScene> Scene;
     TWeakObjectPtr<AWowAudioManager> Audio;
     TArray<TStrongObjectPtr<UWowBackdropWidget>> Backdrops;
     TSharedPtr<FButtonStyle> BlueButton;
-    TSharedPtr<FCheckBoxStyle> GlueCheck;
+    FButtonStyle PlainButton;
     TSharedPtr<FSliderStyle> GlueSlider;
     FEditableTextBoxStyle StockEditStyle;
     TMap<FName,TWeakPtr<SButton>> StockControls;
     bool bOptions=false;
+    bool bRememberAccount=true;
+    bool bPersistPreferences=true;
+    FString StatusText;
     TSharedPtr<SBox> ScreenBody;
+    TSharedPtr<SBox> ExpansionFooter;
     FReply OnLoginClicked();
     void SetExpansion(EWowExpansion Expansion);
 

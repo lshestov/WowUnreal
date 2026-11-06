@@ -6,7 +6,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIdleWowLoginEndpointTest, "WowUnreal.Login.Aut
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FIdleWowLoginEndpointTest::RunTest(const FString& Parameters)
 {
-    TSharedRef<SWowLoginWidget> Widget = SNew(SWowLoginWidget);
+    TSharedRef<SWowLoginWidget> Widget = SNew(SWowLoginWidget).PersistPreferences(false);
     int32 Submissions = 0;
     FString SubmittedHost;
     int32 SubmittedPort = 0;

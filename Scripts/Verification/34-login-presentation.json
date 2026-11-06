@@ -1,0 +1,12 @@
+{"steps":[
+  {"at":3,"action":"capture","capture":"01-wrath"},
+  {"at":5,"action":"remember","expectedRemember":false,"capture":"02-account-not-remembered"},
+  {"at":7,"action":"remember","expectedRemember":true,"capture":"03-account-remembered"},
+  {"at":9,"action":"options","capture":"04-options"},
+  {"at":11,"action":"control","name":"sound_enablemusic","option":"sound_enablemusic","expectedValue":"0","capture":"05-music-disabled"},
+  {"at":13,"action":"control","name":"sound_enablemusic","option":"sound_enablemusic","expectedValue":"1"},
+  {"at":14,"action":"control","name":"OptionsDone","capture":"06-options-closed"},
+  {"at":17,"action":"expansion","version":0,"server":"localhost:3730","capture":"07-classic"},
+  {"at":20,"action":"expansion","version":1,"capture":"08-burning-crusade"},
+  {"at":23,"action":"expansion","version":2,"expectedPort":3730,"capture":"09-wrath-return"}
+]}

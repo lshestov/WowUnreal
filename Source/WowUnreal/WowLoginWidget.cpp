@@ -8,6 +8,7 @@
 #include "Widgets/Images/SImage.h"
 
 #include "WowLoginScene.h"
+#include "WowLoginPreferences.h"
 #include "WowAudioManager.h"
 #include "WowCharacterCreationArt.h"
 #include "WowBackdropWidget.h"
@@ -16,8 +17,8 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Widgets/Layout/SConstraintCanvas.h"
 #include "Widgets/Layout/SDPIScaler.h"
-#include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SSlider.h"
+#include "Framework/Application/SlateApplication.h"
 
 SWowLoginWidget::SWowLoginWidget()=default;
 SWowLoginWidget::~SWowLoginWidget()=default;
@@ -38,6 +39,8 @@ void SWowLoginWidget::SetScene(AWowLoginScene* InScene,FMpqManager* Mpq,AWowAudi
     if (InScene)
     {
         if (!Art) Art = MakeUnique<FWowCharacterCreationArt>(Mpq);
+        InitializeStyles();
+        ExpansionFooter->SetContent(BuildExpansionTabs());
         BuildStockLayout();
         return;
     }
@@ -59,33 +62,82 @@ void SWowLoginWidget::SetScene(AWowLoginScene* InScene,FMpqManager* Mpq,AWowAudi
             + SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)
             [SNew(STextBlock).Text(FText::FromString(Notice))]]);
 }
+void SWowLoginWidget::InitializeStyles()
+{
+    if(BlueButton) return;
+    BlueButton=MakeShared<FButtonStyle>();
+    const FString Base=TEXT("Interface\\Glues\\Common\\Glue-Panel-Button");
+    const FVector2f Max(.578125f,.75f);
+    BlueButton->SetNormal(*Art->Brush(Base+TEXT("-Up-Blue"),FVector2f(0),Max));
+    BlueButton->SetHovered(BlueButton->Normal);
+    BlueButton->SetPressed(*Art->Brush(Base+TEXT("-Down-Blue"),FVector2f(0),Max));
+    BlueButton->SetDisabled(*Art->Brush(Base+TEXT("-Disabled"),FVector2f(0),Max));
+    BlueButton->SetNormalPadding(FMargin(0));BlueButton->SetPressedPadding(FMargin(1,1,0,0));
+    FSlateBrush Empty;Empty.DrawAs=ESlateBrushDrawType::NoDrawType;
+    PlainButton.SetNormal(Empty).SetHovered(Empty).SetPressed(Empty).SetDisabled(Empty);
+    PlainButton.SetNormalPadding(FMargin(0)).SetPressedPadding(FMargin(0));
+}
+TSharedRef<SButton> SWowLoginWidget::MakeButton(FName Id,const FString& Text,FOnClicked Action,int32 Size,TAttribute<bool> Selected)
+{
+    auto Button=SNew(SButton).ButtonStyle(BlueButton.Get()).ContentPadding(0)
+        .HAlign(HAlign_Fill).VAlign(VAlign_Fill).OnClicked(Action);
+    TWeakPtr<SButton> Weak=Button;
+    auto Font=Art->Font(Size);Font.OutlineSettings=FFontOutlineSettings(1);
+    Button->SetContent(SNew(SOverlay)
+        +SOverlay::Slot()[SNew(SImage).Image(&BlueButton->Pressed).Visibility_Lambda([Selected]{return Selected.Get()?EVisibility::HitTestInvisible:EVisibility::Collapsed;})]
+        +SOverlay::Slot()[SNew(SImage).Image(Art->Brush(TEXT("Interface\\Glues\\Common\\Glue-Panel-Button-Highlight-Blue"),FVector2f(0),FVector2f(.625f,.6875f),ESlateBrushMirrorType::NoMirror,true))
+            .Visibility_Lambda([Weak]{auto B=Weak.Pin();return B && B->IsHovered()?EVisibility::HitTestInvisible:EVisibility::Collapsed;})]
+        +SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Center).Padding(0,0,0,1)
+        [SNew(STextBlock).Text(FText::FromString(Text)).Font(Font).ShadowOffset(FVector2D(1,1)).ShadowColorAndOpacity(FLinearColor::Black)
+            .ColorAndOpacity_Lambda([Weak,Selected]() -> FSlateColor {auto B=Weak.Pin();return (B && B->IsHovered()) || Selected.Get()?FLinearColor::White:FLinearColor(1,.78f,0);})]);
+    StockControls.Add(Id,Button);return Button;
+}
+TSharedRef<SButton> SWowLoginWidget::MakeCheckBox(FName Id,const FString& Text,TAttribute<bool> Checked,FSimpleDelegate Toggle)
+{
+    auto Button=SNew(SButton).ButtonStyle(&PlainButton).ContentPadding(0)
+        .OnClicked_Lambda([Toggle]{Toggle.ExecuteIfBound();return FReply::Handled();});
+    TWeakPtr<SButton> Weak=Button;
+    const auto* Up=Art->Brush(TEXT("Interface\\Buttons\\UI-CheckBox-Up"));
+    const auto* Down=Art->Brush(TEXT("Interface\\Buttons\\UI-CheckBox-Down"));
+    auto Font=Art->Font(12);Font.OutlineSettings=FFontOutlineSettings(1);
+    Button->SetContent(SNew(SHorizontalBox)
+        +SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+        [SNew(SBox).WidthOverride(20).HeightOverride(20)[SNew(SOverlay)
+            +SOverlay::Slot()[SNew(SImage).Image_Lambda([Weak,Up,Down]{auto B=Weak.Pin();return B && B->IsPressed()?Down:Up;})]
+            +SOverlay::Slot()[SNew(SImage).Image(Art->Brush(TEXT("Interface\\Buttons\\UI-CheckBox-Check")))
+                .Visibility_Lambda([Checked]{return Checked.Get()?EVisibility::HitTestInvisible:EVisibility::Collapsed;})]
+            +SOverlay::Slot()[SNew(SImage).Image(Art->Brush(TEXT("Interface\\Buttons\\UI-CheckBox-Highlight"),FVector2f(0),FVector2f(1),ESlateBrushMirrorType::NoMirror,true))
+                .Visibility_Lambda([Weak]{auto B=Weak.Pin();return B && B->IsHovered()?EVisibility::HitTestInvisible:EVisibility::Collapsed;})]]]
+        +SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(2,0,0,0)
+        [SNew(STextBlock).Text(FText::FromString(Text)).Font(Font).ColorAndOpacity(FLinearColor(1,.78f,0))
+            .ShadowOffset(FVector2D(1,1)).ShadowColorAndOpacity(FLinearColor::Black)]);
+    StockControls.Add(Id,Button);return Button;
+}
+void SWowLoginWidget::SavePreferences()
+{
+    if(!bPersistPreferences) return;
+    FWowLoginPreferences Preferences;Preferences.bRememberAccount=bRememberAccount;
+    Preferences.Server=ServerBox->GetText().ToString().TrimStartAndEnd();
+    Preferences.AccountName=UsernameBox->GetText().ToString().TrimStartAndEnd();
+    Preferences.Save();
+}
 void SWowLoginWidget::BuildStockLayout()
 {
     ScreenBody->SetContent(SNullWidget::NullWidget);
     Backdrops.Reset();
-    const FLinearColor Gold(1,.82f,0);auto Canvas=SNew(SConstraintCanvas);
+    const FLinearColor Gold(1,.78f,0);auto Canvas=SNew(SConstraintCanvas);
     auto Put=[&](TSharedRef<SWidget> W,float X,float Y,float Width,float Height,float AX=0,float AY=0){Canvas->AddSlot().Anchors(FAnchors(AX,AY)).Alignment(FVector2D::ZeroVector).Offset(FMargin(X,Y,Width,Height))[W];};
     auto Font=[this](int32 Size){auto F=Art->Font(Size);F.OutlineSettings=FFontOutlineSettings(1);return F;};
-    auto Label=[&](const FString& Text,int32 Size=16){return SNew(STextBlock).Text(FText::FromString(Text)).Font(Font(Size)).ColorAndOpacity(Gold).Justification(ETextJustify::Center);};
-    if(!BlueButton) BlueButton=MakeShared<FButtonStyle>();const FString Base=TEXT("Interface\\Glues\\Common\\Glue-Panel-Button");const FVector2f Max(.578125f,.75f);
-    BlueButton->SetNormal(*Art->Brush(Base+TEXT("-Up-Blue"),FVector2f(0),Max));BlueButton->SetHovered(BlueButton->Normal);
-    BlueButton->SetPressed(*Art->Brush(Base+TEXT("-Down-Blue"),FVector2f(0),Max));BlueButton->SetDisabled(*Art->Brush(Base+TEXT("-Disabled"),FVector2f(0),Max));
-    BlueButton->SetNormalPadding(FMargin(0));BlueButton->SetPressedPadding(FMargin(1,1,0,0));
-    auto Click=[&](FName Id,const FString& Text,FOnClicked Action,int32 Size=16)
-    {
-        // Align the visible glyphs to the blue face inside the textured frame.
-        auto B=SNew(SButton).ButtonStyle(BlueButton.Get()).ContentPadding(FMargin(0,0,0,1))
-            .HAlign(HAlign_Center).VAlign(VAlign_Center).OnClicked(Action)[Label(Text,Size)];
-        StockControls.Add(Id,B);
-        return B;
-    };
+    auto Label=[&](const FString& Text,int32 Size=15){return SNew(STextBlock).Text(FText::FromString(Text)).Font(Font(Size)).ColorAndOpacity(Gold)
+        .ShadowOffset(FVector2D(1,1)).ShadowColorAndOpacity(FLinearColor::Black).Justification(ETextJustify::Center);};
     auto Backdrop=[&](FWowBackdrop D)
     {auto* B=NewObject<UWowBackdropWidget>();Backdrops.Add(TStrongObjectPtr<UWowBackdropWidget>(B));B->Configure(D,Cast<UTexture2D>(Art->Brush(D.BgFile)->GetResourceObject()),Cast<UTexture2D>(Art->Brush(D.EdgeFile)->GetResourceObject()),1);return B->TakeWidget();};
     Canvas->AddSlot().Anchors(FAnchors(0,0,1,1)).Offset(FMargin(0))[SNew(SLoginViewport).Scene(Scene.Get())];
     Put(SNew(SImage).Image(Art->Brush(TEXT("Interface\\Glues\\Common\\Glues-WoW-WotLKLogo"))),3,7,256,128);
     Put(SNew(SImage).Image(Art->Brush(TEXT("Interface\\Glues\\Mainmenu\\Glues-BlizzardLogo"))),-50,-108,100,100,.5f,1);
     Put(Label(Art->String(TEXT("BLIZZ_DISCLAIMER")),12),-360,-24,720,18,.5f,1);
-    Put(Label(TEXT("Version 3.3.5 (12340)"),12),0,-24,230,18,0,1);
+    auto Version=Label(TEXT("Version 3.3.5 (12340)"),12);Version->SetJustification(ETextJustify::Left);
+    Put(Version,3,-24,230,18,0,1);
     StockEditStyle=FCoreStyle::Get().GetWidgetStyle<FEditableTextBoxStyle>("NormalEditableTextBox");FSlateBrush Empty;Empty.DrawAs=ESlateBrushDrawType::NoDrawType;
     StockEditStyle.SetBackgroundImageNormal(Empty).SetBackgroundImageHovered(Empty).SetBackgroundImageFocused(Empty).SetBackgroundImageReadOnly(Empty);
     // Keep editable text centered vertically and clear of the beveled sides.
@@ -93,9 +145,12 @@ void SWowLoginWidget::BuildStockLayout()
     auto Field=[&](const TSharedPtr<SEditableTextBox>& Box)
     {
         Box->SetStyle(&StockEditStyle);
-        Box->SetFont(Font(16));
+        Box->SetFont(Art->EditFont(16));
+        Box->SetForegroundColor(FLinearColor::White);
         FWowBackdrop D;D.BgFile=TEXT("Interface\\Tooltips\\UI-Tooltip-Background");D.EdgeFile=TEXT("Interface\\Glues\\Common\\Glue-Tooltip-Border");D.EdgeSize=16;D.TileSize=16;D.Tile=true;
-        D.InsetLeft=10;D.InsetRight=5;D.InsetTop=4;D.InsetBottom=9;D.Color=FLinearColor(.09f,.09f,.09f,1);D.BorderColor=FLinearColor(.8f,.8f,.8f,1);
+        D.InsetLeft=10;D.InsetRight=5;D.InsetTop=4;D.InsetBottom=9;
+        // AccountLogin.lua colors are display-space values; the backdrop painter encodes its tint to sRGB.
+        D.Color=FLinearColor::FromSRGBColor(FColor(23,23,23));D.BorderColor=FLinearColor::FromSRGBColor(FColor(204,204,204));
         return SNew(SOverlay)+SOverlay::Slot()[Backdrop(D)]+SOverlay::Slot()[Box.ToSharedRef()];
     };
     auto AddLoginField = [&](const FString& CaptionText, float LabelWidth, float FieldTop,
@@ -113,28 +168,50 @@ void SWowLoginWidget::BuildStockLayout()
     AddLoginField(TEXT("Login server"), 256, -452, ServerBox);
     AddLoginField(Art->String(TEXT("ACCOUNT_NAME")), 600, -382, UsernameBox);
     AddLoginField(Art->String(TEXT("PASSWORD")), 256, -312, PasswordBox);
-    Put(Click(TEXT("Login"),Art->String(TEXT("LOGIN")),FOnClicked::CreateSP(this,&SWowLoginWidget::OnLoginClicked)), -110,-215,220,45,.5f,1);
-    Put(SAssignNew(StatusLabel,STextBlock).Font(Font(12)).ColorAndOpacity(FLinearColor(1,.25f,.15f)).Justification(ETextJustify::Center).AutoWrapText(true),-300,-159,600,42,.5f,1);
-    Put(Click(TEXT("Options"),Art->String(TEXT("OPTIONS")),FOnClicked::CreateLambda([this]{bOptions=!bOptions;BuildStockLayout();return FReply::Handled();}),12),-155,-219,150,38,1,1);
-    Put(Click(TEXT("Quit"),Art->String(TEXT("QUIT")),FOnClicked::CreateLambda([]{FPlatformMisc::RequestExit(false);return FReply::Handled();}),12),-155,-67,150,38,1,1);
-    constexpr float PanelLeft=-385,PanelWidth=210;
+    Put(MakeButton(TEXT("Login"),Art->String(TEXT("LOGIN")),FOnClicked::CreateSP(this,&SWowLoginWidget::OnLoginClicked)), -110,-215,220,45,.5f,1);
+    Put(SNew(SBox).HAlign(HAlign_Center)[MakeCheckBox(TEXT("RememberAccount"),Art->String(TEXT("SAVE_ACCOUNT_NAME")),
+        TAttribute<bool>::CreateLambda([this]{return bRememberAccount;}),FSimpleDelegate::CreateLambda([this]{bRememberAccount=!bRememberAccount;SavePreferences();}))],-150,-176,300,24,.5f,1);
+    Put(SAssignNew(StatusLabel,STextBlock).Text(FText::FromString(StatusText)).Font(Font(12)).ColorAndOpacity(FLinearColor(1,.25f,.15f)).Justification(ETextJustify::Center).AutoWrapText(true),-270,-144,540,36,.5f,1);
+    Put(MakeButton(TEXT("Options"),Art->String(TEXT("OPTIONS")),FOnClicked::CreateLambda([this]{bOptions=!bOptions;BuildStockLayout();return FReply::Handled();}),12),-155,-293,150,38,1,1);
+    Put(MakeButton(TEXT("Quit"),Art->String(TEXT("QUIT")),FOnClicked::CreateLambda([]{FPlatformMisc::RequestExit(false);return FReply::Handled();}),12),-155,-67,150,38,1,1);
+    auto Content=SNew(SOverlay)+SOverlay::Slot()[Canvas];
     if(bOptions)
     {
-        if(!GlueCheck) GlueCheck=MakeShared<FCheckBoxStyle>();
-        const auto* Up=Art->Brush(TEXT("Interface\\Buttons\\UI-CheckBox-Up"));const auto* Checked=Art->Brush(TEXT("Interface\\Buttons\\UI-CheckBox-Check"));
-        GlueCheck->SetUncheckedImage(*Up).SetUncheckedHoveredImage(*Up).SetUncheckedPressedImage(*Art->Brush(TEXT("Interface\\Buttons\\UI-CheckBox-Down")));
-        GlueCheck->SetCheckedImage(*Checked).SetCheckedHoveredImage(*Checked).SetCheckedPressedImage(*Checked);
-        auto Check=[&](const TCHAR* Name,const FString& Text){return SNew(SCheckBox).Style(GlueCheck.Get()).IsChecked_Lambda([this,Name]{FString V;return Audio.IsValid() && Audio->GetUiOption(Name,V) && V==TEXT("1")?ECheckBoxState::Checked:ECheckBoxState::Unchecked;}).OnCheckStateChanged_Lambda([this,Name](ECheckBoxState S){if(Audio.IsValid()) Audio->SetUiOption(Name,S==ECheckBoxState::Checked?TEXT("1"):TEXT("0"));})[Label(Text,12)];};
-        Put(Check(TEXT("sound_enablemusic"),Art->String(TEXT("ENABLE_MUSIC"))),PanelLeft,-252,PanelWidth,28,1,1);
+        Canvas->SetEnabled(false);
+        Canvas=SNew(SConstraintCanvas);
+        Content->AddSlot()[Canvas];
+        // A modal uses the original dialog border, keeping controls readable over the scene.
+        Canvas->AddSlot().Anchors(FAnchors(0,0,1,1)).Offset(FMargin(0))
+            [SNew(SBorder).BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox")).BorderBackgroundColor(FLinearColor(0,0,0,.55f))];
+        FWowBackdrop Dialog;Dialog.BgFile=TEXT("Interface\\DialogFrame\\UI-DialogBox-Background");
+        Dialog.EdgeFile=TEXT("Interface\\DialogFrame\\UI-DialogBox-Border");Dialog.Tile=true;Dialog.TileSize=32;Dialog.EdgeSize=32;
+        Dialog.InsetLeft=Dialog.InsetRight=Dialog.InsetTop=Dialog.InsetBottom=11;
+        Put(SNew(SBorder).BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
+            .BorderBackgroundColor(FLinearColor(.005f,.008f,.012f,1)), -200,-150,400,300,.5f,.5f);
+        Put(Backdrop(Dialog),-210,-160,420,320,.5f,.5f);
+        Put(Label(Art->String(TEXT("OPTIONS")),18),-180,-128,360,28,.5f,.5f);
+        auto Check=[&](const TCHAR* Name,const FString& Text)
+        {
+            return MakeCheckBox(FName(Name),Text,TAttribute<bool>::CreateLambda([this,Name]
+            {FString V;return Audio.IsValid() && Audio->GetUiOption(Name,V) && V==TEXT("1");}),FSimpleDelegate::CreateLambda([this,Name]
+            {if(Audio.IsValid()){FString V;Audio->GetUiOption(Name,V);Audio->SetUiOption(Name,V==TEXT("1")?TEXT("0"):TEXT("1"));}}));
+        };
+        Put(Check(TEXT("sound_enableall"),Art->String(TEXT("ENABLE_SOUND"))),-155,-83,310,24,.5f,.5f);
+        Put(Check(TEXT("sound_enablemusic"),Art->String(TEXT("ENABLE_MUSIC"))),-155,-47,310,24,.5f,.5f);
+        Put(Label(Art->String(TEXT("MUSIC_VOLUME")),12),-155,-4,310,22,.5f,.5f);
         if(!GlueSlider) GlueSlider=MakeShared<FSliderStyle>();FSlateBrush NoBar;NoBar.DrawAs=ESlateBrushDrawType::NoDrawType;
         GlueSlider->SetNormalBarImage(NoBar).SetHoveredBarImage(NoBar).SetDisabledBarImage(NoBar);
         FSlateBrush Thumb=*Art->Brush(TEXT("Interface\\Buttons\\UI-SliderBar-Button-Horizontal"));Thumb.ImageSize=FVector2D(32,32);
         GlueSlider->SetNormalThumbImage(Thumb).SetHoveredThumbImage(Thumb).SetDisabledThumbImage(Thumb);
         FWowBackdrop SliderBack;SliderBack.BgFile=TEXT("Interface\\Buttons\\UI-SliderBar-Background");SliderBack.EdgeFile=TEXT("Interface\\Buttons\\UI-SliderBar-Border");SliderBack.Tile=true;SliderBack.TileSize=8;SliderBack.EdgeSize=8;SliderBack.InsetLeft=3;SliderBack.InsetRight=3;SliderBack.InsetTop=6;SliderBack.InsetBottom=6;
-        Put(Backdrop(SliderBack),PanelLeft,-215,PanelWidth,17,1,1);
-        Put(SNew(SSlider).Style(GlueSlider.Get()).Value_Lambda([this]{return Audio.IsValid()?Audio->MusicVolume:.5f;}).OnValueChanged_Lambda([this](float V){if(Audio.IsValid()) Audio->SetUiOption(TEXT("sound_musicvolume"),FString::SanitizeFloat(V));}),PanelLeft,-222,PanelWidth,32,1,1);
+        Put(Backdrop(SliderBack),-145,33,290,17,.5f,.5f);
+        Put(SNew(SSlider).Style(GlueSlider.Get()).Value_Lambda([this]{return Audio.IsValid()?Audio->MusicVolume:.5f;}).OnValueChanged_Lambda([this](float V){if(Audio.IsValid()) Audio->SetUiOption(TEXT("sound_musicvolume"),FString::SanitizeFloat(V));}),-145,26,290,32,.5f,.5f);
+        Put(MakeButton(TEXT("OptionsDone"),Art->String(TEXT("DONE")),FOnClicked::CreateLambda([this]{bOptions=false;BuildStockLayout();return FReply::Handled();}),12),-75,94,150,38,.5f,.5f);
     }
-    ScreenBody->SetContent(Canvas);
+    ExpansionFooter->SetEnabled(!bOptions);
+    ScreenBody->SetContent(Content);
+    if(bOptions) FSlateApplication::Get().SetKeyboardFocus(StockControls.FindChecked(TEXT("OptionsDone")).Pin(),EFocusCause::SetDirectly);
+    else FSlateApplication::Get().SetKeyboardFocus(UsernameBox,EFocusCause::SetDirectly);
 }
 bool SWowLoginWidget::PressStockControl(FName Name)
 {
@@ -144,7 +221,7 @@ bool SWowLoginWidget::PressStockControl(FName Name)
 FReply SWowLoginWidget::OnPreviewKeyDown(const FGeometry&,const FKeyEvent& E)
 {
     if(E.GetKey()==EKeys::Escape && bOptions){bOptions=false;BuildStockLayout();return FReply::Handled();}
-    if(E.GetKey()==EKeys::Enter) return OnLoginClicked();return FReply::Unhandled();
+    return FReply::Unhandled();
 }
 
 // ─── Expansion-specific theming ─────────────────────────────────────────────
@@ -193,6 +270,9 @@ FString SWowLoginWidget::GetExpansionTitle() const
 
 void SWowLoginWidget::Construct(const FArguments& InArgs)
 {
+    bPersistPreferences=InArgs._PersistPreferences;
+    FWowLoginPreferences Preferences;
+    if(bPersistPreferences && Preferences.Load()) bRememberAccount=Preferences.bRememberAccount;
     auto MakeInput = [this](bool IsPassword)
     {
         return SNew(SEditableTextBox).IsPassword(IsPassword)
@@ -212,7 +292,7 @@ void SWowLoginWidget::Construct(const FArguments& InArgs)
         return Height > 0 ? Height / 768.f : 1.f;
     })[SNew(SVerticalBox)
         + SVerticalBox::Slot().FillHeight(1)[SAssignNew(ScreenBody,SBox)]
-        + SVerticalBox::Slot().AutoHeight()[BuildExpansionTabs()]]];
+        + SVerticalBox::Slot().AutoHeight()[SAssignNew(ExpansionFooter,SBox)[BuildExpansionTabs()]]]];
 }
 
 TSharedRef<SWidget> SWowLoginWidget::BuildExpansionTabs()
@@ -220,6 +300,15 @@ TSharedRef<SWidget> SWowLoginWidget::BuildExpansionTabs()
     auto Tabs = SNew(SHorizontalBox);
     auto AddTab = [&](EWowExpansion Expansion, const TCHAR* Title)
     {
+        if(Art)
+        {
+            auto Button=MakeButton(FName(*FString::Printf(TEXT("Expansion_%u"),uint8(Expansion))),Title,
+                FOnClicked::CreateLambda([this,Expansion]{SetExpansion(Expansion);return FReply::Handled();}),12,
+                TAttribute<bool>::CreateLambda([this,Expansion]{return CurrentExpansion==Expansion;}));
+            const float Width=Expansion==EWowExpansion::Classic?126.f:Expansion==EWowExpansion::BurningCrusade?196.f:220.f;
+            Tabs->AddSlot().AutoWidth().Padding(0)[SNew(SBox).WidthOverride(Width).HeightOverride(38)[Button]];
+            return;
+        }
         auto Button = SNew(SButton)
             .ContentPadding(FMargin(16,4))
             .ButtonColorAndOpacity_Lambda([this,Expansion]
@@ -243,7 +332,7 @@ TSharedRef<SWidget> SWowLoginWidget::BuildExpansionTabs()
     AddTab(EWowExpansion::BurningCrusade,TEXT("The Burning Crusade"));
     AddTab(EWowExpansion::WrathOfTheLichKing,TEXT("Wrath of the Lich King"));
     return SNew(SBorder).BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
-        .BorderBackgroundColor(FLinearColor(.023f,.025f,.03f)).Padding(0,3).HAlign(HAlign_Center)[Tabs];
+        .BorderBackgroundColor(FLinearColor(.012f,.018f,.023f)).Padding(0).HAlign(HAlign_Center)[Tabs];
 }
 
 void SWowLoginWidget::SetExpansion(EWowExpansion Expansion)
@@ -257,7 +346,7 @@ void SWowLoginWidget::SetExpansion(EWowExpansion Expansion)
 
 FReply SWowLoginWidget::OnLoginClicked()
 {
-    if (CurrentExpansion != EWowExpansion::WrathOfTheLichKing) return FReply::Handled();
+    if (CurrentExpansion != EWowExpansion::WrathOfTheLichKing || bOptions) return FReply::Handled();
     FString ServerStr = ServerBox.IsValid() ? ServerBox->GetText().ToString().TrimStartAndEnd() : TEXT("127.0.0.1:3724");
     if (ServerStr.IsEmpty()) ServerStr = TEXT("127.0.0.1:3724");
     FString User = UsernameBox.IsValid() ? UsernameBox->GetText().ToString().TrimStartAndEnd() : TEXT("");
@@ -289,6 +378,7 @@ FReply SWowLoginWidget::OnLoginClicked()
     }
 
     SetStatusText(TEXT("Connecting..."));
+    SavePreferences();
     OnLoginSubmit.ExecuteIfBound(Host, Port, User, Pass);
     return FReply::Handled();
 }
@@ -307,6 +397,7 @@ void SWowLoginWidget::AutoSubmit()
 
 void SWowLoginWidget::SetStatusText(const FString& Text)
 {
+    StatusText=Text;
     if (StatusLabel.IsValid())
     {
         StatusLabel->SetText(FText::FromString(Text));

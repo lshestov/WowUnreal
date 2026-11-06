@@ -18,12 +18,21 @@ textures; `Scripts/CreateLoginSceneMaterials.py` regenerates them.
   resolves `Sound/Music/GlueScreenMusic/WotLK_main_title.mp3`: stereo 48000 Hz,
   544.080 seconds. The scene's four `$DSO` events resolve sound IDs 14143–14146
   at 7000, 10533, 15067 and 26233 ms.
-* Glue UI BLPs, FRIZQT font and localized strings supply the Wrath login controls.
+* Glue UI BLPs, FRIZQT captions, ARIALN edit text and localized strings supply the Wrath login controls.
   The Wrath form exposes the login server (host and optional port), account
   and password. The bottom tabs keep these entries when switching versions.
   Classic and The Burning Crusade currently show unavailable-login screens.
+  All three version tabs use the Glue blue-button artwork, with selected and hover states.
+  The layout keeps the source 768-unit height coordinate system; compare captures
+  at the same viewport resolution before judging logo/control sizes.
   This change does not implement the original external account/credits/TOS flows
   or claim pixel-identical reproduction of the entire Glue UI.
+* Remember Account Name stores only the server, checkbox and account name in
+  `Saved/Config/WowLogin.ini`. Disabling it removes the remembered name. Manual
+  login loads this preference with an empty password; explicit `-autologin`
+  continues to use the separate saved credential store without modifying it.
+  The sound dialog uses original frame/check/slider artwork, blocks the form
+  underneath, and closes through Done or Escape.
 
 ## Rendering and lifetime
 
@@ -50,6 +59,10 @@ compressed bytes and immutable PCM are bounded and safe if its owner is destroye
 Audio options use the existing UI API and persist in `Saved/Config/WowAudio.ini`.
 
 ## Verification
+
+`34-login-presentation.json` exercises the actual remember checkbox and sound
+controls, dialog closure and expansion switching with a preserved login draft.
+Its isolated profile verifies preference persistence without authentication.
 
 Run build/cook, automation and rendered clients sequentially. Preserve any manual
 client. The local automation selection includes Hud, UI, Gameplay, Player,
