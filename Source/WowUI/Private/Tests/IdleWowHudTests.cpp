@@ -1549,15 +1549,28 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudEditBoxFonts,"WowUnreal.Hud.EditBoxFonts",E
 bool FHudEditBoxFonts::RunTest(const FString&)
 {
     FHudFixture F;
+    // Dynamic addon frames inherit their font after joining an already live UI.
+    const auto RootSlate=F.Canvas->TakeWidget();
     if(!F.Lua.ExecuteString(TEXT("EditorFont=CreateFont('EditorFont'); EditorFont:SetFont('Fonts\\\\FRIZQT__.TTF',14); EditorFont:SetTextColor(.18,.12,.06)"))) return false;
     const FString Xml=TEXT("<Ui><EditBox name='EditorTemplate' virtual='true'><FontString inherits='EditorFont'/></EditBox><EditBox name='SingleEditor' inherits='EditorTemplate'><Size x='220' y='20'/></EditBox><EditBox name='MultiEditor' multiLine='true'><Size x='220' y='180'/><FontString inherits='EditorFont'/></EditBox></Ui>");
     const FTCHARToUTF8 Utf8(*Xml); TArray<uint8> Bytes; Bytes.Append(reinterpret_cast<const uint8*>(Utf8.Get()),Utf8.Length());
     const auto Parsed=FWowFrameXmlParser::ParseXml(Bytes,TEXT("EditorFontFixture")); if(Parsed.Num()!=3) return false;
     for(const auto& Row:Parsed) F.Frames.CreateFrame(Row.FrameDef);
-    const auto* Single=F.Frames.GetEditBoxWidget(F.Frames.FindFrame(TEXT("SingleEditor"))); const auto* Multi=F.Frames.GetMultiLineEditBoxWidget(F.Frames.FindFrame(TEXT("MultiEditor")));
+    auto* Single=F.Frames.GetEditBoxWidget(F.Frames.FindFrame(TEXT("SingleEditor"))); const auto* Multi=F.Frames.GetMultiLineEditBoxWidget(F.Frames.FindFrame(TEXT("MultiEditor")));
     TestTrue(TEXT("Root FontString style survives template inheritance and styles both editor types"),Single && Multi && Single->GetWidgetStyle().TextStyle.Font.Size==11 && Multi->WidgetStyle.Font.Size==11 && F.Lua.ExecuteString(TEXT("assert(SingleEditor:GetFontObject()==EditorFont and MultiEditor:GetFontObject()==EditorFont)")));
+    if(!Single || !Multi) return false;
+    Single->SetText(FText::FromString(TEXT("Ag")));
+    RootSlate->SlatePrepass();
+    const auto SingleSlate=Single->TakeWidget();
+    const auto Measure=[&]() {SingleSlate->Invalidate(EInvalidateWidgetReason::Prepass); SingleSlate->SlatePrepass(); return SingleSlate->GetDesiredSize();};
+    const auto InheritedSize=Measure();
     TestTrue(TEXT("Runtime SetFont changes native editor rendering"),F.Lua.ExecuteString(TEXT("SingleEditor:SetFont('Fonts\\\\FRIZQT__.TTF',20); MultiEditor:SetFont('Fonts\\\\FRIZQT__.TTF',16)")));
     TestTrue(TEXT("Single and multiline use WoW pixel-to-point sizing"),Single && Multi && Single->GetWidgetStyle().TextStyle.Font.Size==15 && Multi->WidgetStyle.Font.Size==12);
+    const auto LargerFontSize=Measure();
+    TestTrue(TEXT("A later Slate prepass uses the updated font after the Lua setter returns"),LargerFontSize.X>InheritedSize.X && LargerFontSize.Y>InheritedSize.Y);
+    TestTrue(TEXT("Runtime text insets update the mounted editor"),F.Lua.ExecuteString(TEXT("SingleEditor:SetTextInsets(9,11,7,13)")));
+    const auto PaddedSize=Measure();
+    TestTrue(TEXT("A later Slate prepass retains the font and the new owned padding"),PaddedSize.X>LargerFontSize.X && PaddedSize.Y>LargerFontSize.Y && Single->GetWidgetStyle().Padding==FMargin(9,7,11,13));
     TestTrue(TEXT("Parchment editor colors inherit from the original font object"),Multi && FMath::IsNearlyEqual(Multi->WidgetStyle.ColorAndOpacity.GetSpecifiedColor().R,.18f));
     TestTrue(TEXT("Stock money editors retain numeric values and treat empty text as zero"),F.Lua.ExecuteString(TEXT("SingleEditor:SetNumber(123.5); assert(SingleEditor:GetText()=='123.5' and SingleEditor:GetNumber()==123.5); SingleEditor:SetText(''); assert(SingleEditor:GetNumber()==0); MultiEditor:SetNumber(99); assert(MultiEditor:GetNumber()==99)")));
     return true;
@@ -2430,7 +2443,7 @@ bool FHudEditorOffsets::RunTest(const FString&)
         Composite->FallbackTypeface.Typeface=FCoreStyle::GetDefaultFont()->DefaultTypeface;
         const FSlateFontInfo Font(Composite,12,TEXT("Regular"));
         auto* Notes=F.Frames.GetMultiLineEditBoxWidget(F.Frames.FindFrame(TEXT("Utf8Notes"))); auto Style=Notes->WidgetStyle; Style.SetFont(Font); Notes->SetWidgetStyle(Style);
-        auto* Single=F.Frames.GetEditBoxWidget(F.Frames.FindFrame(TEXT("Utf8Single"))); auto SingleStyle=Single->GetWidgetStyle(); SingleStyle.SetFont(Font); Single->SetWidgetStyle(SingleStyle);
+        auto* Single=F.Frames.GetEditBoxWidget(F.Frames.FindFrame(TEXT("Utf8Single"))); auto& SingleStyle=Single->WidgetStyle; SingleStyle.SetFont(Font); Single->SetWidgetStyle(SingleStyle);
     }
 #endif
     TestTrue(TEXT("Multiline byte offsets, code-point queries and selection survive line breaks and surrogate pairs"),F.Lua.ExecuteString(TEXT(R"LUA(

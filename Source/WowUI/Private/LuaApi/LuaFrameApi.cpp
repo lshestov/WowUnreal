@@ -1683,7 +1683,9 @@ static int LF_FontStringSetFont(lua_State* L)
         return Info;
     };
     if(auto* Text=GetTextBlockWidgetForTable(L,1)) Text->SetFont(RenderFont(Text->GetFont()));
-    if(auto* Edit=GetEditBoxWidgetForTable(L)) { auto Style=Edit->GetWidgetStyle(); Style.SetFont(RenderFont(Style.TextStyle.Font)); Edit->SetWidgetStyle(Style); }
+    // UE 5.7 forwards the SetWidgetStyle argument's address to Slate. Keep it in
+    // the widget's owned storage so later layout passes never read a stack copy.
+    if(auto* Edit=GetEditBoxWidgetForTable(L)) { auto& Style=Edit->WidgetStyle; Style.SetFont(RenderFont(Style.TextStyle.Font)); Edit->SetWidgetStyle(Style); }
     if(auto* Edit=GetMultiLineEditor(L)) { auto Style=Edit->WidgetStyle; Style.SetFont(RenderFont(Style.Font)); Edit->SetWidgetStyle(Style); }
     if(C && C->FrameManager) C->FrameManager->SetMessageFont(GetFrameHandle(L),UTF8_TO_TCHAR(FontPath),FontSize);
 
@@ -2619,7 +2621,7 @@ static int LF_SetTextInsets(lua_State* L)
     const auto* C=WowLuaApi::GetContext(L); const float Scale=C && C->FrameManager?C->FrameManager->GetUIScale():1.f;
     const FMargin Insets(Left*Scale,Top*Scale,Right*Scale,Bottom*Scale);
     if(auto* Multi=GetMultiLineEditor(L)) Multi->SetEditorInsets(Insets);
-    else if(auto* Single=GetEditBoxWidgetForTable(L)) {auto Style=Single->GetWidgetStyle(); Style.SetPadding(Insets); Single->SetWidgetStyle(Style);}
+    else if(auto* Single=GetEditBoxWidgetForTable(L)) {auto& Style=Single->WidgetStyle; Style.SetPadding(Insets); Single->SetWidgetStyle(Style);}
     return 0;
 }
 static int LF_SetMultiLine(lua_State* L) { return 0; }

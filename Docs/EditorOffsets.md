@@ -21,6 +21,12 @@ non-inlined helper before raising the Lua error, preserving the Windows error
 boundary. SetCursorPosition validates its numeric argument before creating
 widget/string temporaries.
 
+Single-line editor font and inset changes retain their style in the widget's
+owned storage. UE 5.7's editable-text setter forwards its argument address to
+Slate; passing a temporary style left a dangling pointer and could crash the
+next layout pass when a live InputBoxTemplate was created. The EditBoxFonts
+regression mounts Slate before changing styles and runs subsequent prepasses.
+
 Regression tests exercise actual Slate controls with Cyrillic, supplementary
 Unicode characters, line breaks, insertion and forward/reversed selections.
 The Windows supplementary-character fixture uses an installed font containing

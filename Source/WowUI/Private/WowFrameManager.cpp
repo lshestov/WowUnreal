@@ -1404,7 +1404,7 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 		{
 			UEditableTextBox* EditBox = NewObject<UEditableTextBox>(ContainerWidget);
 			// Make edit box background transparent — WoW edit boxes use XML textures for appearance
-			FEditableTextBoxStyle BoxStyle = EditBox->GetWidgetStyle();
+			FEditableTextBoxStyle& BoxStyle = EditBox->WidgetStyle;
 			FSlateBrush EmptyBrush;
 			EmptyBrush.DrawAs = ESlateBrushDrawType::NoDrawType;
 			BoxStyle.SetBackgroundImageNormal(EmptyBrush);

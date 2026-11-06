@@ -11,6 +11,8 @@
     {"op":"capture","name":"01-stock-binding-editor-f8"},
     {"op":"click_frame","name":"KeyBindingFrameOkayButton"},
     {"op":"lua_wait","condition":"not KeyBindingFrame:IsVisible()","timeout":5},
+    {"op":"click_frame","name":"GameMenuButtonContinue"},
+    {"op":"lua_wait","condition":"not GameMenuFrame:IsVisible()","timeout":5},
     {"op":"input_key","name":"F8","event":"press"},
     {"op":"input_key","name":"F8","event":"release"},
     {"op":"lua_wait","condition":"SpellBookFrame:IsVisible()","timeout":5},
