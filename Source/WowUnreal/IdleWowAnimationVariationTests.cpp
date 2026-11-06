@@ -91,7 +91,8 @@ bool FIdleWowAttackVariations::RunTest(const FString&)
             TestEqual(TEXT("Variation keeps the weapon animation family"),Instance->GetM2AnimationId(),19);
             TestEqual(TEXT("Every new swing starts at its first sample"),Instance->GetM2Time(),0.f);
             const int32 Variation=Instance->GetM2VariationId();Seen.Add(Variation);
-            TestTrue(TEXT("One-shot duration follows the chosen variation"),FMath::IsNearlyEqual(Instance->GetM2Duration(),Variation==0?.5f:.9f));
+            // Milliseconds * .001f rounds 900 ms one ULP above the .9f literal.
+            TestEqual(TEXT("One-shot duration follows the chosen variation"),Instance->GetM2Duration(),Variation==0?.5f:.9f,1.e-7f);
             Instance->NativeUpdateAnimation(.2f);
             TArray<FTransform> Pose;Instance->SampleLocalPose(Pose);
             if(Pose.Num()) PosePositions.Add(FMath::RoundToInt(Pose[0].GetTranslation().Y));

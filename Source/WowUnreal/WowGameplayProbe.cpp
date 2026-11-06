@@ -109,6 +109,7 @@ struct FWowGameplayProbe
     double FailureExitAt=0;
     uint32 LastEquippedItem=0;
     uint64 PendingWorldClick=0;
+    bool bWorldClickReleased=false;
     FVector2D SlateClickPoint=FVector2D::ZeroVector;
     FRotator BeforeMouseAxis=FRotator::ZeroRotator;
     TMap<uint64,TPair<uint32,uint32>> OfflineCorpseFields;
@@ -648,25 +649,38 @@ struct FWowGameplayProbe
             const bool ThroughSlate=Op==TEXT("click_world_unit_slate");
             if (PendingWorldClick)
             {
-                if (ThroughSlate)
+                if (!bWorldClickReleased)
                 {
-                    float X=0,Y=0;
-                    const bool SamePixel=C.GetMousePosition(X,Y) && FVector2D::Distance(FVector2D(X,Y),SlateClickPoint)<=2;
-                    const bool Released=RouteWorldClick(C,false);
-                    if (!SamePixel || !Released)
+                    if (ThroughSlate)
                     {
-                        Failure=FString::Printf(TEXT("Slate click did not reach the expected viewport pixel (wanted %.0f,%.0f actual %.0f,%.0f released=%d)"),
-                            SlateClickPoint.X,SlateClickPoint.Y,X,Y,Released); Finish(C,false); return;
+                        float X=0,Y=0;
+                        const bool SamePixel=C.GetMousePosition(X,Y) && FVector2D::Distance(FVector2D(X,Y),SlateClickPoint)<=2;
+                        const bool Released=RouteWorldClick(C,false);
+                        if (!SamePixel || !Released)
+                        {
+                            Failure=FString::Printf(TEXT("Slate click did not reach the expected viewport pixel (wanted %.0f,%.0f actual %.0f,%.0f released=%d)"),
+                                SlateClickPoint.X,SlateClickPoint.Y,X,Y,Released); Finish(C,false); return;
+                        }
                     }
-                }
-                else
-                {
-                    TGuardValue<bool> Synthetic(C.bProbeSyntheticKeyboard,true);
-                    C.InputKey(FInputKeyEventArgs::CreateSimulated(EKeys::LeftMouseButton,IE_Released,0.f));
+                    else
+                    {
+                        TGuardValue<bool> Synthetic(C.bProbeSyntheticKeyboard,true);
+                        C.InputKey(FInputKeyEventArgs::CreateSimulated(EKeys::LeftMouseButton,IE_Released,0.f));
+                    }
+                    // PlayerInput dispatches the queued release on the next tick.
+                    // Selection now deliberately happens on release, not press.
+                    bWorldClickReleased=true;
+                    return;
                 }
                 Done=C.TargetGuid==PendingWorldClick && uint64(Connection->GetTargetGuid())==PendingWorldClick;
+                if (!Done)
+                {
+                    Failure=FString::Printf(TEXT("Released left mouse input did not select the visible world unit (expected=%llu controller=%llu connection=%llu keyDown=%d)"),
+                        PendingWorldClick,C.TargetGuid,uint64(Connection->GetTargetGuid()),C.IsInputKeyDown(EKeys::LeftMouseButton));
+                    Finish(C,false); return;
+                }
                 PendingWorldClick=0;
-                if (!Done) { Failure=TEXT("Left mouse input did not select the visible world unit"); Finish(C,false); return; }
+                bWorldClickReleased=false;
             }
             else
             {
@@ -712,6 +726,7 @@ struct FWowGameplayProbe
                             C.InputKey(FInputKeyEventArgs::CreateSimulated(EKeys::LeftMouseButton,IE_Pressed,1.f));
                         }
                         PendingWorldClick=Guid;
+                        bWorldClickReleased=false;
                     }
                     UE_LOG(LogTemp,Log,TEXT("GameplayProbe: %s entry=%u guid=%llu viewport=(%.0f,%.0f)"),*Op,Entry,Guid,Pointer.X,Pointer.Y);
                 }
