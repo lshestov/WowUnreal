@@ -140,7 +140,6 @@ void SWowLoginWidget::BuildStockLayout()
     Put(Version,3,-24,230,18,0,1);
     StockEditStyle=FCoreStyle::Get().GetWidgetStyle<FEditableTextBoxStyle>("NormalEditableTextBox");FSlateBrush Empty;Empty.DrawAs=ESlateBrushDrawType::NoDrawType;
     StockEditStyle.SetBackgroundImageNormal(Empty).SetBackgroundImageHovered(Empty).SetBackgroundImageFocused(Empty).SetBackgroundImageReadOnly(Empty);
-    // Keep editable text centered vertically and clear of the beveled sides.
     StockEditStyle.SetPadding(FMargin(16, 0, 12, 0));
     auto Field=[&](const TSharedPtr<SEditableTextBox>& Box)
     {
@@ -151,7 +150,10 @@ void SWowLoginWidget::BuildStockLayout()
         D.InsetLeft=10;D.InsetRight=5;D.InsetTop=4;D.InsetBottom=9;
         // AccountLogin.lua colors are display-space values; the backdrop painter encodes its tint to sRGB.
         D.Color=FLinearColor::FromSRGBColor(FColor(23,23,23));D.BorderColor=FLinearColor::FromSRGBColor(FColor(204,204,204));
-        return SNew(SOverlay)+SOverlay::Slot()[Backdrop(D)]+SOverlay::Slot()[Box.ToSharedRef()];
+        // Align the editable widget to the visible face, excluding the lower
+        // bevel/shadow. Keep these insets outside its internal text padding.
+        return SNew(SOverlay)+SOverlay::Slot()[Backdrop(D)]
+            +SOverlay::Slot().Padding(FMargin(0,D.InsetTop,0,D.InsetBottom))[Box.ToSharedRef()];
     };
     auto AddLoginField = [&](const FString& CaptionText, float LabelWidth, float FieldTop,
                              const TSharedPtr<SEditableTextBox>& Box)
