@@ -111,6 +111,7 @@ struct FWowGameplayProbe
     uint64 PendingWorldClick=0;
     bool bWorldClickReleased=false;
     FVector2D SlateClickPoint=FVector2D::ZeroVector;
+    TOptional<FVector2D> SavedSlateCursor;
     FRotator BeforeMouseAxis=FRotator::ZeroRotator;
     TMap<uint64,TPair<uint32,uint32>> OfflineCorpseFields;
     TSet<int32> SwingVariations;
@@ -146,12 +147,23 @@ struct FWowGameplayProbe
         Steps=*Values; Output=Spec->GetStringField(TEXT("output"));
         if (Output.IsEmpty() || !IFileManager::Get().MakeDirectory(*Output,true)) Failure=TEXT("Invalid output directory");
     }
-    ~FWowGameplayProbe() { if(InputGuard && FSlateApplication::IsInitialized()) FSlateApplication::Get().UnregisterInputPreProcessor(InputGuard); }
+    ~FWowGameplayProbe()
+    {
+        RestoreSlateCursor();
+        if(InputGuard && FSlateApplication::IsInitialized()) FSlateApplication::Get().UnregisterInputPreProcessor(InputGuard);
+    }
+
+    void RestoreSlateCursor()
+    {
+        if(SavedSlateCursor.IsSet() && FSlateApplication::IsInitialized()) FSlateApplication::Get().SetCursorPos(*SavedSlateCursor);
+        SavedSlateCursor.Reset();
+    }
 
     void Finish(AWowGameplayController& Controller,bool Passed)
     {
         if (bFinished) return;
         bFinished=true;
+        RestoreSlateCursor();
         if (auto* Character=Cast<ACharacter>(Controller.GetPawn())) Character->GetCharacterMovement()->StopMovementImmediately();
         Controller.StopAutoAttack();
         const auto Report=MakeShared<FJsonObject>();
@@ -224,6 +236,11 @@ struct FWowGameplayProbe
         auto& Slate=FSlateApplication::Get();
         const auto Path=Slate.LocateWindowUnderMouse(Screen,{Window.ToSharedRef()},false,0);
         if (!Path.IsValid()) return false;
+        // SceneViewport refreshes its cached position from the desktop cursor
+        // when capture ends. Keep both positions together until PlayerInput has
+        // dispatched release; restoring earlier would turn this click into a drag.
+        if(Down && !SavedSlateCursor.IsSet()) SavedSlateCursor=Slate.GetCursorPos();
+        Slate.SetCursorPos(Screen);
         const TSet<FKey> Buttons=Down?TSet<FKey>{EKeys::LeftMouseButton}:TSet<FKey>{};
         const FPointerEvent Event(FSlateApplication::CursorPointerIndex,Screen,Screen,Buttons,EKeys::LeftMouseButton,0,FModifierKeysState());
         UE_LOG(LogTemp,Log,TEXT("GameplayProbe: Slate world click %s path=%s desktop=(%.1f,%.1f)"),Down?TEXT("down"):TEXT("up"),*Path.ToString(),Screen.X,Screen.Y);
@@ -666,9 +683,7 @@ struct FWowGameplayProbe
                     {
                         float X=0,Y=0;
                         const bool SamePixel=C.GetMousePosition(X,Y) && FVector2D::Distance(FVector2D(X,Y),SlateClickPoint)<=2;
-                        UE_LOG(LogTemp,Log,TEXT("GameplayProbe: before Slate release %s"),*DescribeWorldClick(C));
                         const bool Released=RouteWorldClick(C,false);
-                        UE_LOG(LogTemp,Log,TEXT("GameplayProbe: after Slate release %s"),*DescribeWorldClick(C));
                         if (!SamePixel || !Released)
                         {
                             Failure=FString::Printf(TEXT("Slate click did not reach the expected viewport pixel (wanted %.0f,%.0f actual %.0f,%.0f released=%d)"),
@@ -692,6 +707,7 @@ struct FWowGameplayProbe
                         PendingWorldClick,C.TargetGuid,uint64(Connection->GetTargetGuid()),*DescribeWorldClick(C));
                     Finish(C,false); return;
                 }
+                RestoreSlateCursor();
                 PendingWorldClick=0;
                 bWorldClickReleased=false;
             }
@@ -732,7 +748,6 @@ struct FWowGameplayProbe
                             C.GameplayProbePointer.Reset();
                             SlateClickPoint=Pointer;
                             if (!RouteWorldClick(C,true)) { Failure=TEXT("Slate could not route the click to the game window"); Finish(C,false); return; }
-                            UE_LOG(LogTemp,Log,TEXT("GameplayProbe: after Slate press %s"),*DescribeWorldClick(C));
                         }
                         else
                         {
