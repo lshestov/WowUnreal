@@ -643,7 +643,7 @@ struct FWowGameplayProbe
             const uint64 Guid=FindEntry(C,Step->GetIntegerField(TEXT("entry")));
             auto* Entity=Handler.EntityManager.Find(Guid);
             auto* Actor=C.SpawnedEntityActors.FindRef(Guid).Get();
-            auto* Pawn=C.GetPawn();
+            APawn* Pawn=C.GetPawn();
             if(!Entity || !IsValid(Actor) || !Pawn || Entity->IsPlayer())
             {Failure=TEXT("NPC facing replay requires the disconnected living creature fixture"); Finish(C,false); return;}
             const auto SendTarget=[&](uint64 Target)
