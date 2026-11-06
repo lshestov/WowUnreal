@@ -231,6 +231,17 @@ struct FWowGameplayProbe
         return (Down?Slate.RoutePointerDownEvent(Path,Event):Slate.RoutePointerUpEvent(Path,Event)).IsEventHandled();
     }
 
+    FString DescribeWorldClick(AWowGameplayController& C) const
+    {
+        float X=0,Y=0;
+        const bool HasPointer=C.GetMousePosition(X,Y);
+        const auto& Press=C.LeftWorldPress;
+        const FVector2D Desktop=FSlateApplication::Get().GetCursorPos();
+        return FString::Printf(TEXT("active=%d dragged=%d picked=%llu start=(%.1f,%.1f) pointer=(%d %.1f,%.1f) desktop=(%.1f,%.1f) view=%s startView=%s ui=%lld native=%d keyDown=%d"),
+            Press.Active,Press.Dragged,Press.Guid,Press.Position.X,Press.Position.Y,HasPointer,X,Y,Desktop.X,Desktop.Y,
+            *C.GetControlRotation().ToString(),*Press.ViewRotation.ToString(),C.GetUiFrameUnderCursor(),C.IsPointerOverNativeWindow(),C.IsInputKeyDown(EKeys::LeftMouseButton));
+    }
+
     bool ProbeDialog(AWowGameplayController& C, const FJsonObject& Step, const FString& Op)
     {
         auto* Client = C.GetWorld()->GetGameViewport();
@@ -655,7 +666,9 @@ struct FWowGameplayProbe
                     {
                         float X=0,Y=0;
                         const bool SamePixel=C.GetMousePosition(X,Y) && FVector2D::Distance(FVector2D(X,Y),SlateClickPoint)<=2;
+                        UE_LOG(LogTemp,Log,TEXT("GameplayProbe: before Slate release %s"),*DescribeWorldClick(C));
                         const bool Released=RouteWorldClick(C,false);
+                        UE_LOG(LogTemp,Log,TEXT("GameplayProbe: after Slate release %s"),*DescribeWorldClick(C));
                         if (!SamePixel || !Released)
                         {
                             Failure=FString::Printf(TEXT("Slate click did not reach the expected viewport pixel (wanted %.0f,%.0f actual %.0f,%.0f released=%d)"),
@@ -675,8 +688,8 @@ struct FWowGameplayProbe
                 Done=C.TargetGuid==PendingWorldClick && uint64(Connection->GetTargetGuid())==PendingWorldClick;
                 if (!Done)
                 {
-                    Failure=FString::Printf(TEXT("Released left mouse input did not select the visible world unit (expected=%llu controller=%llu connection=%llu keyDown=%d)"),
-                        PendingWorldClick,C.TargetGuid,uint64(Connection->GetTargetGuid()),C.IsInputKeyDown(EKeys::LeftMouseButton));
+                    Failure=FString::Printf(TEXT("Released left mouse input did not select the visible world unit (expected=%llu controller=%llu connection=%llu %s)"),
+                        PendingWorldClick,C.TargetGuid,uint64(Connection->GetTargetGuid()),*DescribeWorldClick(C));
                     Finish(C,false); return;
                 }
                 PendingWorldClick=0;
@@ -719,6 +732,7 @@ struct FWowGameplayProbe
                             C.GameplayProbePointer.Reset();
                             SlateClickPoint=Pointer;
                             if (!RouteWorldClick(C,true)) { Failure=TEXT("Slate could not route the click to the game window"); Finish(C,false); return; }
+                            UE_LOG(LogTemp,Log,TEXT("GameplayProbe: after Slate press %s"),*DescribeWorldClick(C));
                         }
                         else
                         {

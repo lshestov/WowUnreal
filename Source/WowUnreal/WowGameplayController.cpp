@@ -2183,19 +2183,6 @@ void AWowGameplayController::InteractWithTarget()
 		if (TargetGuid == 0) return;
 	}
 
-	// Check if this is a dead NPC corpse — loot it
-	UE_LOG(LogWowGameplay, Log, TEXT("OnRightClick: checking DeadEntityGuids for %llu, contains=%d"),
-		TargetGuid, DeadEntityGuids.Contains(TargetGuid) ? 1 : 0);
-	if (DeadEntityGuids.Contains(TargetGuid))
-	{
-		UE_LOG(LogWowGameplay, Log, TEXT("Right-click: looting dead entity %llu"), TargetGuid);
-		if (ConnectionManager)
-		{
-			ConnectionManager->SendLoot(static_cast<int64>(TargetGuid));
-		}
-		return;
-	}
-
 	const FWowEntity* TargetEntity = nullptr;
 	if (ConnectionManager)
 	{
@@ -2227,6 +2214,19 @@ void AWowGameplayController::InteractWithTarget()
 
 	if (!TargetEntity->IsUnit()) return;
 
+	// A rendered corpse can outlive its loot. Only the current server fields,
+	// not the animation/death cache, decide whether a loot request is valid.
+	const auto* Unit = static_cast<const FWowUnitEntity*>(TargetEntity);
+	if (Unit->GetHealth() <= 0)
+	{
+		if (Unit->IsLootable())
+		{
+			UE_LOG(LogWowGameplay, Log, TEXT("Right-click: looting eligible corpse %llu"), TargetGuid);
+			ConnectionManager->SendLoot(static_cast<int64>(TargetGuid));
+		}
+		return;
+	}
+
 	// Players: initiate a trade directly from right-click for now.
 	if (TargetEntity->IsPlayer())
 	{
@@ -2238,15 +2238,6 @@ void AWowGameplayController::InteractWithTarget()
 			UE_LOG(LogWowGameplay, Log, TEXT("Right-click player %llu: initiating trade"), TargetGuid);
 			ConnectionManager->SendInitiateTrade(static_cast<int64>(TargetGuid));
 		}
-		return;
-	}
-
-	// Check if entity is dead (health = 0) — loot instead of interact
-	int32 Health = TargetEntity->GetHealth();
-	if (Health <= 0)
-	{
-		UE_LOG(LogWowGameplay, Log, TEXT("Right-click: entity %llu has 0 health, looting"), TargetGuid);
-		ConnectionManager->SendLoot(static_cast<int64>(TargetGuid));
 		return;
 	}
 

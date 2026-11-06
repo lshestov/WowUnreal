@@ -3,6 +3,8 @@
 #include "Engine/Engine.h"
 #include "WowGameplayController.h"
 #include "WowConnectionManager.h"
+#include "Net/WowWorldSocket.h"
+#include "WowOpcodes.h"
 #include "WowEntityManager.h"
 #include "WowUpdateFields.h"
 #include "WowWorldManager.h"
@@ -191,6 +193,69 @@ bool FIdleWowMouseTargetPolicyTest::RunTest(const FString&)
     Controller->OnLeftClickReleased();
     TestEqual(TEXT("Despawn during a press cannot select a stale GUID or clear another target"),Controller->TargetGuid,Second);
     Controller->Destroy();World->DestroyWorld(false);GEngine->DestroyWorldContext(World);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIdleWowCorpseLootInteractionTest, "WowUnreal.World.ExhaustedCorpseDoesNotRequestLoot",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FIdleWowCorpseLootInteractionTest::RunTest(const FString&)
+{
+    UWorld* World=UWorld::CreateWorld(EWorldType::Game,false);
+    if(!TestNotNull(TEXT("Test world"),World)) return false;
+    GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+    auto* Controller=World->SpawnActor<AWowGameplayController>();
+    Controller->ConnectionManager=NewObject<UWowConnectionManager>(Controller);
+    auto& Connection=*Controller->ConnectionManager;
+    // No Connect(), socket handle or worker thread: inspect the ordinary
+    // outgoing packet queue without opening any network connection.
+    Connection.State=EWowSessionState::WorldInGame;
+    Connection.WorldSocket=MakeShared<FWowWorldSocket,ESPMode::ThreadSafe>();
+    auto& Socket=*Connection.WorldSocket;
+    auto& Handler=Connection.PacketHandler;
+    constexpr uint64 Guid=0xF130000045000123ULL;
+    auto& Corpse=Handler.EntityManager.PromoteToTyped(Guid,WowTypeMask::OBJECT|WowTypeMask::UNIT);
+    Corpse.SetField(UnitField::HEALTH,0); Corpse.SetField(UnitField::MAXHEALTH,50);
+    Controller->TargetGuid=Guid;
+    const auto ExpectPacket=[&](const TCHAR* Label,uint32 ExpectedOpcode)
+    {
+        TArray<uint8> Packet;
+        if(!TestTrue(Label,Socket.SendQueue.Dequeue(Packet) && Packet.Num()==14)) return;
+        uint32 Opcode=0; uint64 Target=0;
+        FMemory::Memcpy(&Opcode,Packet.GetData()+2,4); FMemory::Memcpy(&Target,Packet.GetData()+6,8);
+        TestEqual(TEXT("Interaction uses the intended opcode"),Opcode,ExpectedOpcode);
+        TestEqual(TEXT("Interaction retains the exact corpse GUID"),Target,Guid);
+        TestTrue(TEXT("One click sends only one request"),Socket.SendQueue.IsEmpty());
+    };
+    for(const bool HasDeathMarker:{false,true})
+    {
+        if(HasDeathMarker) Controller->DeadEntityGuids.Add(Guid); else Controller->DeadEntityGuids.Remove(Guid);
+        Corpse.SetField(UnitField::DYNAMIC_FLAGS,WowDynFlags::LOOTABLE);
+        Controller->InteractWithTarget();
+        ExpectPacket(TEXT("A lootable corpse still sends CMSG_LOOT"),WowOpcode::CMSG_LOOT);
+        TestEqual(TEXT("A valid request is tracked until the server responds"),Handler.PendingLootGuid,Guid);
+
+        // Eligibility does not bypass authoritative ownership/permission errors.
+        TArray<uint8> Denied; Denied.SetNumZeroed(10); FMemory::Memcpy(Denied.GetData(),&Guid,8);
+        const uint32 ErrorRevision=Handler.LootErrorRevision;
+        Handler.HandlePacket(WowOpcode::SMSG_LOOT_RESPONSE,Denied);
+        TestTrue(TEXT("A genuine permission denial remains visible to the UI"),
+            Handler.LootErrorRevision==ErrorRevision+1 && Handler.LastLootErrorGuid==Guid && Handler.LastLootError==0 && Handler.PendingLootGuid==0);
+
+        // The server clears LOOTABLE once the same corpse has been exhausted.
+        Corpse.SetField(UnitField::DYNAMIC_FLAGS,0);
+        Controller->InteractWithTarget(); Controller->InteractWithTarget();
+        TestTrue(TEXT("Repeated clicks on an exhausted corpse send no loot or other command"),Socket.SendQueue.IsEmpty());
+        TestTrue(TEXT("Empty corpse clicks preserve selection without creating another pending request/error"),
+            Controller->TargetGuid==Guid && Handler.PendingLootGuid==0 && Handler.LootErrorRevision==ErrorRevision+1 && !Controller->bIsAutoAttacking);
+    }
+    Corpse.SetField(UnitField::HEALTH,50); Corpse.SetField(UnitField::NPC_FLAGS,WowNpcFlags::GOSSIP);
+    Controller->InteractWithTarget();
+    ExpectPacket(TEXT("A resurrected unit uses its live interaction despite a stale death marker"),WowOpcode::CMSG_GOSSIP_HELLO);
+    Handler.EntityManager.Remove(Guid);
+    Controller->InteractWithTarget();
+    TestTrue(TEXT("A removed unit with a stale death marker cannot request loot"),Socket.SendQueue.IsEmpty() && Handler.PendingLootGuid==0);
+    Connection.State=EWowSessionState::Disconnected;
+    Controller->Destroy(); World->DestroyWorld(false); GEngine->DestroyWorldContext(World);
     return true;
 }
 

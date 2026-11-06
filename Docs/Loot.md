@@ -23,6 +23,13 @@ modifier, including changes while the pointer stays still. Exhausted corpses
 use Point. `WowUnreal.Hud.LootCursor` covers both defaults, Shift, a rebound
 Ctrl modifier, and agreement with the collector's LOOT_OPENED behavior.
 
+Right-clicking a dead NPC sends CMSG_LOOT only while its current server
+dynamic flags contain LOOTABLE. The local death-animation cache is not proof
+of remaining loot. Exhausted corpses remain selectable without another loot
+request or a spurious permission error; genuine server loot denials remain
+visible. The world interaction regression inspects the outgoing packet queue
+for empty, lootable, removed, and resurrected units.
+
 Rolls use small public Lua IDs while retaining full 64-bit protocol GUIDs.
 Eligibility masks control Need/Greed/Disenchant, timers use server countdowns in
 milliseconds, and typed start/cancel events control the four stock frames.

@@ -347,6 +347,9 @@ public:
     UPROPERTY(BlueprintAssignable) FOnWowError OnError;
     UPROPERTY(BlueprintAssignable) FOnCharCreateResult OnCharCreateResult;
 private:
+#if WITH_DEV_AUTOMATION_TESTS
+    friend class FIdleWowCorpseLootInteractionTest;
+#endif
     bool bCharacterCreatePending=false;
     uint32 CharacterCreateSendCount=0;
     uint8 NextSpellCastCount=0;

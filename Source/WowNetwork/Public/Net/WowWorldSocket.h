@@ -46,6 +46,7 @@ public:
 private:
 #if WITH_DEV_AUTOMATION_TESTS
     friend class FIdleWowWorldSocketLifetimeTest;
+    friend class FIdleWowCorpseLootInteractionTest;
 #endif
     void DispatchToGameThread(TFunction<void(FWowWorldSocket&)> Callback);
     TWeakPtr<FWowWorldSocket, ESPMode::ThreadSafe> CallbackOwner;

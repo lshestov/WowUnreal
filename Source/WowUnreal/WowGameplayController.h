@@ -91,6 +91,7 @@ private:
     friend class FIdleWowDeathLifetimeTest;
     friend class FIdleWowWorldPickTest;
     friend class FIdleWowMouseTargetPolicyTest;
+    friend class FIdleWowCorpseLootInteractionTest;
     TSharedPtr<struct FWowGameplayProbe> GameplayProbe;
     bool bGameplayProbeChecked=false;
     TOptional<FVector2D> GameplayProbePointer;
