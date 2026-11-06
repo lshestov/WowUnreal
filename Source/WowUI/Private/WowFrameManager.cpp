@@ -1027,7 +1027,8 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 			ApplyElementAnchors(ImgWidget, Container, Tex.Anchors, Tex.Width, Tex.Height,
 				Tex.bSetAllPoints || (Tex.Anchors.IsEmpty() && Tex.Width <= 0 && Tex.Height <= 0), EffectiveParentW, EffectiveParentH);
 			RegionLayouts.Add({ImgWidget, Def.Name, Tex.Anchors, Tex.Width, Tex.Height,
-				Tex.bSetAllPoints || (Tex.Anchors.IsEmpty() && Tex.Width <= 0 && Tex.Height <= 0)});
+				Tex.bSetAllPoints || (Tex.Anchors.IsEmpty() && Tex.Width <= 0 && Tex.Height <= 0),false,false,Layer.Level});
+			ApplyRegionDrawLayer(RegionLayouts.Last());
 			if (!Tex.Name.IsEmpty()) RegionOwners.Add(Tex.Name, Def.Name);
             if(Tex.bSliderThumb) SliderThumbRegions.Add(OwnerHandle,Tex.Name);
 
@@ -1121,7 +1122,8 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
                     NativeTooltipRow=Row>0 && Suffix==FString::FromInt(Row);
                 }
             }
-			RegionLayouts.Add({TextWidget, Def.Name, FS.Anchors, FS.Width, FS.Height, false,false,NativeTooltipRow});
+			RegionLayouts.Add({TextWidget, Def.Name, FS.Anchors, FS.Width, FS.Height, false,false,NativeTooltipRow,Layer.Level});
+			ApplyRegionDrawLayer(RegionLayouts.Last());
 			if (!FS.Name.IsEmpty()) RegionOwners.Add(FS.Name, Def.Name);
 
 			if (!FS.Name.IsEmpty())
@@ -2082,7 +2084,10 @@ void FWowFrameManager::SetChecked(int64 Handle,bool Checked)
 
 void FWowFrameManager::ScrollMessages(int64 Handle,int32 Offset,bool Absolute)
 {
-	auto& State=MessageFrames.FindOrAdd(Handle); State.Offset=FMath::Clamp(Absolute?Offset:State.Offset+Offset,0,FMath::Max(State.Lines.Num()-1,0)); DrawMessages(Handle);
+	auto& State=MessageFrames.FindOrAdd(Handle);
+	if (!Absolute && Offset>0 && State.AtTop) return;
+	State.Offset=FMath::Clamp(Absolute?Offset:State.Offset+Offset,0,FMath::Max(State.Lines.Num()-1,0));
+	DrawMessages(Handle);
 }
 
 namespace
@@ -2142,13 +2147,26 @@ void FWowFrameManager::DrawMessages(int64 Handle,double Now)
 	const float FontHeight = State.FontHeight>0 ? State.FontHeight : FontManager ? FontManager->GetFontSize(FontName) : 12;
 	const float RowSpacing = FontHeight+2;
 	const int32 Visible=FMath::Clamp(FMath::CeilToInt(Height/RowSpacing),1,30);
-	Canvas->SetClipping(EWidgetClipping::ClipToBounds);
+	// FrameXML anchors the chat controls outside this frame. Only the message
+	// content is clipped, so the adjacent buttons remain visible and usable.
+	if (!State.Content.IsValid())
+	{
+		auto* Content=NewObject<UCanvasPanel>(Canvas);
+		Content->SetVisibility(ESlateVisibility::HitTestInvisible);
+		Content->SetClipping(EWidgetClipping::ClipToBounds);
+		auto* ContentSlot=Canvas->AddChildToCanvas(Content);
+		ContentSlot->SetAnchors(FAnchors(0,0,1,1));
+		ContentSlot->SetOffsets(FMargin(0));
+		ContentSlot->SetZOrder(200);
+		State.Content=Content;
+	}
+	auto* Content=State.Content.Get();
 	const int32 Existing = State.Widgets.Num();
 	while(State.Widgets.Num()<Visible)
 	{
-		auto* Text=CreateTextBlock(Canvas); Text->SetVisibility(ESlateVisibility::HitTestInvisible);
+		auto* Text=CreateTextBlock(Content); Text->SetVisibility(ESlateVisibility::HitTestInvisible);
 		Text->SetJustification(Def && Def->MessageJustifyH==TEXT("CENTER")?ETextJustify::Center:Def && Def->MessageJustifyH==TEXT("RIGHT")?ETextJustify::Right:ETextJustify::Left); Text->SetAutoWrapText(false);
-		Canvas->AddChildToCanvas(Text); State.Widgets.Add(Text);
+		Content->AddChildToCanvas(Text); State.Widgets.Add(Text);
 	}
 	// Update already displayed history on SetFont. New pooled rows use the
 	// same face and size as existing ones, including after a UI-scale change.
@@ -2169,11 +2187,15 @@ void FWowFrameManager::DrawMessages(int64 Handle,double Now)
 		State.AppliedFontScale = UIScale;
 	}
 	float Bottom=State.InsertTop?0:Height*UIScale;
+	State.Displayed=0;
+	State.AtTop=false;
 	for(int32 I=0; I<State.Widgets.Num(); ++I) if(auto* Text=State.Widgets[I].Get())
 	{
 		const int32 Index=State.Lines.Num()-1-State.Offset-I;
 		if(I>=Visible || Index<0 || (State.InsertTop?Bottom>=Height*UIScale:Bottom<=0)) { Text->SetVisibility(ESlateVisibility::Collapsed); continue; }
 		const auto& Line=State.Lines[Index]; Text->SetText(FText::FromString(Line.Text)); UWowTextBlock::SetWowTextColor(*Text, Line.Color); Text->SetWrapTextAt(Width*UIScale);
+		++State.Displayed;
+		State.AtTop=Index==0;
 		auto* Label=CastChecked<UWowTextBlock>(Text);
 		Label->TakeWidget(); Label->RefreshRichStyle(UIScale);
 		const float RowHeight=FMath::Max(RowSpacing*UIScale,Label->MeasureRenderedText(State.TextLayoutScale).Y);

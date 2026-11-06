@@ -74,6 +74,53 @@ struct FHudFixture
 };
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudHighlightDrawLayer, "WowUnreal.Hud.HighlightDrawLayer",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FHudHighlightDrawLayer::RunTest(const FString&)
+{
+    FHudFixture F;
+    if (!TestTrue(TEXT("Create ordinary highlight regions and a separate notification glow"),F.Lua.ExecuteString(TEXT(R"LUA(
+        HoverTab=CreateFrame('Button','HoverTab',UIParent)
+        HoverTab:SetSize(120,30); HoverTab:SetPoint('TOPLEFT',UIParent,'TOPLEFT',100,-100)
+        HoverHighlight=HoverTab:CreateTexture('HoverHighlight','HIGHLIGHT')
+        HoverHighlight:SetAllPoints(); HoverHighlight:SetTexture(1,1,0,1)
+        HoverLabel=HoverTab:CreateFontString('HoverLabel','HIGHLIGHT','GameFontNormal')
+        HoverLabel:SetAllPoints(); HoverLabel:SetText('Highlight')
+        AlertGlow=HoverTab:CreateTexture('AlertGlow','BORDER')
+        AlertGlow:SetAllPoints(); AlertGlow:SetTexture(1,.5,0,1)
+    )LUA")))) return false;
+    F.Frames.RefreshLayout();
+    const auto CheckDrawing=[&](bool Highlight) {
+        const auto Expected=Highlight ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Hidden;
+        TestEqual(TEXT("Highlight texture follows its draw layer"),F.Frames.GetNamedTexture(TEXT("HoverHighlight"))->GetVisibility(),Expected);
+        TestEqual(TEXT("Highlight text follows its draw layer"),F.Frames.GetNamedFontString(TEXT("HoverLabel"))->GetVisibility(),Expected);
+        TestEqual(TEXT("Notification glow has an independent layer"),F.Frames.GetNamedTexture(TEXT("AlertGlow"))->GetVisibility(),ESlateVisibility::HitTestInvisible);
+    };
+    TestTrue(TEXT("Draw-layer masking preserves the stock Lua shown and visible flags"),F.Lua.ExecuteString(TEXT(
+        "assert(HoverHighlight:IsShown() and HoverHighlight:IsVisible() and HoverLabel:IsVisible())")));
+    CheckDrawing(false);
+    const auto Rect=F.Frames.GetLayoutRect(F.Frames.FindFrame(TEXT("HoverTab")));
+    const float Scale=F.Frames.GetScreenScale();
+    F.Frames.UpdateMouseHover((Rect.X+Rect.Z/2)*Scale,(Rect.Y+Rect.W/2)*Scale);
+    CheckDrawing(true);
+    TestTrue(TEXT("An explicit Hide survives layout and hover"),F.Lua.ExecuteString(TEXT("HoverHighlight:Hide()")));
+    F.Frames.RefreshLayout();
+    F.Frames.UpdateMouseHover(0,0);
+    F.Frames.UpdateMouseHover((Rect.X+Rect.Z/2)*Scale,(Rect.Y+Rect.W/2)*Scale);
+    TestTrue(TEXT("Hidden texture remains hidden"),F.Lua.ExecuteString(TEXT("assert(not HoverHighlight:IsShown()); HoverHighlight:Show(); HoverTab:LockHighlight()")));
+    F.Frames.UpdateMouseHover(0,0);
+    F.Frames.RefreshLayout();
+    CheckDrawing(true);
+    TestTrue(TEXT("Unlock and Show use the same draw layer"),F.Lua.ExecuteString(TEXT("HoverTab:UnlockHighlight(); HoverHighlight:Show()")));
+    F.Frames.RefreshLayout();
+    CheckDrawing(false);
+    TestTrue(TEXT("A region can change layer dynamically"),F.Lua.ExecuteString(TEXT("HoverHighlight:SetDrawLayer('ARTWORK')")));
+    TestEqual(TEXT("Moving out of HIGHLIGHT renders the texture"),F.Frames.GetNamedTexture(TEXT("HoverHighlight"))->GetVisibility(),ESlateVisibility::HitTestInvisible);
+    TestTrue(TEXT("Disable suppresses a locked highlight"),F.Lua.ExecuteString(TEXT("HoverHighlight:SetDrawLayer('HIGHLIGHT'); HoverTab:LockHighlight(); HoverTab:Disable()")));
+    CheckDrawing(false);
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudAnonymousHierarchy, "WowUnreal.Hud.AnonymousHierarchy",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FHudAnonymousHierarchy::RunTest(const FString&)

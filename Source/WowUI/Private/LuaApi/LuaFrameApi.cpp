@@ -8,6 +8,7 @@
 #include "WowEventSystem.h"
 #include "WowFrameManager.h"
 #include "WowFrameTypes.h"
+#include "WowFrameXmlParser.h"
 #include "../WowPlacedFrameLayout.h"
 #include "WowMultiLineEditBox.h"
 #include "../WowEditOffsets.h"
@@ -593,11 +594,13 @@ static int LF_Show(lua_State* L)
 		if (UImage* Image = GetTextureImage(L, 1))
 		{
 			Image->SetVisibility(Visibility);
+			if(C && C->FrameManager) C->FrameManager->RefreshRegionDrawLayer(Image);
 			return 0;
 		}
 		if (UTextBlock* TextBlock = GetTextBlockWidgetForTable(L, 1))
 		{
 			TextBlock->SetVisibility(Visibility);
+			if(C && C->FrameManager) C->FrameManager->RefreshRegionDrawLayer(TextBlock);
 			return 0;
 		}
 	}
@@ -1840,7 +1843,7 @@ static int LF_DrawLayer(lua_State* L,bool Get)
     const int32 Sub=FMath::Clamp(int32(luaL_optinteger(L,3,0)),-8,7);
     lua_pushvalue(L,2); lua_setfield(L,1,"__drawLayer"); lua_pushinteger(L,Sub); lua_setfield(L,1,"__subLevel");
     UWidget* W=GetTextureImage(L); if(!W) W=GetTextBlockWidgetForTable(L);
-    if(W) if(auto* Slot=Cast<UCanvasPanelSlot>(W->Slot)) Slot->SetZOrder(Index*100+Sub);
+    if(auto* C=WowLuaApi::GetContext(L); C && C->FrameManager) C->FrameManager->SetRegionDrawLayer(W,EWowDrawLayer(Index),Sub);
     return 0;
 }
 static int LF_GetTexCoord(lua_State* L)
@@ -1853,9 +1856,15 @@ static int LF_CreateFontString(lua_State* L)
 {
     auto* C=WowLuaApi::GetContext(L); if(!C || !C->FrameManager) { lua_pushnil(L); return 1; }
     const FString Name=UTF8_TO_TCHAR(luaL_optstring(L,2,"")),Inherits=UTF8_TO_TCHAR(luaL_optstring(L,4,"GameFontNormal"));
+    const FString Layer=UTF8_TO_TCHAR(luaL_optstring(L,3,""));
     const FString Key=C->FrameManager->CreateFontStringRegion(GetFrameHandle(L),Name,Inherits);
     if(Key.IsEmpty()) { lua_pushnil(L); return 1; }
     lua_getglobal(L,TCHAR_TO_UTF8(*Key));
+    if (!Layer.IsEmpty())
+    {
+        C->FrameManager->SetRegionDrawLayer(C->FrameManager->GetNamedFontString(Key),FWowFrameXmlParser::ParseDrawLayer(Layer));
+        lua_pushstring(L,TCHAR_TO_UTF8(*Layer)); lua_setfield(L,-2,"__drawLayer");
+    }
     if(Name.IsEmpty()) { lua_pushboolean(L,1); lua_setfield(L,-2,"__anonymous"); }
     return 1;
 }
@@ -3605,9 +3614,10 @@ static const luaL_Reg FrameMethods[] =
 	}},
 	{"SetScrollRange", [](lua_State* L) -> int { return 0; }},
 	{"GetNumMessages", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); lua_pushinteger(L,C && C->FrameManager?C->FrameManager->MessageFrames.FindOrAdd(GetFrameHandle(L)).Lines.Num():0); return 1; }},
-	{"GetNumLinesDisplayed", [](lua_State* L) -> int { lua_pushnumber(L, 0); return 1; }},
-	{"AtTop", [](lua_State* L) -> int { lua_pushboolean(L, 1); return 1; }},
-	{"AtBottom", [](lua_State* L) -> int { lua_pushboolean(L, 1); return 1; }},
+	{"GetNumLinesDisplayed", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); lua_pushinteger(L,C && C->FrameManager?C->FrameManager->MessageFrames.FindOrAdd(GetFrameHandle(L)).Displayed:0); return 1; }},
+	{"GetCurrentScroll", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); lua_pushinteger(L,C && C->FrameManager?C->FrameManager->MessageFrames.FindOrAdd(GetFrameHandle(L)).Offset:0); return 1; }},
+	{"AtTop", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager && C->FrameManager->MessageFrames.FindOrAdd(GetFrameHandle(L)).AtTop) lua_pushinteger(L,1); else lua_pushnil(L); return 1; }},
+	{"AtBottom", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager && C->FrameManager->MessageFrames.FindOrAdd(GetFrameHandle(L)).Offset==0) lua_pushinteger(L,1); else lua_pushnil(L); return 1; }},
 	{"ScrollUp", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->ScrollMessages(GetFrameHandle(L),1); return 0; }},
 	{"ScrollDown", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->ScrollMessages(GetFrameHandle(L),-1); return 0; }},
 	{"ScrollToTop", [](lua_State* L) -> int { auto* C=WowLuaApi::GetContext(L); if(C && C->FrameManager) C->FrameManager->ScrollMessages(GetFrameHandle(L),10000,true); return 0; }},

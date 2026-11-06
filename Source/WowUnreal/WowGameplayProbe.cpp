@@ -1186,6 +1186,20 @@ struct FWowGameplayProbe
             }
             FString Label = Name;
             Step->TryGetStringField(TEXT("label"), Label);
+            if (Handle<0)
+            {
+                const UWidget* Region=Text;
+                if (!Region) Region=Frames->GetNamedTexture(Name);
+                const bool Drawn=Region && Region->IsVisible() && Frames->IsRegionOwnerDrawn(Name) && Frames->IsRegionAnchored(Name);
+                Row->SetBoolField(TEXT("drawn"),Drawn);
+                bool Expected=false;
+                if (Step->TryGetBoolField(TEXT("expectedDrawn"),Expected) && Drawn!=Expected)
+                {
+                    Failure=FString::Printf(TEXT("Unexpected rendered state for %s"),*Name);
+                    Finish(C,false);
+                    return;
+                }
+            }
             Inspections->SetObjectField(Label,Row); Done=true;
         }
         else if(Op==TEXT("assert_key_state"))

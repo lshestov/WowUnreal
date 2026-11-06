@@ -201,6 +201,8 @@ public:
 	UButton* GetButtonWidget(int64 Handle) const;
 	FString EnsureButtonTexture(int64 Handle, const FString& State);
 	void RefreshButtonVisuals(int64 Handle);
+	void SetRegionDrawLayer(UWidget* Widget, EWowDrawLayer Layer, int32 SubLevel = 0);
+	void RefreshRegionDrawLayer(UWidget* Widget) const;
 	void SetButtonEnabled(int64 Handle, bool Enabled);
 	void SetButtonState(int64 Handle, const FString& State, bool Locked=false);
 	FString GetButtonState(int64 Handle) const;
@@ -324,7 +326,10 @@ public:
 	{
 		TArray<FMessage> Lines;
 		TArray<TWeakObjectPtr<UTextBlock>> Widgets;
+		TWeakObjectPtr<UCanvasPanel> Content;
 		int32 Offset=0,Limit=200;
+		int32 Displayed=0;
+		bool AtTop=false;
 		bool Hyperlinks=true,Fading=false,InsertTop=false;
 		float TimeVisible=120,FadeDuration=3;
 		FString FontPath;
@@ -514,8 +519,11 @@ private:
 		bool bAllPoints;
 		bool bUnanchored=false; // Explicit ClearAllPoints; distinct from XML's implicit owner layout.
         bool bNativeTooltipRow=false;
+		EWowDrawLayer DrawLayer=EWowDrawLayer::ARTWORK;
 	};
 	TArray<FRegionLayout> RegionLayouts;
+	void RefreshFrameDrawLayers(int64 Handle) const;
+	void ApplyRegionDrawLayer(const FRegionLayout& Region) const;
 	TSet<FString> UnanchoredRegions;
 	TArray<TWeakObjectPtr<class UWowTextBlock>> RichTextWidgets;
 	TMap<int64,float> LastScrollRanges;

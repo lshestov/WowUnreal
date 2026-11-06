@@ -367,6 +367,7 @@ void FWowFrameManager::RefreshSubtreeLayout(int64 Handle)
             if(R.bUnanchored) {if(R.Widget->GetVisibility()!=ESlateVisibility::Collapsed) R.Widget->SetVisibility(ESlateVisibility::Hidden); continue;}
             const auto Owner=GetFrameRect(R.Owner); const float Scale=GetEffectiveFrameScale(FindFrame(R.Owner));
             ApplyElementAnchors(R.Widget.Get(),nullptr,R.Anchors,R.Width,R.Height,R.bAllPoints,Owner.W/Scale,Owner.H/Scale);
+            ApplyRegionDrawLayer(R);
         }
     }
     // Other dirty branches still receive the normal end-of-tick layout pass.
@@ -398,6 +399,7 @@ void FWowFrameManager::RefreshLayout()
             if(Region.bUnanchored) { if(Region.Widget->GetVisibility()!=ESlateVisibility::Collapsed) Region.Widget->SetVisibility(ESlateVisibility::Hidden); continue; }
             ApplyElementAnchors(Region.Widget.Get(), nullptr, Region.Anchors, Region.Width, Region.Height,
                 Region.bAllPoints, Owner.W / Scale, Owner.H / Scale);
+            ApplyRegionDrawLayer(Region);
         }
     }
     }

@@ -94,6 +94,7 @@ FString FWowFrameManager::GetButtonState(int64 Handle) const
 
 void FWowFrameManager::RefreshButtonVisuals(int64 Handle)
 {
+    RefreshFrameDrawLayers(Handle);
     auto* Visual=ButtonVisualStates.Find(Handle); if(!Visual) return;
     const FString State=GetButtonState(Handle);
     const bool Pressed=State==TEXT("PUSHED"),Disabled=State==TEXT("DISABLED");
@@ -117,6 +118,44 @@ void FWowFrameManager::RefreshButtonVisuals(int64 Handle)
             const FString TextName=GetNamedFontString(Entry->Def.Name+TEXT("Text"))?Entry->Def.Name+TEXT("Text"):Entry->Def.Name+TEXT("NormalText");
             EventSystem->ApplyRegionFont(TextName,Font);
         }
+    }
+}
+
+void FWowFrameManager::ApplyRegionDrawLayer(const FRegionLayout& Region) const
+{
+    auto* Widget=Region.Widget.Get();
+    if (!Widget || Widget->GetVisibility()==ESlateVisibility::Collapsed) return;
+    const int64 Owner=FindFrame(Region.Owner);
+    const auto* State=ButtonVisualStates.Find(Owner);
+    const auto* Button=GetButtonWidget(Owner);
+    const bool Highlight=Owner>=0 && (HoverFrameHandle==Owner || (State && State->HighlightLocked))
+        && (!Button || Button->GetIsEnabled());
+    const bool Draw=!Region.bUnanchored && (Region.DrawLayer!=EWowDrawLayer::HIGHLIGHT || Highlight);
+    Widget->SetVisibility(Draw ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Hidden);
+}
+
+void FWowFrameManager::RefreshFrameDrawLayers(int64 Handle) const
+{
+    if (Handle<0) return;
+    const FString Owner=GetFrameName(Handle);
+    for (const auto& Region:RegionLayouts)
+        if (Region.Owner==Owner && Region.DrawLayer==EWowDrawLayer::HIGHLIGHT) ApplyRegionDrawLayer(Region);
+}
+
+void FWowFrameManager::RefreshRegionDrawLayer(UWidget* Widget) const
+{
+    for (const auto& Region:RegionLayouts)
+        if (Widget && Region.Widget.Get()==Widget) { ApplyRegionDrawLayer(Region); return; }
+}
+
+void FWowFrameManager::SetRegionDrawLayer(UWidget* Widget, EWowDrawLayer Layer, int32 SubLevel)
+{
+    for (auto& Region:RegionLayouts) if (Widget && Region.Widget.Get()==Widget)
+    {
+        Region.DrawLayer=Layer;
+        if (auto* Slot=Cast<UCanvasPanelSlot>(Widget->Slot)) Slot->SetZOrder(int32(Layer)*100+SubLevel);
+        ApplyRegionDrawLayer(Region);
+        return;
     }
 }
 

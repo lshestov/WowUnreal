@@ -1,0 +1,348 @@
+{
+  "qaClass": 1,
+  "qaLevel": 1,
+  "qaGm": false,
+  "qaSpawnEntry": 823,
+  "qaSpawnOffset": 3,
+  "width": 1280,
+  "height": 900,
+  "steps": [
+    {
+      "op": "wait_world",
+      "timeout": 140
+    },
+    {
+      "op": "wait_floor",
+      "timeout": 80
+    },
+    {
+      "op": "time",
+      "minutes": 630
+    },
+    {
+      "op": "move_pointer",
+      "x": 0.7,
+      "y": 0.4
+    },
+    {
+      "op": "lua_wait",
+      "condition": "ChatFrame1:IsVisible() and ChatFrame1TabSelectedMiddle:IsVisible() and not ChatFrame2TabSelectedMiddle:IsVisible() and ChatFrame1TabHighlightMiddle:IsShown() and not ChatFrame1TabGlow:IsVisible() and not ChatFrame2TabGlow:IsVisible()",
+      "timeout": 12
+    },
+    {
+      "op": "wait",
+      "seconds": 5
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame1TabHighlightLeft",
+      "label": "01-tabs-idle-1-Left",
+      "expectedDrawn": false
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame1TabHighlightMiddle",
+      "label": "01-tabs-idle-1-Middle",
+      "expectedDrawn": false
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame1TabHighlightRight",
+      "label": "01-tabs-idle-1-Right",
+      "expectedDrawn": false
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame2TabHighlightLeft",
+      "label": "01-tabs-idle-2-Left",
+      "expectedDrawn": false
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame2TabHighlightMiddle",
+      "label": "01-tabs-idle-2-Middle",
+      "expectedDrawn": false
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame2TabHighlightRight",
+      "label": "01-tabs-idle-2-Right",
+      "expectedDrawn": false
+    },
+    {
+      "op": "capture",
+      "name": "01-tabs-idle"
+    },
+    {
+      "op": "hover_frame",
+      "name": "ChatFrame1Tab"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "ChatFrame1Tab:IsVisible()",
+      "timeout": 5
+    },
+    {
+      "op": "wait",
+      "seconds": 0.5
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame1TabHighlightLeft",
+      "label": "02-general-hover-1-Left",
+      "expectedDrawn": true
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame1TabHighlightMiddle",
+      "label": "02-general-hover-1-Middle",
+      "expectedDrawn": true
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame1TabHighlightRight",
+      "label": "02-general-hover-1-Right",
+      "expectedDrawn": true
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame2TabHighlightLeft",
+      "label": "02-general-hover-2-Left",
+      "expectedDrawn": false
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame2TabHighlightMiddle",
+      "label": "02-general-hover-2-Middle",
+      "expectedDrawn": false
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame2TabHighlightRight",
+      "label": "02-general-hover-2-Right",
+      "expectedDrawn": false
+    },
+    {
+      "op": "capture",
+      "name": "02-general-hover"
+    },
+    {
+      "op": "hover_frame",
+      "name": "ChatFrame2Tab"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "ChatFrame1TabSelectedMiddle:IsVisible()",
+      "timeout": 5
+    },
+    {
+      "op": "wait",
+      "seconds": 0.5
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame1TabHighlightLeft",
+      "label": "03-combat-log-hover-1-Left",
+      "expectedDrawn": false
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame1TabHighlightMiddle",
+      "label": "03-combat-log-hover-1-Middle",
+      "expectedDrawn": false
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame1TabHighlightRight",
+      "label": "03-combat-log-hover-1-Right",
+      "expectedDrawn": false
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame2TabHighlightLeft",
+      "label": "03-combat-log-hover-2-Left",
+      "expectedDrawn": true
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame2TabHighlightMiddle",
+      "label": "03-combat-log-hover-2-Middle",
+      "expectedDrawn": true
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame2TabHighlightRight",
+      "label": "03-combat-log-hover-2-Right",
+      "expectedDrawn": true
+    },
+    {
+      "op": "capture",
+      "name": "03-combat-log-hover"
+    },
+    {
+      "op": "click_frame",
+      "name": "ChatFrame2Tab"
+    },
+    {
+      "op": "move_pointer",
+      "x": 0.7,
+      "y": 0.4
+    },
+    {
+      "op": "lua_wait",
+      "condition": "ChatFrame2:IsVisible() and not ChatFrame1:IsVisible() and ChatFrame2TabSelectedMiddle:IsVisible() and not ChatFrame1TabSelectedMiddle:IsVisible()",
+      "timeout": 5
+    },
+    {
+      "op": "wait",
+      "seconds": 5
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame1TabHighlightLeft",
+      "label": "04-combat-log-selected-1-Left",
+      "expectedDrawn": false
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame1TabHighlightMiddle",
+      "label": "04-combat-log-selected-1-Middle",
+      "expectedDrawn": false
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame1TabHighlightRight",
+      "label": "04-combat-log-selected-1-Right",
+      "expectedDrawn": false
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame2TabHighlightLeft",
+      "label": "04-combat-log-selected-2-Left",
+      "expectedDrawn": false
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame2TabHighlightMiddle",
+      "label": "04-combat-log-selected-2-Middle",
+      "expectedDrawn": false
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame2TabHighlightRight",
+      "label": "04-combat-log-selected-2-Right",
+      "expectedDrawn": false
+    },
+    {
+      "op": "capture",
+      "name": "04-combat-log-selected"
+    },
+    {
+      "op": "lua",
+      "code": "FCF_StartAlertFlash(ChatFrame1)"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "ChatFrame1Tab.alerting and ChatFrame1TabGlow:IsVisible() and ChatFrame1TabGlow:GetAlpha()>0.6",
+      "timeout": 5
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame1TabHighlightLeft",
+      "label": "05-message-alert-1-Left",
+      "expectedDrawn": false
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame1TabHighlightMiddle",
+      "label": "05-message-alert-1-Middle",
+      "expectedDrawn": false
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame1TabHighlightRight",
+      "label": "05-message-alert-1-Right",
+      "expectedDrawn": false
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame2TabHighlightLeft",
+      "label": "05-message-alert-2-Left",
+      "expectedDrawn": false
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame2TabHighlightMiddle",
+      "label": "05-message-alert-2-Middle",
+      "expectedDrawn": false
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame2TabHighlightRight",
+      "label": "05-message-alert-2-Right",
+      "expectedDrawn": false
+    },
+    {
+      "op": "capture",
+      "name": "05-message-alert"
+    },
+    {
+      "op": "click_frame",
+      "name": "ChatFrame1Tab"
+    },
+    {
+      "op": "move_pointer",
+      "x": 0.7,
+      "y": 0.4
+    },
+    {
+      "op": "lua_wait",
+      "condition": "ChatFrame1:IsVisible() and not ChatFrame1Tab.alerting and not ChatFrame1TabGlow:IsVisible()",
+      "timeout": 8
+    },
+    {
+      "op": "wait",
+      "seconds": 5
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame1TabHighlightLeft",
+      "label": "06-general-returned-1-Left",
+      "expectedDrawn": false
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame1TabHighlightMiddle",
+      "label": "06-general-returned-1-Middle",
+      "expectedDrawn": false
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame1TabHighlightRight",
+      "label": "06-general-returned-1-Right",
+      "expectedDrawn": false
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame2TabHighlightLeft",
+      "label": "06-general-returned-2-Left",
+      "expectedDrawn": false
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame2TabHighlightMiddle",
+      "label": "06-general-returned-2-Middle",
+      "expectedDrawn": false
+    },
+    {
+      "op": "inspect_frame",
+      "name": "ChatFrame2TabHighlightRight",
+      "label": "06-general-returned-2-Right",
+      "expectedDrawn": false
+    },
+    {
+      "op": "capture",
+      "name": "06-general-returned"
+    }
+  ]
+}
