@@ -122,6 +122,7 @@ namespace WowLuaApi
     void RegisterGroupApi(lua_State* L);
     void UpdateGroupState(lua_State* L);
     void RegisterLootApi(lua_State* L);
+    bool IsAutoLooting(lua_State* L);
     void UpdateLootState(lua_State* L);
     void RegisterGuildApi(lua_State* L);
     void UpdateGuildState(lua_State* L);

@@ -28,6 +28,8 @@
 #include "WowEntity.h"
 #include "Coord/WowCoordinate.h"
 #include "Formats/Dbc/DbcStore.h"
+#include "Formats/DbcParser.h"
+#include "Mpq/MpqManager.h"
 #include "TimerManager.h"
 #include "Engine/GameViewportClient.h"
 #include "Framework/Application/SlateApplication.h"
@@ -443,11 +445,17 @@ void AWowViewerGameMode::PopulateUITestScene()
     Pawn->ApplyLoginSpawn(FVector::ZeroVector,0);
     auto& Handler=PC->ConnectionManager->PacketHandler;
     auto& Entities=Handler.EntityManager;
+    FString OfflineFixture;
+    FParse::Value(FCommandLine::Get(),TEXT("-offlinefixture="),OfflineFixture);
+    const bool DwarfWarrior=OfflineFixture==TEXT("dwarf-warrior");
+    const uint8 Race=DwarfWarrior?3:1,Class=DwarfWarrior?1:8;
+    const auto* RaceInfo=FDbcStore::Get().ChrRaces().GetById(Race);
+    const uint32 Display=RaceInfo?RaceInfo->MaleModelID:49;
     Entities.LocalPlayerGuid=1;
     auto& Player=Entities.PromoteToTyped(1,WowTypeMask::PLAYER|WowTypeMask::UNIT);
-    Player.SetField(UnitField::BYTES_0,1|(8<<8)); // Human mage
-    Player.SetField(UnitField::DISPLAYID,49);
-    Player.SetField(UnitField::NATIVEDISPLAYID,49);
+    Player.SetField(UnitField::BYTES_0,Race|(Class<<8));
+    Player.SetField(UnitField::DISPLAYID,Display);
+    Player.SetField(UnitField::NATIVEDISPLAYID,Display);
     Player.SetField(UnitField::FACTIONTEMPLATE,1);
     Player.SetField(UnitField::LEVEL,42);
     Player.SetField(UnitField::HEALTH,1372); Player.SetField(UnitField::MAXHEALTH,1580);
@@ -456,8 +464,11 @@ void AWowViewerGameMode::PopulateUITestScene()
     Handler.ActionButtons.SetNumZeroed(144);
     Handler.ActionButtons[0]=133; Handler.ActionButtons[1]=168;
     Handler.KnownSpells.Add(133); Handler.KnownSpells.Add(168);
-    // Seed the visible robe, pants, boots and staff from the actual mage starter outfit.
-    if(const auto* Outfit=FDbcStore::Get().CharStartOutfit().GetByRaceClassGender(1,8,0))
+    // The explicit offline combat fixture uses original dwarf starter gear and
+    // item classes, so the ordinary melee handler selects its weapon sequence.
+    FDbcParser ItemDbc; TArray<uint8> ItemBytes;
+    if(DwarfWarrior && WM->GetMpqManager()->ReadFile(TEXT("DBFilesClient\\Item.dbc"),ItemBytes)) ItemDbc.Parse(ItemBytes);
+    if(const auto* Outfit=FDbcStore::Get().CharStartOutfit().GetByRaceClassGender(Race,Class,0))
     {
         for(int32 I=0;I<UE_ARRAY_COUNT(Outfit->ItemIds);++I)
         {
@@ -468,13 +479,16 @@ void AWowViewerGameMode::PopulateUITestScene()
             case 5: case 20: Slot=4; break;
             case 7: Slot=6; break;
             case 8: Slot=7; break;
-            case 17: Slot=15; break;
+            case 13: case 17: case 21: Slot=15; break;
             default: continue;
             }
             if(Outfit->ItemIds[I]<=0 || Outfit->ItemDisplayIds[I]<=0) continue;
             const uint32 Id=uint32(Outfit->ItemIds[I]);
             auto& Item=Handler.ItemTemplates.FindOrAdd(Id);
             Item.Id=Id; Item.DisplayId=Outfit->ItemDisplayIds[I]; Item.InventoryType=Type;
+            if(ItemDbc.IsValid() && ItemDbc.GetFieldCount()>=8)
+                for(uint32 Row=0;Row<ItemDbc.GetRecordCount();++Row) if(ItemDbc.GetUInt(Row,0)==Id)
+                {Item.Class=ItemDbc.GetUInt(Row,1); Item.Subclass=ItemDbc.GetUInt(Row,2); break;}
             Player.SetField(PlayerField::VISIBLE_ITEM_BASE+Slot*2,Id);
         }
     }
@@ -501,7 +515,7 @@ void AWowViewerGameMode::PopulateUITestScene()
         FSlateApplication::Get().SetAllUserFocusToGameViewport(EFocusCause::SetDirectly);
     }
     Handler.OnActionButtonsUpdated.Broadcast();
-    UE_LOG(LogWowGameMode,Display,TEXT("Offline FrameXML preview: level 42 mage, two spells, neutral wolf; no server connection."));
+    UE_LOG(LogWowGameMode,Display,TEXT("Offline FrameXML preview: race=%u class=%u, neutral wolf; no server connection."),Race,Class);
 }
 
 void AWowViewerGameMode::SetupLoginScene(UWorld* World)

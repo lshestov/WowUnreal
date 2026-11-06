@@ -65,13 +65,6 @@ FString MoneyText(lua_State* L,uint32 Money)
     for(int32 N=0;N<3;++N) if(Values[N]) {if(!Text.IsEmpty()) Text+=TEXT(" "); Text+=Format(L,Global(L,Keys[N]),{FString::FromInt(Values[N])});}
     return Text;
 }
-bool AutoLoot(lua_State* L)
-{
-    const int32 Top=lua_gettop(L); lua_getglobal(L,"GetCVar"); lua_pushstring(L,"autoLootDefault");
-    const bool Enabled=lua_pcall(L,1,1,0)==0 && lua_isstring(L,-1) && FCStringAnsi::Strcmp(lua_tostring(L,-1),"1")==0;
-    lua_settop(L,Top); lua_getglobal(L,"IsModifiedClick"); lua_pushstring(L,"AUTOLOOTTOGGLE");
-    const bool Toggle=lua_pcall(L,1,1,0)==0 && lua_toboolean(L,-1)!=0; lua_settop(L,Top); return Enabled!=Toggle;
-}
 void Chat(FWowLuaContext* C,const TCHAR* Event,const FString& Text,uint64 Player=0)
 {
     if(!Text.IsEmpty() && C->EventSystem) C->EventSystem->FireEvent(Event,{Text,Name(C,Player),TEXT(""),TEXT(""),TEXT(""),TEXT(""),TEXT("0"),TEXT("0"),TEXT(""),TEXT(""),TEXT("0"),FString::Printf(TEXT("0x%016llX"),Player)});
@@ -116,6 +109,15 @@ int Tooltip(lua_State* L,const FString& ItemLink)
     lua_pushstring(L,TCHAR_TO_UTF8(*ItemLink)); lua_replace(L,2); lua_settop(L,2);
     return WowLuaApi::SetHyperlinkTooltip(L);
 }
+}
+bool WowLuaApi::IsAutoLooting(lua_State* L)
+{
+    // The corpse cursor and collection policy share the original setting XOR
+    // modified-click rule, including a reassigned AUTOLOOTTOGGLE binding.
+    const int32 Top=lua_gettop(L); lua_getglobal(L,"GetCVar"); lua_pushstring(L,"autoLootDefault");
+    const bool Enabled=lua_pcall(L,1,1,0)==0 && lua_isstring(L,-1) && FCStringAnsi::Strcmp(lua_tostring(L,-1),"1")==0;
+    lua_settop(L,Top); lua_getglobal(L,"IsModifiedClick"); lua_pushstring(L,"AUTOLOOTTOGGLE");
+    const bool Toggle=lua_pcall(L,1,1,0)==0 && lua_toboolean(L,-1)!=0; lua_settop(L,Top); return Enabled!=Toggle;
 }
 void WowLuaApi::RegisterLootApi(lua_State* L)
 {
@@ -172,7 +174,7 @@ void WowLuaApi::UpdateLootState(lua_State* L)
     if(V.Loot.Open && (!Loot.Open || V.Loot.Guid!=Loot.Guid)) {E->FireEvent(TEXT("LOOT_CLOSED")); V.ConfirmSlot=0;}
     if(Opened)
     {
-        V.AutoGuid=AutoLoot(L)?Loot.Guid:0; V.AutoCoinSent=false; V.AutoSlots.Reset(); V.CloseSent=false; V.ConfirmSlot=0;
+        V.AutoGuid=IsAutoLooting(L)?Loot.Guid:0; V.AutoCoinSent=false; V.AutoSlots.Reset(); V.CloseSent=false; V.ConfirmSlot=0;
         E->FireEventNumbers(TEXT("LOOT_OPENED"),{V.AutoGuid?1.:0.});
     }
     if(Loot.Open)
@@ -265,6 +267,7 @@ void WowLuaApi::UpdateLootState(lua_State* L)
     if(V.Started.Num()>512) for(auto I=V.Started.CreateIterator();I;++I) if(!H->LootRolls.Contains(*I)) {V.Cancelled.Remove(*I); I.RemoveCurrent();}
 }
 #else
+bool WowLuaApi::IsAutoLooting(lua_State*) {return false;}
 void WowLuaApi::RegisterLootApi(lua_State*) {}
 void WowLuaApi::UpdateLootState(lua_State*) {}
 int WowLuaApi::SetLootItemTooltip(lua_State*) {return 0;}

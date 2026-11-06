@@ -135,6 +135,65 @@ bool FIdleWowWorldPickTest::RunTest(const FString& Parameters)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIdleWowMouseTargetPolicyTest, "WowUnreal.World.MouseClickRetainsTarget",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FIdleWowMouseTargetPolicyTest::RunTest(const FString&)
+{
+    UWorld* World=UWorld::CreateWorld(EWorldType::Game,false);
+    if(!TestNotNull(TEXT("Test world"),World)) return false;
+    GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+    auto* Controller=World->SpawnActor<AWowGameplayController>();
+    Controller->ConnectionManager=NewObject<UWowConnectionManager>(Controller);
+    auto& Entities=Controller->ConnectionManager->PacketHandler.EntityManager;
+    constexpr uint64 First=0xF130000001000001ULL,Second=0xF130000001000002ULL;
+    for(const uint64 Guid:{First,Second})
+    {
+        auto& Unit=Entities.PromoteToTyped(Guid,WowTypeMask::OBJECT|WowTypeMask::UNIT);
+        Unit.SetField(UnitField::HEALTH,50);Unit.SetField(UnitField::MAXHEALTH,50);
+    }
+    const FVector2D Origin(100,100);
+    Controller->GameplayProbePointer=Origin;
+    Controller->SetTarget(First);
+    Controller->bIsAutoAttacking=true;Controller->AutoAttackTargetGuid=First;
+
+    Controller->OnRightClick();
+    TestEqual(TEXT("Right press does not discard the selected unit"),Controller->TargetGuid,First);
+    Controller->OnRightClickReleased();
+    TestTrue(TEXT("Empty right click preserves selection and auto attack"),Controller->TargetGuid==First && Controller->bIsAutoAttacking);
+
+    Controller->OnLeftClick();
+    TestEqual(TEXT("Left press defers selection until a click is known"),Controller->TargetGuid,First);
+    Controller->UpdateWorldMousePress(Controller->LeftWorldPress,Origin+FVector2D(20,0));
+    Controller->OnLeftClickReleased();
+    TestTrue(TEXT("A drag returning to its starting pixel cannot clear the target"),Controller->TargetGuid==First && Controller->bIsAutoAttacking);
+
+    Controller->OnRightClick();Controller->RightWorldPress.Guid=Second;
+    Controller->SetControlRotation(FRotator(0,10,0));
+    Controller->OnRightClickReleased();
+    TestEqual(TEXT("Camera rotation with a captured stationary pointer cannot retarget"),Controller->TargetGuid,First);
+
+    Controller->OnLeftClick();Controller->OnRightClick();
+    Controller->OnRightClickReleased();Controller->OnLeftClickReleased();
+    TestEqual(TEXT("Two-button movement does not also clear selection"),Controller->TargetGuid,First);
+
+    Controller->ApplyWorldClick(0,false,false);
+    TestTrue(TEXT("Sticky targeting retains the target and combat on empty left click"),Controller->TargetGuid==First && Controller->bIsAutoAttacking);
+    Controller->OnLeftClick();Controller->OnLeftClickReleased();
+    TestTrue(TEXT("Ordinary empty left click clears only on release and stops combat"),Controller->TargetGuid==0 && !Controller->bIsAutoAttacking);
+    TestEqual(TEXT("Network selection follows an intentional clear"),uint64(Controller->ConnectionManager->GetTargetGuid()),uint64(0));
+
+    Controller->SetTarget(First);
+    Controller->OnLeftClick();Controller->LeftWorldPress.Guid=Second;
+    TestEqual(TEXT("A pressed unit does not replace the current target prematurely"),Controller->TargetGuid,First);
+    Controller->OnLeftClickReleased();
+    TestTrue(TEXT("Completed unit click selects the pressed unit in both views"),Controller->TargetGuid==Second && uint64(Controller->ConnectionManager->GetTargetGuid())==Second);
+    Controller->OnLeftClick();Controller->LeftWorldPress.Guid=First;Entities.Remove(First);
+    Controller->OnLeftClickReleased();
+    TestEqual(TEXT("Despawn during a press cannot select a stale GUID or clear another target"),Controller->TargetGuid,Second);
+    Controller->Destroy();World->DestroyWorld(false);GEngine->DestroyWorldContext(World);
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIdleWowDeathLifetimeTest, "WowUnreal.World.DeathPreservesEntityUntilServerDestroy",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FIdleWowDeathLifetimeTest::RunTest(const FString& Parameters)

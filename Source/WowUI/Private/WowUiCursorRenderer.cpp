@@ -22,12 +22,16 @@ FString CursorPath(FString Name)
     static const TMap<FString,FString> Names={{TEXT("POINT"),TEXT("Point")},{TEXT("BUY"),TEXT("Buy")},{TEXT("SELL"),TEXT("Buy")},{TEXT("REPAIR"),TEXT("Repair")},{TEXT("REPAIRNPC"),TEXT("RepairNPC")},{TEXT("INSPECT"),TEXT("Inspect")},{TEXT("CAST"),TEXT("Cast")},{TEXT("ATTACK"),TEXT("Attack")},{TEXT("SPEAK"),TEXT("Speak")},{TEXT("INTERACT"),TEXT("Interact")},{TEXT("LOOT"),TEXT("LootAll")},{TEXT("LOOTALL"),TEXT("LootAll")},{TEXT("PICKUP"),TEXT("Pickup")},{TEXT("TAXI"),TEXT("Taxi")},{TEXT("TRAINER"),TEXT("Trainer")},{TEXT("MINE"),TEXT("Mine")},{TEXT("SKIN"),TEXT("Skin")},{TEXT("GATHERHERBS"),TEXT("GatherHerbs")},{TEXT("PICKLOCK"),TEXT("PickLock")},{TEXT("MAIL"),TEXT("Mail")},{TEXT("ITEM"),TEXT("Item")},{TEXT("INNKEEPER"),TEXT("Innkeeper")},{TEXT("QUEST"),TEXT("Quest")},{TEXT("QUESTREPEATABLE"),TEXT("QuestRepeatable")},{TEXT("QUESTTURNIN"),TEXT("QuestTurnIn")}};
     const auto* File=Names.Find(Name); return File?FString(TEXT("Interface\\Cursor\\"))+(Unable?TEXT("Unable"):TEXT(""))+*File:FString();
 }
-const TCHAR* WorldCursor(const FWowLuaContext& Context)
+const TCHAR* WorldCursor(lua_State* L,const FWowLuaContext& Context)
 {
     const auto* Unit = Context.WorldMouseoverGuid && Context.EntityManager
         ? Context.EntityManager->FindUnit(Context.WorldMouseoverGuid) : nullptr;
     if (!Unit) return TEXT("Interface\\Cursor\\Point");
-    if (Unit->IsDead()) return Unit->IsLootable() ? TEXT("Interface\\Cursor\\LootAll") : TEXT("Interface\\Cursor\\Point");
+    if (Unit->IsDead())
+    {
+        if(!Unit->IsLootable()) return TEXT("Interface\\Cursor\\Point");
+        return WowLuaApi::IsAutoLooting(L) ? TEXT("Interface\\Cursor\\LootAll") : TEXT("Interface\\Cursor\\Pickup");
+    }
     if (WowLuaApi::CanUnitAttack(&Context, Context.EntityManager->GetLocalPlayer(), Unit)) return TEXT("Interface\\Cursor\\Attack");
     if (Unit->IsQuestGiver() && Context.ConnectionManager)
     {
@@ -77,7 +81,7 @@ void FWowUiCursorRenderer::Tick(lua_State* L)
     }
     else if(Connection && Connection->HasPendingItemSpell()) Path=TEXT("Interface\\Cursor\\Cast");
     else if(Connection && Connection->IsRepairMode()) Path=TEXT("Interface\\Cursor\\Repair");
-    else Path=Context.CursorTexture.IsEmpty() ? WorldCursor(Context) : Context.CursorTexture;
+    else Path=Context.CursorTexture.IsEmpty() ? WorldCursor(L,Context) : Context.CursorTexture;
     const FVector2D Pointer=Frames.GetPointerPosition();
     if(Context.CursorHidden || Pointer.X<0 || Pointer.Y<0)
     {

@@ -54,6 +54,7 @@ struct FWowM2AnimProxy : FAnimInstanceProxy
 void UWowM2AnimInstance::InitializeModel(TSharedPtr<const FM2Data> InModel)
 {
     Model = MoveTemp(InModel);
+    VariationRandom.GenerateNewSeed();
     TrackIndex = INDEX_NONE;
     ReferencePose.Reset();
     PortraitStandPose.Reset();
@@ -101,9 +102,13 @@ int32 UWowM2AnimInstance::FindClip(int32 AnimationId) const
 
 bool UWowM2AnimInstance::PlayM2Animation(int32 AnimationId, bool bLooping)
 {
-    const int32 Next=FindClip(AnimationId);
+    // State polling must preserve the chosen looping variant and its clock.
+    if (TrackIndex!=INDEX_NONE && GetM2AnimationId()==AnimationId && bLoop && bLooping) return true;
+    // Looping states retain their base clip until variation callbacks at loop
+    // boundaries are supported; a randomly chosen Stand fidget must not loop forever.
+    const int32 Next=bLooping?FindClip(AnimationId):
+        (Model?SelectM2Variation(*Model,AnimationId,VariationRandom.RandRange(0,32767)):INDEX_NONE);
     if (Next == INDEX_NONE) return false;
-    if (Next == TrackIndex && bLoop && bLooping) return true;
     TArray<FTransform> Previous;
     if (TrackIndex != INDEX_NONE) SampleLocalPose(Previous);
     BlendFromPose = MoveTemp(Previous);
@@ -115,9 +120,53 @@ bool UWowM2AnimInstance::PlayM2Animation(int32 AnimationId, bool bLooping)
     return true;
 }
 
+int32 UWowM2AnimInstance::SelectM2Variation(const FM2Data& Data,int32 AnimationId,uint32 Roll)
+{
+    const auto Playable=[AnimationId](const FM2AnimationData& Clip)
+    {return Clip.AnimationId==AnimationId && Clip.Duration>0 && !Clip.BoneTracks.IsEmpty();};
+    int32 Fallback=Data.AnimationTracks.IndexOfByPredicate(Playable);
+    if(Fallback==INDEX_NONE) return INDEX_NONE;
+    int32 Sequence=Data.Animations.IndexOfByPredicate([AnimationId](const FM2AnimSequence& S)
+    {return S.AnimationId==AnimationId && S.SubAnimationId==0;});
+    if(Sequence==INDEX_NONE) Sequence=Data.Animations.IndexOfByPredicate([AnimationId](const FM2AnimSequence& S){return S.AnimationId==AnimationId;});
+    if(Data.Animations.IsValidIndex(Sequence))
+    {
+        const uint16 FirstVariation=Data.Animations[Sequence].SubAnimationId;
+        const int32 First=Data.AnimationTracks.IndexOfByPredicate([&](const FM2AnimationData& Clip)
+        {return Playable(Clip) && Clip.SubAnimationId==FirstVariation;});
+        if(First!=INDEX_NONE) Fallback=First;
+    }
+    // CM2Model::PickRandomSequenceVariation subtracts each authored frequency
+    // from a 15-bit roll. Links address source sequences, not filtered tracks.
+    Roll=FMath::Min(Roll,32767u);
+    TArray<int32,TInlineAllocator<8>> Visited;
+    while(Data.Animations.IsValidIndex(Sequence) && !Visited.Contains(Sequence))
+    {
+        Visited.Add(Sequence);
+        const auto& S=Data.Animations[Sequence];
+        if(S.AnimationId!=AnimationId) break;
+        if(Roll<S.Frequency)
+        {
+            const int32 Chosen=Data.AnimationTracks.IndexOfByPredicate([&](const FM2AnimationData& Clip)
+            {return Playable(Clip) && Clip.SubAnimationId==S.SubAnimationId;});
+            return Chosen!=INDEX_NONE?Chosen:Fallback;
+        }
+        Roll-=S.Frequency;
+        Sequence=S.NextAnimation;
+    }
+    // Missing metadata, incomplete assets and uncovered probability retain a
+    // playable pose, matching the original selector's first-sequence fallback.
+    return Fallback;
+}
+
 int32 UWowM2AnimInstance::GetM2AnimationId() const
 {
     return Model && Model->AnimationTracks.IsValidIndex(TrackIndex) ? Model->AnimationTracks[TrackIndex].AnimationId : INDEX_NONE;
+}
+
+int32 UWowM2AnimInstance::GetM2VariationId() const
+{
+    return Model && Model->AnimationTracks.IsValidIndex(TrackIndex) ? Model->AnimationTracks[TrackIndex].SubAnimationId : INDEX_NONE;
 }
 
 float UWowM2AnimInstance::GetM2Duration() const

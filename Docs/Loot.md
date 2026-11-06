@@ -16,6 +16,13 @@ is tied to the active corpse/slot. Auto-loot uses the saved setting and Shift
 toggle, waits for metadata, sends each available row once and waits for removal
 or release acknowledgements. Closing a corpse leaves its group rolls active.
 
+World corpse cursors use that same effective auto-loot policy: the original
+Pickup texture for manual loot and LootAll for automatic loot. The saved
+autoLootDefault value is inverted by the currently bound AUTOLOOTTOGGLE
+modifier, including changes while the pointer stays still. Exhausted corpses
+use Point. `WowUnreal.Hud.LootCursor` covers both defaults, Shift, a rebound
+Ctrl modifier, and agreement with the collector's LOOT_OPENED behavior.
+
 Rolls use small public Lua IDs while retaining full 64-bit protocol GUIDs.
 Eligibility masks control Need/Greed/Disenchant, timers use server countdowns in
 milliseconds, and typed start/cancel events control the four stock frames.

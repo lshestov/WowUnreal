@@ -60,3 +60,20 @@ The full original spell-effects renderer is still pending.
 
 This cast-feedback revision passes all 152 regression checks (148 clean and
 four pre-existing warning cases), including the original macro sequence suite.
+
+## Melee animation variations
+
+Each new attack selects an authored M2 variation using the original 32-bit
+frequency and linked source-sequence indices with a 15-bit random roll. The
+selected source variation is mapped to its loaded runtime track, whose index
+can differ after filtering. Selection stays within the equipped weapon's
+animation family, restarts the swing, and uses that variation's duration.
+Repeated polling of an already looping state preserves its variation and
+playback time. Missing or malformed chains retain a playable fallback.
+
+The animation regressions cover exact probability boundaries, reordered
+runtime tracks, missing clips, malformed/cyclic links, and actual bone poses
+from repeated one- and two-handed attacks on the original DwarfMale model.
+`Scripts/Verification/43-world-input-offline.json` exercises the shared melee
+event handler, mouse release selection, and original corpse cursor textures
+in a rendered, disconnected dwarf fixture without accessing character data.

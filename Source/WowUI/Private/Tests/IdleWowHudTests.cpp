@@ -26,6 +26,7 @@
 #include "../WowMinimapUi.h"
 #include "Formats/DbcParser.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 #include "HAL/FileManager.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
@@ -671,6 +672,55 @@ bool FHudLootState::RunTest(const FString&)
     H.Loot.Open=true; H.Loot.Guid=99; H.Loot.Items={A,B}; H.Loot.OpenSerial=1; WowLuaApi::UpdateLootState(F.Lua.GetState());
     H.Loot.OpenSerial=2; WowLuaApi::UpdateLootState(F.Lua.GetState());
     TestTrue(TEXT("A fresh response for the same GUID reopens/rebuilds stock slots even without an intervening UI tick"),F.Lua.ExecuteString(TEXT("assert(LootEvents[#LootEvents][1]=='LOOT_OPENED' and LootEvents[#LootEvents-1][1]=='LOOT_OPENED' and GetNumLootItems()==2)")));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudLootCursor,"WowUnreal.Hud.LootCursor",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudLootCursor::RunTest(const FString&)
+{
+    FString Path; if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false;
+    FMpqManager Mpq; if(!Mpq.Initialize(Path)) return false;
+    FHudFixture F; FWowAssetCache Cache;
+    F.Frames.SetMpqManager(&Mpq); F.Frames.SetAssetCache(&Cache);
+    TStrongObjectPtr<UWowConnectionManager> Connection(NewObject<UWowConnectionManager>());
+    auto& H=Connection->PacketHandler; auto& Entities=H.EntityManager;
+    F.Context.ConnectionManager=Connection.Get(); F.Context.EntityManager=&Entities;
+    auto& Corpse=Entities.PromoteToTyped(2,WowTypeMask::OBJECT|WowTypeMask::UNIT);
+    Corpse.SetField(UnitField::HEALTH,0); Corpse.SetField(UnitField::DYNAMIC_FLAGS,WowDynFlags::LOOTABLE);
+    F.Context.WorldMouseoverGuid=2;
+    TSet<FKey> Keys; F.Context.KeyDown=[&](const FKey& Key){return Keys.Contains(Key);};
+    TStrongObjectPtr<UCanvasPanel> CursorCanvas(NewObject<UCanvasPanel>());
+    FWowUiCursorRenderer Cursor(F.Frames,F.Context,*CursorCanvas);
+    F.Frames.UpdateMouseHover(200,200);
+    auto* Pickup=F.Frames.LoadUITexture(TEXT("Interface\\Cursor\\Pickup"));
+    auto* LootAll=F.Frames.LoadUITexture(TEXT("Interface\\Cursor\\LootAll"));
+    if(!TestTrue(TEXT("Original manual and automatic loot cursors are distinct assets"),Pickup && LootAll && Pickup!=LootAll)) return false;
+    F.Lua.ExecuteString(TEXT("PreviousAutoLoot=GetCVar('autoLootDefault'); LastAutoLoot=nil; LootCursorObserver=CreateFrame('Frame'); LootCursorObserver:RegisterEvent('LOOT_OPENED'); LootCursorObserver:SetScript('OnEvent',function(self,event,automatic) LastAutoLoot=automatic end); SetModifiedClick('AUTOLOOTTOGGLE','SHIFT')"));
+    ON_SCOPE_EXIT {F.Lua.ExecuteString(TEXT("SetCVar('autoLootDefault',PreviousAutoLoot)"));};
+    H.Loot.Guid=2; H.Loot.Open=true;
+    const auto Check=[&](const TCHAR* Name,bool Automatic)
+    {
+        auto* L=F.Lua.GetState(); const int32 Top=lua_gettop(L);
+        TestEqual(Name,WowLuaApi::IsAutoLooting(L),Automatic);
+        TestEqual(TEXT("The shared policy leaves the Lua stack unchanged"),lua_gettop(L),Top);
+        Cursor.Tick(L);
+        const auto* Image=F.Frames.GetNamedTexture(TEXT("IdleWowCursorIcon"));
+        TestTrue(Name,Image && Image->GetBrush().GetResourceObject()==(Automatic?LootAll:Pickup));
+        ++H.Loot.OpenSerial; WowLuaApi::UpdateLootState(L);
+        TestTrue(TEXT("Cursor and LOOT_OPENED collection mode agree"),F.Lua.ExecuteString(FString::Printf(TEXT("assert(LastAutoLoot==%d)"),Automatic?1:0)));
+    };
+    F.Lua.ExecuteString(TEXT("SetCVar('autoLootDefault','0')"));
+    Check(TEXT("Disabled autoloot shows the manual pickup glove"),false);
+    Keys.Add(EKeys::LeftShift); Check(TEXT("Holding the toggle temporarily selects autoloot"),true);
+    Keys.Reset(); F.Lua.ExecuteString(TEXT("SetCVar('autoLootDefault','1')"));
+    Check(TEXT("Enabled autoloot shows LootAll without a modifier"),true);
+    Keys.Add(EKeys::LeftShift); Check(TEXT("The modifier temporarily restores manual looting"),false);
+    F.Lua.ExecuteString(TEXT("SetCVar('autoLootDefault','0'); SetModifiedClick('AUTOLOOTTOGGLE','CTRL')"));
+    Check(TEXT("A reassigned toggle no longer responds to Shift"),false);
+    Keys.Reset(); Keys.Add(EKeys::RightControl); Check(TEXT("The configured Ctrl toggle updates the stationary cursor"),true);
+    Corpse.SetField(UnitField::DYNAMIC_FLAGS,0); Cursor.Tick(F.Lua.GetState());
+    const auto* Image=F.Frames.GetNamedTexture(TEXT("IdleWowCursorIcon"));
+    TestTrue(TEXT("An exhausted corpse is not advertised as lootable"),Image && Image->GetBrush().GetResourceObject()==F.Frames.LoadUITexture(TEXT("Interface\\Cursor\\Point")));
     return true;
 }
 

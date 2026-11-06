@@ -110,6 +110,14 @@ struct FWowGameplayProbe
     uint32 LastEquippedItem=0;
     uint64 PendingWorldClick=0;
     FVector2D SlateClickPoint=FVector2D::ZeroVector;
+    FRotator BeforeMouseAxis=FRotator::ZeroRotator;
+    TMap<uint64,TPair<uint32,uint32>> OfflineCorpseFields;
+    TSet<int32> SwingVariations;
+    TArray<TSharedPtr<FJsonValue>> SwingSamples;
+    int32 SwingCount=0;
+    double NextSwingAt=0;
+    bool bSampleSwing=false;
+    FString SwingCapture;
     TWeakObjectPtr<ACameraActor> SideCamera;
     TWeakObjectPtr<UBoxComponent> SideTarget;
     FVector SideCameraOffset = FVector::ZeroVector;
@@ -442,6 +450,9 @@ struct FWowGameplayProbe
         if (Now-StepStarted>Timeout) { Failure=FString::Printf(TEXT("Step %d timed out: %s"),Index,*Op); Finish(C,false); return; }
         auto& Handler=Connection->PacketHandler;
         bool Done=false;
+        // These fixtures never alter a connected session or server state.
+        if(Op.StartsWith(TEXT("offline_")) && (!C.bOfflineUiPreview || Connection->GetState()!=EWowSessionState::Disconnected))
+        {Failure=TEXT("Offline fixture operations require the disconnected UI preview"); Finish(C,false); return;}
         if(Op==TEXT("peer_start") || Op==TEXT("peer_cleanup"))
         {
             if(!Peer)
@@ -530,6 +541,52 @@ struct FWowGameplayProbe
             const FVector2D Point(FMath::Clamp(Step->GetNumberField(TEXT("x")),0.,1.)*Width,FMath::Clamp(Step->GetNumberField(TEXT("y")),0.,1.)*Height);
             C.GameplayProbePointer=Point; C.UIManager->GetFrameManager()->UpdateMouseHover(Point.X,Point.Y); Done=true;
         }
+        else if(Op==TEXT("mouse_axis"))
+        {
+            if(!bInvoked)
+            {
+                BeforeMouseAxis=C.GetControlRotation(); bInvoked=true;
+                TGuardValue<bool> Synthetic(C.bProbeSyntheticKeyboard,true);
+                C.InputKey(FInputKeyEventArgs::CreateSimulated(EKeys::MouseX,IE_Axis,Step->GetNumberField(TEXT("dx")),1));
+                C.InputKey(FInputKeyEventArgs::CreateSimulated(EKeys::MouseY,IE_Axis,Step->GetNumberField(TEXT("dy")),1));
+            }
+            else if(!C.GetControlRotation().Equals(BeforeMouseAxis,.01f))
+            {
+                const auto Row=MakeShared<FJsonObject>();
+                Row->SetNumberField(TEXT("yawBefore"),BeforeMouseAxis.Yaw); Row->SetNumberField(TEXT("yawAfter"),C.GetControlRotation().Yaw);
+                Row->SetNumberField(TEXT("pitchBefore"),BeforeMouseAxis.Pitch); Row->SetNumberField(TEXT("pitchAfter"),C.GetControlRotation().Pitch);
+                Inspections->SetObjectField(TEXT("mouseAxis"),Row); Done=true;
+            }
+        }
+        else if(Op==TEXT("offline_corpse"))
+        {
+            const uint64 Guid=FindEntry(C,Step->GetIntegerField(TEXT("entry")),true);
+            auto* Entity=Handler.EntityManager.Find(Guid);
+            if(!Entity) {Failure=TEXT("Offline corpse fixture was not found"); Finish(C,false); return;}
+            if(Step->GetBoolField(TEXT("dead")))
+            {
+                if(!OfflineCorpseFields.Contains(Guid)) OfflineCorpseFields.Add(Guid,{Entity->GetField(UnitField::HEALTH),Entity->GetField(UnitField::DYNAMIC_FLAGS)});
+                Entity->SetField(UnitField::HEALTH,0);
+                Entity->SetField(UnitField::DYNAMIC_FLAGS,Entity->GetField(UnitField::DYNAMIC_FLAGS)|WowDynFlags::LOOTABLE);
+            }
+            else
+            {
+                const auto* Saved=OfflineCorpseFields.Find(Guid);
+                if(!Saved) {Failure=TEXT("No saved offline corpse fixture to restore"); Finish(C,false); return;}
+                Entity->SetField(UnitField::HEALTH,Saved->Key); Entity->SetField(UnitField::DYNAMIC_FLAGS,Saved->Value);
+                OfflineCorpseFields.Remove(Guid);
+            }
+            Handler.EntityManager.OnEntityUpdated.Broadcast(*Entity); Done=true;
+        }
+        else if(Op==TEXT("assert_cursor"))
+        {
+            const FString Path=TEXT("Interface\\Cursor\\")+Step->GetStringField(TEXT("texture"));
+            auto* Frames=C.UIManager->GetFrameManager();
+            const auto* Image=Frames->GetNamedTexture(TEXT("IdleWowCursorIcon"));
+            auto* Expected=Frames->LoadUITexture(Path);
+            Done=Expected && Image && Image->IsVisible() && Image->GetBrush().GetResourceObject()==Expected;
+            if(Done) Inspections->SetStringField(FString::Printf(TEXT("cursor:%d"),Index),Path);
+        }
         else if(Op==TEXT("wait_character_select")) Done=Connection->GetState()==EWowSessionState::WorldHaveCharList;
         else if(Op==TEXT("assert_lobby_lifecycle"))
         {
@@ -614,6 +671,7 @@ struct FWowGameplayProbe
             else
             {
                 const uint32 Entry=Step->GetIntegerField(TEXT("entry"));
+                bool IncludeDead=false; Step->TryGetBoolField(TEXT("includeDead"),IncludeDead);
                 int32 Width=0,Height=0;
                 C.GetViewportSize(Width,Height);
                 double Nearest=DBL_MAX;
@@ -622,7 +680,7 @@ struct FWowGameplayProbe
                 for (const auto& Unit:C.SpawnedEntityActors)
                 {
                     const auto* Entity=Handler.EntityManager.Find(Unit.Key);
-                    if (!Entity || Entity->Entry!=Entry || Entity->GetHealth()<=0 || !IsValid(Unit.Value)) continue;
+                    if (!Entity || Entity->Entry!=Entry || (!IncludeDead && Entity->GetHealth()<=0) || !IsValid(Unit.Value)) continue;
                     const auto* Body=FindObjectFast<UBoxComponent>(Unit.Value.Get(),TEXT("UnitSelection"));
                     if (!Body) continue;
                     const double Distance=FVector::DistSquared(Body->GetComponentLocation(),C.GetPawn()->GetActorLocation());
@@ -933,6 +991,62 @@ struct FWowGameplayProbe
             }
         }
         else if (Op==TEXT("start_melee")) { C.StartAutoAttack(); Done=C.bIsAutoAttacking; }
+        else if(Op==TEXT("offline_melee_variations"))
+        {
+            auto* Player=Cast<AWowPlayerCharacter>(C.GetPawn());
+            auto* Runtime=Player && Player->AnimationController?Player->AnimationController->GetRuntimeInstance():nullptr;
+            const auto* Self=Handler.EntityManager.GetLocalPlayer();
+            const auto* Victim=Handler.EntityManager.Find(C.TargetGuid);
+            if(!Runtime || !Self || !Victim || Victim->GetHealth()<=0)
+            {Failure=TEXT("Offline swing replay requires a rendered player and living target"); Finish(C,false); return;}
+            const uint32 Weapon=Self->GetField(PlayerField::VISIBLE_ITEM_BASE+PlayerField::EQUIPMENT_SLOT_MAINHAND*2);
+            const int32 Expected=FDbcStore::Get().ItemUi().MeleeSequences(Weapon).Attack;
+            if(Expected!=17 && Expected!=18 && Expected!=19)
+            {Failure=TEXT("Offline swing replay requires a real equipped melee weapon"); Finish(C,false); return;}
+            if(!bInvoked)
+            {
+                Runtime->SetM2VariationSeed(1234); SwingCount=0; NextSwingAt=0; bSampleSwing=false;
+                SwingVariations.Reset(); SwingSamples.Reset(); SwingCapture.Empty(); bInvoked=true;
+            }
+            if(!SwingCapture.IsEmpty())
+            {
+                if(IFileManager::Get().FileSize(*SwingCapture)<=0) return;
+                SwingCapture.Empty();
+            }
+            if(bSampleSwing && Runtime->GetM2AnimationId()==Expected && Runtime->GetM2Time()>=Runtime->GetM2Duration()*.35f)
+            {
+                const int32 Variation=Runtime->GetM2VariationId();
+                const auto Row=MakeShared<FJsonObject>(); Row->SetNumberField(TEXT("swing"),SwingCount);
+                Row->SetNumberField(TEXT("weapon"),Weapon); Row->SetNumberField(TEXT("clip"),Expected);
+                Row->SetNumberField(TEXT("variation"),Variation); Row->SetNumberField(TEXT("seconds"),Runtime->GetM2Time());
+                Row->SetNumberField(TEXT("duration"),Runtime->GetM2Duration());
+                SwingSamples.Add(MakeShared<FJsonValueObject>(Row));
+                if(!SwingVariations.Contains(Variation))
+                {
+                    SwingCapture=Output/FString::Printf(TEXT("07-attack-variation-%d.png"),Variation);
+                    FScreenshotRequest::RequestScreenshot(SwingCapture,true,false);
+                    SwingVariations.Add(Variation);
+                }
+                bSampleSwing=false;
+            }
+            if(!bSampleSwing && Now>=NextSwingAt && SwingCapture.IsEmpty())
+            {
+                const int32 Limit=FMath::Clamp(Step->GetIntegerField(TEXT("swings")),2,32);
+                if(SwingCount>=Limit)
+                {
+                    Inspections->SetArrayField(TEXT("meleeSwings"),SwingSamples);
+                    Inspections->SetNumberField(TEXT("meleeVariationCount"),SwingVariations.Num());
+                    if(SwingVariations.Num()<2) {Failure=TEXT("Repeated offline swings never chose a second original M2 variation"); Finish(C,false); return;}
+                    Done=true;
+                }
+                else
+                {
+                    Handler.OnAttackerStateUpdate.Broadcast(Self->Guid,C.TargetGuid,0,1);
+                    if(Runtime->GetM2AnimationId()!=Expected) {Failure=TEXT("Combat handler chose a different equipped-weapon animation"); Finish(C,false); return;}
+                    ++SwingCount; bSampleSwing=true; NextSwingAt=Now+Runtime->GetM2Duration()+.15;
+                }
+            }
+        }
         else if (Op==TEXT("wait_unit_animation"))
         {
             const FString Unit=Step->GetStringField(TEXT("unit"));
@@ -950,6 +1064,7 @@ struct FWowGameplayProbe
                 const auto Row=MakeShared<FJsonObject>();
                 Row->SetStringField(TEXT("unit"),Unit); Row->SetNumberField(TEXT("health"),Entity->GetHealth());
                 Row->SetNumberField(TEXT("clip"),Runtime->GetM2AnimationId());
+                Row->SetNumberField(TEXT("variation"),Runtime->GetM2VariationId());
                 Row->SetNumberField(TEXT("seconds"),Runtime->GetM2Time()); Row->SetNumberField(TEXT("duration"),Runtime->GetM2Duration());
                 if (Player) Row->SetBoolField(TEXT("grounded"),Player->GetCharacterMovement()->IsMovingOnGround());
                 Inspections->SetObjectField(FString::Printf(TEXT("animation:%d"),Index),Row);

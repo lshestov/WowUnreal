@@ -1089,6 +1089,12 @@ void AWowGameplayController::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 	TickGameplayProbe();
+    FVector2D WorldPointer;
+    if(GetWorldPointer(WorldPointer))
+    {
+        UpdateWorldMousePress(LeftWorldPress,WorldPointer);
+        UpdateWorldMousePress(RightWorldPress,WorldPointer);
+    }
 	// Lua unit buttons and /target update the shared network selection. Keep
 	// world interaction/highlights in sync without sending or publishing twice.
 	if(ConnectionManager && TargetGuid!=uint64(ConnectionManager->GetTargetGuid())) SetTarget(uint64(ConnectionManager->GetTargetGuid()),false);
@@ -1549,6 +1555,7 @@ bool AWowGameplayController::HandleUiMouseRelease(const FString& Button, int64& 
 
 void AWowGameplayController::OnLeftClick()
 {
+    LeftWorldPress={};
 	if (IsPointerOverNativeWindow()) return;
 	if (HandleUiMousePress(TEXT("LeftButton"), PressedLeftMouseFrameHandle, true))
 	{
@@ -1566,13 +1573,67 @@ void AWowGameplayController::OnLeftClick()
         return;
     }
     if(RequestCursorItemDeletion()) return;
-	UE_LOG(LogWowGameplay, Log, TEXT("OnLeftClick: no UI hit, trying world target"));
-	TryTargetUnderCursor();
+    BeginWorldMousePress(false);
 }
 
 void AWowGameplayController::OnLeftClickReleased()
 {
-	HandleUiMouseRelease(TEXT("LeftButton"), PressedLeftMouseFrameHandle);
+    if(HandleUiMouseRelease(TEXT("LeftButton"), PressedLeftMouseFrameHandle)) {LeftWorldPress={};return;}
+    FinishWorldMousePress(false);
+}
+
+bool AWowGameplayController::GetWorldPointer(FVector2D& Position) const
+{
+    if(GameplayProbePointer.IsSet()) {Position=*GameplayProbePointer;return true;}
+    float X=0,Y=0;
+    if(!GetMousePosition(X,Y)) return false;
+    Position=FVector2D(X,Y);return true;
+}
+
+void AWowGameplayController::BeginWorldMousePress(bool RightButton)
+{
+    auto& Press=RightButton?RightWorldPress:LeftWorldPress;
+    FVector2D Position;
+    if(!GetWorldPointer(Position)) return;
+    Press.Active=true;Press.Position=Position;Press.ViewRotation=GetControlRotation();
+    Press.Guid=GetWorldUnitAtScreen(Position.X,Position.Y);
+    auto& Other=RightButton?LeftWorldPress:RightWorldPress;
+    // A two-button movement/camera gesture must not also select or interact.
+    if(Other.Active) Press.Dragged=Other.Dragged=true;
+}
+
+void AWowGameplayController::UpdateWorldMousePress(FWorldMousePress& Press,const FVector2D& Position)
+{
+    if(Press.Active && (FVector2D::DistSquared(Press.Position,Position)>25 ||
+        !Press.ViewRotation.Equals(GetControlRotation(),.1f))) Press.Dragged=true;
+}
+
+void AWowGameplayController::FinishWorldMousePress(bool RightButton)
+{
+    auto& Press=RightButton?RightWorldPress:LeftWorldPress;
+    FVector2D Position;
+    const bool HasPointer=GetWorldPointer(Position);
+    if(HasPointer) UpdateWorldMousePress(Press,Position);
+    const auto Released=Press;Press={};
+    if(!Released.Active || Released.Dragged || !HasPointer || IsPointerOverNativeWindow() || GetUiFrameUnderCursor()>=0) return;
+    ApplyWorldClick(Released.Guid,RightButton,!UIManager || UIManager->ShouldDeselectOnClick());
+}
+
+void AWowGameplayController::ApplyWorldClick(uint64 Picked,bool RightButton,bool DeselectOnEmpty)
+{
+    if(!ConnectionManager) return;
+    if(!Picked)
+    {
+        // Original terrain clicks only deselect for the left button and when
+        // deselectOnClick is enabled. An empty right click never acts on the old target.
+        if(RightButton || !DeselectOnEmpty) return;
+        if(bIsAutoAttacking) StopAutoAttack();
+        if(TargetGuid) SetTarget(0);
+        return;
+    }
+    if(!ConnectionManager->PacketHandler.FindUiUnit(Picked)) return;
+    if(Picked!=TargetGuid) SetTarget(Picked);
+    if(RightButton) InteractWithTarget();
 }
 
 bool AWowGameplayController::RequestCursorItemDeletion()
@@ -1624,10 +1685,7 @@ uint64 AWowGameplayController::TraceWorldUnit(const FVector& Start, const FVecto
 void AWowGameplayController::TryTargetAtScreen(float MouseX, float MouseY)
 {
 	if (!ConnectionManager) return;
-	const uint64 Picked = GetWorldUnitAtScreen(MouseX, MouseY);
-	if (Picked == TargetGuid) return;
-	if (!Picked && bIsAutoAttacking) StopAutoAttack();
-	SetTarget(Picked);
+    ApplyWorldClick(GetWorldUnitAtScreen(MouseX,MouseY),false,!UIManager || UIManager->ShouldDeselectOnClick());
 }
 
 void AWowGameplayController::CacheWorldResources()
@@ -2103,13 +2161,13 @@ void AWowGameplayController::OnServerAttackStop(uint64 AttackerGuid, uint64 Vict
 
 void AWowGameplayController::OnRightClick()
 {
+    RightWorldPress={};
 	if (IsPointerOverNativeWindow()) return;
 	if (HandleUiMousePress(TEXT("RightButton"), PressedRightMouseFrameHandle, false))
 	{
 		return; // Don't interact through UI
 	}
-	TryTargetUnderCursor();
-	InteractWithTarget();
+    BeginWorldMousePress(true);
 }
 
 void AWowGameplayController::InteractWithTarget()
@@ -2227,7 +2285,8 @@ void AWowGameplayController::InteractWithTarget()
 
 void AWowGameplayController::OnRightClickReleased()
 {
-	HandleUiMouseRelease(TEXT("RightButton"), PressedRightMouseFrameHandle);
+    if(HandleUiMouseRelease(TEXT("RightButton"), PressedRightMouseFrameHandle)) {RightWorldPress={};return;}
+    FinishWorldMousePress(true);
 }
 
 void AWowGameplayController::OnTabTarget()

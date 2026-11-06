@@ -90,6 +90,7 @@ private:
     friend struct FWowGameplayProbe;
     friend class FIdleWowDeathLifetimeTest;
     friend class FIdleWowWorldPickTest;
+    friend class FIdleWowMouseTargetPolicyTest;
     TSharedPtr<struct FWowGameplayProbe> GameplayProbe;
     bool bGameplayProbeChecked=false;
     TOptional<FVector2D> GameplayProbePointer;
@@ -532,6 +533,20 @@ private:
     FVector2D UiDragOrigin=FVector2D::ZeroVector;
     bool bDraggingUi=false;
     int64 PressedRightMouseFrameHandle = -1;
+
+    struct FWorldMousePress
+    {
+        bool Active=false,Dragged=false;
+        FVector2D Position=FVector2D::ZeroVector;
+        FRotator ViewRotation=FRotator::ZeroRotator;
+        uint64 Guid=0;
+    };
+    FWorldMousePress LeftWorldPress,RightWorldPress;
+    bool GetWorldPointer(FVector2D& Position) const;
+    void BeginWorldMousePress(bool RightButton);
+    void UpdateWorldMousePress(FWorldMousePress& Press,const FVector2D& Position);
+    void FinishWorldMousePress(bool RightButton);
+    void ApplyWorldClick(uint64 Picked,bool RightButton,bool DeselectOnEmpty);
 
     void SpawnCastGlowEffects(uint64 CasterGuid, uint32 SpellId);
     void RemoveCastGlowEffects(uint64 CasterGuid=0);

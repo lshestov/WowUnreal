@@ -3436,6 +3436,7 @@ static FString NormalizeCVarName(const FString& Name)
 static FString GetDefaultCVarValue(const FString& Name)
 {
     static const TMap<FString, FString> ExplicitDefaults = {
+        { TEXT("deselectonclick"), TEXT("1") },
         { TEXT("questpoi"), TEXT("1") },
         { TEXT("unitnamenpc"), TEXT("1") },
         { TEXT("buffdurations"), TEXT("1") },

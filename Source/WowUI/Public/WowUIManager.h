@@ -51,6 +51,7 @@ public:
 
 	bool IsUILoaded() const { return bUILoaded; }
     bool HasSoftwareCursor() const;
+    bool ShouldDeselectOnClick() const;
     void GetNpcOverheadSettings(bool& ShowNames, bool& TrackTrivial) const;
     uint8 GetQuestGiverStatus(uint64 Guid) const;
     FLinearColor GetUnitSelectionColor(uint64 Guid) const;

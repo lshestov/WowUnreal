@@ -557,6 +557,11 @@ void UWowUIManager::GetNpcOverheadSettings(bool& ShowNames, bool& TrackTrivial) 
     TrackTrivial = UIContext && WowMinimapUi::View(UIContext).CommonKey == TEXT("MINIMAP_TRACKING_TRIVIAL_QUESTS");
 }
 
+bool UWowUIManager::ShouldDeselectOnClick() const
+{
+    return !LuaVM || !LuaVM->GetState() || WowLuaApi::GetUiPreference(LuaVM->GetState(),TEXT("cvar_deselectonclick"),1)!=0;
+}
+
 uint8 UWowUIManager::GetQuestGiverStatus(uint64 Guid) const
 {
     const auto* Unit = UIContext && UIContext->EntityManager ? UIContext->EntityManager->Find(Guid) : nullptr;

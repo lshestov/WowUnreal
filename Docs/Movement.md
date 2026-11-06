@@ -29,3 +29,13 @@ moving immediately resumes the appropriate ground animation instead of
 sliding in the landing pose. Ordinary weapon one-shots are not interrupted
 by this landing-specific transition. `WowUnreal.Animation.RuntimePlayback`
 and `Scripts/Verification/39-backpedal-and-landing.json` cover these paths.
+
+World mouse selection and right-click interaction complete on release. A
+pointer drag, camera rotation with a captured pointer, or two-button movement
+does not also select, clear, or interact. UI clicks remain consumed by the UI.
+An empty right click preserves the target and does not interact with it.
+An ordinary empty left click clears the target only when deselectOnClick is
+enabled (the original default is 1); disabling it provides sticky targeting.
+The pressed unit is revalidated on release in case it despawned. The
+MouseClickRetainsTarget and MouseSelectionRespectsOcclusion world tests cover
+these rules and existing world occlusion.

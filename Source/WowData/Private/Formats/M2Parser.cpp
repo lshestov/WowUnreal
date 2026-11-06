@@ -173,8 +173,7 @@ struct FM2AnimSequenceRaw
 	uint32 Length;
 	float  MoveSpeed;
 	uint32 Flags;
-	int16  Probability;
-	uint16 Padding;
+	uint32 Frequency;
 	uint32 MinRepetitions;
 	uint32 MaxRepetitions;
 	uint32 BlendTime;
@@ -518,6 +517,7 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
             Dst.Length = Src.Length;
             Dst.MoveSpeed = Src.MoveSpeed;
             Dst.Flags = Src.Flags;
+            Dst.Frequency = Src.Frequency;
             Dst.NextAnimation = Src.NextAnimation;
             Dst.AliasNext = Src.AliasNext;
         }

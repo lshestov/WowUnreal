@@ -39,6 +39,7 @@ struct WOWDATA_API FM2AnimSequence
 	uint32 Length = 0; // duration in ms
 	float MoveSpeed = 0.0f;
 	uint32 Flags = 0;
+	uint32 Frequency = 0; // authored variation weight in the original 15-bit random range
 	int16 NextAnimation = -1;
 	uint16 AliasNext = 0;
 	bool IsLooping() const { return (Flags & 0x20) != 0; }
