@@ -1,0 +1,18 @@
+{
+  "qaClass":1, "qaLevel":1, "qaGm":false, "qaSpawnEntry":823, "qaSpawnOffset":3,
+  "width":1280, "height":900,
+  "steps":[
+    {"op":"wait_world","timeout":140}, {"op":"wait_floor","timeout":80},
+    {"op":"time","minutes":630},
+    {"op":"move_pointer","x":0.65,"y":0.4},
+    {"op":"capture","name":"01-camera-before-drag"},
+    {"op":"input_key","name":"RightMouseButton","event":"press"},
+    {"op":"mouse_axis","dx":0,"dy":-45,"expectedPitchSign":-1,"timeout":5},
+    {"op":"input_key","name":"RightMouseButton","event":"release"},
+    {"op":"capture","name":"02-mouse-down-looks-down"},
+    {"op":"input_key","name":"RightMouseButton","event":"press"},
+    {"op":"mouse_axis","dx":0,"dy":45,"expectedPitchSign":1,"timeout":5},
+    {"op":"input_key","name":"RightMouseButton","event":"release"},
+    {"op":"capture","name":"03-mouse-up-restores-view"}
+  ]
+}

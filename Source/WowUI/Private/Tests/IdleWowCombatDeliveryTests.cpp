@@ -5,6 +5,7 @@
 #include "../LuaApi/LuaApiRegistry.h"
 #include "WowConnectionManager.h"
 #include "WowCombatLogUi.h"
+#include "WowCombatTextUi.h"
 #include "Components/CanvasPanel.h"
 #include "UObject/StrongObjectPtr.h"
 #include "Formats/Dbc/DbcStore.h"
@@ -257,6 +258,57 @@ bool FCombatMissFamilies::RunTest(const FString&)
         assert(#Rows==6 and Rows[4][2]=='SPELL_CAST_SUCCESS')
         assert(Rows[5][2]=='SPELL_MISSED' and Rows[5][6]=='0xF130000005000001' and Rows[5][12]=='REFLECT')
         assert(Rows[6][2]=='SPELL_MISSED' and Rows[6][6]=='0x0000000000000001' and Rows[6][12]=='RESIST' and Rows[6][13]==0)
+    )LUA")));
+    return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCombatFloatingDelivery,"WowUnreal.Hud.CombatFloatingDelivery",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FCombatFloatingDelivery::RunTest(const FString&)
+{
+    FCombatFixture F; auto& H=F.Connection->PacketHandler;
+    FWowFrameDef World; World.Name=TEXT("WorldFrame"); World.Type=EWowFrameType::WorldFrame; World.bSetAllPoints=true;
+    F.Frames.CreateFrame(World);
+    TestTrue(TEXT("Widgetless setAllPoints WorldFrame exposes its viewport dimensions to original combat text"),F.Lua.ExecuteString(TEXT(
+        "assert(WorldFrame:GetWidth()>100 and WorldFrame:GetHeight()==768); assert(WorldFrame:GetWidth()==UIParent:GetWidth())")));
+    H.PlayerNameCache.Add(Victim,TEXT("Healer"));
+    TestTrue(TEXT("Combat displays use Wrath defaults and a separate typed event listener"),F.Lua.ExecuteString(TEXT(R"LUA(
+        for _,c in ipairs({'CombatDamage','CombatHealing','enableCombatText','CombatLogPeriodicSpells','PetMeleeDamage','PetSpellDamage'}) do assert(GetCVarDefault(c)=='1'); SetCVar(c,1) end
+        CombatTextSetActiveUnit('player'); FloatingRows={}; FloatingWatch=CreateFrame('Frame')
+        FloatingWatch:RegisterEvent('COMBAT_TEXT_UPDATE'); FloatingWatch:SetScript('OnEvent',function(self,event,...) table.insert(FloatingRows,{n=select('#',...),...}) end)
+        -- A chat combat-log filter must never suppress floating damage numbers.
+        CombatLogResetFilter(); CombatLogAddFilter('SPELL_HEAL')
+    )LUA")));
+    const auto Damage=[&](uint64 Destination,uint64 Source,uint32 Amount)
+    {
+        FCombatPacket P; P.Guid(Destination); P.Guid(Source); P.Word(133); P.Word(Amount); P.Word(0); P.Byte(4);
+        P.Word(0); P.Word(0); P.Byte(0); P.Byte(0); P.Word(0); P.Word(0); P.Byte(0); H.HandlePacket(0x250,P.Data);
+    };
+    Damage(1,Victim,17);
+    FCombatPacket Heal; Heal.Guid(1); Heal.Guid(Victim); Heal.Word(2050); Heal.Word(30); Heal.Word(5); Heal.Word(0); Heal.Byte(1); Heal.Byte(0); H.HandlePacket(0x150,Heal.Data);
+    FCombatPacket Miss; Miss.Wide(Victim); Miss.Wide(1); Miss.Word(133); Miss.Byte(0); H.HandlePacket(0x260,Miss.Data);
+    TestTrue(TEXT("Real packet delivery supplies stock incoming damage, critical heals and spell resists"),F.Lua.ExecuteString(TEXT(R"LUA(
+        assert(#FloatingRows==3)
+        assert(FloatingRows[1].n==2 and FloatingRows[1][1]=='SPELL_DAMAGE' and FloatingRows[1][2]==17 and type(FloatingRows[1][2])=='number')
+        assert(FloatingRows[2].n==3 and FloatingRows[2][1]=='HEAL_CRIT' and FloatingRows[2][2]=='Healer' and FloatingRows[2][3]==30)
+        assert(FloatingRows[3].n==1 and FloatingRows[3][1]=='SPELL_RESIST')
+    )LUA")));
+    Damage(Victim,1,24); Damage(Victim,2,99);
+    int32 Active=0; uint64 Incoming=0,Outgoing=0; FWowCombatTextUi::GetCounts(F.Lua.GetState(),Active,Incoming,Outgoing);
+    TestEqual(TEXT("Own outgoing damage is queued even when filtered from chat; strangers are excluded"),Outgoing,uint64(1));
+    TestEqual(TEXT("A queued label is not reported as rendered before it is projected"),Active,0);
+    TestTrue(TEXT("Disable both independent damage displays"),F.Lua.ExecuteString(TEXT("SetCVar('CombatDamage',0); SetCVar('enableCombatText',0)")));
+    Damage(1,Victim,18); Damage(Victim,1,25);
+    FWowCombatTextUi::GetCounts(F.Lua.GetState(),Active,Incoming,Outgoing);
+    TestEqual(TEXT("Disabling the native display stops outgoing labels"),Outgoing,uint64(1));
+    TestTrue(TEXT("Disabling incoming combat text suppresses its event without touching combat history"),F.Lua.ExecuteString(TEXT("assert(#FloatingRows==3 and CombatLogGetNumEntries(true)==7); SetCVar('CombatDamage',1); SetCVar('enableCombatText',1)")));
+    // These are already-normalized history events from periodic/resource handlers.
+    FWowCombatEntry E; E.Source=Victim; E.Destination=1; E.Event=TEXT("SPELL_PERIODIC_DAMAGE"); E.Values={FWowCombatValue::N(9)};
+    FWowCombatLogUi::Dispatch(F.Lua.GetState(),E);
+    E.Event=TEXT("SPELL_PERIODIC_DRAIN"); E.Values={FWowCombatValue::N(7),FWowCombatValue::N(0)}; FWowCombatLogUi::Dispatch(F.Lua.GetState(),E);
+    E.Source=1; E.Destination=Victim; E.Event=TEXT("SPELL_PERIODIC_LEECH"); E.Values.Add(FWowCombatValue::N(4)); FWowCombatLogUi::Dispatch(F.Lua.GetState(),E);
+    TestTrue(TEXT("Periodic incoming damage stays red; drains and caster gains retain their distinct event types"),F.Lua.ExecuteString(TEXT(R"LUA(
+        assert(#FloatingRows==6 and FloatingRows[4][1]=='DAMAGE' and FloatingRows[4][2]==9)
+        assert(FloatingRows[5][1]=='ENERGIZE' and FloatingRows[5][2]==-7 and FloatingRows[5][3]=='MANA')
+        assert(FloatingRows[6][1]=='PERIODIC_ENERGIZE' and FloatingRows[6][2]==4 and FloatingRows[6][3]=='MANA')
     )LUA")));
     return true;
 }

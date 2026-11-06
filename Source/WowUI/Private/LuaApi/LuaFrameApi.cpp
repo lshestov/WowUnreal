@@ -917,7 +917,7 @@ static int LF_GetWidth(lua_State* L)
 		const FWowFrameDef* Def = Ctx->FrameManager->GetFrameDef(Handle);
 		if (Def)
 		{
-			lua_pushnumber(L, Def->Anchors.IsEmpty()?Def->Width:Ctx->FrameManager->GetLayoutRect(Handle).Z / Ctx->FrameManager->GetEffectiveFrameScale(Handle));
+			lua_pushnumber(L, Def->Anchors.IsEmpty() && !Def->bSetAllPoints?Def->Width:Ctx->FrameManager->GetLayoutRect(Handle).Z / Ctx->FrameManager->GetEffectiveFrameScale(Handle));
 			return 1;
 		}
 	}
@@ -936,7 +936,7 @@ static int LF_GetHeight(lua_State* L)
 		const FWowFrameDef* Def = Ctx->FrameManager->GetFrameDef(Handle);
 		if (Def)
 		{
-			lua_pushnumber(L, Def->Anchors.IsEmpty()?Def->Height:Ctx->FrameManager->GetLayoutRect(Handle).W / Ctx->FrameManager->GetEffectiveFrameScale(Handle));
+			lua_pushnumber(L, Def->Anchors.IsEmpty() && !Def->bSetAllPoints?Def->Height:Ctx->FrameManager->GetLayoutRect(Handle).W / Ctx->FrameManager->GetEffectiveFrameScale(Handle));
 			return 1;
 		}
 	}

@@ -1,0 +1,121 @@
+{
+  "qaClass": 5,
+  "qaLevel": 5,
+  "qaSpells": [
+    2050,
+    585
+  ],
+  "qaGm": false,
+  "qaSpawnEntry": 69,
+  "qaSpawnStatic": true,
+  "qaSpawnOffset": 2.5,
+  "width": 1280,
+  "height": 900,
+  "steps": [
+    {
+      "op": "wait_world",
+      "timeout": 180
+    },
+    {
+      "op": "wait_floor",
+      "timeout": 90
+    },
+    {
+      "op": "time",
+      "minutes": 630
+    },
+    {
+      "op": "select_entry",
+      "entry": 69,
+      "timeout": 30
+    },
+    {
+      "op": "approach",
+      "range": 2.6,
+      "timeout": 40
+    },
+    {
+      "op": "frame_camera_target",
+      "distance": 480,
+      "sideView": true
+    },
+    {
+      "op": "move_pointer",
+      "x": 0.76,
+      "y": 0.37
+    },
+    {
+      "op": "lua",
+      "code": "assert(GetCVar('CombatDamage')=='1' and GetCVar('CombatHealing')=='1' and GetCVar('enableCombatText')=='1')\nassert(IsAddOnLoaded('Blizzard_CombatText') and CombatText and CombatText:IsVisible(), 'stock incoming combat text did not load')\nassert(type(CombatTextSetActiveUnit)=='function' and DAMAGE_TEXT_FONT=='Fonts\\\\FRIZQT__.TTF')\nassert(WorldFrame:GetHeight()>700 and WorldFrame:GetWidth()>900, 'viewport dimensions')\nFctRows={}; FctDamage=0; FctHeal=0; FctSwingDamage=0; FctSpellDamage=0\nFctWatch=CreateFrame('Frame'); FctWatch:RegisterEvent('COMBAT_TEXT_UPDATE'); FctWatch:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED')\nFctWatch:SetScript('OnEvent',function(self,event,...)\n  if event=='COMBAT_LOG_EVENT_UNFILTERED' then\n    local r={...}\n    if r[3]==UnitGUID('player') then\n      if r[2]=='SWING_DAMAGE' then FctSwingDamage=FctSwingDamage+1\n      elseif r[2]=='SPELL_DAMAGE' and r[9]==585 then FctSpellDamage=FctSpellDamage+1 end\n    end\n  elseif event=='COMBAT_TEXT_UPDATE' then\n    local kind,a,b=...; table.insert(FctRows,{kind,a,b})\n    if kind=='DAMAGE' or kind=='DAMAGE_CRIT' or kind=='SPELL_DAMAGE' then assert(type(a)=='number'); FctDamage=FctDamage+1 end\n    if kind=='HEAL' or kind=='HEAL_CRIT' then assert(type(b)=='number'); FctHeal=FctHeal+1 end\n  end\nend)\nfunction FctHasLine(prefix)\n  for i=1,20 do\n    local v=_G['CombatText'..i]\n    if v:IsVisible() and v:GetAlpha()>.1 and (v:GetText() or ''):sub(1,1)==prefix and v:GetBottom()>0 and v:GetTop()<=WorldFrame:GetHeight() then return true end\n  end\n  return false\nend"
+    },
+    {
+      "op": "start_melee"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "FctSwingDamage>0",
+      "timeout": 25
+    },
+    {
+      "op": "combat_text",
+      "minimumOutgoing": 1,
+      "minimumActive": 1,
+      "capture": "01-white-melee-damage-over-wolf",
+      "timeout": 20
+    },
+    {
+      "op": "lua",
+      "code": "StopAttack()"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "FctDamage>0 and FctHasLine('-')",
+      "timeout": 18
+    },
+    {
+      "op": "wait",
+      "seconds": 0.25
+    },
+    {
+      "op": "capture",
+      "name": "02-stock-incoming-damage"
+    },
+    {
+      "op": "lua",
+      "code": "CastSpellByName(GetSpellInfo(2050),'player')"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "FctHeal>0 and FctHasLine('+')",
+      "timeout": 20
+    },
+    {
+      "op": "wait",
+      "seconds": 0.25
+    },
+    {
+      "op": "capture",
+      "name": "03-stock-green-self-heal"
+    },
+    {
+      "op": "lua",
+      "code": "assert(FctDamage>0 and FctHeal>0); CastSpellByName(GetSpellInfo(585),'target')"
+    },
+    {
+      "op": "lua_wait",
+      "condition": "FctSpellDamage>0",
+      "timeout": 20
+    },
+    {
+      "op": "combat_text",
+      "minimumOutgoing": 2,
+      "minimumActive": 1,
+      "capture": "04-gold-spell-damage-over-wolf",
+      "timeout": 20
+    },
+    {
+      "op": "lua",
+      "code": "StopAttack(); SpellStopCasting(); FctWatch:UnregisterAllEvents()"
+    }
+  ]
+}

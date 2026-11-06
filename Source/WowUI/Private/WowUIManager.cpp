@@ -24,6 +24,7 @@
 #include "WowSavedVariables.h"
 #include "WowMacros.h"
 #include "WowCombatLogUi.h"
+#include "WowCombatTextUi.h"
 #include "Misc/Paths.h"
 
 #if __has_include("lua.h")
@@ -527,6 +528,7 @@ void UWowUIManager::TickWorldImages(UWorld* World, uint64 MouseoverGuid)
     if(bUILoaded && LuaVM) WowLuaApi::UpdateMapArt(LuaVM->GetState());
     if(bUILoaded && CursorRenderer && LuaVM) CursorRenderer->Tick(LuaVM->GetState());
     if(ModelRenderer) ModelRenderer->Tick(World);
+    if(bUILoaded && LuaVM) FWowCombatTextUi::Tick(LuaVM->GetState(),World);
     if(MapRenderer) MapRenderer->Tick(World);
     const double Now=FPlatformTime::Seconds();
     if(bUILoaded && LuaVM && Now>=NextItemComparisonUpdate)

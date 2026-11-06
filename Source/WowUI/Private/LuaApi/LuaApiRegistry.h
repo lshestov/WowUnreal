@@ -15,6 +15,7 @@ struct FWowEntity;
 struct FAuraInfo;
 struct FWowSpellBookView;
 struct FWowCombatLogView;
+struct FWowCombatTextView;
 struct FWowClassUiView;
 struct FWowChannelUiView;
 struct FWowMapUiView;
@@ -41,6 +42,7 @@ struct FWowLuaContext
     FWowFrameManager* FrameManager = nullptr;
     TSharedPtr<FWowSpellBookView> SpellBook;
     TSharedPtr<FWowCombatLogView> CombatLog;
+    TSharedPtr<FWowCombatTextView> CombatText;
     TSharedPtr<FWowClassUiView> ClassUi;
     TSharedPtr<FWowChannelUiView> Channels;
     TSharedPtr<FWowMapUiView> Map;

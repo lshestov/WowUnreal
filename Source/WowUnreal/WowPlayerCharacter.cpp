@@ -245,7 +245,9 @@ void AWowPlayerCharacter::OnLook(const FInputActionValue& Value)
 	if (PC->IsInputKeyDown(EKeys::RightMouseButton))
 	{
 		AddControllerYawInput(Input.X);
-		AddControllerPitchInput(Input.Y);
+		// Mouse Y is positive upwards; the configured legacy pitch scale is
+		// negative. Cancel that inversion so dragging down looks down.
+		AddControllerPitchInput(-Input.Y);
 	}
 }
 

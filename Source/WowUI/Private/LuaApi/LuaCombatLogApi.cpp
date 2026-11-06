@@ -1,4 +1,5 @@
 #include "WowCombatLogUi.h"
+#include "WowCombatTextUi.h"
 #include "LuaApiRegistry.h"
 #include "WowConnectionManager.h"
 #include "WowEventSystem.h"
@@ -131,6 +132,7 @@ FWowCombatLogView::FSelector ReadSelector(lua_State* L,int I)
 }
 void FWowCombatLogUi::RegisterApi(lua_State* L)
 {
+    FWowCombatTextUi::RegisterApi(L);
     Register(L,"CombatLog_Object_IsA",[](lua_State* S)->int { lua_pushboolean(S,ObjectIsA(uint32(luaL_checknumber(S,1)),uint32(luaL_checknumber(S,2)))); return 1; });
     Register(L,"CombatLogGetNumEntries",[](lua_State* S)->int { Refresh(S); const auto* V=View(S); const auto* H=History(S); lua_pushinteger(S,Boolean(S,1)?(H?H->Num():0):(V?V->Selected.Num():0)); return 1; });
     Register(L,"CombatLogResetFilter",[](lua_State* S)->int { if(auto* V=View(S)) { V->Filters.Reset(); V->Dirty=true; } return 0; });
@@ -170,6 +172,7 @@ void FWowCombatLogUi::Dispatch(lua_State* L,const FWowCombatEntry& Entry)
         C->EventSystem->FireEvent(TEXT("UI_ERROR_MESSAGE"),{Message});
     }
     V->Active=Previous;
+    FWowCombatTextUi::Dispatch(L,Entry);
 }
 #else
 void FWowCombatLogUi::RegisterApi(lua_State*) {}

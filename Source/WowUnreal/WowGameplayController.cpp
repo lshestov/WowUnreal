@@ -1381,6 +1381,17 @@ bool AWowGameplayController::InputKey(const FInputKeyEventArgs& Params)
         auto* Frames=UIManager->GetFrameManager();
         if(Frames->DispatchMouseWheel(Frames->HitTestFrames(Pointer.X,Pointer.Y,true),Params.Key==EKeys::MouseScrollUp?1.f:-1.f)) return true;
     }
+	if(Params.Event==IE_Axis && Params.Key==EKeys::MouseWheelAxis && Params.AmountDepressed!=0 && UIManager && UIManager->GetFrameManager())
+	{
+		// UE sends both the scroll-button press and an analog wheel value.
+		// A FrameXML scroll must consume the latter without scrolling twice or
+		// also changing the camera distance through Enhanced Input.
+		FVector2D Pointer;
+		if(IsPointerOverNativeWindow(&Pointer)) return true;
+		const auto* Frames=UIManager->GetFrameManager();
+		for(int64 Handle=Frames->HitTestFrames(Pointer.X,Pointer.Y,true),Depth=0; Handle>=0 && Depth<64; Handle=Frames->GetParentHandle(Handle),++Depth)
+			if(Frames->IsFrameMouseWheelEnabled(Handle)) return true;
+	}
 	if(UIManager && UIManager->GetLuaVM())
 	{
 		const auto ChordFor=[&](const FKey& Key)

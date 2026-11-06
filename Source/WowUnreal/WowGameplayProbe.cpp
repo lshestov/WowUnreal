@@ -3,6 +3,7 @@
 #include "WowUiTestPeer.h"
 #include "WowGameUI.h"
 #include "WowUIManager.h"
+#include "WowCombatTextUi.h"
 #include "WowInventoryManager.h"
 #include "WowLuaVM.h"
 #include "WowFrameManager.h"
@@ -113,6 +114,7 @@ struct FWowGameplayProbe
     FVector2D SlateClickPoint=FVector2D::ZeroVector;
     TOptional<FVector2D> SavedSlateCursor;
     FRotator BeforeMouseAxis=FRotator::ZeroRotator;
+    float BeforeWheelDistance=0;
     TMap<uint64,TPair<uint32,uint32>> OfflineCorpseFields;
     uint64 OfflineFacingGuid=0, SavedOfflineNpcTarget=0;
     float SavedOfflineNpcOrientation=0, OfflineNpcRawOrientation=0;
@@ -588,7 +590,43 @@ struct FWowGameplayProbe
                 const auto Row=MakeShared<FJsonObject>();
                 Row->SetNumberField(TEXT("yawBefore"),BeforeMouseAxis.Yaw); Row->SetNumberField(TEXT("yawAfter"),C.GetControlRotation().Yaw);
                 Row->SetNumberField(TEXT("pitchBefore"),BeforeMouseAxis.Pitch); Row->SetNumberField(TEXT("pitchAfter"),C.GetControlRotation().Pitch);
+                const float PitchDelta=FMath::FindDeltaAngleDegrees(BeforeMouseAxis.Pitch,C.GetControlRotation().Pitch);
+                double PitchSign=0; Step->TryGetNumberField(TEXT("expectedPitchSign"),PitchSign);
+                if(PitchSign!=0 && PitchDelta*PitchSign<=.01f)
+                {Failure=TEXT("Native vertical mouse input rotated the camera in the wrong direction"); Finish(C,false); return;}
+                Row->SetNumberField(TEXT("pitchDelta"),PitchDelta);
+                Inspections->SetObjectField(FString::Printf(TEXT("mouseAxis:%d"),Index),Row);
                 Inspections->SetObjectField(TEXT("mouseAxis"),Row); Done=true;
+            }
+        }
+        else if(Op==TEXT("mouse_wheel"))
+        {
+            auto* Player=Cast<AWowPlayerCharacter>(C.GetPawn());
+            const float Delta=Step->GetNumberField(TEXT("delta"));
+            if(!Player || !Player->CameraBoom || (Delta!=1 && Delta!=-1))
+            {Failure=TEXT("Mouse wheel probe requires a player camera and one signed wheel tick"); Finish(C,false); return;}
+            if(!bInvoked)
+            {
+                BeforeWheelDistance=Player->CameraBoom->TargetArmLength; bInvoked=true;
+                TGuardValue<bool> Synthetic(C.bProbeSyntheticKeyboard,true);
+                const FKey Key=Delta>0?EKeys::MouseScrollUp:EKeys::MouseScrollDown;
+                C.InputKey(FInputKeyEventArgs::CreateSimulated(Key,IE_Pressed,1.f));
+                C.InputKey(FInputKeyEventArgs::CreateSimulated(EKeys::MouseWheelAxis,IE_Axis,Delta,1));
+                C.InputKey(FInputKeyEventArgs::CreateSimulated(Key,IE_Released,0.f));
+            }
+            else if(Now-StepStarted>.15)
+            {
+                const float After=Player->CameraBoom->TargetArmLength;
+                bool ExpectedZoom=false;
+                if(Step->TryGetBoolField(TEXT("expectedZoom"),ExpectedZoom))
+                {
+                    const bool Zoomed=!FMath::IsNearlyEqual(BeforeWheelDistance,After,.01f);
+                    if(Zoomed!=ExpectedZoom || (Zoomed && (BeforeWheelDistance-After)*Delta<=0))
+                    {Failure=TEXT("Native mouse wheel camera zoom did not match UI ownership"); Finish(C,false); return;}
+                }
+                const auto Row=MakeShared<FJsonObject>();
+                Row->SetNumberField(TEXT("distanceBefore"),BeforeWheelDistance); Row->SetNumberField(TEXT("distanceAfter"),After);
+                Inspections->SetObjectField(FString::Printf(TEXT("mouseWheel:%d"),Index),Row); Done=true;
             }
         }
         else if(Op==TEXT("offline_heroic_packet"))
@@ -1367,11 +1405,42 @@ struct FWowGameplayProbe
             else Name=Step->GetStringField(TEXT("name"));
             const int64 Handle=Frames->FindFrame(Name);
             if(Handle<0 || !Frames->IsFrameDrawn(Handle)) { Failure=FString::Printf(TEXT("UI frame '%s' is not visible"),*Name); Finish(C,false); return; }
+            // Resolve any OnUpdate changes before deriving a synthetic pointer.
+            // The real controller already receives viewport pixels, whereas a
+            // probe must not calculate them from a stale cached frame rectangle.
+            const auto BeforeRect=Frames->GetLayoutRect(Handle);
+            Frames->RefreshLayout();
             const auto Rect=Frames->GetLayoutRect(Handle); const float Scale=Frames->GetScreenScale();
             const float X=(Rect.X+Rect.Z*.5f)*Scale,Y=(Rect.Y+Rect.W*.5f)*Scale;
-            const int64 Hit=Frames->HitTestFrames(X,Y,Op==TEXT("wheel_frame")); bool Allowed=Hit==Handle;
-            if(Op==TEXT("wheel_frame")) for(int64 Parent=Hit,Depth=0;Parent>=0 && Depth<64;++Depth,Parent=Frames->GetParentHandle(Parent)) Allowed|=Parent==Handle;
-            if(!Allowed) { Failure=FString::Printf(TEXT("UI frame %s is obscured by %s"),*Name,*Frames->GetFrameName(Hit)); Finish(C,false); return; }
+            bool ForWheel=Op==TEXT("wheel_frame"); Step->TryGetBoolField(TEXT("forWheel"),ForWheel);
+            const int64 Hit=Frames->HitTestFrames(X,Y,ForWheel); bool Allowed=Hit==Handle;
+            if(ForWheel) for(int64 Parent=Hit,Depth=0;Parent>=0 && Depth<64;++Depth,Parent=Frames->GetParentHandle(Parent)) Allowed|=Parent==Handle;
+            if(!Allowed)
+            {
+                const auto* HitDef=Frames->GetFrameDef(Hit);
+                const auto AfterRect=Frames->GetLayoutRect(Handle);
+                auto Row=MakeShared<FJsonObject>(); Row->SetStringField(TEXT("name"),Name);
+                Row->SetNumberField(TEXT("handle"),Handle); Row->SetBoolField(TEXT("forWheel"),ForWheel);
+                Row->SetBoolField(TEXT("wheelEnabled"),Frames->IsFrameMouseWheelEnabled(Handle));
+                Row->SetBoolField(TEXT("mouseEnabled"),Frames->IsFrameMouseEnabled(Handle));
+                Row->SetStringField(TEXT("rectBeforeRefresh"),BeforeRect.ToString());
+                Row->SetStringField(TEXT("rect"),Rect.ToString()); Row->SetStringField(TEXT("rectAfterHit"),AfterRect.ToString());
+                Row->SetNumberField(TEXT("screenScale"),Scale); Row->SetNumberField(TEXT("uiScale"),Frames->GetUIScale());
+                if(const auto* TargetDef=Frames->GetFrameDef(Handle))
+                {
+                    Row->SetNumberField(TEXT("type"),int32(TargetDef->Type)); Row->SetNumberField(TEXT("strata"),int32(TargetDef->Strata));
+                    Row->SetNumberField(TEXT("level"),TargetDef->FrameLevel); Row->SetBoolField(TEXT("hidden"),TargetDef->bHidden);
+                    Row->SetStringField(TEXT("hitInsets"),TargetDef->HitInsets.ToString());
+                }
+                Row->SetNumberField(TEXT("pointerX"),X); Row->SetNumberField(TEXT("pointerY"),Y);
+                Row->SetNumberField(TEXT("hitHandle"),Hit); Row->SetStringField(TEXT("hitName"),Frames->GetFrameName(Hit));
+                Row->SetNumberField(TEXT("hitType"),HitDef?int32(HitDef->Type):-1);
+                Row->SetBoolField(TEXT("hitWheelEnabled"),Frames->IsFrameMouseWheelEnabled(Hit));
+                Inspections->SetObjectField(TEXT("failedFrameHit"),Row);
+                Failure=FString::Printf(TEXT("UI frame %s (wheel=%d, rect=%s) missed hit %lld '%s' at %.1f,%.1f"),
+                    *Name,Frames->IsFrameMouseWheelEnabled(Handle),*Rect.ToString(),Hit,*Frames->GetFrameName(Hit),X,Y);
+                Finish(C,false); return;
+            }
             Frames->UpdateMouseHover(X,Y);
             C.GameplayProbePointer=FVector2D(X,Y);
             if(Op==TEXT("hover_frame") || Op==TEXT("wheel_frame"))
@@ -1434,6 +1503,9 @@ struct FWowGameplayProbe
             const auto Rect=Handle>=0?Frames->GetLayoutRect(Handle):Frames->GetRegionRect(Name);
             auto Row=MakeShared<FJsonObject>(); Row->SetNumberField(TEXT("x"),Rect.X); Row->SetNumberField(TEXT("y"),Rect.Y); Row->SetNumberField(TEXT("width"),Rect.Z); Row->SetNumberField(TEXT("height"),Rect.W);
             Row->SetStringField(TEXT("hit"),Frames->GetFrameName(Frames->HitTestFrames((Rect.X+Rect.Z*.5f)*Frames->GetScreenScale(),(Rect.Y+Rect.W*.5f)*Frames->GetScreenScale())));
+            Row->SetBoolField(TEXT("wheelEnabled"),Frames->IsFrameMouseWheelEnabled(Handle));
+            Row->SetBoolField(TEXT("mouseEnabled"),Frames->IsFrameMouseEnabled(Handle));
+            Row->SetStringField(TEXT("wheelHit"),Frames->GetFrameName(Frames->HitTestFrames((Rect.X+Rect.Z*.5f)*Frames->GetScreenScale(),(Rect.Y+Rect.W*.5f)*Frames->GetScreenScale(),true)));
             if(const auto* Def=Frames->GetFrameDef(Handle)) { Row->SetNumberField(TEXT("level"),Def->FrameLevel); Row->SetNumberField(TEXT("strata"),int32(Def->Strata)); Row->SetBoolField(TEXT("hidden"),Def->bHidden); Row->SetBoolField(TEXT("hiddenSpecified"),Def->bHiddenSpecified); Row->SetBoolField(TEXT("drawn"),Frames->IsFrameDrawn(Handle)); }
             auto* Text=Handle>=0?Frames->GetPrimaryTextWidget(Handle):Frames->GetNamedFontString(Name);
             if(Text)
@@ -1539,6 +1611,29 @@ struct FWowGameplayProbe
             else if(Key==TEXT("Enter")) C.OnEnterKey();
             else { Failure=TEXT("Unsupported UI probe key"); Finish(C,false); return; }
             Done=true;
+        }
+        else if(Op==TEXT("combat_text"))
+        {
+            int32 Active=0; uint64 Incoming=0,Outgoing=0;
+            FWowCombatTextUi::GetCounts(C.UIManager->GetLuaVM()->GetState(),Active,Incoming,Outgoing);
+            double MinIncoming=0,MinOutgoing=0,MinActive=0;
+            Step->TryGetNumberField(TEXT("minimumIncoming"),MinIncoming);
+            Step->TryGetNumberField(TEXT("minimumOutgoing"),MinOutgoing);
+            Step->TryGetNumberField(TEXT("minimumActive"),MinActive);
+            if(bInvoked || (Incoming>=MinIncoming && Outgoing>=MinOutgoing && Active>=MinActive))
+            {
+                FString Capture; Step->TryGetStringField(TEXT("capture"),Capture);
+                const FString Path=Output/(Capture+TEXT(".png"));
+                if(!bInvoked)
+                {
+                    const auto Row=MakeShared<FJsonObject>();
+                    Row->SetNumberField(TEXT("incoming"),Incoming); Row->SetNumberField(TEXT("outgoing"),Outgoing); Row->SetNumberField(TEXT("active"),Active);
+                    Inspections->SetObjectField(FString::Printf(TEXT("combatText:%d"),Index),Row);
+                    if(!Capture.IsEmpty()) FScreenshotRequest::RequestScreenshot(Path,true,false);
+                    bInvoked=true;
+                }
+                Done=Capture.IsEmpty() || IFileManager::Get().FileSize(*Path)>0;
+            }
         }
         else if (Op==TEXT("capture"))
         {
