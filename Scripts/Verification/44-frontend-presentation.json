@@ -1,0 +1,13 @@
+{"steps":[
+  {"at":3,"action":"capture","cursor":[0.5,0.54],"capture":"01-login-glove-cursor"},
+  {"at":6,"action":"options","cursor":[0.55,0.5],"capture":"02-options-glove-cursor"},
+  {"at":9,"action":"select","sampleCharacter":true,"cursor":[0.8,0.35],"capture":"03-selection-glove-cursor"},
+  {"at":12,"action":"create","cursor":[0.8,0.5],"capture":"04-creation-glove-cursor"},
+  {"at":15,"action":"loadingBar","progress":0,"cursor":[0.75,0.7],"capture":"05-loading-empty"},
+  {"at":18,"action":"progress","progress":0.5,"cursor":[0.75,0.7],"capture":"06-loading-half"},
+  {"at":21,"action":"progress","progress":1,"cursor":[0.75,0.7],"capture":"07-loading-complete"},
+  {"at":24,"action":"loadingError","cursor":[0.5,0.54],"capture":"08-loading-error-on-login"},
+  {"at":27,"action":"loadingBar","progress":0.3},
+  {"at":29,"action":"loadingAutologinError","cursor":[0.5,0.54],"capture":"09-autologin-error-on-login"},
+  {"at":32,"action":"login","cursor":[0.5,0.54],"capture":"10-returned-login-cursor"}
+]}

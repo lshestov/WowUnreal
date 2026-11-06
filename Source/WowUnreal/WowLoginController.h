@@ -47,6 +47,7 @@ private:
     uint32 CreationResultSerial=0;
     uint8 LastCreationResult=0xff;
     void StopAutoLogin(const FString& Message);
+    void LeaveLoadingScreenAfterError();
     void UpdateWorldCapture();
     void OnWorldScreenshotProcessed();
 
@@ -96,6 +97,8 @@ private:
     void ShowCharacterCreateScreen();
     void ClearCurrentScreen();
     void SetStatusText(const FString& Text);
+    void ShowFrontendCursor();
+    TSharedPtr<class FWowFrontendCursor> FrontendCursor;
 
     TSharedPtr<SWowLoginWidget> LoginWidget;
     TSharedPtr<SWowRealmSelectWidget> RealmSelectWidget;

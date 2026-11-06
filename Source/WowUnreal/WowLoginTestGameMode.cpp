@@ -3,6 +3,12 @@
 #include "WowLoginWidget.h"
 #include "WowLoginPreferences.h"
 #include "WowLoginScene.h"
+#include "WowFrontendCursor.h"
+#include "WowCharacterSelectWidget.h"
+#include "SWowLoadingScreen.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Widgets/SViewport.h"
+#include "Widgets/SNullWidget.h"
 #include "WowCharacterPreview.h"
 #include "WowAudioManager.h"
 #include "WowM2EmitterComponent.h"
@@ -45,8 +51,48 @@ void AWowLoginTestGameMode::Tick(float Delta)
     if(Now-Started>240){Finish(false,TEXT("Login replay timeout"));return;}
     if(!FDbcStore::Get().IsDeferredLoaded()) return;
     if(Phase==2){if(Now-Changed>2) Finish(true);return;}
-    if(Phase==3){if(Now-Changed>1.5){FScreenshotRequest::RequestScreenshot(Output/(PendingCapture+TEXT(".png")),true,false);Phase=1;}return;}
-    if(Phase==1){if(!FScreenshotRequest::IsScreenshotRequested()){++Index;Phase=0;}return;}
+    if(Phase==3)
+    {
+        if(Now-Changed>1.5)
+        {
+            const auto Step=Steps[Index]->AsObject();
+            if(Step->HasField(TEXT("cursor")))
+            {
+                auto Cursor=Controller->FrontendCursor;
+                if(!Cursor || !Cursor->IsActive() || !Cursor->IsReady())
+                {Finish(false,TEXT("Frontend cursor is not ready in the viewport"));return;}
+                for(auto Type:{EMouseCursor::Default,EMouseCursor::TextEditBeam,EMouseCursor::Hand})
+                    if(GEngine->GameViewport->GetSoftwareCursorWidget(Type)!=SNullWidget::NullWidget)
+                    {Finish(false,TEXT("Native cursor was not suppressed over a frontend control"));return;}
+                // Reassert the real Slate cursor immediately before the UE
+                // capture; a person may have moved it during the settle wait.
+                const auto& Pointer=Step->GetArrayField(TEXT("cursor"));
+                const auto& Geometry=GEngine->GameViewport->GetGameViewportWidget()->GetCachedGeometry();
+                FSlateApplication::Get().SetCursorPos(Geometry.GetAbsolutePositionAtCoordinates(
+                    FVector2D(Pointer[0]->AsNumber(),Pointer[1]->AsNumber())));
+            }
+            FScreenshotRequest::RequestScreenshot(Output/(PendingCapture+TEXT(".png")),true,false);Phase=1;
+        }
+        return;
+    }
+    if(Phase==1)
+    {
+        if(!FScreenshotRequest::IsScreenshotRequested())
+        {
+            if(Steps[Index]->AsObject()->HasField(TEXT("cursor")))
+            {
+                const auto Cursor=Controller->FrontendCursor;
+                // Hidden verification windows paint their Slate tree as part
+                // of the screenshot request. Inspect that paint, not a frame
+                // before the first requested screenshot.
+                if(!Cursor || !Cursor->IsDrawn())
+                {Finish(false,TEXT("Frontend cursor was not drawn during the capture: ")+(Cursor?Cursor->DescribeDrawState():TEXT("widget absent")));return;}
+                Results.Last()->AsObject()->SetBoolField(TEXT("cursorDrawn"),true);
+            }
+            ++Index;Phase=0;
+        }
+        return;
+    }
     if(Index>=Steps.Num())
     {
         if(Recording){UAudioMixerBlueprintLibrary::StopRecordingOutput(this,EAudioRecordingExportType::WavFile,TEXT("mixer"),Output);Recording=false;}
@@ -134,9 +180,44 @@ void AWowLoginTestGameMode::Tick(float Delta)
     {
         Retired.Add(Controller->LoginScene);TArray<FWowRealmInfo> Realms;FWowRealmInfo R;R.Name=TEXT("Offline QA");Realms.Add(R);Controller->ShowRealmSelectScreen(Realms);++Cycles;
     }
-    else if(Action==TEXT("select")){Retired.Add(Controller->LoginScene);Retired.Add(Controller->CharacterPreview);Controller->ShowCharacterSelectScreen({});++Cycles;}
+    else if(Action==TEXT("select"))
+    {
+        Retired.Add(Controller->LoginScene);Retired.Add(Controller->CharacterPreview);
+        TArray<FWowCharacterInfo> Characters;
+        if(S->HasField(TEXT("sampleCharacter")))
+        {
+            FWowCharacterInfo Character;Character.Guid=1;Character.Name=TEXT("Preview");Character.Race=1;Character.Class=8;
+            Character.Level=1;Character.ZoneId=12;Character.HairStyle=1;Characters.Add(Character);
+        }
+        Controller->ShowCharacterSelectScreen(Characters);++Cycles;
+    }
     else if(Action==TEXT("create")){Retired.Add(Controller->CharacterPreview);Controller->ShowCharacterCreateScreen();++Cycles;}
     else if(Action==TEXT("loading")){Retired.Add(Controller->CharacterPreview);Controller->ClearCurrentScreen();Audio->SetGlueMode(false);++Cycles;}
+    else if(Action==TEXT("loadingBar"))
+    {
+        Retired.Add(Controller->CharacterPreview);Retired.Add(Controller->LoginScene);
+        Controller->ShowLoadingScreen(0);Controller->bWaitingForInitialLoad=false;Audio->SetGlueMode(false);++Cycles;
+        if(!Controller->LoadingScreenWidget->HasProgressArtwork()) {Finish(false,TEXT("Original loading bar artwork missing"));return;}
+        Controller->LoadingScreenWidget->SetProgress(S->GetNumberField(TEXT("progress")),TEXT("Loading terrain..."));
+    }
+    else if(Action==TEXT("progress"))
+    {
+        if(!Controller->LoadingScreenWidget) {Finish(false,TEXT("Progress step requires a loading screen"));return;}
+        Controller->LoadingScreenWidget->SetProgress(S->GetNumberField(TEXT("progress")),TEXT("Loading terrain..."));
+    }
+    else if(Action==TEXT("loadingError") || Action==TEXT("loadingAutologinError"))
+    {
+        if(!Controller->LoadingScreenWidget) {Finish(false,TEXT("Loading error step requires a loading screen"));return;}
+        const FString Message=TEXT("Unable to enter the world. Please reconnect.");
+        const bool Auto=Action==TEXT("loadingAutologinError");
+        if(Auto) Controller->StopAutoLogin(Message); else Controller->OnError(Message);
+        const FString Expected=(Auto?FString(TEXT("Autologin stopped: ")):FString(TEXT("Error: ")))+Message;
+        if(!Controller->LoginWidget || Controller->LoginWidget->GetStatusText()!=Expected || Controller->LoadingScreenWidget || Controller->LoadingWidget ||
+            Controller->bWaitingForInitialLoad || Controller->bAutoLoginActive || Controller->bPendingGroundSnap ||
+            Controller->ConnectionManager->GetState()!=EWowSessionState::Disconnected)
+        {Finish(false,TEXT("Failed world entry did not return to the login form with a visible error"));return;}
+        Controller->LoginWidget->OnLoginSubmit.BindLambda([this](const FString&,int32,const FString&,const FString&){++Submits;});++Cycles;
+    }
     else if(Action==TEXT("login"))
     {
         Retired.Add(Controller->CharacterPreview);Retired.Add(Controller->LoginScene);Controller->ShowLoginScreen();Controller->LoginWidget->SetCredentials(TEXT("127.0.0.1:3724"),TEXT(""),TEXT(""));
@@ -148,6 +229,19 @@ void AWowLoginTestGameMode::Tick(float Delta)
     }
     else {Finish(false,TEXT("Unknown login replay action"));return;}
     auto Row=MakeShared<FJsonObject>();Row->SetStringField(TEXT("action"),Action);Row->SetNumberField(TEXT("elapsed"),Now-Started);
+    const TArray<TSharedPtr<FJsonValue>>* Pointer=nullptr;
+    if(S->TryGetArrayField(TEXT("cursor"),Pointer) && Pointer->Num()==2 && FSlateApplication::IsInitialized())
+    {
+        auto& Slate=FSlateApplication::Get();if(!OriginalCursor.IsSet()) OriginalCursor=Slate.GetCursorPos();
+        const auto Viewport=GEngine->GameViewport->GetGameViewportWidget();const auto& Geometry=Viewport->GetCachedGeometry();
+        const FVector2D Position(Pointer->operator[](0)->AsNumber(),Pointer->operator[](1)->AsNumber());
+        Slate.SetCursorPos(Geometry.LocalToAbsolute(Geometry.GetLocalSize()*Position));
+    }
+    if(Controller->LoadingScreenWidget)
+    {
+        Row->SetNumberField(TEXT("progress"),Controller->LoadingScreenWidget->GetProgress());
+        Row->SetBoolField(TEXT("originalLoadingArtwork"),Controller->LoadingScreenWidget->HasProgressArtwork());
+    }
     if(Action==TEXT("remember")) Row->SetBoolField(TEXT("rememberAccount"),S->GetBoolField(TEXT("expectedRemember")));
     if(Action==TEXT("control")) Row->SetStringField(TEXT("control"),S->GetStringField(TEXT("name")));
     Row->SetBoolField(TEXT("playing"),Audio->IsGlueMusicPlaying());Row->SetNumberField(TEXT("pcmBytes"),Audio->GetGlueGeneratedBytes());Row->SetNumberField(TEXT("gain"),Audio->GetMusicGain());Row->SetNumberField(TEXT("effects"),Audio->GetGlueEffectCount());
@@ -163,7 +257,7 @@ void AWowLoginTestGameMode::Tick(float Delta)
     Results.Add(MakeShared<FJsonValueObject>(Row));FString CaptureName;
     if(S->TryGetStringField(TEXT("capture"),CaptureName))
     {
-        if(Action==TEXT("realm") || Action==TEXT("select") || Action==TEXT("create") || Action==TEXT("login") || Action==TEXT("expansion")){PendingCapture=CaptureName;Changed=Now;Phase=3;}
+        if(S->HasField(TEXT("cursor")) || Action==TEXT("loadingBar") || Action==TEXT("progress") || Action==TEXT("realm") || Action==TEXT("select") || Action==TEXT("create") || Action==TEXT("login") || Action==TEXT("expansion")){PendingCapture=CaptureName;Changed=Now;Phase=3;}
         else {FScreenshotRequest::RequestScreenshot(Output/(CaptureName+TEXT(".png")),true,false);Phase=1;}
     }
     else ++Index;
@@ -171,6 +265,7 @@ void AWowLoginTestGameMode::Tick(float Delta)
 void AWowLoginTestGameMode::Finish(bool Passed,const FString& Failure)
 {
     if(Finished) return;Finished=true;
+    if(OriginalCursor.IsSet() && FSlateApplication::IsInitialized()) {FSlateApplication::Get().SetCursorPos(*OriginalCursor);OriginalCursor.Reset();}
     if(Recording){UAudioMixerBlueprintLibrary::StopRecordingOutput(this,EAudioRecordingExportType::WavFile,TEXT("mixer"),Output);Recording=false;}
     auto Root=MakeShared<FJsonObject>();Root->SetBoolField(TEXT("passed"),Passed);Root->SetStringField(TEXT("failure"),Failure);Root->SetNumberField(TEXT("cycles"),Cycles);
     Root->SetBoolField(TEXT("networkLogin"),false);Root->SetBoolField(TEXT("actionsAreSpies"),true);Root->SetArrayField(TEXT("steps"),Results);
@@ -182,5 +277,6 @@ void AWowLoginTestGameMode::Finish(bool Passed,const FString& Failure)
 }
 void AWowLoginTestGameMode::EndPlay(const EEndPlayReason::Type Reason)
 {
+    if(OriginalCursor.IsSet() && FSlateApplication::IsInitialized()) {FSlateApplication::Get().SetCursorPos(*OriginalCursor);OriginalCursor.Reset();}
     if(Controller){Controller->Destroy();Controller=nullptr;}Super::EndPlay(Reason);
 }

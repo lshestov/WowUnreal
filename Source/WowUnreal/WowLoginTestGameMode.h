@@ -26,4 +26,5 @@ private:
     double Started=0,Changed=0;
     int32 Index=0,Phase=0,Submits=0,Cycles=0;
     bool Finished=false,Recording=false;
+    TOptional<FVector2D> OriginalCursor;
 };

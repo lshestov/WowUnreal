@@ -32,6 +32,7 @@ public:
     bool PressStockControl(FName Name);
     virtual FReply OnPreviewKeyDown(const FGeometry&,const FKeyEvent&) override;
     void SetStatusText(const FString& Text);
+    const FString& GetStatusText() const { return StatusText; }
 
     /** Prefill the login fields */
     void SetCredentials(const FString& Server, const FString& Username, const FString& Password);

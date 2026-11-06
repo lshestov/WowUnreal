@@ -2,6 +2,7 @@
 #include "WowConnectionManager.h"
 #include "WowLoginWidget.h"
 #include "WowLoginPreferences.h"
+#include "WowFrontendCursor.h"
 #include "WowRealmSelectWidget.h"
 #include "WowCharacterSelectWidget.h"
 #include "WowCharacterCreateWidget.h"
@@ -315,6 +316,7 @@ void AWowLoginController::OnError(const FString& Msg)
         return;
     }
     UE_LOG(LogWowLogin, Error, TEXT("Connection error: %s"), *Msg);
+    LeaveLoadingScreenAfterError();
     SetStatusText(FString::Printf(TEXT("Error: %s"), *Msg));
 }
 
@@ -610,6 +612,7 @@ void AWowLoginController::StopAutoLogin(const FString& Message)
 {
     bAutoLoginActive = false;
     bAutoLoginSubmitted = false;
+    if (!bQuitAfterWorldScreenshot) LeaveLoadingScreenAfterError();
     SetStatusText(FString::Printf(TEXT("Autologin stopped: %s"), *Message));
     UE_LOG(LogWowLogin, Error, TEXT("Autologin stopped: %s"), *Message);
     // Verification runs fail explicitly instead of waiting forever at a login screen.
@@ -620,6 +623,25 @@ void AWowLoginController::StopAutoLogin(const FString& Message)
         if (GLog) GLog->FlushThreadedLogs();
         FPlatformMisc::RequestExitWithStatus(true, 1);
     }
+}
+
+void AWowLoginController::LeaveLoadingScreenAfterError()
+{
+    if (!LoadingScreenWidget && !LoadingWidget) return;
+    // The loading bar has no diagnostic label. Return failed world entry to
+    // the login form so its existing status area can display the error.
+    bAutoLoginActive = bAutoLoginSubmitted = false;
+    bWorldEntryComplete = bHasPendingSpawn = bPendingGroundSnap = false;
+    if (WorldManager) WorldManager->SuspendStreaming();
+    if (auto* Gameplay = Cast<AWowGameplayController>(UGameplayStatics::GetPlayerController(this, 0)))
+    {
+        Gameplay->bDeferSpawnTeleport = Gameplay->bHasDeferredSpawn = false;
+        Gameplay->PrepareCharacterSelect();
+        if (APawn* Pawn = Gameplay->GetPawn()) { Pawn->SetActorHiddenInGame(true); SuspendPawnUntilGroundReady(Pawn); }
+    }
+    if (auto* UI = GetGameInstance()->GetSubsystem<UWowUIManager>()) UI->SetWorldUiVisible(false);
+    if (ConnectionManager && ConnectionManager->GetState() != EWowSessionState::Disconnected) ConnectionManager->Disconnect();
+    ShowLoginScreen();
 }
 
 void AWowLoginController::UpdateWorldCapture()
@@ -804,6 +826,7 @@ void AWowLoginController::UpdateLoadingProgress()
 
 void AWowLoginController::FinalizeWorldEntry()
 {
+    if (FrontendCursor) FrontendCursor->Hide();
     bWaitingForInitialLoad = false;
     bHasPendingSpawn = false;
     bPendingGroundSnap = false;
@@ -812,6 +835,7 @@ void AWowLoginController::FinalizeWorldEntry()
     if (LoadingWidget.IsValid() && GEngine && GEngine->GameViewport)
     {
         GEngine->GameViewport->RemoveViewportWidgetContent(LoadingWidget.ToSharedRef());
+        if (CurrentWidget == LoadingWidget) CurrentWidget.Reset();
         LoadingWidget.Reset();
         LoadingScreenWidget.Reset();
     }
@@ -978,12 +1002,17 @@ void AWowLoginController::HandleExpansionChanged(uint8 ExpansionIndex)
 
 void AWowLoginController::ClearCurrentScreen()
 {
+    if (FrontendCursor) FrontendCursor->Hide();
+    bWaitingForInitialLoad = false;
     if(LoginScene){LoginScene->Destroy();LoginScene=nullptr;}
     if(CharCreateWidget && FSlateApplication::IsInitialized()) FSlateApplication::Get().ReleaseAllPointerCapture();
     if (LoadingScreenWidget.IsValid())
     {
         LoadingScreenWidget->SetBackgroundImage(nullptr);
     }
+    if (LoadingWidget.IsValid() && LoadingWidget != CurrentWidget && GEngine && GEngine->GameViewport)
+        GEngine->GameViewport->RemoveViewportWidgetContent(LoadingWidget.ToSharedRef());
+    LoadingWidget.Reset();
 
     if (CurrentWidget.IsValid())
     {
@@ -1008,9 +1037,17 @@ void AWowLoginController::ClearCurrentScreen()
     }
 }
 
+void AWowLoginController::ShowFrontendCursor()
+{
+    if (!FrontendCursor && WorldManager && WorldManager->GetMpqManager())
+        FrontendCursor = MakeShared<FWowFrontendCursor>(WorldManager->GetMpqManager());
+    if (FrontendCursor && GEngine) FrontendCursor->Show(GEngine->GameViewport);
+}
+
 void AWowLoginController::ShowLoginScreen()
 {
     ClearCurrentScreen();
+    ShowFrontendCursor();
 
     LoginWidget = SNew(SWowLoginWidget);
     LoginWidget->OnLoginSubmit.BindUObject(this, &AWowLoginController::HandleLoginSubmit);
@@ -1067,6 +1104,7 @@ void AWowLoginController::ShowLoginScreen()
 void AWowLoginController::ShowRealmSelectScreen(const TArray<FWowRealmInfo>& Realms)
 {
     ClearCurrentScreen();
+    ShowFrontendCursor();
     EnsureMenuAudio();
 
     RealmSelectWidget = SNew(SWowRealmSelectWidget);
@@ -1083,6 +1121,7 @@ void AWowLoginController::ShowRealmSelectScreen(const TArray<FWowRealmInfo>& Rea
 void AWowLoginController::ShowCharacterSelectScreen(const TArray<FWowCharacterInfo>& Characters)
 {
     ClearCurrentScreen();
+    ShowFrontendCursor();
     EnsureMenuAudio();
 
     CharSelectWidget = SNew(SWowCharacterSelectWidget);
@@ -1127,6 +1166,7 @@ void AWowLoginController::ShowCharacterSelectScreen(const TArray<FWowCharacterIn
 void AWowLoginController::ShowCharacterCreateScreen()
 {
     ClearCurrentScreen();
+    ShowFrontendCursor();
     EnsureMenuAudio();
 
     bCreationPending=false;
@@ -1159,8 +1199,9 @@ void AWowLoginController::SetStatusText(const FString& Text)
 void AWowLoginController::ShowLoadingScreen(uint32 MapId)
 {
     ClearCurrentScreen();
+    ShowFrontendCursor();
 
-    LoadingScreenWidget = SNew(SWowLoadingScreen);
+    LoadingScreenWidget = SNew(SWowLoadingScreen).Mpq(WorldManager ? WorldManager->GetMpqManager() : nullptr);
     CurrentWidget = LoadingScreenWidget;
 
     // Try to load the appropriate loading screen for this map
