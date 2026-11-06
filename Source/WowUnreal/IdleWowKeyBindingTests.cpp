@@ -24,6 +24,9 @@ bool FIdleWowNativeBindingsTest::RunTest(const FString&)
     TStrongObjectPtr<UGameInstance> Instance(NewObject<UGameInstance>());
     TStrongObjectPtr<UWowUIManager> UI(NewObject<UWowUIManager>(Instance.Get()));
     auto* Controller=World->SpawnActor<AWowGameplayController>();
+    // This fixture has no viewport/local player. Engine ActorOnClicked tracing
+    // is separate from the tested native BindKey and FrameXML mouse callbacks.
+    Controller->bEnableClickEvents=false;
     Controller->UIManager=UI.Get();
     Controller->PlayerInput=NewObject<UPlayerInput>(Controller);
     Controller->SetupInputComponent();
