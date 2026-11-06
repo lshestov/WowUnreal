@@ -39,3 +39,12 @@ enabled (the original default is 1); disabling it provides sticky targeting.
 The pressed unit is revalidated on release in case it despawned. The
 MouseClickRetainsTarget and MouseSelectionRespectsOcclusion world tests cover
 these rules and existing world occlusion.
+
+Stationary NPCs follow their authoritative UNIT_FIELD_TARGET visually, including
+when the target moves without a new NPC movement packet. This matches the
+original target-facing path without rewriting the server movement orientation.
+Active splines, players, dead/stunned/turn-locked units and restricted casts retain
+their movement facing. Spline completion and stop packets clear stale horizontal
+movement flags. `WowUnreal.Npc.StationaryTargetFacing` covers target field updates,
+spline stops, target removal and the restrictions; the disconnected rendered
+route `44-keybinds-facing-offline.json` also checks target tracking and removal.

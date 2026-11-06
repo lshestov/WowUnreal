@@ -20,6 +20,7 @@ struct FSpellDbcEntry
     {
         return !(Attributes & 0x80) && !(AttributesEx & 0x10000000); // DO_NOT_DISPLAY / NO_AURA_ICON
     }
+    bool IsNextMeleeSwing() const { return (Attributes & 0x404) != 0; }
     uint64 Stances;
     uint64 StancesNot;
     uint32 Targets;

@@ -74,6 +74,7 @@ public:
 	void SetWorldUiVisible(bool Visible);
 
 private:
+    friend class FIdleWowNativeBindingsTest;
 	void InitializeCore();
     void OnMailLockItems(int32 Index,uint64 Guid);
 	UPROPERTY() TObjectPtr<UCanvasPanel> RootCanvas;

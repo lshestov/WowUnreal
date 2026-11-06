@@ -453,17 +453,33 @@ void AWowViewerGameMode::PopulateUITestScene()
     const uint32 Display=RaceInfo?RaceInfo->MaleModelID:49;
     Entities.LocalPlayerGuid=1;
     auto& Player=Entities.PromoteToTyped(1,WowTypeMask::PLAYER|WowTypeMask::UNIT);
-    Player.SetField(UnitField::BYTES_0,Race|(Class<<8));
+    Player.SetField(UnitField::BYTES_0,Race|(Class<<8)|(DwarfWarrior?1u<<24:0));
     Player.SetField(UnitField::DISPLAYID,Display);
     Player.SetField(UnitField::NATIVEDISPLAYID,Display);
     Player.SetField(UnitField::FACTIONTEMPLATE,1);
     Player.SetField(UnitField::LEVEL,42);
     Player.SetField(UnitField::HEALTH,1372); Player.SetField(UnitField::MAXHEALTH,1580);
-    Player.SetField(UnitField::POWER1,1920); Player.SetField(UnitField::MAXPOWER1,2260);
+    if(DwarfWarrior)
+    {
+        Player.SetField(UnitField::POWER2,250); Player.SetField(UnitField::MAXPOWER2,1000);
+    }
+    else
+    {
+        Player.SetField(UnitField::POWER1,1920); Player.SetField(UnitField::MAXPOWER1,2260);
+    }
     Handler.PlayerNameCache.Add(Player.Guid,TEXT("Aster"));
     Handler.ActionButtons.SetNumZeroed(144);
-    Handler.ActionButtons[0]=133; Handler.ActionButtons[1]=168;
-    Handler.KnownSpells.Add(133); Handler.KnownSpells.Add(168);
+    if(DwarfWarrior)
+    {
+        Handler.ActionButtons[0]=Handler.ActionButtons[72]=6603;
+        Handler.ActionButtons[1]=Handler.ActionButtons[73]=78;
+        Handler.KnownSpells.Add(6603); Handler.KnownSpells.Add(78);
+    }
+    else
+    {
+        Handler.ActionButtons[0]=133; Handler.ActionButtons[1]=168;
+        Handler.KnownSpells.Add(133); Handler.KnownSpells.Add(168);
+    }
     // The explicit offline combat fixture uses original dwarf starter gear and
     // item classes, so the ordinary melee handler selects its weapon sequence.
     FDbcParser ItemDbc; TArray<uint8> ItemBytes;

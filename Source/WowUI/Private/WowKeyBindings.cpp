@@ -99,7 +99,7 @@ void FWowKeyBindings::RegisterApi(lua_State* L)
     });
 }
 #else
-FString FWowKeyBindings::Action(lua_State*,const FString&) { return {}; }
+FString FWowKeyBindings::Action(lua_State*,const FString&,bool) { return {}; }
 void FWowKeyBindings::RegisterApi(lua_State*) {}
 #endif
 FString FWowKeyBindings::KeyName(const FKey& Key)
@@ -109,6 +109,19 @@ FString FWowKeyBindings::KeyName(const FKey& Key)
 #endif
     if(Key==EKeys::BackSpace) return TEXT("BACKSPACE");
     if(Key==EKeys::Delete) return TEXT("DELETE");
+    if(Key==EKeys::LeftMouseButton) return TEXT("BUTTON1"); if(Key==EKeys::RightMouseButton) return TEXT("BUTTON2");
+    if(Key==EKeys::MiddleMouseButton) return TEXT("BUTTON3");
+    if(Key==EKeys::ThumbMouseButton) return TEXT("BUTTON4"); if(Key==EKeys::ThumbMouseButton2) return TEXT("BUTTON5");
+    if(Key==EKeys::MouseScrollUp) return TEXT("MOUSEWHEELUP"); if(Key==EKeys::MouseScrollDown) return TEXT("MOUSEWHEELDOWN");
+    if(Key==EKeys::Comma) return TEXT(","); if(Key==EKeys::Period) return TEXT(".");
+    if(Key==EKeys::Semicolon) return TEXT(";"); if(Key==EKeys::Apostrophe) return TEXT("'");
+    if(Key==EKeys::LeftBracket) return TEXT("["); if(Key==EKeys::RightBracket) return TEXT("]");
+    if(Key==EKeys::Backslash) return TEXT("\\"); if(Key==EKeys::Tilde) return TEXT("`");
+    const FKey Numpad[]={EKeys::NumPadZero,EKeys::NumPadOne,EKeys::NumPadTwo,EKeys::NumPadThree,EKeys::NumPadFour,EKeys::NumPadFive,EKeys::NumPadSix,EKeys::NumPadSeven,EKeys::NumPadEight,EKeys::NumPadNine};
+    for(int32 I=0;I<UE_ARRAY_COUNT(Numpad);++I) if(Key==Numpad[I]) return FString::Printf(TEXT("NUMPAD%d"),I);
+    if(Key==EKeys::Add) return TEXT("NUMPADPLUS"); if(Key==EKeys::Subtract) return TEXT("NUMPADMINUS");
+    if(Key==EKeys::Multiply) return TEXT("NUMPADMULTIPLY"); if(Key==EKeys::Divide) return TEXT("NUMPADDIVIDE");
+    if(Key==EKeys::Decimal) return TEXT("NUMPADDECIMAL");
     if(Key==EKeys::LeftShift) return TEXT("LSHIFT"); if(Key==EKeys::RightShift) return TEXT("RSHIFT");
     if(Key==EKeys::LeftControl) return TEXT("LCTRL"); if(Key==EKeys::RightControl) return TEXT("RCTRL");
     if(Key==EKeys::LeftAlt) return TEXT("LALT"); if(Key==EKeys::RightAlt) return TEXT("RALT");

@@ -2186,6 +2186,64 @@ bool FHudActionButtonHighlight::RunTest(const FString&)
     Check(TEXT("Another actor's cancel does not clear the local spell"),TEXT("assert(IsAutoRepeatAction(3))"));
     Handler.HandlePacket(WowOpcode::SMSG_CANCEL_AUTO_REPEAT,{1,1});
     Check(TEXT("Local server cancellation clears the ranged border"),TEXT("assert(not IsAutoRepeatAction(3) and not IsAutoRepeatSpell(75))"));
+
+    const auto* Heroic=Dbc.Spells().GetById(78);
+    if(!TestTrue(TEXT("Original Heroic Strike is an on-next-swing ability"),Heroic && Heroic->IsNextMeleeSwing())) return false;
+    Handler.ActionButtons.Add(78);Handler.ActionButtons.Add(0x80000000u|78);
+    Handler.KnownSpells.Add(78);
+    int32 ActionEvents=0,Successes=0,CastStarts=0;
+    Handler.OnActionStateChanged.BindLambda([&](){++ActionEvents;F.Events.FireEvent(TEXT("ACTIONBAR_UPDATE_STATE"));});
+    Handler.OnCastResult.BindLambda([&](uint64,uint32,uint8,bool Success,uint8){Successes+=Success;});
+    Handler.OnCastState.BindLambda([&](uint64,uint32,uint8 Kind,uint8){CastStarts+=Kind==0;});
+    Check(TEXT("Queued ability listens to the stock action-state update"),TEXT("ActionProbe.action=5; ActionProbe:SetScript('OnEvent',function(self,event) ActionButton_UpdateState(self) end); ActionProbe:RegisterEvent('ACTIONBAR_UPDATE_STATE'); ActionButton_UpdateState(ActionProbe); assert(not ActionProbe:GetChecked() and not IsCurrentSpell(78))"));
+    const auto SpellPacket=[](bool Go,uint8 Counter,uint8 Caster=1,uint32 Spell=78)
+    {
+        TArray<uint8> P={1,Caster,1,Caster,Counter};
+        const auto Word=[&](uint32 Value){P.Append(reinterpret_cast<const uint8*>(&Value),4);};
+        Word(Spell);Word(0);Word(0);if(Go){P.Add(0);P.Add(0);}Word(0);return P;
+    };
+    const auto Reject=[&](uint8 Counter,uint8 Reason)
+    {
+        TArray<uint8> P={Counter,78,0,0,0,Reason};Handler.HandlePacket(0x130,P); // SMSG_CAST_FAILED
+    };
+    Reject(31,85);
+    Check(TEXT("Insufficient rage rejection never queues or checks the ability"),TEXT("assert(not IsCurrentAction(5) and not ActionProbe:GetChecked())"));
+    TestEqual(TEXT("Rejected requests do not announce a queued action"),ActionEvents,0);
+    auto Start=SpellPacket(false,32);auto Short=Start;Short.Pop();
+    Handler.HandlePacket(WowOpcode::SMSG_SPELL_START,Short);
+    TestEqual(TEXT("Truncated acceptance cannot create a queued action"),Handler.LocalQueuedMeleeSpell,0u);
+    Handler.HandlePacket(WowOpcode::SMSG_SPELL_START,Start);
+    Check(TEXT("Server-accepted zero-time Heroic Strike checks only its spell slot"),TEXT("assert(IsCurrentAction(5) and IsCurrentSpell(78) and IsCurrentSpell(GetSpellInfo(78)) and not IsCurrentAction(6) and not IsAutoRepeatAction(5) and ActionProbe:GetChecked() and UnitCastingInfo('player')==nil)"));
+    TestTrue(TEXT("Acceptance queues the exact cast identity without cast bar or fabricated success"),
+        Handler.LocalQueuedMeleeSpell==78 && Handler.LocalQueuedMeleeCounter==32 && !Handler.Casts.Contains(1) && Successes==0 && CastStarts==0 && ActionEvents==1);
+    Handler.HandlePacket(WowOpcode::SMSG_SPELL_START,Start);
+    TestEqual(TEXT("Duplicate acceptance does not republish unchanged action state"),ActionEvents,1);
+    Handler.HandlePacket(WowOpcode::SMSG_SPELL_START,SpellPacket(false,33));
+    Reject(32,85);
+    Handler.HandlePacket(WowOpcode::SMSG_SPELL_GO,SpellPacket(true,32));
+    Check(TEXT("Late failure and completion of the previous counter preserve the new queue"),TEXT("assert(ActionProbe:GetChecked() and IsCurrentSpell(78))"));
+    TestEqual(TEXT("New queue retains its accepted counter"),Handler.LocalQueuedMeleeCounter,uint8(33));
+    Handler.HandlePacket(WowOpcode::SMSG_SPELL_GO,SpellPacket(true,33,2));
+    TestEqual(TEXT("Another caster cannot release the local queue"),Handler.LocalQueuedMeleeCounter,uint8(33));
+    Handler.HandlePacket(WowOpcode::SMSG_SPELL_GO,SpellPacket(true,33));
+    Check(TEXT("The actual matching swing clears the stock checked texture"),TEXT("assert(not ActionProbe:GetChecked() and not IsCurrentAction(5) and not IsCurrentSpell(78))"));
+    Handler.HandlePacket(WowOpcode::SMSG_SPELL_START,SpellPacket(false,34));Reject(34,27);
+    Check(TEXT("Matching cancellation clears the queue"),TEXT("assert(not ActionProbe:GetChecked() and not IsCurrentSpell(78))"));
+    Handler.HandlePacket(WowOpcode::SMSG_SPELL_START,SpellPacket(false,35));
+    Handler.HandlePacket(WowOpcode::SMSG_ATTACKSTOP,{1,2,1,1,0,0,0,0});
+    TestEqual(TEXT("Another attacker's stop leaves the queue intact"),Handler.LocalQueuedMeleeSpell,78u);
+    Handler.HandlePacket(WowOpcode::SMSG_ATTACKSTOP,{1,1,1,2,0,0,0,0});
+    Check(TEXT("Stopping local melee cancels its queued strike"),TEXT("assert(not ActionProbe:GetChecked())"));
+    Handler.HandlePacket(WowOpcode::SMSG_SPELL_START,SpellPacket(false,36));
+    auto& Local=Handler.EntityManager.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER);
+    Local.SetField(UnitField::HEALTH,50);Local.SetField(UnitField::MAXHEALTH,50);
+    TArray<uint8> Death={1,0,0,0,0,1,1,1};const uint32 HealthMask=1u<<UnitField::HEALTH;
+    Death.Append(reinterpret_cast<const uint8*>(&HealthMask),4);Death.AddZeroed(4);
+    Handler.HandlePacket(WowOpcode::SMSG_UPDATE_OBJECT,Death);
+    TestEqual(TEXT("Death clears the local next-swing ability"),Handler.LocalQueuedMeleeSpell,0u);
+    Handler.HandlePacket(WowOpcode::SMSG_SPELL_START,SpellPacket(false,37));
+    Connection->Disconnect();
+    TestTrue(TEXT("A new session cannot inherit the old queued identity"),Handler.LocalQueuedMeleeSpell==0 && Handler.LocalQueuedMeleeCounter==0);
     return true;
 }
 

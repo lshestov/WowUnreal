@@ -50,7 +50,10 @@ public:
 
     /** Override to catch all input regardless of input mode */
     virtual bool InputKey(const FInputKeyEventArgs& Params) override;
+    virtual void FlushPressedKeys() override;
+    virtual void ProcessPlayerInput(float DeltaTime,bool bGamePaused) override;
     TMap<FKey,FKey> HeldBindingKeys;
+    TSet<FKey> PressedBindingKeys, HeldBindingCommands, PulsedBindingKeys;
     bool bProbeSyntheticKeyboard=false;
     bool CanAcceptNativeCharacter() const { return !GameplayProbe || bProbeSyntheticKeyboard; }
 
@@ -92,6 +95,9 @@ private:
     friend class FIdleWowWorldPickTest;
     friend class FIdleWowMouseTargetPolicyTest;
     friend class FIdleWowCorpseLootInteractionTest;
+    friend class FIdleWowNativeBindingsTest;
+    friend class FIdleWowNpcFacingTest;
+    friend class FQueuedMeleeFeedbackTest;
     TSharedPtr<struct FWowGameplayProbe> GameplayProbe;
     bool bGameplayProbeChecked=false;
     TOptional<FVector2D> GameplayProbePointer;
@@ -310,6 +316,7 @@ private:
 
     // Entity movement interpolation
     void UpdateEntitySplineMovement(float DeltaTime);
+    void UpdateEntityFacing(const FWowEntity& Entity, AActor* Actor) const;
 
     // Animation state management
     void UpdateEntityAnimations();

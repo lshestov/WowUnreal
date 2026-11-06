@@ -77,6 +77,28 @@ void PushName(lua_State* L,uint64 Guid)
     }
     if(Name && !Name->IsEmpty()) lua_pushstring(L,TCHAR_TO_UTF8(**Name)); else lua_pushnil(L);
 }
+FString LocalizedCombatText(lua_State* L,const FString& Key,uint32 SpellId)
+{
+    const auto Read=[&](const TCHAR* Name)
+    {
+        lua_getglobal(L,TCHAR_TO_UTF8(Name));
+        FString Text=lua_isstring(L,-1)?UTF8_TO_TCHAR(lua_tostring(L,-1)):TEXT("");
+        lua_pop(L,1); return Text;
+    };
+    // Build 12340 uses the spell's resource-specific UI error for NO_POWER;
+    // there is no usable generic SPELL_FAILED_NO_POWER in GlobalStrings.lua.
+    if(Key==TEXT("SPELL_FAILED_NO_POWER")) if(const auto* Spell=FDbcStore::Get().Spells().GetById(SpellId))
+    {
+        static const TCHAR* Errors[]={TEXT("ERR_OUT_OF_MANA"),TEXT("ERR_OUT_OF_RAGE"),TEXT("ERR_OUT_OF_FOCUS"),
+            TEXT("ERR_OUT_OF_ENERGY"),TEXT("ERR_NOT_HAPPY_ENOUGH"),TEXT("ERR_OUT_OF_RUNES"),TEXT("ERR_OUT_OF_RUNIC_POWER")};
+        const TCHAR* Error=Spell->PowerType<UE_ARRAY_COUNT(Errors)?Errors[Spell->PowerType]:
+            int32(Spell->PowerType)==-2?TEXT("ERR_OUT_OF_HEALTH"):nullptr;
+        if(Error) {FString Text=Read(Error); if(!Text.IsEmpty()) return Text;}
+    }
+    FString Text=Read(*Key);
+    if(Text.IsEmpty()) Text=Read(TEXT("SPELL_FAILED_CANT_DO_THAT_RIGHT_NOW"));
+    return Text.IsEmpty()?TEXT("Cannot cast that spell right now."):Text;
+}
 int Push(lua_State* L,const FWowCombatEntry* E)
 {
     if(!E) { lua_pushnil(L); return 1; }
@@ -93,7 +115,7 @@ int Push(lua_State* L,const FWowCombatEntry* E)
     for(const auto& V:E->Values)
     {
         if(V.Kind==FWowCombatValue::EKind::Nil) lua_pushnil(L);
-        else if(V.Kind==FWowCombatValue::EKind::Localized) {lua_getglobal(L,TCHAR_TO_UTF8(*V.String)); if(!lua_isstring(L,-1)) {lua_pop(L,1); lua_getglobal(L,"SPELL_FAILED_CANT_DO_THAT_RIGHT_NOW"); if(!lua_isstring(L,-1)) {lua_pop(L,1); lua_pushstring(L,"Cannot cast that spell right now.");}}}
+        else if(V.Kind==FWowCombatValue::EKind::Localized) lua_pushstring(L,TCHAR_TO_UTF8(*LocalizedCombatText(L,V.String,E->Spell)));
         else if(V.Kind==FWowCombatValue::EKind::String) lua_pushstring(L,TCHAR_TO_UTF8(*V.String)); else lua_pushnumber(L,V.Number);
         ++Count;
     }
@@ -143,7 +165,7 @@ void FWowCombatLogUi::Dispatch(lua_State* L,const FWowCombatEntry& Entry)
     if(Matches(L,Entry)) C->EventSystem->FireEventTyped(TEXT("COMBAT_LOG_EVENT"),[&](lua_State* S) { return Push(S,&Entry); });
     if(Entry.Event==TEXT("SPELL_CAST_FAILED") && C->EntityManager && Entry.Source==C->EntityManager->LocalPlayerGuid && !Entry.Values.IsEmpty())
     {
-        lua_getglobal(L,TCHAR_TO_UTF8(*Entry.Values[0].String)); FString Message=lua_isstring(L,-1)?UTF8_TO_TCHAR(lua_tostring(L,-1)):TEXT(""); lua_pop(L,1);
+        FString Message=LocalizedCombatText(L,Entry.Values[0].String,Entry.Spell);
         if(Message.IsEmpty() || Message.Contains(TEXT("%"))) {lua_getglobal(L,"SPELL_FAILED_CANT_DO_THAT_RIGHT_NOW"); Message=lua_isstring(L,-1)?UTF8_TO_TCHAR(lua_tostring(L,-1)):TEXT("Cannot cast that spell right now."); lua_pop(L,1);}
         C->EventSystem->FireEvent(TEXT("UI_ERROR_MESSAGE"),{Message});
     }

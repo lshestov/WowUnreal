@@ -13,6 +13,7 @@ DECLARE_DELEGATE_OneParam(FOnWowCombatLog,const FWowCombatEntry&);
 DECLARE_DELEGATE_RetVal_OneParam(uint32,FOnWowCombatFlags,uint64);
 DECLARE_DELEGATE_FiveParams(FOnWowCastResult,uint64,uint32,uint8,bool,uint8);
 DECLARE_DELEGATE_FourParams(FOnWowCastState,uint64,uint32,uint8,uint8);
+DECLARE_DELEGATE(FOnWowActionStateChanged);
 
 DECLARE_MULTICAST_DELEGATE_FiveParams(FOnLoginVerifyWorld, uint32 /*MapId*/, float /*X*/, float /*Y*/, float /*Z*/, float /*Orientation*/);
 DECLARE_MULTICAST_DELEGATE_SevenParams(FOnChatMessage, uint8 /*Type*/, uint32 /*Language*/, uint64 /*SenderGuid*/, const FString& /*SenderName*/, const FString& /*Message*/, const FString& /*Channel*/, uint32 /*Achievement*/);
@@ -181,6 +182,11 @@ public:
     bool HasPendingAttackCast=false;
     bool LocalMeleeAttacking=false;
     uint32 LocalAutoRepeatSpell=0;
+    uint32 LocalQueuedMeleeSpell=0;
+    uint8 LocalQueuedMeleeCounter=0;
+    FOnWowActionStateChanged OnActionStateChanged;
+    void SetLocalQueuedMeleeSpell(uint32 Spell,uint8 Counter=0);
+    bool IsLocalCurrentSpell(uint32 Spell) const;
     FOnWowAttackModeChanged OnAttackModeChanged;
     void RecordCombat(FWowCombatEntry Entry);
 

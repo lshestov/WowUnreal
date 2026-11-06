@@ -15,6 +15,10 @@
 #include "WowAnimationController.h"
 #include "WowM2AnimInstance.h"
 #include "WowPacketHandler.h"
+#include "WowGameplayController.h"
+#include "WowConnectionManager.h"
+#include "Components/SceneComponent.h"
+#include "GameFramework/Pawn.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 namespace
@@ -102,6 +106,125 @@ bool FIdleWowNpcRoutes::RunTest(const FString& Parameters)
     Cycle.SplineWaypoints = {FWowSplineWaypoint(FVector(10, 0, 0)), FWowSplineWaypoint(FVector::ZeroVector)};
     Cycle.AdvanceSpline(1.25f);
     TestTrue(TEXT("Cyclic route remains active and wraps by elapsed duration"), Cycle.bHasActiveSpline && Cycle.Position.Equals(FVector(5, 0, 0), 0.001));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIdleWowNpcFacingTest, "WowUnreal.Npc.StationaryTargetFacing",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FIdleWowNpcFacingTest::RunTest(const FString&)
+{
+    UWorld* World=UWorld::CreateWorld(EWorldType::Game,false);
+    if(!TestNotNull(TEXT("Facing test world"),World)) return false;
+    GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+    auto* Controller=World->SpawnActor<AWowGameplayController>();
+    Controller->ConnectionManager=NewObject<UWowConnectionManager>(Controller);
+    auto& Handler=Controller->ConnectionManager->PacketHandler;
+    auto& Entities=Handler.EntityManager;
+    constexpr uint64 NpcGuid=1,PlayerGuid=0x100000099ULL;
+    auto& Npc=Entities.PromoteToTyped(NpcGuid,WowTypeMask::OBJECT|WowTypeMask::UNIT);
+    auto& Player=Entities.PromoteToTyped(PlayerGuid,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER);
+    Entities.LocalPlayerGuid=PlayerGuid;
+    Npc.SetField(UnitField::HEALTH,50);Npc.SetField(UnitField::MAXHEALTH,50);
+    Npc.Movement.Position=FVector(100,200,10);Npc.Movement.Orientation=PI;
+    auto* Model=World->SpawnActor<AActor>();
+    auto* ModelRoot=NewObject<USceneComponent>(Model);Model->SetRootComponent(ModelRoot);ModelRoot->RegisterComponent();
+    Model->SetActorLocation(FWowCoordinate::WowToUE(Npc.Movement.Position));
+    Controller->SpawnedEntityActors.Add(NpcGuid,Model);
+    auto* Pawn=World->SpawnActor<APawn>();
+    auto* PawnRoot=NewObject<USceneComponent>(Pawn);Pawn->SetRootComponent(PawnRoot);PawnRoot->RegisterComponent();
+    Controller->Possess(Pawn);
+    Pawn->SetActorLocation(FWowCoordinate::WowToUE(FVector(100,210,10)));
+    // Intentionally stale network position: local visual movement has not sent a heartbeat yet.
+    Player.Movement.Position=FVector(90,200,10);
+    Entities.OnEntityUpdated.AddUObject(Controller,&AWowGameplayController::OnEntityUpdated);
+    const auto SetTargetPacket=[&](uint64 Target)
+    {
+        TArray<uint8> Packet;Append(Packet,uint32(1));Append(Packet,uint8(UpdateType::VALUES));
+        Packet.Add(1);Packet.Add(1); // packed NPC GUID 1
+        Append(Packet,uint8(1));Append(Packet,(1u<<UnitField::TARGET)|(1u<<(UnitField::TARGET+1)));
+        Append(Packet,uint32(Target));Append(Packet,uint32(Target>>32));
+        Handler.HandlePacket(WowOpcode::SMSG_UPDATE_OBJECT,Packet);
+    };
+    const auto FacesPawn=[&]()
+    {
+        const FVector Toward=(Pawn->GetActorLocation()-Model->GetActorLocation()).GetSafeNormal2D();
+        return FVector::DotProduct(Model->GetActorForwardVector(),Toward)>.9999;
+    };
+    const auto HasRawFacing=[&]()
+    {return FMath::Abs(FMath::FindDeltaAngleDegrees(Model->GetActorRotation().Yaw,-FMath::RadiansToDegrees(Npc.Movement.Orientation)))<.001f;};
+
+    SetTargetPacket(PlayerGuid);
+    TestEqual(TEXT("Facing uses all 64 bits of the server target field"),Npc.GetField64(UnitField::TARGET),PlayerGuid);
+    TestTrue(TEXT("A stationary target update faces the actual local pawn"),FacesPawn());
+    TestEqual(TEXT("Render facing does not overwrite the authoritative movement angle"),Npc.Movement.Orientation,float(PI));
+    for(const FVector Offset:{FVector(10,0,0),FVector(0,10,0),FVector(-10,0,0),FVector(0,-10,0)})
+    {
+        Pawn->SetActorLocation(FWowCoordinate::WowToUE(Npc.Movement.Position+Offset));
+        Controller->UpdateEntitySplineMovement(.016f);
+        TestTrue(TEXT("Stationary NPC tracks the target across all WoW/UE quadrants without a movement packet"),FacesPawn());
+        TestEqual(TEXT("Tracking leaves raw server facing intact"),Npc.Movement.Orientation,float(PI));
+    }
+    Model->SetActorRotation(FRotator(0,45,0));
+    Controller->OnAttackerStateUpdate(NpcGuid,PlayerGuid,0,0);
+    TestTrue(TEXT("The server hit callback corrects render facing before an attack can play"),FacesPawn());
+    SetTargetPacket(0);
+    TestTrue(TEXT("Clearing the authoritative target restores server facing"),HasRawFacing());
+    SetTargetPacket(0x200000099ULL);
+    TestTrue(TEXT("A missing target does not invent a facing direction"),HasRawFacing());
+    SetTargetPacket(0);
+
+    auto Packet=MonsterHeader(4);Append(Packet,1.25f);Append(Packet,uint32(0));
+    Append(Packet,uint32(1));Append(Packet,uint32(1));Point(Packet,100,200,10);
+    Npc.Movement.MoveFlags=0x08000001;
+    Handler.HandlePacket(WowOpcode::SMSG_MONSTER_MOVE,Packet);
+    Controller->UpdateEntitySplineMovement(.01f);
+    TestEqual(TEXT("A stationary one-millisecond facing spline applies the server angle"),Npc.Movement.Orientation,1.25f);
+    TestTrue(TEXT("Server angle uses the inverse WoW-to-UE yaw"),HasRawFacing());
+    TestTrue(TEXT("Turning in place preserves position and clears completed movement flags"),
+        Npc.Movement.Position.Equals(FVector(100,200,10)) && !(Npc.Movement.MoveFlags&0x0800000F));
+
+    // Final target facing uses server positions and survives the same zero-distance route.
+    Player.Movement.Position=FVector(100,210,10);
+    Packet=MonsterHeader(3);Append(Packet,PlayerGuid);Append(Packet,uint32(0));
+    Append(Packet,uint32(1));Append(Packet,uint32(1));Point(Packet,100,200,10);
+    Handler.HandlePacket(WowOpcode::SMSG_MONSTER_MOVE,Packet);
+    Controller->UpdateEntitySplineMovement(.01f);
+    TestEqual(TEXT("A stationary target-facing packet resolves its 64-bit target"),Npc.Movement.Orientation,float(PI/2),1.e-6f);
+    TestTrue(TEXT("Final target packet updates the actual actor"),HasRawFacing());
+
+    Pawn->SetActorLocation(FWowCoordinate::WowToUE(FVector(110,210,10)));
+    SetTargetPacket(PlayerGuid);
+    Packet=MonsterHeader(0);Append(Packet,uint32(0));Append(Packet,uint32(1000));Append(Packet,uint32(1));Point(Packet,110,200,10);
+    Npc.Movement.MoveFlags=0x08000001;
+    Handler.HandlePacket(WowOpcode::SMSG_MONSTER_MOVE,Packet);
+    Controller->UpdateEntitySplineMovement(.5f);
+    TestTrue(TEXT("Active path direction takes priority over stationary target facing"),HasRawFacing() && !FacesPawn());
+    Controller->UpdateEntitySplineMovement(.6f);
+    TestTrue(TEXT("Finishing a chase follows the target without retaining stale forward flags"),FacesPawn() && !Npc.Movement.bHasActiveSpline && !(Npc.Movement.MoveFlags&0xF));
+
+    struct FGuard {uint16 Field;uint32 Value;};
+    for(const FGuard Guard: {FGuard{UnitField::FLAGS,0x00040000},FGuard{UnitField::FLAGS,0x01000000},
+        FGuard{UnitField::FLAGS_2,0x8000},FGuard{UnitField::BYTES_1,1},FGuard{UnitField::NPC_EMOTESTATE,1},FGuard{UnitField::CHANNEL_SPELL,1}})
+    {
+        Npc.SetField(Guard.Field,Guard.Value);Controller->UpdateEntitySplineMovement(.016f);
+        TestTrue(TEXT("Server turn restrictions and authored poses retain raw facing"),HasRawFacing());
+        Npc.SetField(Guard.Field,0);
+    }
+    Npc.Movement.TransportGuid=88;Controller->UpdateEntitySplineMovement(.016f);
+    TestTrue(TEXT("Unsupported transport-relative facing retains its authoritative angle"),HasRawFacing());
+    Npc.Movement.TransportGuid=0;
+    Npc.SetField(UnitField::HEALTH,0);Controller->UpdateEntitySplineMovement(.016f);
+    TestTrue(TEXT("A dead NPC does not track a target"),HasRawFacing());
+    Npc.SetField(UnitField::HEALTH,50);
+    Npc.Movement.MoveFlags=0x08000001;Controller->UpdateEntitySplineMovement(.016f);
+    TestTrue(TEXT("Non-spline movement flags also prevent stationary tracking"),HasRawFacing());
+    Handler.HandlePacket(WowOpcode::SMSG_MONSTER_MOVE,MonsterHeader(1));
+    TestTrue(TEXT("A server stop clears stale moving flags and restores stationary target facing"),FacesPawn() && !(Npc.Movement.MoveFlags&0x0800000F));
+
+    Player.SetField(UnitField::TARGET,uint32(NpcGuid));Player.Movement.Orientation=.4f;
+    Controller->UpdateEntityFacing(Player,Pawn);
+    TestEqual(TEXT("Other players retain their authoritative facing even with a target"),Pawn->GetActorRotation().Yaw,double(-FMath::RadiansToDegrees(.4f)),.001);
+    Controller->Destroy();World->DestroyWorld(false);GEngine->DestroyWorldContext(World);
     return true;
 }
 

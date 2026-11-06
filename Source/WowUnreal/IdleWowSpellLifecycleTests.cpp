@@ -1,5 +1,7 @@
 ﻿#include "Misc/AutomationTest.h"
 #include "WowPacketHandler.h"
+#include "WowGameplayController.h"
+#include "WowConnectionManager.h"
 #include "Formats/Dbc/DbcStore.h"
 #include "Formats/M2Types.h"
 #include "WowDoodadManager.h"
@@ -24,6 +26,34 @@ TArray<uint8> GroundGo()
     Word(P,0x60); P.Add(0); Float(P,1); Float(P,2); Float(P,3); P.Add(0); Float(P,4); Float(P,5); Float(P,6); P.Add(0); return P;
 }
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQueuedMeleeFeedbackTest,"WowUnreal.Gameplay.QueuedMeleeFeedback",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FQueuedMeleeFeedbackTest::RunTest(const FString&)
+{
+    FString Path;if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false;
+    FMpqManager Mpq;if(!Mpq.Initialize(Path)) return false;
+    auto& Dbc=FDbcStore::Get();if(!Dbc.IsLoaded()) Dbc.LoadAll(Mpq);if(!Dbc.IsDeferredLoaded()) Dbc.LoadDeferred(Mpq);
+    UWorld* World=UWorld::CreateWorld(EWorldType::Game,false);if(!World) return false;
+    GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+    auto* Controller=World->SpawnActor<AWowGameplayController>();
+    Controller->ConnectionManager=NewObject<UWowConnectionManager>(Controller);
+    auto& Handler=Controller->ConnectionManager->PacketHandler;Handler.EntityManager.LocalPlayerGuid=1;
+    Handler.OnSpellStart.AddUObject(Controller,&AWowGameplayController::OnSpellStart);
+    TArray<uint8> Start={1,1,1,1,40};Word(Start,78);Word(Start,0);Word(Start,0);Word(Start,0);
+    Handler.HandlePacket(WowOpcode::SMSG_SPELL_START,Start);
+    TestTrue(TEXT("Accepted next-swing packet queues the ability without a generic cast or hand effects"),
+        Handler.LocalQueuedMeleeSpell==78 && Handler.LocalQueuedMeleeCounter==40 && !Controller->bIsCasting
+        && Controller->CurrentSpellId==0 && Controller->ActiveCastEffects.IsEmpty() && !Handler.Casts.Contains(1));
+    // A queued melee acceptance must not replace a separately tracked timed cast.
+    Controller->bIsCasting=true;Controller->CurrentSpellId=133;Controller->CastDuration=3;
+    const double Now=FPlatformTime::Seconds();Handler.Casts.Add(1,{133,39,Now,Now+3,false});
+    Start[4]=41;Handler.HandlePacket(WowOpcode::SMSG_SPELL_START,Start);
+    TestTrue(TEXT("Next-swing feedback leaves an unrelated ordinary cast intact"),
+        Controller->bIsCasting && Controller->CurrentSpellId==133 && Controller->CastDuration==3
+        && Handler.Casts[1].Spell==133 && Handler.Casts[1].Counter==39 && Handler.LocalQueuedMeleeCounter==41
+        && Controller->ActiveCastEffects.IsEmpty());
+    Controller->Destroy();World->DestroyWorld(false);GEngine->DestroyWorldContext(World);return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSpellGroundTargetPacket,"WowUnreal.Gameplay.SpellGroundTargets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FSpellGroundTargetPacket::RunTest(const FString&)
 {

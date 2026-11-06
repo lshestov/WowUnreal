@@ -114,6 +114,10 @@ struct FWowGameplayProbe
     TOptional<FVector2D> SavedSlateCursor;
     FRotator BeforeMouseAxis=FRotator::ZeroRotator;
     TMap<uint64,TPair<uint32,uint32>> OfflineCorpseFields;
+    uint64 OfflineFacingGuid=0, SavedOfflineNpcTarget=0;
+    float SavedOfflineNpcOrientation=0, OfflineNpcRawOrientation=0;
+    FVector SavedOfflinePlayerPosition=FVector::ZeroVector;
+    FRotator SavedOfflinePlayerRotation=FRotator::ZeroRotator;
     TSet<int32> SwingVariations;
     TArray<TSharedPtr<FJsonValue>> SwingSamples;
     int32 SwingCount=0;
@@ -585,6 +589,129 @@ struct FWowGameplayProbe
                 Row->SetNumberField(TEXT("yawBefore"),BeforeMouseAxis.Yaw); Row->SetNumberField(TEXT("yawAfter"),C.GetControlRotation().Yaw);
                 Row->SetNumberField(TEXT("pitchBefore"),BeforeMouseAxis.Pitch); Row->SetNumberField(TEXT("pitchAfter"),C.GetControlRotation().Pitch);
                 Inspections->SetObjectField(TEXT("mouseAxis"),Row); Done=true;
+            }
+        }
+        else if(Op==TEXT("offline_heroic_packet"))
+        {
+            // Visual acknowledgement/error replay only. This never fabricates
+            // successful client dispatch; native cast packets have separate tests.
+            const FString Phase=Step->GetStringField(TEXT("phase"));
+            int32 Counter=0; Step->TryGetNumberField(TEXT("counter"),Counter);
+            if(Counter<0 || Counter>255 || !Handler.EntityManager.GetLocalPlayer())
+            {Failure=TEXT("Invalid offline Heroic Strike replay identity"); Finish(C,false); return;}
+            TArray<uint8> Bytes;
+            const auto U32=[&](uint32 Value){Bytes.Append(reinterpret_cast<const uint8*>(&Value),4);};
+            const auto Packed=[&](uint64 Guid)
+            {
+                uint8 Mask=0;
+                for(int32 Byte=0;Byte<8;++Byte) if(uint8(Guid>>(Byte*8))) Mask|=1u<<Byte;
+                Bytes.Add(Mask);
+                for(int32 Byte=0;Byte<8;++Byte) if(Mask&(1u<<Byte)) Bytes.Add(uint8(Guid>>(Byte*8)));
+            };
+            if(Phase==TEXT("rage"))
+            {
+                const int32 Rage=Step->GetIntegerField(TEXT("rawRage"));
+                if(Rage<0 || Rage>1000) {Failure=TEXT("Invalid offline rage value"); Finish(C,false); return;}
+                U32(1); Bytes.Add(0); Packed(Handler.EntityManager.LocalPlayerGuid);
+                Bytes.Add(1); U32(1u<<UnitField::POWER2); U32(uint32(Rage));
+                Handler.HandlePacket(WowOpcode::SMSG_UPDATE_OBJECT,Bytes);
+            }
+            else if(Phase==TEXT("start") || Phase==TEXT("go"))
+            {
+                Packed(Handler.EntityManager.LocalPlayerGuid); Packed(Handler.EntityManager.LocalPlayerGuid);
+                Bytes.Add(uint8(Counter)); U32(78); U32(0); U32(0);
+                if(Phase==TEXT("go")) {Bytes.Add(0); Bytes.Add(0);}
+                U32(0);
+                Handler.HandlePacket(Phase==TEXT("start")?WowOpcode::SMSG_SPELL_START:WowOpcode::SMSG_SPELL_GO,Bytes);
+            }
+            else if(Phase==TEXT("no_power"))
+            {
+                Bytes.Add(uint8(Counter)); U32(78); Bytes.Add(85);
+                Handler.HandlePacket(0x0130,Bytes); // SMSG_CAST_FAILED in build 12340.
+            }
+            else {Failure=TEXT("Unknown offline Heroic Strike packet phase"); Finish(C,false); return;}
+            const auto Row=MakeShared<FJsonObject>();
+            Row->SetStringField(TEXT("source"),TEXT("server-packet-replay"));
+            Row->SetNumberField(TEXT("queuedSpell"),Handler.LocalQueuedMeleeSpell);
+            Row->SetNumberField(TEXT("queuedCounter"),Handler.LocalQueuedMeleeCounter);
+            Inspections->SetObjectField(FString::Printf(TEXT("heroicPacket:%s:%d"),*Phase,Counter),Row);
+            Done=true;
+        }
+        else if(Op==TEXT("offline_npc_facing"))
+        {
+            const FString Phase=Step->GetStringField(TEXT("phase"));
+            const uint64 Guid=FindEntry(C,Step->GetIntegerField(TEXT("entry")));
+            auto* Entity=Handler.EntityManager.Find(Guid);
+            auto* Actor=C.SpawnedEntityActors.FindRef(Guid).Get();
+            auto* Pawn=C.GetPawn();
+            if(!Entity || !IsValid(Actor) || !Pawn || Entity->IsPlayer())
+            {Failure=TEXT("NPC facing replay requires the disconnected living creature fixture"); Finish(C,false); return;}
+            const auto SendTarget=[&](uint64 Target)
+            {
+                // Original VALUES update: packed object GUID and target low/high.
+                TArray<uint8> Bytes;
+                const auto U32=[&](uint32 Value){Bytes.Append(reinterpret_cast<const uint8*>(&Value),4);};
+                U32(1); Bytes.Add(0);
+                uint8 Mask=0;
+                for(int32 Byte=0;Byte<8;++Byte) if(uint8(Guid>>(Byte*8))) Mask|=1u<<Byte;
+                Bytes.Add(Mask);
+                for(int32 Byte=0;Byte<8;++Byte) if(Mask&(1u<<Byte)) Bytes.Add(uint8(Guid>>(Byte*8)));
+                Bytes.Add(1); U32((1u<<UnitField::TARGET)|(1u<<(UnitField::TARGET+1)));
+                U32(uint32(Target)); U32(uint32(Target>>32));
+                Handler.HandlePacket(WowOpcode::SMSG_UPDATE_OBJECT,Bytes);
+            };
+            if(Phase==TEXT("target"))
+            {
+                if(auto* Character=Cast<ACharacter>(Pawn)) Character->GetCharacterMovement()->StopMovementImmediately();
+                OfflineFacingGuid=Guid; SavedOfflineNpcTarget=Entity->GetField64(UnitField::TARGET);
+                SavedOfflineNpcOrientation=Entity->Movement.Orientation;
+                SavedOfflinePlayerPosition=Pawn->GetActorLocation(); SavedOfflinePlayerRotation=Pawn->GetActorRotation();
+                const FVector TowardPlayer=(Pawn->GetActorLocation()-Actor->GetActorLocation()).GetSafeNormal2D();
+                if(TowardPlayer.IsNearlyZero()) {Failure=TEXT("NPC facing fixture overlaps the player"); Finish(C,false); return;}
+                OfflineNpcRawOrientation=-FMath::DegreesToRadians(TowardPlayer.Rotation().Yaw+180.f);
+                Entity->Movement.Orientation=OfflineNpcRawOrientation;
+                SendTarget(Handler.EntityManager.LocalPlayerGuid);
+            }
+            else
+            {
+                if(OfflineFacingGuid!=Guid) {Failure=TEXT("NPC facing replay has no saved fixture"); Finish(C,false); return;}
+                if(Phase==TEXT("track"))
+                {
+                    // Move around the creature without another movement
+                    // or target packet; the ordinary render tick must follow us.
+                    const FVector Offset=SavedOfflinePlayerPosition-Actor->GetActorLocation();
+                    FVector Position=Actor->GetActorLocation()+FVector(-Offset.Y,Offset.X,Offset.Z);
+                    Position.Z=SavedOfflinePlayerPosition.Z;
+                    Pawn->SetActorLocation(Position,false,nullptr,ETeleportType::TeleportPhysics);
+                    Pawn->SetActorRotation(FRotator(0,(Actor->GetActorLocation()-Position).Rotation().Yaw,0));
+                }
+                else if(Phase==TEXT("clear")) SendTarget(0);
+                else if(Phase==TEXT("restore"))
+                {
+                    Entity->Movement.Orientation=SavedOfflineNpcOrientation;
+                    Pawn->SetActorLocation(SavedOfflinePlayerPosition,false,nullptr,ETeleportType::TeleportPhysics);
+                    Pawn->SetActorRotation(SavedOfflinePlayerRotation);
+                    SendTarget(SavedOfflineNpcTarget); OfflineFacingGuid=0;
+                }
+                else {Failure=TEXT("Unknown NPC facing replay phase"); Finish(C,false); return;}
+            }
+            C.UpdateEntitySplineMovement(.016f);
+            if(Phase==TEXT("restore")) Done=true;
+            else
+            {
+                const FVector Expected=Phase==TEXT("clear")
+                    ? FRotator(0,-FMath::RadiansToDegrees(OfflineNpcRawOrientation),0).Vector()
+                    : (Pawn->GetActorLocation()-Actor->GetActorLocation()).GetSafeNormal2D();
+                const double Dot=FVector::DotProduct(Actor->GetActorForwardVector().GetSafeNormal2D(),Expected);
+                const bool TargetValid=Entity->GetField64(UnitField::TARGET)==(Phase==TEXT("clear")?0:Handler.EntityManager.LocalPlayerGuid);
+                const bool RawUnchanged=FMath::IsNearlyEqual(Entity->Movement.Orientation,OfflineNpcRawOrientation,.0001f);
+                const auto Row=MakeShared<FJsonObject>();
+                Row->SetNumberField(TEXT("forwardDot"),Dot); Row->SetNumberField(TEXT("rawOrientation"),Entity->Movement.Orientation);
+                Row->SetBoolField(TEXT("rawUnchanged"),RawUnchanged); Row->SetBoolField(TEXT("targetValid"),TargetValid);
+                Inspections->SetObjectField(TEXT("npcFacing:")+Phase,Row);
+                if(Dot<.999 || !TargetValid || !RawUnchanged)
+                {Failure=FString::Printf(TEXT("NPC facing %s failed: dot=%.5f target=%d rawUnchanged=%d"),*Phase,Dot,TargetValid,RawUnchanged); Finish(C,false); return;}
+                Done=true;
             }
         }
         else if(Op==TEXT("offline_corpse"))

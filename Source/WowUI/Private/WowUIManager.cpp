@@ -237,6 +237,8 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
         if(Ranged) EventSystem->FireEvent(Active?TEXT("START_AUTOREPEAT_SPELL"):TEXT("STOP_AUTOREPEAT_SPELL"));
         else EventSystem->FireEvent(Active?TEXT("PLAYER_ENTER_COMBAT"):TEXT("PLAYER_LEAVE_COMBAT"));
     });
+    if(ConnectionManager) ConnectionManager->PacketHandler.OnActionStateChanged.BindWeakLambda(this,[this]()
+    {if(bUILoaded && EventSystem) EventSystem->FireEvent(TEXT("ACTIONBAR_UPDATE_STATE"));});
 	if(ConnectionManager) ConnectionManager->OnMacroUse.BindWeakLambda(this,[this](uint32 Id)
 	{
 		if(!LuaVM) return false;

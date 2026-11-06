@@ -127,6 +127,7 @@ void UWowConnectionManager::SelectRealm(int32 I)
             for(uint64 Guid:Guids) PacketHandler.EntityManager.Remove(Guid);
             PacketHandler.EntityManager.LocalPlayerGuid=0; TargetGuid=0; CursorPayload=FCursorPayloadState();
             PacketHandler.LocalAutoRepeatSpell=0; PacketHandler.LocalMeleeAttacking=false;
+            PacketHandler.SetLocalQueuedMeleeSpell(0);
             PacketHandler.KnownSpells.Reset(); PacketHandler.ActionButtons.Reset(); PacketHandler.QuestLog.Reset(); PacketHandler.ResetTalentState(); PacketHandler.Reputations.Reset(); PacketHandler.ForcedReactions.Reset();
             PacketHandler.SpellCooldowns.Reset(); PacketHandler.SpellCooldownInfo.Reset(); PacketHandler.CombatHistory.Reset(); PacketHandler.Casts.Reset(); PacketHandler.RecentSpellLaunches.Reset(); PendingGroundSpell=0; PacketHandler.CastFailures.Reset(); PacketHandler.LocalCastRequests.Reset(); PacketHandler.HasPendingAttackCast=false;
             PacketHandler.ResetGroupState(); PacketHandler.PetActionBar=FWowPetActionBarState(); PacketHandler.ResetChannels();
@@ -1590,6 +1591,7 @@ void UWowConnectionManager::Disconnect()
     RepairCursor=false; PacketHandler.GuildCanRepair=false; PacketHandler.GuildRepairRequested=false; PacketHandler.GuildRepairId=0; PacketHandler.GuildWithdrawMoney=0; PacketHandler.ResetGuildState(); PacketHandler.ResetInspectState(); PacketHandler.ArenaIdentities.Reset(); PacketHandler.ResetPvpState(); PacketHandler.ResetLfgState(); PacketHandler.ResetAchievementState(); PacketHandler.ItemRefunds.Empty(); PacketHandler.RequestedItemRefunds.Empty(); PacketHandler.TotalPlayedTime=0; PacketHandler.PlayedTimeReceived=0; PacketHandler.PlayedTimeRequested=false;
     PacketHandler.WeaponProficiency=PacketHandler.ArmorProficiency=0; PacketHandler.HasWeaponProficiency=PacketHandler.HasArmorProficiency=false;
     PacketHandler.LocalAutoRepeatSpell=0; PacketHandler.LocalMeleeAttacking=false;
+    PacketHandler.SetLocalQueuedMeleeSpell(0);
     PacketHandler.CombatHistory.Reset(); PacketHandler.Casts.Reset(); PacketHandler.RecentSpellLaunches.Reset(); PendingGroundSpell=0; PacketHandler.CastFailures.Reset(); PacketHandler.LocalCastRequests.Reset(); PacketHandler.HasPendingAttackCast=false;
     PacketHandler.OnLoginVerifyWorld.Clear();
     PacketHandler.OnSendPacket.Unbind();

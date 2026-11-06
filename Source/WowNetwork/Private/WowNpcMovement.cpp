@@ -44,6 +44,7 @@ void FWowMovementInfo::AdvanceSpline(float DeltaSeconds, const FVector* FacingTa
             if (!Facing.IsNearlyZero()) Orientation = FMath::Atan2(Facing.Y, Facing.X);
         }
         bHasActiveSpline = false;
+        MoveFlags &= ~(0xF | 0x08000000); // finished spline no longer moves the unit
         SplineWaypoints.Reset();
     }
 }

@@ -190,6 +190,50 @@ bool FCombatCastTrailers::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCombatNoPowerFeedback,"WowUnreal.Hud.CombatResourceFailureFeedback",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FCombatNoPowerFeedback::RunTest(const FString&)
+{
+    if(!LoadCombatDbc()) return false;
+    FString Path; FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path);
+    FMpqManager Mpq; TArray<uint8> Strings;
+    if(!TestTrue(TEXT("Read original localized resource errors"),Mpq.Initialize(Path) && Mpq.ReadFile(TEXT("Interface\\FrameXML\\GlobalStrings.lua"),Strings))) return false;
+    FCombatFixture F; auto& H=F.Connection->PacketHandler;
+    if(!F.Lua.ExecuteBuffer(Strings,TEXT("GlobalStrings.lua")) || !F.Listen()) return false;
+    auto* Player=H.EntityManager.GetLocalPlayer();
+    Player->SetField(UnitField::BYTES_0,3|(1<<8)|(1u<<24));
+    Player->SetField(UnitField::POWER2,114); Player->SetField(UnitField::MAXPOWER2,1000);
+    H.KnownSpells.Add(78); H.ActionButtons.SetNumZeroed(144); H.ActionButtons[73]=78;
+    const auto* Strike=FDbcStore::Get().Spells().GetById(78);
+    if(!TestNotNull(TEXT("Original Heroic Strike definition"),Strike)) return false;
+    TestEqual(TEXT("Rank-one Heroic Strike costs 15 displayed rage / 150 wire units"),Strike->ManaCost,150u);
+    TestTrue(TEXT("11.4 rage is displayed as 11 and cannot afford Heroic Strike"),F.Lua.ExecuteString(TEXT(
+        "assert(UnitPower('player')==11 and UnitPowerMax('player')==100); local usable,low=IsUsableAction(74); assert(not usable and low); "
+        "ResourceErrors={}; ResourceProbe=CreateFrame('Frame'); ResourceProbe:RegisterEvent('UI_ERROR_MESSAGE'); "
+        "ResourceProbe:SetScript('OnEvent',function(self,event,text) table.insert(ResourceErrors,text) end)")));
+    const auto Reject=[&](uint32 Spell,uint8 Counter)
+    {
+        FCombatPacket P; P.Byte(Counter); P.Word(Spell); P.Byte(85);
+        H.HandlePacket(0x130,P.Data);
+        P.Data.Reset(); P.Guid(1); P.Byte(Counter); P.Word(Spell); P.Byte(85);
+        H.HandlePacket(WowOpcode::SMSG_SPELL_FAILURE,P.Data);
+    };
+    Reject(78,1); Reject(133,2);
+    TestTrue(TEXT("Private/public failures yield one resource-specific UI and combat message each"),F.Lua.ExecuteString(TEXT(
+        "assert(#ResourceErrors==2 and ResourceErrors[1]==ERR_OUT_OF_RAGE and ResourceErrors[2]==ERR_OUT_OF_MANA); "
+        "assert(#Rows==2 and Rows[1][12]==ERR_OUT_OF_RAGE and Rows[2][12]==ERR_OUT_OF_MANA); "
+        "assert(ResourceErrors[1]~=SPELL_FAILED_CANT_DO_THAT_RIGHT_NOW)")));
+    Player->SetField(UnitField::POWER2,150);
+    TestTrue(TEXT("Exactly 15 rage becomes usable without inventing extra resource"),F.Lua.ExecuteString(TEXT(
+        "assert(UnitPower('player')==15); local usable,low=IsUsableAction(74); assert(usable and not low)")));
+    // Use the spell's power type, including when the caster now displays a
+    // different resource (forms can change between a request and its failure).
+    Player->SetField(UnitField::BYTES_0,3|(1<<8));
+    Reject(78,3);
+    TestTrue(TEXT("A changed active resource cannot turn a rage rejection into a mana error"),F.Lua.ExecuteString(TEXT(
+        "assert(#ResourceErrors==3 and ResourceErrors[3]==ERR_OUT_OF_RAGE and Rows[3][12]==ERR_OUT_OF_RAGE)")));
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCombatMissFamilies,"WowUnreal.Hud.CombatMissFamilies",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FCombatMissFamilies::RunTest(const FString&)
 {

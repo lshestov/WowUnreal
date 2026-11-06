@@ -196,3 +196,13 @@ and multiline inputs. GetUTF8CursorPosition and strlenutf8 count code points,
 and compiled XML text-change handlers retain the named userInput flag. Original
 whisper autocompletion and Cyrillic editing in chat, macro bodies and macro
 names are verified through rendered native input; see [editor offsets](EditorOffsets.md).
+
+Native hotkeys resolve the original modifier chord before dispatching discrete
+actions, including side mouse buttons and wheel ticks. Key release retains the
+action selected on press, even after focus, modifiers or assignments change;
+multiple movement aliases cannot release each other. Text capture suppresses
+new keyboard actions, and focus loss flushes held input. The
+`WowUnreal.Input.NativeKeyBindings` regression includes actual key 2 dispatch
+through warrior stance slot 73 into a Heroic Strike cast packet. This verifies
+the outbound request, not server acceptance. The disconnected rendered route
+`44-keybinds-facing-offline.json` covers the stock binding editor and native keys.

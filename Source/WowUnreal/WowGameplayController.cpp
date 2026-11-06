@@ -146,30 +146,6 @@ bool IsWowUiConsumingKeyboardInput()
 	return WidgetType.Contains(TEXT("EditableText")) || WidgetType.Contains(TEXT("SEditableText"));
 }
 
-bool ShouldSuppressGameplayHotkey(const FKey& Key)
-{
-	return Key == EKeys::Tab
-		|| Key == EKeys::Enter
-		|| Key == EKeys::One
-		|| Key == EKeys::Two
-		|| Key == EKeys::Three
-		|| Key == EKeys::Four
-		|| Key == EKeys::Five
-		|| Key == EKeys::Six
-		|| Key == EKeys::Seven
-		|| Key == EKeys::Eight
-		|| Key == EKeys::Nine
-		|| Key == EKeys::Zero
-		|| Key == EKeys::Hyphen
-		|| Key == EKeys::Equals
-		|| Key == EKeys::M
-		|| Key == EKeys::B
-		|| Key == EKeys::C
-		|| Key == EKeys::L
-		|| Key == EKeys::J
-		|| Key == EKeys::N
-		|| Key == EKeys::P;
-}
 }
 
 AWowGameplayController::AWowGameplayController()
@@ -204,7 +180,7 @@ void AWowGameplayController::BeginPlay()
         });
         if(UIManager) UIManager->SetKeyResolver([WeakThis=TWeakObjectPtr<AWowGameplayController>(this)](const FKey& Key)->bool
         {
-            if(WeakThis.IsValid() && WeakThis->IsInputKeyDown(Key)) return true;
+            if(WeakThis.IsValid() && (WeakThis->PressedBindingKeys.Contains(Key) || (!Key.IsModifierKey() && WeakThis->IsInputKeyDown(Key)))) return true;
             if(!FSlateApplication::IsInitialized()) return false;
             const auto M=FSlateApplication::Get().GetModifierKeys();
             return (Key==EKeys::LeftShift && M.IsLeftShiftDown()) || (Key==EKeys::RightShift && M.IsRightShiftDown()) ||
@@ -1045,11 +1021,9 @@ void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
 					(*ActorPtr)->SetActorLocation(Smoothed);
 				}
 
-				float Ori = FMath::IsFinite(Entity.Movement.Orientation) ? Entity.Movement.Orientation : 0.0f;
-				float UEYaw = -FMath::RadiansToDegrees(Ori);
-				(*ActorPtr)->SetActorRotation(FRotator(0.0f, UEYaw, 0.0f));
 			}
 		}
+		if (ActorPtr && *ActorPtr) UpdateEntityFacing(Entity, ActorPtr->Get());
 
 		// Check for death — entity health=0 with valid MaxHealth, or StandState=DEAD
 		if (Entity.Guid != LocalGuid && Entity.IsUnit())
@@ -1383,52 +1357,119 @@ void AWowGameplayController::OnOpcodeReceived(uint16 Opcode)
 bool AWowGameplayController::InputKey(const FInputKeyEventArgs& Params)
 {
 	if(GameplayProbe && !bProbeSyntheticKeyboard) return true;
+	const bool Wheel=Params.Key==EKeys::MouseScrollUp || Params.Key==EKeys::MouseScrollDown;
+	if(Params.Event==IE_Pressed && !Wheel) PressedBindingKeys.Add(Params.Key);
+	else if(Params.Event==IE_Released) PressedBindingKeys.Remove(Params.Key);
 	// Release the key originally routed on key-down even if a text box gained
-	// focus in the meantime. Otherwise custom movement bindings can stay held.
+	// focus or modifiers/bindings changed. Two physical keys may hold one action.
 	if(Params.Event==IE_Released) if(const auto* Held=HeldBindingKeys.Find(Params.Key))
 	{
-		auto Routed=Params; Routed.Key=*Held; HeldBindingKeys.Remove(Params.Key); return Super::InputKey(Routed);
+		auto Routed=Params; Routed.Key=*Held; HeldBindingKeys.Remove(Params.Key);
+		for(const auto& Other:HeldBindingKeys) if(Other.Value==Routed.Key) return true;
+		return Super::InputKey(Routed);
 	}
-	if(Params.Event==IE_Pressed && UIManager && UIManager->GetFrameManager() && (Params.Key==EKeys::MouseScrollUp || Params.Key==EKeys::MouseScrollDown))
+	if(Params.Event==IE_Released) for(const auto& Held:HeldBindingKeys) if(Held.Value==Params.Key) return true;
+	if(Params.Event==IE_Released && HeldBindingCommands.Remove(Params.Key)) return true;
+	if(Params.Event==IE_Repeat && (HeldBindingCommands.Contains(Params.Key) || HeldBindingKeys.Contains(Params.Key))) return true;
+	if(Params.Event==IE_Pressed && UIManager && UIManager->GetFrameManager() && Wheel)
     {
         FVector2D Pointer;
         if (IsPointerOverNativeWindow(&Pointer)) return true;
         auto* Frames=UIManager->GetFrameManager();
         if(Frames->DispatchMouseWheel(Frames->HitTestFrames(Pointer.X,Pointer.Y,true),Params.Key==EKeys::MouseScrollUp?1.f:-1.f)) return true;
     }
-	if (Params.Event == IE_Pressed
-		&& IsWowUiConsumingKeyboardInput()
-		&& ShouldSuppressGameplayHotkey(Params.Key))
+	if(UIManager && UIManager->GetLuaVM())
 	{
-		return true;
-	}
-	if(UIManager && UIManager->GetLuaVM() && !Params.Key.IsMouseButton() && Params.Event!=IE_Axis)
-	{
+		const auto ChordFor=[&](const FKey& Key)
+		{
+			FString Chord=FWowKeyBindings::KeyName(Key);
+			const auto Modifiers=FSlateApplication::IsInitialized()?FSlateApplication::Get().GetModifierKeys():FModifierKeysState();
+			const auto Down=[&](const FKey& K){return PressedBindingKeys.Contains(K);};
+			if(Key!=EKeys::LeftShift && Key!=EKeys::RightShift && (Down(EKeys::LeftShift) || Down(EKeys::RightShift) || Modifiers.IsShiftDown())) Chord=TEXT("SHIFT-")+Chord;
+			if(Key!=EKeys::LeftControl && Key!=EKeys::RightControl && (Down(EKeys::LeftControl) || Down(EKeys::RightControl) || Modifiers.IsControlDown())) Chord=TEXT("CTRL-")+Chord;
+			if(Key!=EKeys::LeftAlt && Key!=EKeys::RightAlt && (Down(EKeys::LeftAlt) || Down(EKeys::RightAlt) || Modifiers.IsAltDown())) Chord=TEXT("ALT-")+Chord;
+			return Chord;
+		};
+		auto* Lua=UIManager->GetLuaVM()->GetState();
+		if(Params.Event==IE_Axis)
+		{
+			// A bound wheel command must not also zoom the camera through MouseWheelAxis.
+			if(Params.Key==EKeys::MouseWheelAxis && Params.AmountDepressed!=0 &&
+				!FWowKeyBindings::Action(Lua,ChordFor(Params.AmountDepressed>0?EKeys::MouseScrollUp:EKeys::MouseScrollDown),true).IsEmpty()) return true;
+			return Super::InputKey(Params);
+		}
+		const bool PrimaryMouse=Params.Key==EKeys::LeftMouseButton || Params.Key==EKeys::RightMouseButton;
 		const FString Name=FWowKeyBindings::KeyName(Params.Key);
-		if(UIManager->GetFrameManager()->DispatchKeyboard(Name,Params.Event==IE_Pressed || Params.Event==IE_Repeat))
+		if(!PrimaryMouse && UIManager->GetFrameManager()->DispatchKeyboard(Name,Params.Event==IE_Pressed || Params.Event==IE_Repeat))
 		{
 			// A keyboard-enabled popup can consume key-up after key-down reached
 			// PlayerInput. Release that state too, so modified clicks cannot stick.
-			if(Params.Event==IE_Released) Super::InputKey(Params);
+			if(Params.Event==IE_Released || Params.Key.IsModifierKey()) Super::InputKey(Params);
 			return true;
 		}
-		if(!IsWowUiConsumingKeyboardInput())
+		if(IsWowUiConsumingKeyboardInput() && !Params.Key.IsMouseButton() && !Wheel)
 		{
-			FString Chord=Name;
-			if(FSlateApplication::IsInitialized())
+			if(Params.Event==IE_Released || Params.Key.IsModifierKey()) return Super::InputKey(Params);
+			if(Params.Key==EKeys::Escape && Params.Event==IE_Pressed) OnEscapeKey();
+			return true;
+		}
+		// Primary mouse clicks on frames retain their ordinary UI dispatch.
+		if(!PrimaryMouse || (!IsPointerOverNativeWindow() && GetUiFrameUnderCursor()<0))
+		{
+			const FKey Virtual=FWowKeyBindings::GameplayKey(FWowKeyBindings::Action(Lua,ChordFor(Params.Key),true));
+			if(Virtual.IsValid())
 			{
-				const auto Modifiers=FSlateApplication::Get().GetModifierKeys();
-				if(Modifiers.IsShiftDown()) Chord=TEXT("SHIFT-")+Chord;
-				if(Modifiers.IsControlDown()) Chord=TEXT("CTRL-")+Chord;
-				if(Modifiers.IsAltDown()) Chord=TEXT("ALT-")+Chord;
+				// WoW has already resolved the chord. Execute discrete commands once;
+				// routing a virtual P/1/etc through UE's unmodified BindKey filters can
+				// discard Ctrl/Shift bindings and also loses mouse button assignments.
+				if(InputComponent) for(const auto& Binding:InputComponent->KeyBindings)
+					if(Binding.Chord.Key==Virtual && Binding.KeyEvent==IE_Pressed)
+					{
+						if(Params.Event==IE_Pressed && !HeldBindingCommands.Contains(Params.Key))
+						{if(!Wheel) HeldBindingCommands.Add(Params.Key); Binding.KeyDelegate.Execute(Virtual);}
+						return true;
+					}
+				// Enhanced Input still owns movement, jump and walk/autorun state.
+				if(Wheel)
+				{
+					if(Params.Event==IE_Pressed)
+					{
+						PulsedBindingKeys.Add(Virtual);
+						auto Routed=Params; Routed.Key=Virtual; return Super::InputKey(Routed);
+					}
+					return true;
+				}
+				if(Params.Event==IE_Pressed)
+				{
+					bool AlreadyHeld=false; for(const auto& Other:HeldBindingKeys) AlreadyHeld|=Other.Value==Virtual;
+					HeldBindingKeys.Add(Params.Key,Virtual); if(AlreadyHeld) return true;
+				}
+				auto Routed=Params; Routed.Key=Virtual; return Super::InputKey(Routed);
 			}
-			const FKey Virtual=FWowKeyBindings::GameplayKey(FWowKeyBindings::Action(UIManager->GetLuaVM()->GetState(),Chord,true));
-			if(Virtual.IsValid()) { auto Routed=Params; Routed.Key=Virtual; if(Params.Event==IE_Pressed) HeldBindingKeys.Add(Params.Key,Virtual); return Super::InputKey(Routed); }
 			if(FWowKeyBindings::IsDefaultGameplayKey(Params.Key)) return true;
 		}
 	}
 
 	return Super::InputKey(Params);
+}
+
+void AWowGameplayController::FlushPressedKeys()
+{
+    HeldBindingKeys.Reset(); HeldBindingCommands.Reset(); PressedBindingKeys.Reset(); PulsedBindingKeys.Reset();
+    Super::FlushPressedKeys();
+}
+
+void AWowGameplayController::ProcessPlayerInput(float DeltaTime,bool bGamePaused)
+{
+    Super::ProcessPlayerInput(DeltaTime,bGamePaused);
+    // A wheel has no lasting held state. Let Enhanced Input observe its press
+    // once, then release it without disturbing another key holding that action.
+    for(const FKey& Key:PulsedBindingKeys)
+    {
+        bool Held=false; for(const auto& Binding:HeldBindingKeys) Held|=Binding.Value==Key;
+        if(!Held) Super::InputKey(FInputKeyEventArgs::CreateSimulated(Key,IE_Released,0.f));
+    }
+    PulsedBindingKeys.Reset();
 }
 
 bool AWowGameplayController::IsPointerOverNativeWindow(FVector2D* OutViewportPixel, bool bUseLiveSlateCursor) const
@@ -1931,11 +1972,46 @@ void AWowGameplayController::SpawnEntityModel(const FWowEntity& Entity)
 	}
 }
 
+void AWowGameplayController::UpdateEntityFacing(const FWowEntity& Entity, AActor* Actor) const
+{
+    if (!IsValid(Actor) || !ConnectionManager) return;
+    const auto& Movement=Entity.Movement;
+    float Yaw=-FMath::RadiansToDegrees(FMath::IsFinite(Movement.Orientation)?Movement.Orientation:0.f);
+    // CGUnit_C::UpdateSmoothFacing follows UNIT_FIELD_TARGET for a standing,
+    // stationary NPC. This is render facing, not a new server movement angle.
+    const bool CanTrack=Entity.IsUnit() && !Entity.IsPlayer() && !Movement.bHasActiveSpline
+        && !(Movement.MoveFlags&0xF) && !Movement.TransportGuid && !Entity.VehicleId
+        && !DeadEntityGuids.Contains(Entity.Guid) && (Entity.GetMaxHealth()==0 || Entity.GetHealth()>0)
+        && Entity.GetFieldByte(UnitField::BYTES_1,0)==0
+        && !(Entity.GetField(UnitField::FLAGS)&(0x00040000|0x01000000)) // stunned / possessed
+        && !(Entity.GetField(UnitField::FLAGS_2)&0x00008000) // cannot turn
+        && !Entity.GetField(UnitField::NPC_EMOTESTATE) && !Entity.GetField(UnitField::CHANNEL_SPELL);
+    if (CanTrack)
+    {
+        const auto& Handler=ConnectionManager->PacketHandler;
+        const auto* Cast=Handler.Casts.Find(Entity.Guid);
+        const auto* Spell=Cast?FDbcStore::Get().Spells().GetById(Cast->Spell):nullptr;
+        const bool CannotTurnWhileCasting=Spell && (Spell->AttributesEx5&0x00080000);
+        const uint64 FacingGuid=Entity.GetField64(UnitField::TARGET);
+        const auto* Target=Handler.EntityManager.Find(FacingGuid);
+        if (!CannotTurnWhileCasting && Target && Target->IsUnit() && FacingGuid!=Entity.Guid)
+        {
+            const AActor* TargetActor=FacingGuid==Handler.EntityManager.LocalPlayerGuid
+                ? GetPawn() : SpawnedEntityActors.FindRef(FacingGuid).Get();
+            const FVector TargetPosition=IsValid(TargetActor)?TargetActor->GetActorLocation():FWowCoordinate::WowToUE(Target->Movement.Position);
+            const FVector Direction=TargetPosition-Actor->GetActorLocation();
+            if (!Direction.ContainsNaN() && Direction.SizeSquared2D()>UE_SMALL_NUMBER)
+                Yaw=FMath::RadiansToDegrees(FMath::Atan2(Direction.Y,Direction.X));
+        }
+    }
+    Actor->SetActorRotation(FRotator(0,Yaw,0));
+}
+
 void AWowGameplayController::UpdateEntitySplineMovement(float DeltaTime)
 {
 	if (!ConnectionManager) return;
 
-	// Iterate through all entities and update those with active splines
+	// Advance routes and keep stationary NPCs facing their server-selected target.
 	FWowEntityManager& EntityManager = ConnectionManager->PacketHandler.EntityManager;
 
 	for (const auto& EntityPair : EntityManager.GetAll())
@@ -1950,23 +2026,25 @@ void AWowGameplayController::UpdateEntitySplineMovement(float DeltaTime)
 		// Skip dead entities — corpses don't move
 		if (DeadEntityGuids.Contains(Entity.Guid)) continue;
 
-		// Skip entities without active splines
-		if (!Entity.Movement.bHasActiveSpline || Entity.Movement.SplineWaypoints.Num() == 0)
-			continue;
-
-        const FWowEntity* FacingTarget = EntityManager.Find(Entity.Movement.SplineFacingTarget);
-        Entity.Movement.AdvanceSpline(DeltaTime, FacingTarget ? &FacingTarget->Movement.Position : nullptr);
+		const bool WasOnSpline=Entity.Movement.bHasActiveSpline && !Entity.Movement.SplineWaypoints.IsEmpty();
+        if (!WasOnSpline && !Entity.IsUnit()) continue;
+        if (WasOnSpline)
+        {
+            const FWowEntity* FacingTarget = EntityManager.Find(Entity.Movement.SplineFacingTarget);
+            Entity.Movement.AdvanceSpline(DeltaTime, FacingTarget ? &FacingTarget->Movement.Position : nullptr);
+        }
 		// Update the visual actor position
 		TObjectPtr<AActor>* ActorPtr = SpawnedEntityActors.Find(Entity.Guid);
 		if (ActorPtr && *ActorPtr)
 		{
-			FVector UEPos = FWowCoordinate::WowToUE(Entity.Movement.Position);
-			UEPos.Z += NpcGroundOffsets.FindRef(Entity.Guid);
-			if (UEPos.ContainsNaN()) continue; // Skip invalid positions
-			(*ActorPtr)->SetActorLocation(UEPos);
-			float Ori = FMath::IsFinite(Entity.Movement.Orientation) ? Entity.Movement.Orientation : 0.0f;
-			float UEYaw = -FMath::RadiansToDegrees(Ori);
-			(*ActorPtr)->SetActorRotation(FRotator(0.0f, UEYaw, 0.0f));
+            if (WasOnSpline)
+            {
+                FVector UEPos = FWowCoordinate::WowToUE(Entity.Movement.Position);
+                UEPos.Z += NpcGroundOffsets.FindRef(Entity.Guid);
+                if (UEPos.ContainsNaN()) continue; // Skip invalid positions
+                (*ActorPtr)->SetActorLocation(UEPos);
+            }
+			UpdateEntityFacing(Entity, ActorPtr->Get());
 		}
 	}
 }
@@ -2325,6 +2403,9 @@ void AWowGameplayController::OnTabTarget()
 void AWowGameplayController::OnSpellStart(uint64 CasterGuid, uint32 SpellId, uint32 CastFlags, int32 CastTime)
 {
 	if (!ConnectionManager) return;
+    // Accepted next-swing abilities stay queued until SPELL_GO; they have no
+    // timed cast bar or precast hand glow while waiting for the melee swing.
+    if(const auto* Spell=FDbcStore::Get().Spells().GetById(SpellId); Spell && Spell->IsNextMeleeSwing()) return;
 
 	const uint64 LocalGuid = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
 
@@ -4004,6 +4085,8 @@ void AWowGameplayController::OnAttackerStateUpdate(uint64 AttackerGuid, uint64 V
 	// Play attack animation on the attacker
 	const uint64 LocalGuid2 = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
 	AActor* AttackerActor = SpellActor(AttackerGuid);
+	if (AttackerGuid!=LocalGuid2)
+		if (const auto* Attacker=ConnectionManager->PacketHandler.EntityManager.Find(AttackerGuid)) UpdateEntityFacing(*Attacker,AttackerActor);
 	AWowPlayerCharacter* AttackingPlayer = Cast<AWowPlayerCharacter>(AttackerActor);
 	UWowAnimationController* AttackerAnim = AttackingPlayer ? AttackingPlayer->AnimationController.Get()
 		: FWowCharacterBuilder::GetAnimationController(AttackerActor);

@@ -1053,6 +1053,7 @@ void FWowPacketHandler::HandleAttackStop(FPacketReader& R)
     uint64 VictimGuid = R.ReadPackedGuid();
     if(!R.CanRead(4)) return; R.ReadU32(); if(R.Remaining()) return;
     UE_LOG(LogWowPacket, Log, TEXT("SMSG_ATTACKSTOP: attacker=%llu victim=%llu"), AttackerGuid, VictimGuid);
+    if(AttackerGuid && AttackerGuid==EntityManager.LocalPlayerGuid) SetLocalQueuedMeleeSpell(0);
     if(AttackerGuid==EntityManager.LocalPlayerGuid && LocalMeleeAttacking)
     {
         LocalMeleeAttacking=false;
@@ -1189,6 +1190,7 @@ void FWowPacketHandler::HandleMonsterMove(FPacketReader& R)
             Move.SplineWaypoints.Add(FWowSplineWaypoint(Move.SplineStartPosition));
         Move.bHasActiveSpline = !Move.SplineWaypoints.IsEmpty();
     }
+    if (Type == 1) Move.MoveFlags &= ~(0xF | 0x08000000);
     Entity->Movement = Move;
     UE_LOG(LogWowPacket, Verbose, TEXT("MONSTER_MOVE guid=%llu type=%u flags=0x%X duration=%u points=%d speed=%.2f"),
         Guid, Type, Move.SplineFlags, Move.SplineDuration, Move.SplineWaypoints.Num(), Move.GetSplineSpeed());

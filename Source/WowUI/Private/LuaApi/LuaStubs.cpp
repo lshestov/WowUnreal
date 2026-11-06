@@ -2011,7 +2011,9 @@ static const FWowPacketHandler* ActionHandler(lua_State* L)
 static int L_IsCurrentAction(lua_State* L)
 {
     const auto* Handler = ActionHandler(L);
-    lua_pushboolean(L, Handler && Handler->LocalMeleeAttacking && ActionAtSlot(L, Handler).Kind == EWowActionInvocationKind::AutoAttack);
+    const auto Action=ActionAtSlot(L,Handler);
+    lua_pushboolean(L,Handler && ((Action.Kind==EWowActionInvocationKind::AutoAttack && Handler->LocalMeleeAttacking)
+        || (Action.Kind==EWowActionInvocationKind::SpellCast && Handler->IsLocalCurrentSpell(Action.ActionId))));
     return 1;
 }
 

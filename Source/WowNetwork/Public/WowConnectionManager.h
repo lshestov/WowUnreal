@@ -349,6 +349,7 @@ public:
 private:
 #if WITH_DEV_AUTOMATION_TESTS
     friend class FIdleWowCorpseLootInteractionTest;
+    friend class FIdleWowNativeBindingsTest;
 #endif
     bool bCharacterCreatePending=false;
     uint32 CharacterCreateSendCount=0;

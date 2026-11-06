@@ -77,3 +77,19 @@ from repeated one- and two-handed attacks on the original DwarfMale model.
 `Scripts/Verification/43-world-input-offline.json` exercises the shared melee
 event handler, mouse release selection, and original corpse cursor textures
 in a rendered, disconnected dwarf fixture without accessing character data.
+
+## Next-swing abilities and resource errors
+
+An accepted next-melee-swing spell remains current until its matching server
+completion, rejection or cancellation. The original action button's checked
+texture shows this queue; accepting Heroic Strike does not start a timed cast
+bar or precast hand effects. Spell IDs and cast counters protect a newer queue
+from stale replies. Local attack stop, death and session teardown clear it.
+
+NO_POWER failures use the original resource-specific error string from the
+spell definition in both the UI and combat log. Rank-one Heroic Strike costs
+150 protocol rage units (15 displayed rage); this change does not alter costs
+or award resources. Regressions cover the queue lifecycle, controller effects,
+paired failure deduplication and resource display/usability at the threshold.
+The disconnected rendered route replays server acknowledgements and failures;
+it does not establish successful combat against a live server.

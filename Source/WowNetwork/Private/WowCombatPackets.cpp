@@ -104,6 +104,7 @@ void FWowPacketHandler::RecordSpellCombat(FWowCombatEntry Entry)
 void FWowPacketHandler::RecordUnitDeath(uint64 Target)
 {
     Casts.Remove(Target);
+    if(Target && Target==EntityManager.LocalPlayerGuid) SetLocalQueuedMeleeSpell(0);
     FWowCombatEntry E; E.Event=TEXT("UNIT_DIED"); E.Destination=Target;
     if(const auto* Entity=EntityManager.Find(Target))
     {
@@ -119,10 +120,28 @@ void FWowPacketHandler::HandleSpellStart(FPacketReader& R)
     if(!Guid(R,Object) || !Guid(R,Caster) || !R.CanRead(13)) return;
     FWowSpellLaunch TargetInfo;
     const uint8 Counter=R.ReadU8(); const uint32 Spell=R.ReadU32(),Flags=R.ReadU32(); const int32 Time=int32(R.ReadU32()); if(!Targets(R,Target,&TargetInfo) || !CastTail(R,Flags,TargetInfo.TargetMask,false)) return;
-    if(Time>0) {const double Now=FPlatformTime::Seconds(); if(Casts.Num()>256) for(auto It=Casts.CreateIterator();It;++It) if(It.Value().Ends<Now) It.RemoveCurrent(); Casts.Add(Caster,{Spell,Counter,Now,Now+Time/1000.,false});}
-    if(Time>0) {FWowCombatEntry E; E.Source=Caster; E.Spell=Spell; E.Event=TEXT("SPELL_CAST_START"); RecordSpellCombat(MoveTemp(E));}
+    const auto* Definition=FDbcStore::Get().Spells().GetById(Spell);
+    const bool NextSwing=Definition && Definition->IsNextMeleeSwing();
+    if(NextSwing && Caster && Caster==EntityManager.LocalPlayerGuid) SetLocalQueuedMeleeSpell(Spell,Counter);
+    if(Time>0 && !NextSwing) {const double Now=FPlatformTime::Seconds(); if(Casts.Num()>256) for(auto It=Casts.CreateIterator();It;++It) if(It.Value().Ends<Now) It.RemoveCurrent(); Casts.Add(Caster,{Spell,Counter,Now,Now+Time/1000.,false});}
+    if(Time>0 && !NextSwing) {FWowCombatEntry E; E.Source=Caster; E.Spell=Spell; E.Event=TEXT("SPELL_CAST_START"); RecordSpellCombat(MoveTemp(E));}
     CastFailures.Remove(Caster);
-    OnCastState.ExecuteIfBound(Caster,Spell,0,Counter); OnSpellStart.Broadcast(Caster,Spell,Flags,Time);
+    if(!NextSwing) OnCastState.ExecuteIfBound(Caster,Spell,0,Counter);
+    OnSpellStart.Broadcast(Caster,Spell,Flags,Time);
+}
+void FWowPacketHandler::SetLocalQueuedMeleeSpell(uint32 Spell,uint8 Counter)
+{
+    if(!Spell) Counter=0;
+    if(LocalQueuedMeleeSpell==Spell && LocalQueuedMeleeCounter==Counter) return;
+    LocalQueuedMeleeSpell=Spell;LocalQueuedMeleeCounter=Counter;
+    OnActionStateChanged.ExecuteIfBound();
+}
+bool FWowPacketHandler::IsLocalCurrentSpell(uint32 Spell) const
+{
+    if(!Spell) return false;
+    if(LocalQueuedMeleeSpell==Spell) return true;
+    const auto* Definition=FDbcStore::Get().Spells().GetById(Spell);
+    return LocalMeleeAttacking && Definition && Definition->Effect[0]==78; // SPELL_EFFECT_ATTACK
 }
 void FWowPacketHandler::SetLocalAutoRepeatSpell(uint32 Spell)
 {
@@ -171,6 +190,8 @@ void FWowPacketHandler::HandleSpellGo(FPacketReader& R)
     }
     uint64 ExplicitTarget=0; if(!Targets(R,ExplicitTarget,&Launch) || !CastTail(R,Flags,Launch.TargetMask,true)) return; if(ExplicitTarget) Target=ExplicitTarget;
     Launch.ExplicitTargetGuid=ExplicitTarget;
+    if(Caster==EntityManager.LocalPlayerGuid && LocalQueuedMeleeSpell==Spell && LocalQueuedMeleeCounter==Counter)
+        SetLocalQueuedMeleeSpell(0);
     // SPELL_ATTR2_AUTO_REPEAT distinguishes ranged auto attacks from ordinary shots.
     if(Caster && Caster==EntityManager.LocalPlayerGuid && Definition && (Definition->AttributesEx2&0x20))
         SetLocalAutoRepeatSpell(Spell);
@@ -200,13 +221,17 @@ void FWowPacketHandler::HandleCastFailure(uint64 Caster,uint32 Spell,uint8 Count
     {CastFailures.Remove(Caster); return;}
     if(CastFailures.Num()>=256) CastFailures.Reset();
     CastFailures.Add(Caster,{Spell,Counter,Private});
+    const bool DifferentQueue=Caster==EntityManager.LocalPlayerGuid && LocalQueuedMeleeSpell
+        && (LocalQueuedMeleeSpell!=Spell || LocalQueuedMeleeCounter!=Counter);
+    if(Caster==EntityManager.LocalPlayerGuid && LocalQueuedMeleeSpell==Spell && LocalQueuedMeleeCounter==Counter)
+        SetLocalQueuedMeleeSpell(0);
     RecordCastFailure(Caster,Spell,Reason);
     const auto* Active=Casts.Find(Caster);
     const bool DifferentCast=Active && (Active->Spell!=Spell || Active->Counter!=Counter);
     if(Active && !DifferentCast) Casts.Remove(Caster);
     OnCastResult.ExecuteIfBound(Caster,Spell,Counter,false,Reason);
     OnCastState.ExecuteIfBound(Caster,Spell,Reason==40?7:2,Counter);
-    if(!DifferentCast) OnSpellFailure.Broadcast(Caster,Spell,Reason);
+    if(!DifferentCast && !DifferentQueue) OnSpellFailure.Broadcast(Caster,Spell,Reason);
 }
 void FWowPacketHandler::RecordCastFailure(uint64 Caster,uint32 Spell,uint8 Reason)
 {
