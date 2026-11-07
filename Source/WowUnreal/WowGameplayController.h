@@ -97,6 +97,7 @@ private:
     friend class FIdleWowCorpseLootInteractionTest;
     friend class FIdleWowNativeBindingsTest;
     friend class FIdleWowNpcFacingTest;
+    friend class FIdleWowNpcFamilyScaleTest;
     friend class FQueuedMeleeFeedbackTest;
     TSharedPtr<struct FWowGameplayProbe> GameplayProbe;
     bool bGameplayProbeChecked=false;

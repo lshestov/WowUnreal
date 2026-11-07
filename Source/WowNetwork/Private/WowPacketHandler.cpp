@@ -2028,9 +2028,23 @@ void FWowPacketHandler::HandleCreatureQueryResponse(FPacketReader& R)
     if (!R.CanRead(4)) return;
 
     uint32 Entry = R.ReadU32();
+    if (Entry & 0x80000000u) return; // Unknown creature template.
     FString Name = R.ReadCString();
     for(int32 I=0;I<3;++I) R.ReadCString(); // alternate name slots
     FString Title = R.ReadCString(); // SubName follows all four names
+
+    // Publish template metadata before notifying the renderer: a query commonly
+    // arrives after the actor's create packet, and family affects its model size.
+    if (R.Remaining())
+    {
+        R.ReadCString(); // icon name
+        if (R.CanRead(8))
+        {
+            R.ReadU32(); // type flags
+            CreatureTypes.Add(Entry, R.ReadU32());
+            if (R.CanRead(4)) CreatureFamilies.Add(Entry, R.ReadU32());
+        }
+    }
 
     if (!Name.IsEmpty())
     {
@@ -2043,7 +2057,6 @@ void FWowPacketHandler::HandleCreatureQueryResponse(FPacketReader& R)
         OnCreatureNameReceived.Broadcast(Entry, Name, Title);
     }
 
-    if(R.Remaining()) {R.ReadCString(); if(R.CanRead(8)) {R.ReadU32(); CreatureTypes.Add(Entry,R.ReadU32());}}
 }
 
 // ── Cooldown Helper Methods ──────────────────────────────────────────────────

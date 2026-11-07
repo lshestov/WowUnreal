@@ -106,10 +106,16 @@ void AWowGameplayController::LogNpcCapture() const
     }
     const auto* Display = FDbcStore::Get().CreatureDisplayInfo().GetById(Entity->GetDisplayId());
     const auto* Data = Display ? FDbcStore::Get().CreatureModelData().GetById(Display->ModelID) : nullptr;
+    const uint32 FamilyId = ConnectionManager->PacketHandler.CreatureFamilies.FindRef(Entity->Entry);
+    const auto* Family = FDbcStore::Get().CreatureFamilies().GetById(FamilyId);
+    const float BaseScale = Display && Data ? Display->Scale * Data->Scale : 1.f;
+    const float ModelScale = Family ? Family->ModelScale(BaseScale, Entity->GetLevel(), Entity->GetField(UnitField::PETNUMBER) != 0) : BaseScale;
     const auto* Selection = FindObjectFast<UBoxComponent>(Target, TEXT("UnitSelection"));
     UE_LOG(LogWowNpcCapture, Log, TEXT("NpcScaleCapture: entry=%u display=%u objectScale=%.4f displayScale=%.4f modelScale=%.4f renderedScale=%.4f referenceHeightYards=%.4f"),
         Entity->Entry, Entity->GetDisplayId(), Entity->Scale, Display ? Display->Scale : 0, Data ? Data->Scale : 0,
         Mesh->GetComponentScale().Z, Selection ? Selection->GetScaledBoxExtent().Z * 2 / FWowCoordinate::SCALE : 0);
+    UE_LOG(LogWowNpcCapture, Log, TEXT("NpcFamilyScaleCapture: entry=%u family=%u level=%d baseScale=%.6f familyModelScale=%.6f expectedRenderedScale=%.6f"),
+        Entity->Entry, FamilyId, Entity->GetLevel(), BaseScale, ModelScale, ModelScale * Entity->Scale);
     const double PositionError = FVector::Distance(Target->GetActorLocation(), FWowCoordinate::WowToUE(Entity->Movement.Position));
     UE_LOG(LogWowNpcCapture, Log, TEXT("NpcCapture: guid=%llu entry=%u display=%u positionError=%.3f vertices=%u textures=%d animId=%d time=%.3f rate=%.3f animatedBones=%d poseChecksum=%.6f splineSpeed=%.3f"),
         Entity->Guid, Entity->Entry, Entity->GetDisplayId(), PositionError,

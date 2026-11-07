@@ -13,6 +13,7 @@
 #include "Formats/Dbc/CreatureDisplayInfoDbc.h"
 #include "Formats/Dbc/CreatureDisplayInfoExtraDbc.h"
 #include "Formats/Dbc/CreatureModelDataDbc.h"
+#include "Formats/Dbc/CreatureFamilyDbc.h"
 #include "Formats/Dbc/ItemDisplayInfoDbc.h"
 #include "Formats/Dbc/SpellDbc.h"
 #include "Formats/Dbc/SpellBookDbc.h"
@@ -132,6 +133,7 @@ public:
     const FCreatureDisplayInfoDbc& CreatureDisplayInfo() const { return CreatureDisplayInfoDbc; }
     const FCreatureDisplayInfoExtraDbc& CreatureDisplayInfoExtra() const { return CreatureDisplayInfoExtraDbc; }
     const FCreatureModelDataDbc& CreatureModelData() const { return CreatureModelDataDbc; }
+    const FCreatureFamilyDbc& CreatureFamilies() const { return CreatureFamilyDbc; }
     const FItemDisplayInfoDbc& ItemDisplayInfo() const { return ItemDisplayInfoDbc; }
     const FSpellDbc& Spells() const { return SpellDbc; }
     const FSpellBookDbc& SpellBook() const { return SpellBookDbc; }
@@ -172,6 +174,7 @@ private:
     FCreatureDisplayInfoDbc CreatureDisplayInfoDbc;
     FCreatureDisplayInfoExtraDbc CreatureDisplayInfoExtraDbc;
     FCreatureModelDataDbc CreatureModelDataDbc;
+    FCreatureFamilyDbc CreatureFamilyDbc;
     FItemDisplayInfoDbc ItemDisplayInfoDbc;
     FSpellDbc SpellDbc;
     TMap<uint32,uint32> SummonSlots;

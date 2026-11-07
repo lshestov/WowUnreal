@@ -9,6 +9,7 @@
 #include "WowUIManager.h"
 #include "Coord/WowCoordinate.h"
 #include "Formats/M2Types.h"
+#include "Formats/Dbc/DbcStore.h"
 #include "Widgets/SLeafWidget.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Rendering/DrawElements.h"
@@ -123,9 +124,22 @@ void AWowGameplayController::EndPlay(const EEndPlayReason::Type Reason)
 void AWowGameplayController::ApplyUnitScale(AActor* Actor, const FWowEntity& Entity)
 {
     if (!Actor || !Entity.IsUnit()) return;
-    // The mesh already carries CreatureDisplayInfo and CreatureModelData scales.
-    // OBJECT_FIELD_SCALE_X is a separate multiplier and can change after spawn.
-    const float Scale = FMath::IsFinite(Entity.Scale) && Entity.Scale > 0 ? Entity.Scale : 1.f;
+    // The mesh carries the display/model scale. Build 12340 applies the family
+    // minimum (or pet size) at the current level before OBJECT_FIELD_SCALE_X.
+    // Apply the ratio on the actor so the body, equipment and picking bounds
+    // all resize together, without multiplying the family size by display size.
+    float Scale = FMath::IsFinite(Entity.Scale) && Entity.Scale > 0 ? Entity.Scale : 1.f;
+    if (!Entity.IsPlayer() && ConnectionManager)
+    {
+        const auto& Dbc = FDbcStore::Get();
+        const uint32 DisplayId = Entity.GetDisplayId() ? Entity.GetDisplayId() : Entity.GetNativeDisplayId();
+        const auto* Display = Dbc.CreatureDisplayInfo().GetById(DisplayId);
+        const auto* Model = Display ? Dbc.CreatureModelData().GetById(Display->ModelID) : nullptr;
+        const auto* Family = Dbc.CreatureFamilies().GetById(ConnectionManager->PacketHandler.CreatureFamilies.FindRef(Entity.Entry));
+        const float Base = Display && Model ? Display->Scale * Model->Scale : 0.f;
+        if (Family && FMath::IsFinite(Base) && Base > 0)
+            Scale *= Family->ModelScale(Base, Entity.GetLevel(), Entity.GetField(UnitField::PETNUMBER) != 0) / Base;
+    }
     if (Actor->GetActorScale3D().Equals(FVector(Scale), KINDA_SMALL_NUMBER)) return;
     Actor->SetActorScale3D(FVector(Scale));
     NpcReferenceFeet.Remove(Entity.Guid);

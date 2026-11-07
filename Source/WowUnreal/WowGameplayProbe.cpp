@@ -1038,9 +1038,18 @@ struct FWowGameplayProbe
                 if (Entity && Body && Info->Selection.IsValid())
                 {
                     State->SetNumberField(TEXT("display"), Entity->GetDisplayId());
+                    State->SetNumberField(TEXT("level"), Entity->GetLevel());
+                    State->SetNumberField(TEXT("family"), Handler.CreatureFamilies.FindRef(Entity->Entry));
                     State->SetNumberField(TEXT("serverScale"), Entity->Scale);
                     State->SetNumberField(TEXT("renderedScale"), Body->GetComponentScale().Z);
                     State->SetNumberField(TEXT("heightYards"), Info->Selection->GetScaledBoxExtent().Z * 2 / FWowCoordinate::SCALE);
+                    double ExpectedScale=0;
+                    if(Step->TryGetNumberField(TEXT("expectedRenderedScale"),ExpectedScale) &&
+                        !FMath::IsNearlyEqual(Body->GetComponentScale().Z,ExpectedScale,0.0001))
+                    {
+                        Failure=FString::Printf(TEXT("Creature %u scale %.6f differs from expected %.6f"),Entry,Body->GetComponentScale().Z,ExpectedScale);
+                        Finish(C,false); return;
+                    }
                 }
                 Inspections->SetObjectField(Step->GetStringField(TEXT("label")), State);
             }

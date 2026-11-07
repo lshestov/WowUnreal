@@ -278,6 +278,12 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         }
     }
 
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\CreatureFamily.dbc"), Parser))
+    {
+        CreatureFamilyDbc.Load(Parser);
+        ++Loaded;
+    }
+
     bLoaded = Loaded > 0;
     UE_LOG(LogDbcStore, Log, TEXT("DbcStore: loaded %d/12 essential DBC tables (Tier 1)"), Loaded);
     return bLoaded;

@@ -1,0 +1,33 @@
+{
+  "qaClass": 1,
+  "qaLevel": 5,
+  "qaGm": true,
+  "qaSpawnEntry": 704,
+  "qaSpawnOffset": 4,
+  "width": 1280,
+  "height": 900,
+  "steps": [
+    {"op":"wait_world","timeout":180},
+    {"op":"wait_floor","timeout":90},
+    {"op":"time","minutes":720},
+    {"op":"wait","seconds":3},
+    {"op":"select_entry","entry":704,"timeout":40},
+    {"op":"approach","range":3.5,"timeout":60},
+    {"op":"frame_camera_target","distance":680,"sideView":true},
+    {"op":"move_pointer","x":0.8,"y":0.35},
+    {"op":"inspect_unit_overhead","entry":704,"marker":"","showName":true,"label":"ragged-timber-wolf","expectedRenderedScale":0.70508475,"timeout":20},
+    {"op":"capture","name":"01-ragged-timber-wolf-day"},
+    {"op":"time","minutes":0},
+    {"op":"wait","seconds":3},
+    {"op":"approach","range":3.5,"timeout":60},
+    {"op":"frame_camera_target","distance":680,"sideView":true},
+    {"op":"capture","name":"02-coldridge-night"},
+    {"op":"time","minutes":720},
+    {"op":"wait","seconds":3},
+    {"op":"select_entry","entry":705,"timeout":40},
+    {"op":"approach","range":3.5,"timeout":60},
+    {"op":"frame_camera_target","distance":680,"sideView":true},
+    {"op":"inspect_unit_overhead","entry":705,"marker":"","showName":true,"label":"ragged-young-wolf","expectedRenderedScale":0.7,"timeout":20},
+    {"op":"capture","name":"03-ragged-young-wolf-day"}
+  ]
+}

@@ -279,6 +279,7 @@ public:
     /** Creature name cache */
     TMap<uint32, FString> CreatureNameCache;
     TMap<uint32,uint32> CreatureTypes;
+    TMap<uint32,uint32> CreatureFamilies;
     TMap<uint32, FString> CreatureTitleCache;
     const FString* GetCreatureTitle(const FWowEntity& Unit) const
     {

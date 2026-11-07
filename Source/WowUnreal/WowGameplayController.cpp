@@ -3998,6 +3998,14 @@ void AWowGameplayController::OnPlayerNameReceived(uint64 Guid, const FString& Na
 void AWowGameplayController::OnCreatureNameReceived(uint32 Entry, const FString& Name, const FString& Title)
 {
     if(ConnectionManager && ConnectionManager->PacketHandler.CurrentMailboxGuid) FireUIEvent(TEXT("MAIL_INBOX_UPDATE"));
+	if (ConnectionManager)
+	{
+		for (const auto& Pair : SpawnedEntityActors)
+		{
+			const auto* Entity = ConnectionManager->PacketHandler.EntityManager.Find(Pair.Key);
+			if (Entity && Entity->Entry == Entry && IsValid(Pair.Value)) ApplyUnitScale(Pair.Value, *Entity);
+		}
+	}
 	// TODO: Update nameplate for matching entities
 	UE_LOG(LogWowGameplay, Log, TEXT("Received creature name: Entry=%u Name=%s Title=%s"), Entry, *Name, *Title);
 }
