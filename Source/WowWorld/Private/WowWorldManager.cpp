@@ -1,4 +1,6 @@
 #include "WowWorldManager.h"
+#include "WowSkyManager.h"
+#include "EngineUtils.h"
 #include "WowStreamingBudget.h"
 #include "WowStreamingProfile.h"
 #include "WowWmoArea.h"
@@ -564,6 +566,11 @@ bool AWowWorldManager::SelectMap(uint32 MapId)
 {
     const auto* Map=FDbcStore::Get().Maps().GetById(MapId);
     if(!Map || Map->InternalName.IsEmpty()) return false;
+    // Login and cross-map transfers must select lighting as well as terrain.
+    // Do this even when the terrain map is already selected: the sky may have
+    // started before the world manager loaded the essential DBC tables.
+    for(TActorIterator<AWowSkyManager> Sky(GetWorld());Sky;++Sky)
+        Sky->LoadLightZones(MapId);
     if(MapName.Equals(Map->InternalName,ESearchCase::IgnoreCase)) return true;
     bStreamingSuspended=true; bStreamingEnabled=false; CollisionReadyCached=false; ++MapGeneration;
     // Old MPQ reads can finish in the background; their generation prevents

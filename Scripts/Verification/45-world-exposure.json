@@ -1,0 +1,11 @@
+{
+  "map": 0,
+  "cases": [
+    {"name":"coldridge-day-snow","position":[-6234,334,386],"target":[-6214,348,380],"subject":[-6228,338,381],"time":720,"settle":12},
+    {"name":"coldridge-evening-snow","position":[-6234,334,386],"target":[-6214,348,380],"subject":[-6228,338,381],"time":1080},
+    {"name":"coldridge-night-snow","position":[-6234,334,386],"target":[-6214,348,380],"subject":[-6228,338,381],"time":0},
+    {"name":"abbey-day-outdoor","position":[-8930,-117,87],"target":[-8908,-149,91],"subject":[-8926,-122,83],"time":540,"settle":15},
+    {"name":"abbey-day-interior","position":[-8908,-151,86],"target":[-8899,-171,86],"subject":[-8904,-160,83],"time":540},
+    {"name":"abbey-night-interior","position":[-8908,-151,86],"target":[-8899,-171,86],"subject":[-8904,-160,83],"time":1200}
+  ]
+}

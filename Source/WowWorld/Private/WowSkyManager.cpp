@@ -178,9 +178,6 @@ void AWowSkyManager::BeginPlay()
 	// Load light zones from DBC
 	LoadLightZones(CurrentMapId);
 
-	// Check if float params are available
-	bHasFloatParams = FDbcStore::Get().LightFloatParams().Num() > 0;
-
 	// Initial update
 	UpdateSunPosition();
 	UpdateLightColors();
@@ -713,7 +710,9 @@ void AWowSkyManager::LoadLightZones(int32 MapId)
 	MapLights.Empty();
 
 	const FDbcStore& Dbc = FDbcStore::Get();
-	if (Dbc.Lights().Num() == 0)
+	bLightTablesReady = Dbc.Lights().Num() > 0 && Dbc.LightIntParams().Num() > 0;
+	bHasFloatParams = Dbc.LightFloatParams().Num() > 0;
+	if (!bLightTablesReady)
 	{
 		UE_LOG(LogWowSky, Log, TEXT("Light.dbc not loaded, using fallback colors"));
 		bHasDbcLights = false;
@@ -722,6 +721,7 @@ void AWowSkyManager::LoadLightZones(int32 MapId)
 
 	MapLights = Dbc.Lights().GetByMap(static_cast<uint32>(MapId));
 	bHasDbcLights = MapLights.Num() > 0;
+	EnvironmentElapsed = .1f; // Apply the new map's bands on the next frame.
 
 	UE_LOG(LogWowSky, Log, TEXT("Loaded %d light zones for map %d"), MapLights.Num(), MapId);
 }
@@ -757,6 +757,13 @@ void AWowSkyManager::Tick(float DeltaTime)
 	EnvironmentElapsed+=DeltaTime;
 	if(EnvironmentElapsed>=.1f)
 	{
+		// Login creates the sky before WorldManager loads the DBCs. Do not
+		// retain the generic white sunlight/ambient/fog for the entire session.
+		// Only retry when the synchronous essential tables are actually ready;
+		// maps without authored lights should keep their fallback without polling.
+		const auto& Dbc=FDbcStore::Get();
+		if(!bLightTablesReady && Dbc.Lights().Num()>0 && Dbc.LightIntParams().Num()>0)
+			LoadLightZones(CurrentMapId);
 		// DBC/room work stays bounded at 10 Hz; it must not quantize shadows.
 		UpdateInteriorUnits(EnvironmentElapsed); EnvironmentElapsed=0;
 		UpdateLightColors(); UpdateFog(); UpdateSkydome(); UpdateClouds();

@@ -19,6 +19,7 @@ struct FLightDbcEntry;
 UCLASS()
 class WOWWORLD_API AWowSkyManager : public AActor
 {
+	friend class FLightingDataLifecycle;
 	GENERATED_BODY()
 public:
 	AWowSkyManager();
@@ -112,6 +113,9 @@ private:
 
 	/** Whether we have DBC-driven light data loaded */
 	bool bHasDbcLights = false;
+
+	/** Sky can begin play before the world manager loads the essential DBCs. */
+	bool bLightTablesReady = false;
 
 	/** Whether LightFloatParams loaded */
 	bool bHasFloatParams = false;

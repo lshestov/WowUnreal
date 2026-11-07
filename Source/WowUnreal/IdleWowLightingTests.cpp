@@ -1,5 +1,7 @@
 #include "Misc/AutomationTest.h"
 #include "WowSkyManager.h"
+#include "WowWorldManager.h"
+#include "Formats/Dbc/DbcStore.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "Components/DirectionalLightComponent.h"
@@ -14,6 +16,50 @@
 #include "Coord/WowCoordinate.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLightingDataLifecycle,"WowUnreal.Lighting.LoginAndMapLighting",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FLightingDataLifecycle::RunTest(const FString&)
+{
+    FString Path;
+    if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) {AddError(TEXT("Supply existing -wowdata")); return false;}
+    auto& Dbc=FDbcStore::Get();
+    if(!Dbc.IsLoaded())
+    {
+        FMpqManager Mpq;
+        if(!Mpq.Initialize(Path) || !Dbc.LoadAll(Mpq)) return false;
+    }
+    if(!TestTrue(TEXT("Original client lighting tables are present"),Dbc.Lights().Num()>0 && Dbc.LightIntParams().Num()>0 && Dbc.LightFloatParams().Num()>0)) return false;
+    // Reproduce the real login ordering: sky begins first, essential tables
+    // become available afterwards. Preserve the shared DBC state for all tests.
+    auto SavedLights=MoveTemp(Dbc.Lights()); Dbc.Lights()=FLightDbc();
+    auto SavedInts=MoveTemp(Dbc.LightIntParams()); Dbc.LightIntParams()=FLightIntParamsDbc();
+    auto SavedFloats=MoveTemp(Dbc.LightFloatParams()); Dbc.LightFloatParams()=FLightFloatParamsDbc();
+    auto* World=UWorld::CreateWorld(EWorldType::Game,false);
+    GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+    auto* Sky=World->SpawnActor<AWowSkyManager>();
+    Sky->TimeOfDay=630; Sky->TimeSpeed=0; Sky->DispatchBeginPlay();
+    TestFalse(TEXT("Early login starts with a fallback until tables exist"),Sky->bLightTablesReady || Sky->bHasDbcLights || Sky->bHasFloatParams);
+    Dbc.Lights()=MoveTemp(SavedLights); Dbc.LightIntParams()=MoveTemp(SavedInts); Dbc.LightFloatParams()=MoveTemp(SavedFloats);
+    Sky->Tick(.1f);
+    TestTrue(TEXT("Next sky update adopts the loaded colour and fog bands"),Sky->bLightTablesReady && Sky->bHasDbcLights && Sky->bHasFloatParams);
+    TestEqual(TEXT("Late loading retains the Eastern Kingdoms bands"),Sky->MapLights.Num(),Dbc.Lights().GetByMap(0).Num());
+    TestEqual(TEXT("Lighting refresh preserves the game clock"),Sky->TimeOfDay,630.);
+    auto* Manager=World->SpawnActor<AWowWorldManager>();
+    TestTrue(TEXT("Selecting Kalimdor succeeds"),Manager->SelectMap(1));
+    TestEqual(TEXT("Sky follows the selected terrain map"),Sky->CurrentMapId,1);
+    TestEqual(TEXT("Kalimdor gets its own lighting table"),Sky->MapLights.Num(),Dbc.Lights().GetByMap(1).Num());
+    for(const auto* Light:Sky->MapLights) if(Light->MapID!=1) {AddError(TEXT("Previous map lighting leaked through transfer")); break;}
+    TestEqual(TEXT("Map transfer does not reset the game clock"),Sky->TimeOfDay,630.);
+    // A same-map selection used to return before refreshing an early sky.
+    Sky->LoadLightZones(999999);
+    TestFalse(TEXT("Unknown map has a fallback"),Sky->bHasDbcLights);
+    TestTrue(TEXT("Reselecting the current map succeeds"),Manager->SelectMap(1));
+    TestTrue(TEXT("Same-map login restores authored lighting"),Sky->bHasDbcLights && Sky->CurrentMapId==1);
+    TestTrue(TEXT("Returning to Eastern Kingdoms succeeds"),Manager->SelectMap(0));
+    TestEqual(TEXT("Return transfer restores the original map"),Sky->CurrentMapId,0);
+    World->DestroyWorld(false); GEngine->DestroyWorldContext(World);
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLightingSunCycle,"WowUnreal.Lighting.DayNightAndShadows",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FLightingSunCycle::RunTest(const FString&)
 {
