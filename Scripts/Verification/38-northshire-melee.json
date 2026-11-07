@@ -21,6 +21,7 @@
     {"op":"wait_unit_animation","unit":"player","id":19,"progress":0.22,"timeout":22},
     {"op":"capture","name":"03-staff-swing"},
     {"op":"wait_dead","timeout":75},
+    {"op":"select_last_corpse"},
     {"op":"wait_unit_animation","unit":"target","id":1,"progress":0.2,"timeout":6},
     {"op":"capture","name":"04-wolf-dying"},
     {"op":"wait_unit_animation","unit":"target","id":1,"progress":1,"timeout":8},

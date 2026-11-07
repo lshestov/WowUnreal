@@ -456,6 +456,16 @@ void AWowGameplayController::BindEntityEvents()
 			}
 		});
 
+    ConnectionManager->PacketHandler.OnLootCompleted.AddWeakLambda(this,[this](uint64 Guid)
+    {
+        const auto* Unit=ConnectionManager->PacketHandler.EntityManager.Find(Guid);
+        if(Unit && Unit->IsUnit() && !Unit->IsPlayer() && Unit->GetHealth()==0 &&
+            uint64(ConnectionManager->GetTargetGuid())==Guid)
+        {
+            SetTarget(0);
+        }
+    });
+
 	ConnectionManager->PacketHandler.OnVendorOpened.AddLambda(
 		[this](uint64 VendorGuid, const TArray<FWowVendorItem>& Items)
 		{
@@ -1810,6 +1820,16 @@ void AWowGameplayController::OnEntityDeath(uint64 Guid)
 
 	// Track as dead/lootable
 	DeadEntityGuids.Add(Guid);
+
+    // Deselect the dying creature once; it remains in the world and can be
+    // deliberately selected again for looting. Players remain targetable for
+    // resurrection. The connection owns the newest selection, including Lua
+    // changes that have not yet reached this controller's next tick.
+    if(ConnectionManager && uint64(ConnectionManager->GetTargetGuid())==Guid)
+    {
+        const auto* Unit=ConnectionManager->PacketHandler.EntityManager.Find(Guid);
+        if(Unit && Unit->IsUnit() && !Unit->IsPlayer()) SetTarget(0);
+    }
 
 	// Stop any active spline movement — dead entities don't walk
 	if (ConnectionManager)
@@ -3246,11 +3266,12 @@ void AWowGameplayController::UpdateTargetFrame()
 void AWowGameplayController::SetTarget(uint64 NewTargetGuid, bool bUpdateConnection)
 {
 	uint64 OldTargetGuid = TargetGuid;
+    const uint64 OldConnectionGuid=ConnectionManager?uint64(ConnectionManager->GetTargetGuid()):OldTargetGuid;
 	TargetGuid = NewTargetGuid;
 	if (ConnectionManager && bUpdateConnection) ConnectionManager->SendSetSelection(static_cast<int64>(TargetGuid));
 
 	// Fire target change event
-	if (OldTargetGuid != NewTargetGuid && bUpdateConnection)
+	if ((OldTargetGuid != NewTargetGuid || OldConnectionGuid != NewTargetGuid) && bUpdateConnection)
 	{
 		FireUIEvent(TEXT("PLAYER_TARGET_CHANGED"));
 	}

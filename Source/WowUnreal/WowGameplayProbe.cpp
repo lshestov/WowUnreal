@@ -109,6 +109,7 @@ struct FWowGameplayProbe
     bool bJumpRequested=false,bJumpObserved=false;
     double FailureExitAt=0;
     uint32 LastEquippedItem=0;
+    uint64 LastLivingTargetGuid=0;
     uint64 PendingWorldClick=0;
     bool bWorldClickReleased=false;
     FVector2D SlateClickPoint=FVector2D::ZeroVector;
@@ -484,6 +485,8 @@ struct FWowGameplayProbe
         if (StepStarted==0) { StepStarted=Now; UE_LOG(LogTemp,Log,TEXT("GameplayProbe: step %d %s"),Index,*Op); }
         if (Now-StepStarted>Timeout) { Failure=FString::Printf(TEXT("Step %d timed out: %s"),Index,*Op); Finish(C,false); return; }
         auto& Handler=Connection->PacketHandler;
+        if (const auto* Selected=Handler.EntityManager.FindUnit(C.TargetGuid); Selected && Selected->GetHealth()>0)
+            LastLivingTargetGuid=C.TargetGuid;
         bool Done=false;
         // These fixtures never alter a connected session or server state.
         if(Op.StartsWith(TEXT("offline_")) && (!C.bOfflineUiPreview || Connection->GetState()!=EWowSessionState::Disconnected))
@@ -836,6 +839,12 @@ struct FWowGameplayProbe
             bool IncludeDead=false; Step->TryGetBoolField(TEXT("includeDead"),IncludeDead);
             const uint64 Guid=FindEntry(C,Step->GetIntegerField(TEXT("entry")),IncludeDead);
             if (Guid) { C.SetTarget(Guid); Done=true; }
+        }
+        else if (Op==TEXT("select_last_corpse"))
+        {
+            const auto* Corpse=Handler.EntityManager.FindUnit(LastLivingTargetGuid);
+            if (Corpse && !Corpse->IsPlayer() && Corpse->GetHealth()==0 && C.SpawnedEntityActors.Contains(Corpse->Guid))
+            { C.SetTarget(Corpse->Guid); Done=true; }
         }
         else if (Op==TEXT("click_world_unit") || Op==TEXT("click_world_unit_slate") || Op==TEXT("hover_world_unit"))
         {
@@ -1328,8 +1337,11 @@ struct FWowGameplayProbe
         }
         else if (Op==TEXT("wait_dead"))
         {
-            const auto* Target=Handler.EntityManager.Find(C.TargetGuid); Done=Target && Target->GetHealth()==0;
-            if (!Done) if (const auto* Actor=C.SpawnedEntityActors.Find(C.TargetGuid); Actor && IsValid(*Actor)) Walk(C,(*Actor)->GetActorLocation(),2.5f);
+            // A death now clears the gameplay target. Observe the last living
+            // selection without silently selecting its corpse again.
+            const uint64 Guid=C.TargetGuid ? C.TargetGuid : LastLivingTargetGuid;
+            const auto* Target=Handler.EntityManager.Find(Guid); Done=Target && Target->GetHealth()==0;
+            if (!Done) if (const auto* Actor=C.SpawnedEntityActors.Find(Guid); Actor && IsValid(*Actor)) Walk(C,(*Actor)->GetActorLocation(),2.5f);
         }
         else if (Op==TEXT("wait_loot")) Done=Handler.Loot.Guid==C.TargetGuid;
         else if (Op==TEXT("loot_all")) { C.GameUI->LootAll(); Done=true; }

@@ -237,8 +237,14 @@ void FWowPacketHandler::HandleLootReleaseResponse(FPacketReader& R)
     {PendingLootGuid=0; LastLootErrorGuid=Guid; LastLootError=255; ++LootErrorRevision;}
     if (Released && Guid==Loot.Guid)
     {
+        const bool Completed=Loot.Open && !Loot.Gold &&
+            !Loot.Items.ContainsByPredicate([](const FWowLootItem& Item){return !Item.bLooted;});
         const uint32 Revision=Loot.Revision+1; Loot=FWowLootState(); Loot.Revision=Revision; PendingLootGuid=0;
-        MasterLootGuid=0; MasterLootCandidates.Reset(); ++MasterLootRevision; OnLootClosed.Broadcast();
+        MasterLootGuid=0; MasterLootCandidates.Reset(); ++MasterLootRevision;
+        // Preserve the acknowledged corpse identity after resetting the loot window.
+        // A cancelled/denied/stale release must not deselect a different unit.
+        if(Completed) OnLootCompleted.Broadcast(Guid);
+        OnLootClosed.Broadcast();
     }
 }
 

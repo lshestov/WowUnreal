@@ -27,6 +27,7 @@ DECLARE_MULTICAST_DELEGATE_TwoParams(FOnAttackStart, uint64 /*AttackerGuid*/, ui
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnAttackStop, uint64 /*AttackerGuid*/, uint64 /*VictimGuid*/);
 DECLARE_MULTICAST_DELEGATE_FourParams(FOnLootOpened, uint64 /*LootGuid*/, uint8 /*LootType*/, uint32 /*Gold*/, const TArray<FWowLootItem>& /*Items*/);
 DECLARE_MULTICAST_DELEGATE(FOnLootClosed);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnLootCompleted, uint64 /*LootGuid*/);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnVendorOpened, uint64 /*VendorGuid*/, const TArray<FWowVendorItem>& /*Items*/);
 DECLARE_MULTICAST_DELEGATE(FOnVendorUpdated);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnVendorError,uint8 /*Code*/,bool /*Sale*/);
@@ -411,6 +412,7 @@ public:
     FOnAttackStop OnAttackStop;
     FOnLootOpened OnLootOpened;
     FOnLootClosed OnLootClosed;
+    FOnLootCompleted OnLootCompleted;
     FOnVendorOpened OnVendorOpened;
     FOnVendorUpdated OnVendorUpdated;
     FOnVendorError OnVendorError;
