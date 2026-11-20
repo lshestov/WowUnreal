@@ -100,7 +100,9 @@ void FWowUiCursorRenderer::Tick(lua_State* L)
         if (auto* Widget = Frames.GetWidgetForHandle(Handle))
         {
             Widget->RemoveFromParent();
-            CursorCanvas.AddChildToCanvas(Widget)->SetSize(FVector2D(Def.Width, Def.Height) * Frames.GetUIScale());
+            auto* Slot = CursorCanvas.AddChildToCanvas(Widget);
+            Slot->SetSize(FVector2D(Def.Width, Def.Height) * Frames.GetUIScale());
+            Slot->SetZOrder(MAX_int32);
         }
     }
     // A pointer move must not invalidate the layout of every stock frame.

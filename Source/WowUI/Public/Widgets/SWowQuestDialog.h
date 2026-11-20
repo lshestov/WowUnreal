@@ -34,8 +34,9 @@ public:
     SLATE_END_ARGS()
 
     void Construct(const FArguments& InArgs);
+    virtual void Tick(const FGeometry& AllottedGeometry, double CurrentTime, float DeltaTime) override;
     void SetPresentation(class FWowFrameManager& Frames, const FString& Name, bool bShowTargetPortrait);
-    void PrepareItems(FWowFrameManager& Frames, class UWowConnectionManager* Connection, const FWowQuestDetails& Quest);
+    void PrepareItems(class UWowUIManager& UI, class UWowConnectionManager* Connection, const FWowQuestDetails& Quest);
 
     /** Show quest details dialog (for new quest) */
     void ShowQuestDetails(const FWowQuestDetails& QuestDetails);
@@ -55,15 +56,23 @@ private:
     FSlateBrush Background[4];
     FSlateBrush AutoAcceptBottomRight;
     FSlateBrush PanelHighlight, CloseHighlight, AvailableIcon, ActiveIcon, GossipIcon, Book, GreetingFooter, SectionDivider;
-    FButtonStyle PanelStyle, CloseStyle, RowStyle;
+    FSlateBrush ItemNameFrame, SelectedItemHighlight, MoneyIcons[3];
+    FSlateBrush ScrollKnob, ScrollArrowHighlight[2];
+    FButtonStyle ScrollArrowStyle[2];
+    FButtonStyle PanelStyle, CloseStyle, RowStyle, ItemStyle;
     TSharedRef<SWidget> PanelButton(const FString& Label, FOnClicked Action, float Width = 78.f, bool bClose = false, TAttribute<bool> Enabled = true);
     TSharedRef<SWidget> GossipRow(const FString& Label, const FSlateBrush* Icon, FOnClicked Action, bool bEnabled = true);
-    TSharedRef<SWidget> ItemRow(const FWowQuestRewardItem& Item);
+    enum class EItemGroup { Required, Choice, Fixed };
+    TSharedRef<SWidget> ItemButton(const FWowQuestRewardItem& Item, EItemGroup Group, int32 Index);
+    void AddItemGrid(const TArray<FWowQuestRewardItem>& Items, EItemGroup Group, float Left, float Top);
+    TSharedRef<SWidget> MoneyAmount(uint32 Amount, bool bRequired);
+    FString Label(const TCHAR* Key, const TCHAR* Fallback) const;
     TMap<uint32,TSharedPtr<class FDeferredCleanupSlateBrush>> ItemIcons;
+    TWeakObjectPtr<class UWowUIManager> ItemUI;
     TWeakObjectPtr<class UWowConnectionManager> ItemConnection;
     TSharedRef<class STextBlock> WrappedText(const FString& Text,const FTextBlockStyle& Style,float Width) const;
     TArray<TStrongObjectPtr<UObject>> Artwork;
-    FTextBlockStyle TitleText, BodyText, RowText, CaptionText, RewardNumber;
+    FTextBlockStyle TitleText, BodyText, RowText, CaptionText, RewardNumber, StackNumber, SmallQuestText;
     TSharedPtr<class STextBlock> NpcName;
     TSharedPtr<class SBox> GreetingBlock;
     TSharedPtr<class STextBlock> GreetingText;
@@ -81,6 +90,7 @@ private:
     FWowQuestDetails CurrentQuest;
     bool bUsesGossipFrame = false;
     bool bIsRewardDialog = false;
+    float FontAspect = 1.f;
     int32 SelectedRewardChoice = 0;
 
     FReply OnAcceptClicked();

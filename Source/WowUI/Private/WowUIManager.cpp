@@ -13,6 +13,7 @@
 #include "LuaApi/LuaApiRegistry.h"
 #include "Mpq/MpqManager.h"
 #include "Components/CanvasPanel.h"
+#include "Components/CanvasPanelSlot.h"
 #include "WowEntity.h"
 #include "WowEntityManager.h"
 #include "WowConnectionManager.h"
@@ -481,6 +482,28 @@ void UWowUIManager::SetRootCanvas(UCanvasPanel* Canvas)
 
 		UE_LOG(LogWowUIManager, Log, TEXT("Created bag and character panel UI"));
 	}
+}
+
+void UWowUIManager::RaiseItemTooltips()
+{
+    if (!FrameManager || !CursorCanvas || !RootCanvas) return;
+    // These stock TOOLTIP-strata frames normally share the HUD canvas below
+    // native windows. Both canvases cover the same viewport in UMG units.
+    for (const TCHAR* Name : {TEXT("GameTooltip"), TEXT("ShoppingTooltip1"), TEXT("ShoppingTooltip2"), TEXT("ShoppingTooltip3")})
+    {
+        const int64 Handle = FrameManager->FindFrame(Name);
+        const auto* Frame = FrameManager->GetFrameDef(Handle);
+        auto* Widget = FrameManager->GetWidgetForHandle(Handle);
+        if (!Widget || Widget->GetParent() == CursorCanvas || !Frame || Frame->Parent != TEXT("UIParent")) continue;
+        auto* OldSlot = Cast<UCanvasPanelSlot>(Widget->Slot);
+        if (!OldSlot) continue;
+        const auto Layout = OldSlot->GetLayout();
+        const int32 Order = OldSlot->GetZOrder();
+        Widget->RemoveFromParent();
+        auto* NewSlot = CursorCanvas->AddChildToCanvas(Widget);
+        NewSlot->SetLayout(Layout);
+        NewSlot->SetZOrder(Order);
+    }
 }
 
 void UWowUIManager::ToggleBagWindow()
