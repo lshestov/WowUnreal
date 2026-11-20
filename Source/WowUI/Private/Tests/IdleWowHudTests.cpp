@@ -1757,6 +1757,49 @@ bool FHudMerchantApi::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudQuestItemTooltip,"WowUnreal.Hud.QuestItemTooltip",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudQuestItemTooltip::RunTest(const FString&)
+{
+    FString Path;
+    FMpqManager Mpq;
+    if (!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path) || !Mpq.Initialize(Path)) return false;
+    auto& Dbc = FDbcStore::Get();
+    if (!Dbc.IsLoaded()) Dbc.LoadAll(Mpq);
+    if (!Dbc.IsDeferredLoaded()) Dbc.LoadDeferred(Mpq);
+    FHudFixture F;
+    TStrongObjectPtr<UWowConnectionManager> Connection(NewObject<UWowConnectionManager>());
+    auto& Handler = Connection->PacketHandler;
+    F.Context.ConnectionManager = Connection.Get();
+    F.Context.EntityManager = &Handler.EntityManager;
+    FWowItemTemplate Gloves;
+    Gloves.Id=6171; Gloves.Name=TEXT("Wolf Handler Gloves"); Gloves.Class=4; Gloves.Subclass=2;
+    Gloves.InventoryType=10; Gloves.Armor=21; Gloves.MaxDurability=16; Gloves.Bonding=1;
+    Handler.ItemTemplates.Add(Gloves.Id,Gloves);
+    FWowItemTemplate Meat;
+    Meat.Id=750; Meat.Name=TEXT("Tough Wolf Meat"); Meat.Class=12; Meat.Bonding=4;
+    Handler.ItemTemplates.Add(Meat.Id,Meat);
+    F.Lua.ExecuteString(TEXT("INVTYPE_HAND='Hands'; ARMOR_TEMPLATE='Armor: %d'; DURABILITY_TEMPLATE='%2$d max / %1$d current'; QuestTip=CreateFrame('GameTooltip','QuestTip',UIParent)"));
+    const int64 Handle = F.Frames.FindFrame(TEXT("QuestTip"));
+    auto* State = F.Frames.GetTooltipState(Handle);
+    if (!TestNotNull(TEXT("FrameXML created the item tooltip"),State)) return false;
+    auto HasLine = [&](const TCHAR* Text) { return State->Lines.ContainsByPredicate([Text](const auto& Line) { return Line.Text==Text; }); };
+    WowLuaApi::ShowQuestItemTooltip(F.Lua.GetState(),Handle,Gloves.Id);
+    TestTrue(TEXT("Preview uses the server bind rule, localized armor and mint durability"),HasLine(TEXT("Binds when picked up")) && HasLine(TEXT("Armor: 21")) && HasLine(TEXT("16 max / 16 current")));
+    TestTrue(TEXT("Equipped slot and localized armor subclass share one row"),State->DoubleLines.Num()==1
+        && State->DoubleLines[0].LeftText==TEXT("Hands") && State->DoubleLines[0].RightText==TEXT("Leather"));
+    WowLuaApi::ShowQuestItemTooltip(F.Lua.GetState(),Handle,Meat.Id);
+    TestTrue(TEXT("Quest reagent has its quest marker without equipment or durability"),State->GetTotalLines()==2 && HasLine(TEXT("Quest Item")) && State->ItemId==Meat.Id);
+    Handler.EntityManager.LocalPlayerGuid=1;
+    auto& Player = Handler.EntityManager.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER);
+    const uint64 Guid=0x4000000000000011ULL;
+    auto& Item=Handler.EntityManager.PromoteToTyped(Guid,WowTypeMask::OBJECT|WowTypeMask::ITEM);
+    Item.Entry=Gloves.Id; Item.SetField(ItemField::FLAGS,1); Item.SetField(ItemField::DURABILITY,3); Item.SetField(ItemField::MAX_DURABILITY,16);
+    Player.SetField(PlayerField::INV_SLOT_HEAD+18,uint32(Guid & MAX_uint32)); Player.SetField(PlayerField::INV_SLOT_HEAD+19,uint32(Guid>>32));
+    TestTrue(TEXT("Equipped gloves show binding and wear from the actual instance"),
+        F.Lua.ExecuteString(TEXT("assert(QuestTip:SetInventoryItem('player',10))")) && HasLine(TEXT("Soulbound")) && HasLine(TEXT("16 max / 3 current")) && !HasLine(TEXT("Binds when picked up")));
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudItemComparison,"WowUnreal.Hud.ItemComparison",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FHudItemComparison::RunTest(const FString&)
 {

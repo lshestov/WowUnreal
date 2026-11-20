@@ -330,31 +330,94 @@ int PushStats(lua_State* L,const TMap<FString,float>& Values,int32 OptionalTable
     for(const auto& Stat:Values) if(!FMath::IsNearlyZero(Stat.Value)) { lua_pushnumber(L,Stat.Value); lua_setfield(L,-2,TCHAR_TO_UTF8(*Stat.Key)); }
     return 1;
 }
-void ItemTooltip(lua_State* L,FWowLuaContext* C,int64 H,const FWowItemTemplate* T,uint32 Id,const FWowItemEntity* Item=nullptr,bool Compare=false)
+enum class EItemTooltipView { Standard, Comparison, QuestPreview };
+
+FString ItemBinding(lua_State* L, const FWowItemTemplate& Data, const FWowItemEntity* Instance)
+{
+    const bool bBound = Instance && (Instance->GetItemFlags() & 1u);
+    if (Data.Bonding == 4 || Data.Bonding == 5) return Localized(L,TEXT("ITEM_BIND_QUEST"),TEXT("Quest Item"));
+    if (Data.Class == 10) return {}; // Currency items do not display binding.
+    if ((Data.Flags & 0x08000000u) && (bBound || Data.Bonding))
+        return bBound ? Localized(L,TEXT("ITEM_ACCOUNTBOUND"),TEXT("Account Bound")) : Localized(L,TEXT("ITEM_BIND_TO_ACCOUNT"),TEXT("Binds to account"));
+    if (bBound) return Localized(L,TEXT("ITEM_SOULBOUND"),TEXT("Soulbound"));
+    switch (Data.Bonding)
+    {
+    case 1: return Localized(L,TEXT("ITEM_BIND_ON_PICKUP"),TEXT("Binds when picked up"));
+    case 2: return Localized(L,TEXT("ITEM_BIND_ON_EQUIP"),TEXT("Binds when equipped"));
+    case 3: return Localized(L,TEXT("ITEM_BIND_ON_USE"),TEXT("Binds when used"));
+    default: return {};
+    }
+}
+
+FString ItemTooltipNumbers(lua_State* L, const TCHAR* Key, const TCHAR* Fallback, std::initializer_list<uint32> Values)
+{
+    FString Pattern = Localized(L,Key,Fallback);
+    int32 Index = 1;
+    for (uint32 Value : Values)
+    {
+        const FString Digits = FString::Printf(TEXT("%u"),Value);
+        const FString Positional = FString::Printf(TEXT("%%%d$d"),Index++);
+        if (Pattern.ReplaceInline(*Positional,*Digits) == 0)
+        {
+            const int32 Offset = Pattern.Find(TEXT("%d"));
+            if (Offset != INDEX_NONE) Pattern = Pattern.Left(Offset) + Digits + Pattern.Mid(Offset + 2);
+        }
+    }
+    return Pattern;
+}
+
+void ItemTooltip(lua_State* L,FWowLuaContext* C,int64 H,const FWowItemTemplate* T,uint32 Id,const FWowItemEntity* Item=nullptr,EItemTooltipView View=EItemTooltipView::Standard)
 {
     auto* F=C->FrameManager; F->TooltipClearLines(H);
     auto* State=F->GetTooltipState(H); State->ItemLink=Link(T,Id); State->ItemId=Id; State->ItemName=T?T->Name:TEXT("Retrieving item information...");
-    if(Compare) F->TooltipAddLine(H,Localized(L,TEXT("CURRENTLY_EQUIPPED"),TEXT("Currently Equipped")),1,.82f,0,false);
+    if(View==EItemTooltipView::Comparison) F->TooltipAddLine(H,Localized(L,TEXT("CURRENTLY_EQUIPPED"),TEXT("Currently Equipped")),1,.82f,0,false);
     const FLinearColor Color=Quality(T?T->Quality:1);
     F->TooltipAddLine(H,T?T->Name:TEXT("Retrieving item information..."),Color.R,Color.G,Color.B,false);
     if(T)
     {
+        if (Item || View == EItemTooltipView::QuestPreview)
+        {
+            const FString Binding = ItemBinding(L,*T,Item);
+            if (!Binding.IsEmpty()) F->TooltipAddLine(H,Binding,1,1,1,false);
+        }
+        if (View == EItemTooltipView::QuestPreview && T->InventoryType)
+        {
+            const FString Slot = Localized(L,EquipType(T->InventoryType),FString());
+            const auto* Subclass = FDbcStore::Get().ItemUi().SubclassName(T->Class,T->Subclass);
+            if (!Slot.IsEmpty())
+            {
+                if (T->InventoryType != 16 && (T->Class == 2 || (T->Class == 4 && T->Subclass)) && Subclass && !Subclass->IsEmpty())
+                    F->TooltipAddDoubleLine(H,Slot,*Subclass,1,1,1,1,1,1);
+                else F->TooltipAddLine(H,Slot,1,1,1,false);
+            }
+        }
         if(T->DamageMax>0)
         {
             F->TooltipAddDoubleLine(H,FString::Printf(TEXT("%.0f - %.0f Damage"),T->DamageMin,T->DamageMax),FString::Printf(TEXT("Speed %.2f"),T->Delay/1000.f),1,1,1,1,1,1);
             if(T->Delay) F->TooltipAddLine(H,FString::Printf(TEXT("(%.1f damage per second)"),(T->DamageMin+T->DamageMax)*500.f/T->Delay),1,1,1,false);
         }
-        if(T->Armor) F->TooltipAddLine(H,FString::Printf(TEXT("%u %s"),T->Armor,*StatLabel(L,TEXT("RESISTANCE0_NAME"))),1,1,1,false);
+        if(T->Armor) F->TooltipAddLine(H,ItemTooltipNumbers(L,TEXT("ARMOR_TEMPLATE"),TEXT("%d Armor"),{T->Armor}),1,1,1,false);
         for(const auto& Stat:T->Stats) if(const auto Key=StatKey(Stat.Key); !Key.IsEmpty()) F->TooltipAddLine(H,FString::Printf(TEXT("%+d %s"),Stat.Value,*StatLabel(L,Key)),1,1,1,false);
         if(T->RequiredLevel>1) F->TooltipAddLine(H,FString::Printf(TEXT("Requires Level %u"),T->RequiredLevel),1,1,1,false);
         if(!T->Description.IsEmpty()) F->TooltipAddLine(H,T->Description,1,.82f,0,true);
         if(T->UseSpellId) { const auto* P=C->EntityManager?C->EntityManager->GetLocalPlayer():nullptr; const auto Text=F->DescribeSpell(T->UseSpellId,P?P->GetLevel():1); if(!Text.IsEmpty()) F->TooltipAddLine(H,TEXT("Use: ")+Text,0,1,0,true); }
-        if(Item && Item->GetField(ItemField::MAX_DURABILITY)) F->TooltipAddLine(H,FString::Printf(TEXT("Durability %u / %u"),Item->GetField(ItemField::DURABILITY),Item->GetField(ItemField::MAX_DURABILITY)),1,1,1,false);
+        const uint32 Maximum = Item ? Item->GetField(ItemField::MAX_DURABILITY) : View == EItemTooltipView::QuestPreview ? T->MaxDurability : 0;
+        if (Maximum)
+        {
+            const uint32 Current = Item ? Item->GetField(ItemField::DURABILITY) : Maximum;
+            F->TooltipAddLine(H,ItemTooltipNumbers(L,TEXT("DURABILITY_TEMPLATE"),TEXT("Durability %d / %d"),{Current,Maximum}),1,1,1,false);
+        }
     }
     F->SetFrameVisible(H,true);
 }
 }
 const FWowItemTemplate* WowLuaApi::QueryItemTemplate(FWowLuaContext* C,uint32 Id) { return Template(C,Id); }
+void WowLuaApi::ShowQuestItemTooltip(lua_State* L, int64 H, uint32 Id)
+{
+    auto* C = GetContext(L);
+    if (C && C->FrameManager && Id && C->FrameManager->GetTooltipState(H))
+        ItemTooltip(L,C,H,Template(C,Id),Id,nullptr,EItemTooltipView::QuestPreview);
+}
 FString WowLuaApi::ItemLinkForUi(FWowLuaContext* C,uint32 Id) { return Link(Template(C,Id),Id); }
 FString WowLuaApi::ItemIconForUi(FWowLuaContext* C,uint32 Id,uint32 Display)
 {
@@ -511,7 +574,7 @@ int WowLuaApi::SetHyperlinkCompareItem(lua_State* L)
     else for(int32 Slot=0;Slot<19;++Slot) if(Mask&(1u<<Slot)) if(auto* Item=Equipped(C,Slot+1)) Candidates.Add(Item);
     if(!Candidates.IsValidIndex(Index)) return Fail();
     auto* Item=Candidates[Index]; const auto* Current=Template(C,Item->Entry); if(!Current) return Fail();
-    ItemTooltip(L,C,H,Current,Item->Entry,Item,true);
+    ItemTooltip(L,C,H,Current,Item->Entry,Item,EItemTooltipView::Comparison);
     if(lua_istable(L,5))
     {
         lua_getfield(L,5,"__handle"); const auto* Source=C->FrameManager->GetTooltipState(lua_tointeger(L,-1)); lua_pop(L,1);
@@ -659,6 +722,7 @@ void WowLuaApi::RegisterItemApi(lua_State*) {}
 int WowLuaApi::SetBagItemTooltip(lua_State*) { return 0; }
 int WowLuaApi::SetInventoryItemTooltip(lua_State*) { return 0; }
 int WowLuaApi::SetHyperlinkTooltip(lua_State*) { return 0; }
+void WowLuaApi::ShowQuestItemTooltip(lua_State*,int64,uint32) {}
 int WowLuaApi::SetHyperlinkCompareItem(lua_State*) { return 0; }
 void WowLuaApi::UpdateItemComparisons(lua_State*) {}
 int WowLuaApi::TryOnItem(lua_State*) { return 0; }

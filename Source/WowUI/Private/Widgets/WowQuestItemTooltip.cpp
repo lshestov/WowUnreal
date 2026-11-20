@@ -1,5 +1,6 @@
 #include "WowQuestItemTooltip.h"
 #include "WowUIManager.h"
+#include "LuaApi/LuaApiRegistry.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/World.h"
 #include "Widgets/SViewport.h"
@@ -22,8 +23,10 @@ void WowQuestItemTooltip::Show(UWowUIManager& UI, uint32 ItemId, const FGeometry
         "local a = IdleWowQuestItemAnchor or CreateFrame('Frame','IdleWowQuestItemAnchor',UIParent) "
         "a:Hide() a:ClearAllPoints() a:SetPoint('TOPLEFT',UIParent,'TOPLEFT',%.8f * UIParent:GetWidth(),-%.8f * UIParent:GetHeight()) "
         "a:SetSize(%.8f * UIParent:GetWidth(),%.8f * UIParent:GetHeight()) "
-        "GameTooltip:SetOwner(a,'ANCHOR_RIGHT') GameTooltip:SetHyperlink('item:%u') GameTooltip:Show()"),
-        Start.X, Start.Y, End.X-Start.X, End.Y-Start.Y, ItemId), TEXT("=QuestItemTooltip"));
+        "GameTooltip:SetOwner(a,'ANCHOR_RIGHT')"),
+        Start.X, Start.Y, End.X-Start.X, End.Y-Start.Y), TEXT("=QuestItemTooltip"));
+    if (auto* Frames = UI.GetFrameManager())
+        WowLuaApi::ShowQuestItemTooltip(UI.GetLuaVM()->GetState(),Frames->FindFrame(TEXT("GameTooltip")),ItemId);
 }
 
 void WowQuestItemTooltip::Hide(UWowUIManager& UI)

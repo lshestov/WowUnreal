@@ -164,6 +164,7 @@ namespace WowLuaApi
     int SetBagItemTooltip(lua_State* L);
     int SetInventoryItemTooltip(lua_State* L);
     int SetHyperlinkTooltip(lua_State* L);
+    void ShowQuestItemTooltip(lua_State* L, int64 Handle, uint32 ItemId);
     int SetHyperlinkCompareItem(lua_State* L);
     void UpdateItemComparisons(lua_State* L);
     int TryOnItem(lua_State* L);

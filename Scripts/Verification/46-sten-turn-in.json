@@ -57,6 +57,7 @@
     {"op":"wait_dialog_text","text":"Wolf Handler Gloves","timeout":8},
     {"op":"dialog_button","text":"Wolf Handler Gloves","label":"choose-second-reward","click":true,"nativeMouse":true,"timeout":8},
     {"op":"lua_wait","condition":"GameTooltip:IsShown() and GameTooltip:IsOwned(IdleWowQuestItemAnchor) and GameTooltip:GetItem()=='Wolf Handler Gloves'","timeout":8},
+    {"op":"lua","code":"local lines={} for i=1,GameTooltip:NumLines() do for _,side in ipairs({'Left','Right'}) do local fs=_G['GameTooltipText'..side..i]; if fs and fs:IsShown() then lines[fs:GetText() or '']=true end end end assert(lines[ITEM_BIND_ON_PICKUP] and lines[INVTYPE_HAND] and lines['Leather'] and lines['21 Armor'] and lines['Durability 16 / 16'],'Missing stock reward item details')"},
     {"op":"wait_dialog_text","text":"Complete Quest","enabled":true,"timeout":8},
     {"op":"check_quest_item_layout","label":"reward-grid-after-choice","items":[719,6171,2547],"selected":1,"timeout":8},
     {"op":"capture","name":"03b-wolf-handler-gloves-selected"},
