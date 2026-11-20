@@ -1182,7 +1182,7 @@ struct FWowGameplayProbe
         else if (Op==TEXT("time"))
         {
             if (auto* Sky=Cast<AWowSkyManager>(UGameplayStatics::GetActorOfClass(C.GetWorld(),AWowSkyManager::StaticClass())))
-            { Sky->TimeOfDay=FMath::Clamp(float(Step->GetNumberField(TEXT("minutes"))),0.f,1439.9f); Sky->TimeSpeed=0; Done=true; }
+            { Sky->FreezeTime(Step->GetNumberField(TEXT("minutes"))); Done=true; }
         }
         else if (Op==TEXT("profile"))
         {

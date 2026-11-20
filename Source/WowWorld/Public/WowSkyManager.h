@@ -10,6 +10,7 @@ class UExponentialHeightFogComponent;
 class UStaticMeshComponent;
 class UMaterialInstanceDynamic;
 class UPointLightComponent;
+class UPostProcessComponent;
 struct FLightDbcEntry;
 
 /**
@@ -48,6 +49,9 @@ public:
 	int32 CurrentMapId = 0;
 
 	double GetTimeOfDay() const { return TimeOfDay; }
+	void ApplyRealmTime(double Minutes, float MinutesPerSecond);
+	void ResetRealmTime();
+	void FreezeTime(double Minutes);
 	static FRotator SunRotationForTime(double Minutes);
 	static float HorizonWeight(float Altitude);
 
@@ -55,11 +59,18 @@ public:
 	void LoadLightZones(int32 MapId);
 
 private:
+	TOptional<double> LastRealmClockTick;
+	bool bTimeOverride = false;
 	float EnvironmentElapsed=.1f;
 	TArray<TWeakObjectPtr<AActor>> LightingSubjects;
 	TMap<TWeakObjectPtr<AActor>,TWeakObjectPtr<UPointLightComponent>> UnitLights;
 	int32 LightingCursor=0;
 	float SubjectRefresh=0;
+	float CharacterAmbientScale = 1.f;
+	float TargetCharacterAmbientScale = 1.f;
+	FLinearColor OutdoorAmbientBand = FLinearColor::Black;
+	UPROPERTY()
+	TObjectPtr<UPostProcessComponent> WorldColor;
 	void UpdateInteriorUnits(float DeltaTime);
 	UPROPERTY()
 	TObjectPtr<UDirectionalLightComponent> SunLight;
@@ -132,8 +143,8 @@ private:
 		LP_SkyBand2 = 5,
 		LP_SkySmogColor = 6,
 		LP_SkyFogColor = 7,
-		LP_SunColor = 8,
-		LP_SunHaloColor = 9,
+		LP_ShadowOpacity = 8,
+		LP_SunColor = 9,
 		LP_MAX = 18
 	};
 

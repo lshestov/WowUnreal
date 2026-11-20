@@ -21,6 +21,7 @@ bool FAreaTableDbc::Load(const FDbcParser& Parser)
         E.AreaLevel    = static_cast<int32>(Parser.GetUInt(i, 10));
         E.Name         = Parser.GetString(i, 11);
         E.Team         = Parser.GetUInt(i, 28);
+        E.AmbientMultiplier = Parser.GetFloat(i, 34);
         IdIndex.Add(E.ID, Entries.Num());
         Entries.Add(MoveTemp(E));
     }
@@ -33,4 +34,12 @@ const FAreaTableDbcEntry* FAreaTableDbc::GetById(uint32 ID) const
 {
     const int32* Idx = IdIndex.Find(ID);
     return Idx ? &Entries[*Idx] : nullptr;
+}
+
+float FAreaTableDbc::GetCharacterAmbientScale(uint32 AreaId) const
+{
+    const FAreaTableDbcEntry* Area = GetById(AreaId);
+    if (Area && Area->ParentAreaID && !(Area->Flags & 0x2000))
+        Area = GetById(Area->ParentAreaID);
+    return Area ? 1.f + 2.f * Area->AmbientMultiplier : 1.f;
 }

@@ -11,6 +11,7 @@
 #include "WowGameUI.h"
 #include "WowEventSystem.h"
 #include "WowWorldManager.h"
+#include "WowSkyManager.h"
 #include "WowLoginController.h"
 #include "WowAudioManager.h"
 #include "WowCharacterBuilder.h"
@@ -322,6 +323,9 @@ void AWowGameplayController::BindEntityEvents()
 	// Listen for login verify world — teleport pawn to spawn position
 	ConnectionManager->PacketHandler.OnLoginVerifyWorld.AddUObject(
 		this, &AWowGameplayController::OnLoginVerifyWorld);
+	ConnectionManager->PacketHandler.OnRealmClockChanged.RemoveAll(this);
+	ConnectionManager->PacketHandler.OnRealmClockChanged.AddUObject(this, &AWowGameplayController::OnRealmClockChanged);
+	OnRealmClockChanged(); // Login packets may have arrived before the gameplay controller.
 
 	// Listen for teleport requests from server
 	ConnectionManager->PacketHandler.OnTeleportRequest.AddUObject(
@@ -695,6 +699,16 @@ void AWowGameplayController::BindEntityEvents()
 
 	// Initialize managers once connection is established
 	InitializeManagers();
+}
+
+void AWowGameplayController::OnRealmClockChanged()
+{
+	if (!ConnectionManager) return;
+	auto* Sky = Cast<AWowSkyManager>(UGameplayStatics::GetActorOfClass(this, AWowSkyManager::StaticClass()));
+	if (!Sky) return;
+	const auto& Clock = ConnectionManager->PacketHandler.RealmClock;
+	if (Clock.IsSet()) Sky->ApplyRealmTime(Clock->MinutesAt(FPlatformTime::Seconds()), Clock->MinutesPerSecond);
+	else Sky->ResetRealmTime();
 }
 
 void AWowGameplayController::OnLoginVerifyWorld(uint32 MapId, float X, float Y, float Z, float Orientation)

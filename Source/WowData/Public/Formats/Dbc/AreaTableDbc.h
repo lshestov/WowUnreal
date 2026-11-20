@@ -15,6 +15,7 @@ struct FAreaTableDbcEntry
     int32  AreaLevel;       // 10
     FString Name;           // 11 (localized, enUS)
     uint32 Team;            // 28: faction group mask (2=Alliance, 4=Horde)
+    float AmbientMultiplier = 0.f; // 34: area-specific character lighting
 };
 
 class WOWDATA_API FAreaTableDbc
@@ -22,6 +23,7 @@ class WOWDATA_API FAreaTableDbc
 public:
     bool Load(const FDbcParser& Parser);
     const FAreaTableDbcEntry* GetById(uint32 ID) const;
+    float GetCharacterAmbientScale(uint32 AreaId) const;
     const TArray<FAreaTableDbcEntry>& GetAll() const { return Entries; }
     int32 Num() const { return Entries.Num(); }
 

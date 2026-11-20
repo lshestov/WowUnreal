@@ -182,3 +182,25 @@ files against the installation, and three identical executable SHA256 values:
 The source is published and clean, no overlays are applied, all clients are
 closed. Verification used no server login, database operation or user
 character. The final plan/documentation update does not change runtime inputs.
+
+## Realm time and outdoor lighting
+
+The sky and Lua `GetGameTime()` follow the time and rate in
+`SMSG_LOGIN_SETTIMESPEED`. The login handler caches the clock so it can also
+be applied when the gameplay controller binds after the packet arrives.
+Screenshot routes can freeze the sky independently.
+
+Build 12340 uses a fixed light azimuth and varies its elevation between 20
+and 37 degrees. The visible sun and moon have their own paths. LightIntBand
+supplies diffuse, ambient and shadow opacity. The client applies ambient
+through a uniform cubemap. It converts the authored colours to linear light
+at two reference points, full shade and a horizontal surface in direct
+light. UE interpolates the light for other surface normals. Characters also
+use the area ambient multiplier, which Coldridge Valley inherits from Dun
+Morogh. The streamed world uses an SDR colour response.
+
+`Scripts/Verification/47-world-ambient.json` captures the player at Sten
+Stoutarm, Northshire Abbey and the nearby wolf field in the evening and at
+noon. The evening minutes and positions match captures from build 12340
+at display gamma 1.0. `45-world-exposure.json` adds fixed views of snow
+at sunset and midnight and an indoor comparison.

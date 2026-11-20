@@ -224,6 +224,7 @@ private:
 
     // Server position sync
     void OnLoginVerifyWorld(uint32 MapId, float X, float Y, float Z, float Orientation);
+    void OnRealmClockChanged();
     void OnEntityUpdated(const FWowEntity& Entity);
 
     // Teleport handling

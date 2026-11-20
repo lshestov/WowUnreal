@@ -1318,13 +1318,17 @@ static int L_GetServerTime(lua_State* L)
 
 static int L_GetGameTime(lua_State* L)
 {
-    // Return hours, minutes for in-game time
-    // For now, just use real time
-    time_t RawTime;
-    time(&RawTime);
-    struct tm* TimeInfo = localtime(&RawTime);
-    lua_pushnumber(L, TimeInfo->tm_hour);
-    lua_pushnumber(L, TimeInfo->tm_min);
+    int32 Minutes = 0;
+    const auto* Context = WowLuaApi::GetContext(L);
+    if (Context && Context->ConnectionManager && Context->ConnectionManager->PacketHandler.RealmClock.IsSet())
+        Minutes = FMath::FloorToInt(Context->ConnectionManager->PacketHandler.RealmClock->MinutesAt(FPlatformTime::Seconds()));
+    else
+    {
+        const FDateTime Now = FDateTime::Now();
+        Minutes = Now.GetHour() * 60 + Now.GetMinute();
+    }
+    lua_pushnumber(L, Minutes / 60);
+    lua_pushnumber(L, Minutes % 60);
     return 2;
 }
 

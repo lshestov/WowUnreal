@@ -38,6 +38,7 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(WowOpcode::SMSG_LOOT_REMOVED, &FWowPacketHandler::HandleLootRemoved);
     Handlers.Add(WowOpcode::SMSG_LOOT_CLEAR_MONEY, &FWowPacketHandler::HandleLootClearMoney);
     Handlers.Add(WowOpcode::SMSG_LOGIN_VERIFY_WORLD,      &FWowPacketHandler::HandleLoginVerifyWorld);
+    Handlers.Add(WowOpcode::SMSG_LOGIN_SETTIMESPEED,      &FWowPacketHandler::HandleLoginSetTimeSpeed);
     Handlers.Add(WowOpcode::SMSG_UPDATE_OBJECT,            &FWowPacketHandler::HandleUpdateObject);
     Handlers.Add(WowOpcode::SMSG_COMPRESSED_UPDATE_OBJECT, &FWowPacketHandler::HandleCompressedUpdateObject);
     Handlers.Add(WowOpcode::SMSG_DESTROY_OBJECT,           &FWowPacketHandler::HandleDestroyObject);
@@ -287,6 +288,31 @@ void FWowPacketHandler::HandlePacket(uint16 Opcode, const TArray<uint8>& Data)
 
     // Notify subscribers (EventSystem wires this to fire WoW UI events)
     OnOpcodeReceived.Broadcast(Opcode);
+}
+
+void FWowPacketHandler::ResetRealmClock()
+{
+    if (RealmClock.IsSet())
+    {
+        RealmClock.Reset();
+        OnRealmClockChanged.Broadcast();
+    }
+}
+
+void FWowPacketHandler::HandleLoginSetTimeSpeed(FPacketReader& R)
+{
+    if (!R.CanRead(12)) return;
+    const uint32 PackedTime = R.ReadU32();
+    const float Speed = R.ReadFloat();
+    R.ReadU32(); // Server time zone. The packed hours and minutes are already realm-local.
+    const int32 Hour = (PackedTime >> 6) & 31;
+    const int32 Minute = PackedTime & 63;
+    if (Hour >= 24 || Minute >= 60 || !FMath::IsFinite(Speed)) return;
+
+    RealmClock = FWowRealmClock{Hour * 60 + Minute, FMath::Clamp(Speed, 1.f / 60.f, 60.f), FPlatformTime::Seconds()};
+    UE_LOG(LogWowPacket, Log, TEXT("Realm clock received: %02d:%02d (%.7f game minutes per second)"),
+        Hour, Minute, RealmClock->MinutesPerSecond);
+    OnRealmClockChanged.Broadcast();
 }
 
 // ── SMSG_LOGIN_VERIFY_WORLD ──────────────────────────────────────────────────

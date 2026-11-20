@@ -79,6 +79,7 @@ namespace WowOpcode
     inline constexpr uint16 SMSG_AUTH_RESPONSE           = 0x01EE;
     inline constexpr uint16 SMSG_COMPRESSED_UPDATE_OBJECT = 0x01F6;
     inline constexpr uint16 SMSG_ACCOUNT_DATA_TIMES      = 0x0209;
+    inline constexpr uint16 SMSG_LOGIN_SETTIMESPEED      = 0x0042;
     inline constexpr uint16 SMSG_LOGIN_VERIFY_WORLD      = 0x0236;
     inline constexpr uint16 SMSG_ADDON_INFO              = 0x02EF;
     inline constexpr uint16 SMSG_WARDEN_DATA             = 0x02E6;

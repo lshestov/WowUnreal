@@ -1,7 +1,9 @@
 #include "WowSkyManager.h"
+#include "WowWorldManager.h"
 #include "WowWmoArea.h"
 #include "WowWmoLighting.h"
 #include "Components/PointLightComponent.h"
+#include "Components/PostProcessComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/MeshComponent.h"
 #include "EngineUtils.h"
@@ -20,6 +22,8 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/Material.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/TextureCube.h"
+#include "TextureResource.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "MeshDescription.h"
 #include "StaticMeshAttributes.h"
@@ -34,6 +38,13 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowSky, Log, All);
 
+// LightIntBand contains display-space RGB. The stock renderer combines those
+// bytes before modulating the texture. UE samples the same BLP in linear space.
+static FLinearColor DecodeLightingBand(const FLinearColor& Band)
+{
+    return FLinearColor::FromSRGBColor(Band.ToFColor(false));
+}
+
 void AWowSkyManager::EndPlay(const EEndPlayReason::Type Reason)
 {
     for(auto& Pair:UnitLights) if(Pair.Value.IsValid()) Pair.Value->DestroyComponent();
@@ -43,10 +54,15 @@ void AWowSkyManager::EndPlay(const EEndPlayReason::Type Reason)
 void AWowSkyManager::UpdateInteriorUnits(float DeltaTime)
 {
     SubjectRefresh-=DeltaTime;
-    const APawn* Pawn=UGameplayStatics::GetPlayerPawn(this,0); if(!Pawn) return;
+    const APawn* Pawn=UGameplayStatics::GetPlayerPawn(this,0);
+    if(!Pawn) {WorldColor->bEnabled=false; return;}
     const FVector Focus=Pawn->GetActorLocation();
     if(SubjectRefresh<=0)
     {
+        const auto* Manager = Cast<AWowWorldManager>(UGameplayStatics::GetActorOfClass(this, AWowWorldManager::StaticClass()));
+        WorldColor->bEnabled = Manager && Manager->bStreamingEnabled;
+        if (Manager)
+            TargetCharacterAmbientScale = FDbcStore::Get().AreaTable().GetCharacterAmbientScale(Manager->GetAreaAt(Focus));
         SubjectRefresh=1; LightingSubjects.Reset(); LightingCursor=0;
         for(TActorIterator<AActor> It(GetWorld());It;++It)
         {
@@ -59,13 +75,20 @@ void AWowSkyManager::UpdateInteriorUnits(float DeltaTime)
         for(auto It=UnitLights.CreateIterator();It;++It) if(!It.Key().IsValid() || !LightingSubjects.Contains(It.Key()))
             {if(It.Value().IsValid()) It.Value()->DestroyComponent(); It.RemoveCurrent();}
     }
+    CharacterAmbientScale = FMath::Lerp(CharacterAmbientScale, TargetCharacterAmbientScale, FMath::Min(DeltaTime, 1.f));
+    const FLinearColor AreaFill = bHasDbcLights
+        ? DecodeLightingBand(OutdoorAmbientBand * CharacterAmbientScale) - DecodeLightingBand(OutdoorAmbientBand)
+        : FLinearColor::Black;
     for(int32 N=0;N<FMath::Min(16,LightingSubjects.Num());++N)
     {
         if(LightingCursor>=LightingSubjects.Num()) LightingCursor=0;
         auto Subject=LightingSubjects[LightingCursor++]; if(!Subject.IsValid()) continue;
         const auto Room=UWowWmoAreaComponent::Locate(GetWorld(),Subject->GetActorLocation()+FVector(0,0,20),CurrentMapId);
         const float Blend=Room.Indoors?1.f-Room.OutdoorLight:0.f;
-        const FLinearColor Ambient=FWowWmoLighting::UnitAmbient(Room.Lighting)*Blend;
+        // The skylight already supplies outdoor ambient. Add only the area's
+        // character-specific increase to the material, including at portals.
+        const FLinearColor RoomAmbient = (FWowWmoLighting::UnitAmbient(Room.Lighting) * CharacterAmbientScale).GetClamped();
+        const FLinearColor Ambient = FMath::Lerp(AreaFill, RoomAmbient, Blend);
         TInlineComponentArray<UMeshComponent*> Meshes(Subject.Get());
         for(auto* Mesh:Meshes) for(int32 I=0;I<Mesh->GetNumMaterials();++I)
             if(auto* Material=Cast<UMaterialInstanceDynamic>(Mesh->GetMaterial(I))) Material->SetVectorParameterValue(TEXT("WowInteriorAmbient"),Ambient);
@@ -94,6 +117,19 @@ AWowSkyManager::AWowSkyManager()
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.TickInterval = 0; // Celestial shadow direction follows every frame.
 	SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("SkyRoot")));
+	// World textures were authored for an SDR display. A filmic toe crushes
+	// dark grass even with the correct lights; its shoulder desaturates snow.
+	WorldColor = CreateDefaultSubobject<UPostProcessComponent>(TEXT("WorldColor"));
+	WorldColor->SetupAttachment(GetRootComponent());
+	WorldColor->bUnbound = true;
+	WorldColor->bEnabled = false;
+	WorldColor->Priority = 1.f;
+	WorldColor->Settings.bOverride_ToneCurveAmount = true;
+	WorldColor->Settings.ToneCurveAmount = 0.f;
+	WorldColor->Settings.bOverride_ExpandGamut = true;
+	WorldColor->Settings.ExpandGamut = 0.f;
+	WorldColor->Settings.bOverride_BlueCorrection = true;
+	WorldColor->Settings.BlueCorrection = 0.f;
 }
 
 void AWowSkyManager::BeginPlay()
@@ -136,11 +172,21 @@ void AWowSkyManager::BeginPlay()
 	SkyAtmosphere->RegisterComponent();
 	SkyAtmosphere->AttachToComponent(GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
 
-	// Create sky light for ambient
+	// LightIntBand supplies irradiance directly. A uniform white source applies
+	// that ambient to every normal, including the shaded side of a character.
+	UTextureCube* AmbientCube = UTextureCube::CreateTransient(1, 1);
+	auto& AmbientMip = AmbientCube->GetPlatformData()->Mips[0].BulkData;
+	void* AmbientPixels = AmbientMip.Lock(LOCK_READ_WRITE);
+	FMemory::Memset(AmbientPixels, 255, AmbientMip.GetBulkDataSize());
+	AmbientMip.Unlock();
+	AmbientCube->UpdateResource();
+
 	SkyLight = NewObject<USkyLightComponent>(this, TEXT("SkyLight"));
 	SkyLight->SetMobility(EComponentMobility::Movable);
-	SkyLight->bRealTimeCapture = true;
-	SkyLight->bLowerHemisphereIsBlack = true;
+	SkyLight->SourceType = SLS_SpecifiedCubemap;
+	SkyLight->Cubemap = AmbientCube;
+	SkyLight->bRealTimeCapture = false;
+	SkyLight->bLowerHemisphereIsBlack = false;
 	SkyLight->RegisterComponent();
 	SkyLight->AttachToComponent(GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
 	SkyLight->SetIntensity(1.0f);
@@ -170,8 +216,7 @@ void AWowSkyManager::BeginPlay()
 	float CmdTimeOfDay = -1.0f;
 	if (FParse::Value(FCommandLine::Get(), TEXT("-timeofday="), CmdTimeOfDay))
 	{
-		TimeOfDay = FMath::Clamp(CmdTimeOfDay, 0.0f, 1439.9f);
-		TimeSpeed = 0.0f; // Freeze time for screenshots
+		FreezeTime(CmdTimeOfDay);
 		UE_LOG(LogWowSky, Log, TEXT("Time-of-day override: %.0f minutes (frozen)"), TimeOfDay);
 	}
 
@@ -726,22 +771,56 @@ void AWowSkyManager::LoadLightZones(int32 MapId)
 	UE_LOG(LogWowSky, Log, TEXT("Loaded %d light zones for map %d"), MapLights.Num(), MapId);
 }
 
+void AWowSkyManager::ApplyRealmTime(double Minutes, float MinutesPerSecond)
+{
+	if (bTimeOverride) return;
+	TimeOfDay = Minutes;
+	TimeSpeed = MinutesPerSecond;
+	LastRealmClockTick = FPlatformTime::Seconds();
+	EnvironmentElapsed = .1f;
+	UE_LOG(LogWowSky, Log, TEXT("Sky synchronized to realm clock: %.2f minutes, speed %.7f"), TimeOfDay, TimeSpeed);
+}
+
+void AWowSkyManager::ResetRealmTime()
+{
+	if (!LastRealmClockTick.IsSet()) return;
+	LastRealmClockTick.Reset();
+	TimeOfDay = GetDefault<AWowSkyManager>()->TimeOfDay;
+	TimeSpeed = GetDefault<AWowSkyManager>()->TimeSpeed;
+	EnvironmentElapsed = .1f;
+}
+
+void AWowSkyManager::FreezeTime(double Minutes)
+{
+	bTimeOverride = true;
+	LastRealmClockTick.Reset();
+	TimeOfDay = FMath::Clamp(Minutes, 0., 1439.9);
+	TimeSpeed = 0;
+	EnvironmentElapsed = .1f;
+}
+
 void AWowSkyManager::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	double ElapsedSeconds = DeltaTime;
+	if (LastRealmClockTick.IsSet())
+	{
+		// Loading screens, pauses and capped frame deltas must not slow the realm clock.
+		const double Now = FPlatformTime::Seconds();
+		ElapsedSeconds = Now - LastRealmClockTick.GetValue();
+		LastRealmClockTick = Now;
+	}
 	if (TimeSpeed != 0.0f)
 	{
-		TimeOfDay += TimeSpeed * DeltaTime;
-		while (TimeOfDay >= 1440.0f) TimeOfDay -= 1440.0f;
-		while (TimeOfDay < 0.0f) TimeOfDay += 1440.0f;
+		TimeOfDay = FMath::Fmod(TimeOfDay + TimeSpeed * ElapsedSeconds, 1440.);
+		if (TimeOfDay < 0.) TimeOfDay += 1440.;
 	}
 
 	// Keep skydome and clouds centered on camera
 	if (APawn* Pawn = UGameplayStatics::GetPlayerPawn(this, 0))
 	{
 		FVector CamPos = Pawn->GetActorLocation();
-		if (SkyLight) SkyLight->SetWorldLocation(CamPos);
 		if (SkydomeMesh)
 		{
 			SkydomeMesh->SetWorldLocation(CamPos);
@@ -785,6 +864,20 @@ void AWowSkyManager::UpdateSunPosition()
 {
 	if (!SunLight) return;
 
+	if (bHasDbcLights)
+	{
+		// DayNight::SetDirection uses a fixed azimuth and four elevation keys.
+		// Their 225-degree world azimuth becomes 135 degrees in UE (Y is east).
+		// The visible discs follow a separate path. At night the DBC changes
+		// the colour of the same directional light.
+		const double HalfDay = FMath::Fmod(TimeOfDay, 720.);
+		const double Elevation = FMath::Lerp(20., 37., FMath::Abs(HalfDay - 360.) / 360.);
+		SunLight->SetWorldRotation(FRotator(-Elevation, 135., 0.));
+		SunLight->SetVisibility(true);
+		if (MoonLight) MoonLight->SetVisibility(false);
+		return;
+	}
+
 	const auto Rotation=SunRotationForTime(TimeOfDay);
 	SunLight->SetWorldRotation(Rotation);
 
@@ -807,8 +900,6 @@ void AWowSkyManager::UpdateLightColors()
 {
 	if (!SunLight) return;
 
-	float SunIntensity = GetSunIntensityForTime();
-
 	if (bHasDbcLights)
 	{
 		FVector PlayerPos = FVector::ZeroVector;
@@ -817,25 +908,43 @@ void AWowSkyManager::UpdateLightColors()
 			PlayerPos = Pawn->GetActorLocation();
 		}
 
-		FLinearColor SunColor = BlendZoneColor(LP_GlobalDiffuse, PlayerPos);
-		FLinearColor AmbientColor = BlendZoneColor(LP_GlobalAmbient, PlayerPos);
-
-		SunLight->SetLightColor(SunColor);
+		const FLinearColor DiffuseBand = BlendZoneColor(LP_GlobalDiffuse, PlayerPos);
+		OutdoorAmbientBand = BlendZoneColor(LP_GlobalAmbient, PlayerPos);
+		const FLinearColor AmbientColor = DecodeLightingBand(OutdoorAmbientBand);
+		// Preserve both the ambient floor and the original combined light on a
+		// horizontal surface. Other normals interpolate through UE's Lambert term.
+		const float SunHeight = FMath::Max(.01f, float(-SunLight->GetForwardVector().Z));
+		const FLinearColor GroundBand = (OutdoorAmbientBand + DiffuseBand * SunHeight).GetClamped();
+		const FLinearColor GroundLight = DecodeLightingBand(GroundBand);
+		const FLinearColor Diffuse = (GroundLight - AmbientColor) / SunHeight;
+		const float Intensity = FMath::Max(1.f, Diffuse.GetMax());
+		SunLight->SetLightColor(Diffuse / Intensity);
+		SunLight->SetIntensity(UE_PI * Intensity);
+		// The stock shadow modulates display RGB with a tint derived from one
+		// third of ambient. UE attenuates only linear direct light. Match the
+		// luminance loss on the ground while keeping ambient in the shadow.
+		const float ShadowOpacity = BlendZoneColor(LP_ShadowOpacity, PlayerPos).R;
+		const auto ShadowTransmission = FMath::Lerp(FLinearColor::White, OutdoorAmbientBand / 3.f, ShadowOpacity);
+		const float ShadedLuma = DecodeLightingBand(GroundBand * ShadowTransmission).GetLuminance();
+		const float DirectLuma = (GroundLight - AmbientColor).GetLuminance();
+		const float ShadowAmount = DirectLuma > SMALL_NUMBER ? (GroundLight.GetLuminance() - ShadedLuma) / DirectLuma : 0.f;
+		SunLight->SetShadowAmount(FMath::Clamp(ShadowAmount, 0.f, 1.f));
 
 		if (SkyLight)
 		{
 			SkyLight->SetLightColor(AmbientColor);
-			// Keep minimum ambient so night is never pitch black (WoW always has some visibility)
-			SkyLight->SetIntensity(FMath::Lerp(.4f,.65f,SunIntensity/3.14f));
+			SkyLight->SetIntensity(1.0f);
 		}
 	}
 	else
 	{
 		SunLight->SetLightColor(GetSunColorFallback());
+		SunLight->SetShadowAmount(1.f);
 
 		if (SkyLight)
 		{
-			SkyLight->SetIntensity(FMath::Lerp(.4f,.65f,SunIntensity/3.14f));
+			SkyLight->SetLightColor(GetSkyColorFallback());
+			SkyLight->SetIntensity(FMath::Lerp(.4f, .65f, GetSunIntensityForTime() / 3.14f));
 		}
 	}
 }

@@ -16,6 +16,19 @@ DECLARE_DELEGATE_FourParams(FOnWowCastState,uint64,uint32,uint8,uint8);
 DECLARE_DELEGATE(FOnWowActionStateChanged);
 
 DECLARE_MULTICAST_DELEGATE_FiveParams(FOnLoginVerifyWorld, uint32 /*MapId*/, float /*X*/, float /*Y*/, float /*Z*/, float /*Orientation*/);
+DECLARE_MULTICAST_DELEGATE(FOnRealmClockChanged);
+
+struct FWowRealmClock
+{
+    int32 MinuteOfDay;
+    float MinutesPerSecond;
+    double ReceivedAt;
+
+    double MinutesAt(double RealSeconds) const
+    {
+        return FMath::Fmod(MinuteOfDay + FMath::Max(0., RealSeconds - ReceivedAt) * MinutesPerSecond, 1440.);
+    }
+};
 DECLARE_MULTICAST_DELEGATE_SevenParams(FOnChatMessage, uint8 /*Type*/, uint32 /*Language*/, uint64 /*SenderGuid*/, const FString& /*SenderName*/, const FString& /*Message*/, const FString& /*Channel*/, uint32 /*Achievement*/);
 DECLARE_MULTICAST_DELEGATE_FourParams(FOnSpellStart, uint64 /*CasterGuid*/, uint32 /*SpellId*/, uint32 /*CastFlags*/, int32 /*CastTime*/);
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnSpellGo, uint64 /*CasterGuid*/, uint32 /*SpellId*/, uint32 /*CastFlags*/);
@@ -402,6 +415,9 @@ public:
 
     // Events
     FOnLoginVerifyWorld OnLoginVerifyWorld;
+    FOnRealmClockChanged OnRealmClockChanged;
+    TOptional<FWowRealmClock> RealmClock;
+    void ResetRealmClock();
     FOnChatMessage OnChatMessage;
     FOnSpellStart OnSpellStart;
     FOnSpellGo OnSpellGo;
@@ -555,6 +571,7 @@ private:
 
     // Individual handlers
     void HandleLoginVerifyWorld(FPacketReader& R);
+    void HandleLoginSetTimeSpeed(FPacketReader& R);
     void HandleUpdateObject(FPacketReader& R);
     void HandleCompressedUpdateObject(FPacketReader& R);
     void HandleDestroyObject(FPacketReader& R);

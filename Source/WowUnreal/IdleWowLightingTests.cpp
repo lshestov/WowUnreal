@@ -1,10 +1,14 @@
 #include "Misc/AutomationTest.h"
 #include "WowSkyManager.h"
 #include "WowWorldManager.h"
+#include "WowGameplayController.h"
+#include "WowConnectionManager.h"
 #include "Formats/Dbc/DbcStore.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "Components/DirectionalLightComponent.h"
+#include "Components/SkyLightComponent.h"
+#include "Engine/TextureCube.h"
 #include "Components/PointLightComponent.h"
 #include "Components/SceneComponent.h"
 #include "WowWmoRenderer.h"
@@ -16,6 +20,48 @@
 #include "Coord/WowCoordinate.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLightingRealmClock, "WowUnreal.Lighting.RealmClock", EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FLightingRealmClock::RunTest(const FString&)
+{
+    auto* World = UWorld::CreateWorld(EWorldType::Game, false);
+    GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+    auto* Sky = World->SpawnActor<AWowSkyManager>();
+    auto* Controller = World->SpawnActor<AWowGameplayController>();
+    Controller->ConnectionManager = NewObject<UWowConnectionManager>(Controller);
+    auto& Handler = Controller->ConnectionManager->PacketHandler;
+    // Packed date containing 23:59, two game minutes per second, realm TZ offset 3.
+    TArray<uint8> Data = {0xfb, 0xc5, 0xe2, 0x18, 0, 0, 0, 0x40, 3, 0, 0, 0};
+    Handler.HandlePacket(WowOpcode::SMSG_LOGIN_SETTIMESPEED, Data);
+    if (TestTrue(TEXT("Wire time is cached before the UI binds"), Handler.RealmClock.IsSet()))
+    {
+        const auto Clock = Handler.RealmClock.GetValue();
+        TestEqual(TEXT("Use realm-local hours and minutes"), Clock.MinuteOfDay, 1439);
+        TestEqual(TEXT("Use server speed and wrap around midnight"), Clock.MinutesAt(Clock.ReceivedAt + 3.), 5.);
+        Handler.HandlePacket(WowOpcode::SMSG_LOGIN_SETTIMESPEED, {0, 0, 0, 0});
+        TestEqual(TEXT("A truncated update preserves the previous clock"), Handler.RealmClock->ReceivedAt, Clock.ReceivedAt);
+        const double BeforeBind = Clock.MinutesAt(FPlatformTime::Seconds());
+        Controller->BindEntityEvents();
+        const double AfterBind = Clock.MinutesAt(FPlatformTime::Seconds());
+        const double ReplayOffset = FMath::Fmod(Sky->TimeOfDay - BeforeBind + 1440., 1440.);
+        const double BindDuration = FMath::Fmod(AfterBind - BeforeBind + 1440., 1440.);
+        TestTrue(TEXT("Late binding replays the cached time into the sky"),
+            ReplayOffset <= BindDuration + .00001 && Sky->TimeSpeed == 2.f);
+        Handler.ResetRealmClock();
+        TestTrue(TEXT("Session reset clears cached time and restores the fallback"),
+            !Handler.RealmClock.IsSet() && Sky->TimeOfDay == GetDefault<AWowSkyManager>()->TimeOfDay);
+        Data[0] = 0x43; Data[1] = 2; // 09:03
+        Handler.HandlePacket(WowOpcode::SMSG_LOGIN_SETTIMESPEED, Data);
+        TestTrue(TEXT("A fresh clock reaches an already-bound sky"),
+            Sky->TimeOfDay >= 543. && Sky->TimeOfDay <= Handler.RealmClock->MinutesAt(FPlatformTime::Seconds()));
+        Sky->FreezeTime(630.);
+        Handler.HandlePacket(WowOpcode::SMSG_LOGIN_SETTIMESPEED, Data);
+        TestTrue(TEXT("Explicit capture time survives later packets"), Sky->TimeOfDay == 630. && Sky->TimeSpeed == 0.f);
+    }
+    World->DestroyWorld(false);
+    GEngine->DestroyWorldContext(World);
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLightingDataLifecycle,"WowUnreal.Lighting.LoginAndMapLighting",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FLightingDataLifecycle::RunTest(const FString&)
 {
@@ -28,6 +74,9 @@ bool FLightingDataLifecycle::RunTest(const FString&)
         if(!Mpq.Initialize(Path) || !Dbc.LoadAll(Mpq)) return false;
     }
     if(!TestTrue(TEXT("Original client lighting tables are present"),Dbc.Lights().Num()>0 && Dbc.LightIntParams().Num()>0 && Dbc.LightFloatParams().Num()>0)) return false;
+    TestTrue(TEXT("Coldridge inherits Dun Morogh's character ambient"), FMath::IsNearlyEqual(Dbc.AreaTable().GetCharacterAmbientScale(132), 1.6f));
+    TestEqual(TEXT("Elwynn uses base character ambient"), Dbc.AreaTable().GetCharacterAmbientScale(12), 1.f);
+    TestEqual(TEXT("An unknown area uses base character ambient"), Dbc.AreaTable().GetCharacterAmbientScale(0), 1.f);
     // Reproduce the real login ordering: sky begins first, essential tables
     // become available afterwards. Preserve the shared DBC state for all tests.
     auto SavedLights=MoveTemp(Dbc.Lights()); Dbc.Lights()=FLightDbc();
@@ -43,6 +92,35 @@ bool FLightingDataLifecycle::RunTest(const FString&)
     TestTrue(TEXT("Next sky update adopts the loaded colour and fog bands"),Sky->bLightTablesReady && Sky->bHasDbcLights && Sky->bHasFloatParams);
     TestEqual(TEXT("Late loading retains the Eastern Kingdoms bands"),Sky->MapLights.Num(),Dbc.Lights().GetByMap(0).Num());
     TestEqual(TEXT("Lighting refresh preserves the game clock"),Sky->TimeOfDay,630.);
+    TestTrue(TEXT("Ambient uses a uniform source across both hemispheres"),
+        Sky->SkyLight->SourceType == SLS_SpecifiedCubemap && Sky->SkyLight->Cubemap &&
+        Sky->SkyLight->Cubemap->GetSizeX() == 1 && Sky->SkyLight->Cubemap->GetSizeY() == 1 &&
+        !Sky->SkyLight->bRealTimeCapture && !Sky->SkyLight->bLowerHemisphereIsBlack);
+    for (const double Minutes : {0., 360., 720., 1080., 1286.})
+    {
+        Sky->TimeOfDay = Minutes;
+        Sky->Tick(.11f);
+        const FLinearColor Ambient = Sky->BlendZoneColor(AWowSkyManager::LP_GlobalAmbient, FVector::ZeroVector);
+        const FLinearColor Diffuse = Sky->BlendZoneColor(AWowSkyManager::LP_GlobalDiffuse, FVector::ZeroVector);
+        const float Height = float(-Sky->SunLight->GetForwardVector().Z);
+        const auto ExpectedGround = (Ambient + Diffuse * Height).ToFColor(false);
+        const auto RenderedGround = Sky->SkyLight->GetLightColor() + Sky->SunLight->GetLightColor() * (Height * Sky->SunLight->Intensity / UE_PI);
+        TestTrue(TEXT("Authored ambient reaches the light without a second time-of-day multiplier"),
+            Sky->SkyLight->GetLightColor().ToFColorSRGB() == Ambient.ToFColor(false) && Sky->SkyLight->Intensity == 1.f);
+        const FColor Ground = RenderedGround.ToFColorSRGB();
+        TestTrue(TEXT("Day and night reproduce stock ground irradiance within component quantization"),
+            Sky->SunLight->IsVisible() && !Sky->MoonLight->IsVisible() && FMath::Abs(int(Ground.R)-ExpectedGround.R)<=2 &&
+            FMath::Abs(int(Ground.G)-ExpectedGround.G)<=2 && FMath::Abs(int(Ground.B)-ExpectedGround.B)<=2);
+        const auto Aim = Sky->SunLight->GetComponentRotation();
+        const float Opacity = Sky->BlendZoneColor(AWowSkyManager::LP_ShadowOpacity, FVector::ZeroVector).R;
+        const auto StockShadow = (ExpectedGround.ReinterpretAsLinear() * FMath::Lerp(FLinearColor::White, Ambient / 3.f, Opacity)).ToFColor(false);
+        const float ShadowLuma = FMath::Lerp(RenderedGround.GetLuminance(), Sky->SkyLight->GetLightColor().GetLuminance(), Sky->SunLight->ShadowAmount);
+        TestTrue(TEXT("Cast shadow strength reproduces the stock attenuation above the ambient floor"),
+            FMath::IsNearlyEqual(ShadowLuma, FMath::Max(FLinearColor::FromSRGBColor(StockShadow).GetLuminance(), Sky->SkyLight->GetLightColor().GetLuminance()), .015f));
+        TestTrue(TEXT("The world light stays low and uses a fixed azimuth"),
+            Aim.Pitch >= -37.01 && Aim.Pitch <= -19.99 && FMath::IsNearlyEqual(Aim.Yaw, 135., .01));
+    }
+    Sky->TimeOfDay = 630.;
     auto* Manager=World->SpawnActor<AWowWorldManager>();
     TestTrue(TEXT("Selecting Kalimdor succeeds"),Manager->SelectMap(1));
     TestEqual(TEXT("Sky follows the selected terrain map"),Sky->CurrentMapId,1);
@@ -72,6 +150,7 @@ bool FLightingSunCycle::RunTest(const FString&)
     TestEqual(TEXT("Shadow direction is updated every frame"),Sky->PrimaryActorTick.TickInterval,0.f);
     TestTrue(TEXT("Default clock advances one game minute per real minute"),FMath::IsNearlyEqual(Sky->TimeSpeed,1.f/60.f));
     Sky->DispatchBeginPlay();
+    Sky->LoadLightZones(999999); // This path exercises the fallback when a map has no authored bands.
     TArray<UDirectionalLightComponent*> Lights; Sky->GetComponents(Lights);
     TestEqual(TEXT("Sun and moon are separate lights"),Lights.Num(),2);
     for (auto* Light:Lights)

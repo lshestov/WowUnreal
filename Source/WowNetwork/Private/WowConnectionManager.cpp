@@ -122,6 +122,7 @@ void UWowConnectionManager::SelectRealm(int32 I)
         }
         if(Opcode==0x004D)
         {
+            PacketHandler.ResetRealmClock();
             OnLogoutComplete.Broadcast();
             TArray<uint64> Guids; PacketHandler.EntityManager.GetAll().GetKeys(Guids);
             for(uint64 Guid:Guids) PacketHandler.EntityManager.Remove(Guid);
@@ -230,6 +231,7 @@ void UWowConnectionManager::EnterWorld(int64 G)
     }
 
     PacketHandler.EntityManager.LocalPlayerGuid = static_cast<uint64>(G);
+    PacketHandler.ResetRealmClock();
     for(const auto& Character:CachedCharacters) if(Character.Guid==G) PacketHandler.PlayerNameCache.Add(uint64(G),Character.Name);
 
     // Listen for LOGIN_VERIFY_WORLD to transition to InGame state
@@ -1570,6 +1572,7 @@ void UWowConnectionManager::SendLearnPreviewTalents(const TArray<FWowTalentInfo>
 void UWowConnectionManager::Disconnect()
 {
     bCharacterCreatePending=false;
+    PacketHandler.ResetRealmClock();
     CancelGlyphUse();
     PacketHandler.ResetChannels();
     PacketHandler.ResetMapState();
