@@ -34,7 +34,6 @@ public:
     SLATE_END_ARGS()
 
     void Construct(const FArguments& InArgs);
-    virtual void Tick(const FGeometry& AllottedGeometry, double CurrentTime, float DeltaTime) override;
     void SetPresentation(class FWowFrameManager& Frames, const FString& Name, bool bShowTargetPortrait);
     void PrepareItems(class UWowUIManager& UI, class UWowConnectionManager* Connection, const FWowQuestDetails& Quest);
 
@@ -90,7 +89,6 @@ private:
     FWowQuestDetails CurrentQuest;
     bool bUsesGossipFrame = false;
     bool bIsRewardDialog = false;
-    float FontAspect = 1.f;
     int32 SelectedRewardChoice = 0;
 
     FReply OnAcceptClicked();

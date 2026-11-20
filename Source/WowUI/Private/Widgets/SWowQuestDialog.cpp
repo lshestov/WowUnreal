@@ -10,13 +10,12 @@
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScrollBar.h"
 #include "Widgets/Layout/SScrollBox.h"
+#include "Widgets/Layout/SScaleBox.h"
 #include "Styling/CoreStyle.h"
 #include "Fonts/FontCache.h"
 #include "Fonts/FontMeasure.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Rendering/SlateRenderer.h"
-#include "Engine/Engine.h"
-#include "Engine/GameViewportClient.h"
 #include "Engine/Texture2D.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Components/Image.h"
@@ -32,29 +31,6 @@
 #include "Widgets/Layout/SSpacer.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowQuestDialog, Log, All);
-
-namespace
-{
-float QuestFontAspect()
-{
-    // Build 12340 captures at 1024x768 and 1280x720 show glyphs following the
-    // horizontal and vertical resolutions independently. FrameXML art follows height.
-    FVector2D Viewport;
-    if (!GEngine || !GEngine->GameViewport) return 1.f;
-    GEngine->GameViewport->GetViewportSize(Viewport);
-    if (Viewport.Y < 1 || Viewport.X < 1) return 1.f;
-    // Preserve readable labels and space for ellipses even on portrait and ultrawide displays.
-    return FMath::Clamp(float(Viewport.X / Viewport.Y * .75), .75f, 2.f);
-}
-
-TSharedRef<SWidget> QuestFontString(const TSharedRef<STextBlock>& Text, float WidthScale, float Baseline = 0, float HeightScale = 1)
-{
-    Text->SetRenderTransformPivot(FVector2D::ZeroVector);
-    Text->SetRenderTransform(FSlateRenderTransform(FScale2D(WidthScale,HeightScale),FVector2f(0,Baseline)));
-    return SNew(SBox).HAlign(HAlign_Left).VAlign(VAlign_Fill)
-        .WidthOverride_Lambda([Text,WidthScale] { return FOptionalSize(Text->GetDesiredSize().X * WidthScale); })[Text];
-}
-}
 
 static FSlateFontInfo WithQuestTracking(FSlateFontInfo Font)
 {
@@ -113,8 +89,6 @@ void SWowQuestDialog::Construct(const FArguments& InArgs)
     })
         [SNew(SBox).VAlign(VAlign_Center).Clipping(EWidgetClipping::ClipToBounds)
             [SAssignNew(NpcName,STextBlock).TextStyle(&CaptionText).Justification(ETextJustify::Center)
-                .RenderTransformPivot(FVector2D(.5f,.5f)).RenderTransform_Lambda([this]() -> TOptional<FSlateRenderTransform>
-                    { return FSlateRenderTransform(FScale2D(bIsRewardDialog || CurrentQuest.RequestedItems.IsSet() ? FontAspect : 1.f,1)); })
                 .TextShapingMethod(ETextShapingMethod::FullShaping)
                 .OverflowPolicy(ETextOverflowPolicy::Ellipsis)]];
     Canvas->AddSlot().Alignment(FVector2D::ZeroVector).Offset(FMargin(326,15,32,32))
@@ -326,26 +300,18 @@ TSharedRef<SWidget> SWowQuestDialog::ItemButton(const FWowQuestRewardItem& Item,
         [SNew(SImage).Tag(ItemTag(TEXT("Icon"))).Image_Lambda([Icon] { return FDeferredCleanupSlateBrush::TrySlateBrush(Icon); }).ColorAndOpacity(Tint)];
     Canvas->AddSlot().Alignment(FVector2D::ZeroVector).Offset(FMargin(29,-12.5f,128,64))
         [SNew(SImage).Tag(ItemTag(TEXT("NameFrame"))).Image(&ItemNameFrame).ColorAndOpacity(Tint)];
-    const float NameScale = bIsRewardDialog || CurrentQuest.RequestedItems.IsSet() ? FontAspect : 1.f;
-    const auto Name = SNew(STextBlock).Tag(ItemTag(TEXT("Name"))).TextStyle(&CaptionText).WrapTextAt(90 / NameScale)
-                .TextShapingMethod(ETextShapingMethod::FullShaping)
-                .OverflowPolicy(ETextOverflowPolicy::MultilineEllipsis).Clipping(EWidgetClipping::ClipToBounds)
-                .Text_Lambda([this, Id = Item.ItemId]
-                {
-                    const auto* Data = ItemConnection.IsValid() ? ItemConnection->PacketHandler.ItemTemplates.Find(Id) : nullptr;
-                    return FText::FromString(Data ? Data->Name : Label(TEXT("RETRIEVING_ITEM_INFO"),TEXT("Retrieving item information...")));
-                });
-    const auto NameBlock = SNew(SBox).WidthOverride(90 / NameScale)
-        .MaxDesiredHeight_Lambda([this]
-        {
-            const float Scale = GetCachedGeometry().GetAccumulatedLayoutTransform().GetScale();
-            const auto Measure = FSlateApplication::Get().GetRenderer()->GetFontMeasureService();
-            return FOptionalSize(2.f * Measure->GetMaxCharacterHeight(CaptionText.Font,Scale) / Scale);
-        })[Name];
-    NameBlock->SetRenderTransformPivot(FVector2D::ZeroVector);
-    NameBlock->SetRenderTransform(FSlateRenderTransform(FScale2D(NameScale,1)));
-    Canvas->AddSlot().Alignment(FVector2D::ZeroVector).Offset(FMargin(44,1.5f,90,36))
-        [SNew(SBox).HAlign(HAlign_Left).VAlign(VAlign_Center).Clipping(EWidgetClipping::ClipToBounds)[NameBlock]];
+    const auto Name = WrappedText(FString(), CaptionText, 90.f);
+    Name->SetTag(ItemTag(TEXT("Name")));
+    Name->SetText(TAttribute<FText>::CreateLambda([this, Id = Item.ItemId]
+    {
+        const auto* Data = ItemConnection.IsValid() ? ItemConnection->PacketHandler.ItemTemplates.Find(Id) : nullptr;
+        return FText::FromString(Data ? Data->Name : Label(TEXT("RETRIEVING_ITEM_INFO"),TEXT("Retrieving item information...")));
+    }));
+    // LargeItemButtonTemplate gives the name 90x36 units. Wrap at the full
+    // width first. A long localized name can scale down uniformly to fit.
+    Canvas->AddSlot().Alignment(FVector2D::ZeroVector).Offset(FMargin(46,1.5f,90,36))
+        [SNew(SScaleBox).HAlign(HAlign_Left).VAlign(VAlign_Center)
+            .Stretch(EStretch::ScaleToFit).StretchDirection(EStretchDirection::DownOnly)[Name]];
     if (Item.Count > 1)
         Canvas->AddSlot().Alignment(FVector2D::ZeroVector).Offset(FMargin(0,0,38,38))
             [SNew(SBox).HAlign(HAlign_Right).VAlign(VAlign_Bottom)
@@ -417,12 +383,6 @@ TSharedRef<SWidget> SWowQuestDialog::PanelButton(const FString& Label,FOnClicked
     if (!bClose)
         Content->AddSlot().HAlign(HAlign_Center).VAlign(VAlign_Center)
             [SNew(STextBlock).TextStyle(&CaptionText).Text(FText::FromString(Label))
-                .RenderTransformPivot(FVector2D(.5f,.5f)).RenderTransform_Lambda([this,Width,Label]() -> TOptional<FSlateRenderTransform>
-                    {
-                        if (!bIsRewardDialog && !CurrentQuest.RequestedItems.IsSet()) return {};
-                        const float TextWidth = FSlateApplication::Get().GetRenderer()->GetFontMeasureService()->Measure(Label,CaptionText.Font).X;
-                        return FSlateRenderTransform(FScale2D(FMath::Min(FontAspect,(Width - 8) / FMath::Max(1.f,TextWidth)),1));
-                    })
                 .TextShapingMethod(ETextShapingMethod::FullShaping)
                 .ColorAndOpacity_Lambda([Weak]() -> FSlateColor {
                     const auto Current = Weak.Pin();
@@ -571,17 +531,6 @@ void SWowQuestDialog::UpdateGossipGreeting(const FString& Greeting)
     }
 }
 
-void SWowQuestDialog::Tick(const FGeometry& AllottedGeometry, double CurrentTime, float DeltaTime)
-{
-    SCompoundWidget::Tick(AllottedGeometry, CurrentTime, DeltaTime);
-    if ((bIsRewardDialog || CurrentQuest.RequestedItems.IsSet()) && !FMath::IsNearlyEqual(FontAspect,QuestFontAspect()))
-    {
-        const float Offset = ContentArea->GetScrollOffset();
-        RefreshContent();
-        ContentArea->SetScrollOffset(Offset);
-    }
-}
-
 void SWowQuestDialog::RefreshContent()
 {
     if (ItemUI.IsValid()) WowQuestItemTooltip::Hide(*ItemUI.Get());
@@ -592,16 +541,16 @@ void SWowQuestDialog::RefreshContent()
     ButtonArea->ClearChildren();
 
     const bool bProgress = CurrentQuest.RequestedItems.IsSet();
-    const bool bTurnIn = bProgress || bIsRewardDialog;
-    FontAspect = QuestFontAspect();
     auto AddParagraph = [&](const FString& Text, const FTextBlockStyle& Style, float Top, float Width = 285.f)
     {
-        const bool bHeading = &Style == &TitleText;
-        const float WidthScale = bHeading ? FMath::Lerp(1.f,FontAspect,.9f) : FontAspect;
-        const auto Block = WrappedText(Text,Style,bTurnIn ? Width / WidthScale : Width);
-        TSharedRef<SWidget> Content = Block;
-        if (bTurnIn) Content = QuestFontString(Block,WidthScale,bHeading ? -3.f : -2.f,bHeading ? .94f : 1.f);
-        ContentArea->AddSlot().HAlign(HAlign_Left).Padding(bTurnIn ? 7.f : 5.f,Top,0,0)[Content];
+        const auto Paragraph = WrappedText(Text,Style,Width);
+        if (bProgress || bIsRewardDialog)
+        {
+            // Align Slate's ink with the original parchment FontString baseline.
+            // Keep the FrameXML line box and the item anchors below it unchanged.
+            Paragraph->SetRenderTransform(FSlateRenderTransform(FVector2f(2.f, &Style == &TitleText ? -3.f : -2.f)));
+        }
+        ContentArea->AddSlot().HAlign(HAlign_Left).Padding(5,Top,0,0)[Paragraph];
     };
     AddParagraph(CurrentQuest.Title, TitleText, 10);
     if (!CurrentQuest.Details.IsEmpty()) AddParagraph(CurrentQuest.Details, BodyText, 5, bProgress ? 275.f : 285.f);
@@ -649,23 +598,29 @@ void SWowQuestDialog::RefreshContent()
                 Label(TEXT("REWARD_ITEMS_ONLY"),TEXT("You will receive:"));
             // QuestInfo.lua anchors the receive line to the last left-hand card, or directly to the header.
             const float Left = bChoices ? 5.f : 8.f;
-            const float InkWidth = bTurnIn ? FontAspect : 1.f;
+            // These two FontStrings are vertically centered beside a MoneyFrame
+            // or a number. Align their ink without moving the coin and XP widgets.
+            auto RewardLabel = [&](const FString& Text, float Width)
+            {
+                const auto Block = WrappedText(Text, BodyText, Width);
+                if (bIsRewardDialog) Block->SetRenderTransform(FSlateRenderTransform(FVector2f(2.f,-3.f)));
+                return Block;
+            };
             const auto Receive = SNew(SHorizontalBox)
-                +SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[QuestFontString(WrappedText(ReceiveText,BodyText,250 / InkWidth),InkWidth)];
+                +SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[RewardLabel(ReceiveText,250)];
             if (CurrentQuest.RewardMoney)
                 Receive->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(15,0,0,0)[MoneyAmount(CurrentQuest.RewardMoney,false)];
-            const float InkLeft = Left + (bTurnIn ? 2.f : 0.f);
-            ContentArea->AddSlot().HAlign(HAlign_Left).Padding(InkLeft,5,0,0)[Receive];
+            ContentArea->AddSlot().HAlign(HAlign_Left).Padding(Left,5,0,0)[Receive];
             if (CurrentQuest.RewardXP)
             {
-                ContentArea->AddSlot().HAlign(HAlign_Left).Padding(InkLeft,5,0,0)
+                ContentArea->AddSlot().HAlign(HAlign_Left).Padding(Left,5,0,0)
                     [SNew(SBox).WidthOverride(280).HeightOverride(20)
                         [SNew(SHorizontalBox)
                             +SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-                                [QuestFontString(WrappedText(Label(TEXT("EXPERIENCE_COLON"),TEXT("Experience:")),BodyText,180 / InkWidth),InkWidth)]
+                                [RewardLabel(Label(TEXT("EXPERIENCE_COLON"),TEXT("Experience:")),180)]
                             +SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(15,0,0,0)
-                                [QuestFontString(SNew(STextBlock).Tag(TEXT("QuestRewardXP")).TextStyle(&RewardNumber)
-                                    .Text(FText::AsNumber(CurrentQuest.RewardXP)),InkWidth)]]];
+                                [SNew(STextBlock).Tag(TEXT("QuestRewardXP")).TextStyle(&RewardNumber)
+                                    .Text(FText::AsNumber(CurrentQuest.RewardXP))]]];
             }
             AddItemGrid(CurrentQuest.RewardItems,EItemGroup::Fixed,Left-3,5);
         }

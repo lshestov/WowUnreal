@@ -479,6 +479,13 @@ struct FWowGameplayProbe
             return FSlateRect(Start,End);
         };
         auto Near=[](float A,float B){ return FMath::IsNearlyEqual(A,B,1.5f); };
+        auto UniformScale=[](const FGeometry& Geometry)
+        {
+            const FVector2D Origin=Geometry.LocalToAbsolute(FVector2D::ZeroVector);
+            const double X=FVector2D::Distance(Origin,Geometry.LocalToAbsolute(FVector2D(1,0)));
+            const double Y=FVector2D::Distance(Origin,Geometry.LocalToAbsolute(FVector2D(0,1)));
+            return X>0 && FMath::IsNearlyEqual(X,Y,.005);
+        };
         const bool Required=Step.HasField(TEXT("count"));
         const FString Prefix=Required?TEXT("QuestRequiredItem"):TEXT("QuestChoice");
         const auto& Items=Step.GetArrayField(TEXT("items"));
@@ -494,7 +501,8 @@ struct FWowGameplayProbe
             const auto Bounds=Rect(Card), Art=Rect(Icon);
             Cards.Add(Bounds);
             if (!Near(Bounds.GetSize().X,147) || !Near(Bounds.GetSize().Y,41) || !Near(Art.GetSize().X,39) ||
-                !Near(Art.GetSize().Y,39) || !Near(Art.Left,Bounds.Left) || !Near(Art.Top,Bounds.Top)) return false;
+                !Near(Art.GetSize().Y,39) || !Near(Art.Left,Bounds.Left) || !Near(Art.Top,Bounds.Top) ||
+                !UniformScale(Icon->GetCachedGeometry())) return false;
             if (I>0 && (!Near(Bounds.Left,Cards[0].Left+(I%2)*(Required?149:148)) ||
                 !Near(Bounds.Top,Cards[0].Top+(I/2)*(Required?44:43)))) return false;
 
@@ -502,6 +510,18 @@ struct FWowGameplayProbe
             const auto* Item=C.ConnectionManager->PacketHandler.ItemTemplates.Find(ItemId);
             const auto* Display=Item?FDbcStore::Get().ItemDisplayInfo().GetById(Item->DisplayId):nullptr;
             if (!Display || Display->Icon1.IsEmpty()) return false;
+            const auto Name=Tagged(Prefix+TEXT("Name")+Suffix);
+            if (!Name || Name->GetType()!=TEXT("STextBlock")) return false;
+            const auto NameBounds=Rect(Name);
+            const auto& NameGeometry=Name->GetCachedGeometry();
+            const auto& NameText=static_cast<const STextBlock&>(*Name);
+            const FVector2D Desired=NameText.GetDesiredSize(), Allotted=NameGeometry.GetLocalSize();
+            auto NameData=State->GetObjectField(Name->GetTag().ToString());
+            NameData->SetStringField(TEXT("text"),NameText.GetText().ToString());
+            if (NameText.GetText().ToString()!=Item->Name || !UniformScale(NameGeometry) ||
+                Desired.X>Allotted.X+1 || Desired.Y>Allotted.Y+1 ||
+                !Near(NameBounds.Left,Bounds.Left+46) || NameBounds.Right>Bounds.Left+137 ||
+                NameBounds.Top<Bounds.Top+.5f || NameBounds.Bottom>Bounds.Top+38.5f) return false;
             const FString Path=TEXT("Interface\\Icons\\")+Display->Icon1;
             auto* Texture=C.UIManager->GetFrameManager()->LoadUITexture(Path);
             if (!Texture) return false;
