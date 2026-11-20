@@ -11,6 +11,7 @@ class UStaticMeshComponent;
 class UMaterialInstanceDynamic;
 class UPointLightComponent;
 class UPostProcessComponent;
+class UMaterialParameterCollectionInstance;
 struct FLightDbcEntry;
 
 /**
@@ -69,6 +70,8 @@ private:
 	float CharacterAmbientScale = 1.f;
 	float TargetCharacterAmbientScale = 1.f;
 	FLinearColor OutdoorAmbientBand = FLinearColor::Black;
+	UPROPERTY()
+	TObjectPtr<UMaterialParameterCollectionInstance> TerrainLighting;
 	UPROPERTY()
 	TObjectPtr<UPostProcessComponent> WorldColor;
 	void UpdateInteriorUnits(float DeltaTime);

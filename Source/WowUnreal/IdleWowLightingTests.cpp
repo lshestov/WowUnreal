@@ -87,9 +87,11 @@ bool FLightingDataLifecycle::RunTest(const FString&)
     auto* Sky=World->SpawnActor<AWowSkyManager>();
     Sky->TimeOfDay=630; Sky->TimeSpeed=0; Sky->DispatchBeginPlay();
     TestFalse(TEXT("Early login starts with a fallback until tables exist"),Sky->bLightTablesReady || Sky->bHasDbcLights || Sky->bHasFloatParams);
+    TestTrue(TEXT("Fallback sunlight is filtered by the sky atmosphere"), Sky->SunLight->IsUsedAsAtmosphereSunLight());
     Dbc.Lights()=MoveTemp(SavedLights); Dbc.LightIntParams()=MoveTemp(SavedInts); Dbc.LightFloatParams()=MoveTemp(SavedFloats);
     Sky->Tick(.1f);
     TestTrue(TEXT("Next sky update adopts the loaded colour and fog bands"),Sky->bLightTablesReady && Sky->bHasDbcLights && Sky->bHasFloatParams);
+    TestFalse(TEXT("Atmosphere does not filter the authored ground light twice"), Sky->SunLight->IsUsedAsAtmosphereSunLight());
     TestEqual(TEXT("Late loading retains the Eastern Kingdoms bands"),Sky->MapLights.Num(),Dbc.Lights().GetByMap(0).Num());
     TestEqual(TEXT("Lighting refresh preserves the game clock"),Sky->TimeOfDay,630.);
     TestTrue(TEXT("Ambient uses a uniform source across both hemispheres"),

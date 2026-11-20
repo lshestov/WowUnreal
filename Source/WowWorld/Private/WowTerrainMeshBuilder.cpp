@@ -36,6 +36,12 @@ static int32 InnerIndex(int32 X, int32 Y)
     return Y * 17 + 9 + X;
 }
 
+static FVector TerrainNormalToUE(const FVector& WorldNormal)
+{
+    // The vertex positions place north along UE X and west along negative UE Y.
+    return FVector(WorldNormal.X, -WorldNormal.Y, WorldNormal.Z);
+}
+
 bool FTerrainMeshBuilder::IsHole(uint16 Holes, int32 QuadX, int32 QuadY)
 {
     // The 4x4 hole grid maps to the 8x8 quad grid
@@ -137,12 +143,7 @@ FTerrainChunkMeshData FTerrainMeshBuilder::BuildChunkMesh(const FAdtChunkData& C
             AdtY * FWowCoordinate::SCALE  // height (absolute, not relative)
         );
 
-        // MCNR normals: parsed as FVector(east, up, south) from file bytes (X, Z, Y).
-        // WoW ADT axes: X=east, Y=up, Z=south
-        // UE axes: X=north(-south), Y=east, Z=up
-        // Transform: UE_Normal = (-WoW.south, WoW.east, WoW.up)
-        const FVector& WN = ChunkData.Normals[i];
-        Result.Normals[i] = FVector(-WN.Z, WN.X, WN.Y);
+        Result.Normals[i] = TerrainNormalToUE(ChunkData.Normals[i]);
 
         // UV0: Alpha/splatmap UVs (0..1 per chunk)
         Result.UVs[i] = FVector2D(GridX / 8.0f, GridY / 8.0f);
@@ -257,9 +258,7 @@ FTerrainChunkMeshData FTerrainMeshBuilder::BuildChunkMeshLOD1(const FAdtChunkDat
                 AdtY * FWowCoordinate::SCALE     // height (absolute, not relative)
             );
 
-            // Transform MCNR normals from WoW ADT (east, up, south) to UE (north, east, up)
-            const FVector& WN = ChunkData.Normals[HeightIndex];
-            Result.Normals[VertIdx] = FVector(-WN.Z, WN.X, WN.Y);
+            Result.Normals[VertIdx] = TerrainNormalToUE(ChunkData.Normals[HeightIndex]);
 
             // UV0: Alpha/splatmap UVs (0..1 per chunk)
             Result.UVs[VertIdx] = FVector2D(GridX / 8.0f, GridY / 8.0f);

@@ -17,9 +17,20 @@ bool FIdleWowTerrainAlpha::RunTest(const FString&)
         for(int32 L=0;L<3;++L) {C.AlphaMaps[L].SetNum(4096); for(int32 P=0;P<4096;++P) C.AlphaMaps[L][P]=uint8((P*17+I*29+L*83)%256);}
     }
     Data->Chunks[1].TextureIndices={1,0,2,3}; Data->Chunks[2].Holes=0xffff;
+    auto& Shadow = Data->Chunks[16].ShadowMap;
+    Shadow.Init(0, FAdtChunkData::ShadowMapBytes);
+    Shadow[0] = 0x81;
+    Shadow[1] = 0x04;
+    Shadow.Last() = 0x80;
+    Data->Chunks[17].ShadowMap.Add(0xFF); // A partial bitmap must not shadow a neighbouring chunk.
     const FWowTerrainBatch Batch(*Data);
     TestTrue(TEXT("Only identical ordered layer sets share a section; full holes have none"),Batch.Representatives.Num()==2 && Batch.SectionForChunk[0]==Batch.SectionForChunk[3] && Batch.SectionForChunk[0]!=Batch.SectionForChunk[1] && Batch.SectionForChunk[2]==INDEX_NONE);
     const auto Atlas=FWowTerrainBatch::AlphaPixels(*Data);
+    const auto Visibility = [&](int32 X, int32 Y) { return Atlas[Y * FWowTerrainBatch::AtlasPixels + X].A; };
+    TestTrue(TEXT("Shadow bits are LSB-first and stay in their chunk"),
+        Visibility(0,64)==0 && Visibility(1,64)==255 && Visibility(7,64)==0 && Visibility(8,64)==255 &&
+        Visibility(10,64)==0 && Visibility(0,65)==255 && Visibility(63,127)==0);
+    TestTrue(TEXT("Absent and partial shadow maps remain fully lit"), Visibility(0,0)==255 && Visibility(64,64)==255);
     const auto Sample=[](double X,double Y,int32 Size,const auto& Pixel)
     {
         X=FMath::Clamp(X*Size-.5,0.,double(Size-1)); Y=FMath::Clamp(Y*Size-.5,0.,double(Size-1));
@@ -49,6 +60,10 @@ bool FIdleWowTerrainBatchReal::RunTest(const FString&)
     if(!Mpq.ReadFile(TEXT("World\\Maps\\Azeroth\\Azeroth_32_48.adt"),Bytes)) return false;
     const auto Data=MakeUnique<FAdtData>(FAdtParser::Parse(Bytes,false)); if(!Data->bIsValid) return false;
     const FWowTerrainBatch Batch(*Data); const auto Atlas=FWowTerrainBatch::AlphaPixels(*Data);
+    const auto& Field = Data->Chunks[10 * 16 + 1];
+    TestTrue(TEXT("The original Northshire field contains the baked shadow under the trees"),
+        Field.IndexX==1 && Field.IndexY==10 && Field.ShadowMap.Num()==FAdtChunkData::ShadowMapBytes &&
+        Atlas[(10 * 64 + 17) * FWowTerrainBatch::AtlasPixels + 64 + 53].A==0);
     TestTrue(TEXT("Real Abbey texture sets reduce sections without replacing original textures"),Batch.Representatives.Num()>1 && Batch.Representatives.Num()<128);
     for(int32 I=0;I<256;++I)
     {

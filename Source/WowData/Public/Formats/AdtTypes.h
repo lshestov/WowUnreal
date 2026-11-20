@@ -4,10 +4,13 @@
 struct WOWDATA_API FAdtChunkData
 {
     float Heights[145] = {};
-    FVector Normals[145];
+    FVector Normals[145]; // MCNR uses WoW world axes (north, west, up).
     FColor VertexColors[145];
     TArray<int32> TextureIndices;
     TArray<TArray<uint8>> AlphaMaps;
+    // Optional 64x64 baked terrain shadow, one bit per texel, least-significant bit first.
+    static constexpr int32 ShadowMapBytes = 64 * 64 / 8;
+    TArray<uint8> ShadowMap;
     int32 IndexX = 0;
     int32 IndexY = 0;
     uint32 AreaId = 0;

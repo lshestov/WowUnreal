@@ -21,6 +21,7 @@ TArray<FColor> FWowTerrainBatch::AlphaPixels(const FAdtData& Data)
     for(const auto& Chunk:Data.Chunks)
     {
         if(Chunk.IndexX<0 || Chunk.IndexX>=Grid || Chunk.IndexY<0 || Chunk.IndexY>=Grid) continue;
+        const bool HasShadowMap = Chunk.ShadowMap.Num() == FAdtChunkData::ShadowMapBytes;
         for(int32 Y=0;Y<ChunkPixels;++Y) for(int32 X=0;X<ChunkPixels;++X)
         {
             auto& Pixel=Pixels[(Chunk.IndexY*ChunkPixels+Y)*AtlasPixels+Chunk.IndexX*ChunkPixels+X];
@@ -28,6 +29,8 @@ TArray<FColor> FWowTerrainBatch::AlphaPixels(const FAdtData& Data)
             Pixel.R=Chunk.AlphaMaps.IsValidIndex(0) && Chunk.AlphaMaps[0].IsValidIndex(Source)?Chunk.AlphaMaps[0][Source]:0;
             Pixel.G=Chunk.AlphaMaps.IsValidIndex(1) && Chunk.AlphaMaps[1].IsValidIndex(Source)?Chunk.AlphaMaps[1][Source]:0;
             Pixel.B=Chunk.AlphaMaps.IsValidIndex(2) && Chunk.AlphaMaps[2].IsValidIndex(Source)?Chunk.AlphaMaps[2][Source]:0;
+            const bool InShadow = HasShadowMap && (Chunk.ShadowMap[Source / 8] & (1u << (Source % 8)));
+            Pixel.A = InShadow ? 0 : 255;
         }
     }
     return Pixels;

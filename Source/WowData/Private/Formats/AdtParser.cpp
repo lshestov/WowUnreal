@@ -145,12 +145,12 @@ namespace
 
     void ParseMCNR(FBinaryReader& R, FAdtChunkData& Chunk)
     {
-        // 145 normals, each 3 × int8 in X, Z, Y order
+        // MapChunk::CreateVerticesWorld reads MCNR in WoW world X, Y, Z order.
         for (int32 i = 0; i < 145; ++i)
         {
             int8 Nx = R.ReadI8();
-            int8 Nz = R.ReadI8();
             int8 Ny = R.ReadI8();
+            int8 Nz = R.ReadI8();
             // Normalize from [-127,127] to [-1,1]
             Chunk.Normals[i] = FVector(
                 static_cast<float>(Nx) / 127.0f,
@@ -302,7 +302,7 @@ namespace
         // R.Pos is right after reading the MCNK magic+size (8 bytes).
         // Subtract 8 to get the start of the MCNK chunk.
         const int32 McnkDataStart = R.Pos - 8;
-        const int32 McnkDataEnd   = McnkDataStart + static_cast<int32>(McnkSize);
+        const int32 McnkDataEnd = static_cast<int32>(FMath::Min<int64>(R.Size, int64(R.Pos) + McnkSize));
 
         // ── Read the 128-byte MCNK header ───────────────────────────────────
         uint32 Flags        = R.ReadU32();
@@ -405,6 +405,19 @@ namespace
             uint32 SubMagic, SubSize;
             ReadChunkHeader(R, SubMagic, SubSize);
             ParseMCAL(R, SubSize, Layers, bBigAlpha, bDoNotFixAlpha, Chunk);
+        }
+
+        const int64 ShadowHeader = int64(McnkDataStart) + OfsShadow;
+        if ((Flags & MCNK_FLAG_HAS_MCSH) && OfsShadow >= 8 + 128 && SizeShadow >= FAdtChunkData::ShadowMapBytes
+            && ShadowHeader + 8 + FAdtChunkData::ShadowMapBytes <= McnkDataEnd)
+        {
+            R.Seek(static_cast<int32>(ShadowHeader));
+            uint32 SubMagic, SubSize;
+            if (ReadChunkHeader(R, SubMagic, SubSize) && SubMagic == MAGIC_MCSH && SubSize == FAdtChunkData::ShadowMapBytes)
+            {
+                Chunk.ShadowMap.SetNumUninitialized(FAdtChunkData::ShadowMapBytes);
+                R.ReadBytes(Chunk.ShadowMap.GetData(), Chunk.ShadowMap.Num());
+            }
         }
 
         // ── MCCV (vertex colors, optional) ─────────────────────────────────

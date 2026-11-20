@@ -19,7 +19,10 @@
 #include "Formats/Dbc/LightFloatParamsDbc.h"
 #include "Coord/WowCoordinate.h"
 #include "Kismet/GameplayStatics.h"
+#include "HAL/IConsoleManager.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialParameterCollection.h"
+#include "Materials/MaterialParameterCollectionInstance.h"
 #include "Materials/Material.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/TextureCube.h"
@@ -135,6 +138,8 @@ AWowSkyManager::AWowSkyManager()
 void AWowSkyManager::BeginPlay()
 {
 	Super::BeginPlay();
+	if (auto* Collection = LoadObject<UMaterialParameterCollection>(nullptr, TEXT("/Game/Materials/MPC_WowTerrainLight")))
+		TerrainLighting = GetWorld()->GetParameterCollectionInstance(Collection);
 
 	// Create sun directional light
 	SunLight = NewObject<UDirectionalLightComponent>(this, TEXT("SunLight"));
@@ -920,6 +925,9 @@ void AWowSkyManager::UpdateLightColors()
 		const float Intensity = FMath::Max(1.f, Diffuse.GetMax());
 		SunLight->SetLightColor(Diffuse / Intensity);
 		SunLight->SetIntensity(UE_PI * Intensity);
+		// These DBC colours already describe the light reaching the ground.
+		// UE's atmospheric-sun path filters that light a second time.
+		SunLight->SetAtmosphereSunLight(false);
 		// The stock shadow modulates display RGB with a tint derived from one
 		// third of ambient. UE attenuates only linear direct light. Match the
 		// luminance loss on the ground while keeping ambient in the shadow.
@@ -939,6 +947,7 @@ void AWowSkyManager::UpdateLightColors()
 	else
 	{
 		SunLight->SetLightColor(GetSunColorFallback());
+		SunLight->SetAtmosphereSunLight(true);
 		SunLight->SetShadowAmount(1.f);
 
 		if (SkyLight)
@@ -946,6 +955,14 @@ void AWowSkyManager::UpdateLightColors()
 			SkyLight->SetLightColor(GetSkyColorFallback());
 			SkyLight->SetIntensity(FMath::Lerp(.4f, .65f, GetSunIntensityForTime() / 3.14f));
 		}
+	}
+	// High shadow quality supplies the environment shadow map. Adding the ADT
+	// mask to that map darkens tree shadows twice.
+	if (TerrainLighting)
+	{
+		static const auto* ShadowQuality = IConsoleManager::Get().FindConsoleVariable(TEXT("sg.ShadowQuality"));
+		const bool UseBakedShadows = bHasDbcLights && ShadowQuality && ShadowQuality->GetInt() < 3;
+		TerrainLighting->SetScalarParameterValue(TEXT("TerrainUseBakedShadows"), UseBakedShadows ? 1.f : 0.f);
 	}
 }
 
