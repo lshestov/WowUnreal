@@ -601,6 +601,7 @@ private:
     void HandleMinimapPing(FPacketReader& R);
     void HandleQuestQueryResponse(FPacketReader& R);
     void HandleQuestgiverQuestDetails(FPacketReader& R);
+    void HandleQuestgiverRequestItems(FPacketReader& R);
     void HandleQuestgiverOfferReward(FPacketReader& R);
     void HandleQuestgiverQuestComplete(FPacketReader& R);
     void HandleQuestUpdateAddKill(FPacketReader& R);

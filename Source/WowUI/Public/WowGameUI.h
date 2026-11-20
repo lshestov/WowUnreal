@@ -79,7 +79,7 @@ private:
     TSharedPtr<SWowLootWindow> LootWindow;
     TSharedPtr<SWowVendorWindow> VendorWindow;
     TSharedPtr<SWowQuestDialog> QuestDialog;
-    void PrepareQuestDialog(uint64 Guid);
+    void PrepareQuestDialog(uint64 Guid, const FWowQuestDetails* Details = nullptr);
     TSharedPtr<SWowTradeWindow> TradeWindow;
     TSharedPtr<SWidget> WindowRoot;
 

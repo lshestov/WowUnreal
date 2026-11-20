@@ -274,6 +274,7 @@ public:
     void SendGossipSelect(uint64 NpcGuid, uint32 MenuId, uint32 OptionId);
     void SendQuestQuery(uint64 NpcGuid, uint32 QuestId);
     void SendQuestComplete(uint64 NpcGuid, uint32 QuestId);
+    void SendQuestRequestReward(uint64 NpcGuid, uint32 QuestId);
     void SendQuestAbandon(uint32 QuestId);
     void SendLootMoney();
     void RequestItemTemplate(uint32 ItemId);

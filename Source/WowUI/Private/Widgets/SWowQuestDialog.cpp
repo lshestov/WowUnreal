@@ -18,6 +18,9 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Components/Image.h"
 #include "WowFrameManager.h"
+#include "WowConnectionManager.h"
+#include "Formats/Dbc/DbcStore.h"
+#include "Slate/DeferredCleanupSlateBrush.h"
 #include "WowFontManager.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Layout/SConstraintCanvas.h"
@@ -36,6 +39,7 @@ static FSlateFontInfo WithQuestTracking(FSlateFontInfo Font)
 void SWowQuestDialog::Construct(const FArguments& InArgs)
 {
     OnQuestAccept = InArgs._OnQuestAccept;
+    OnQuestContinue = InArgs._OnQuestContinue;
     OnQuestComplete = InArgs._OnQuestComplete;
     OnQuestDecline = InArgs._OnQuestDecline;
     OnGossipQuest = InArgs._OnGossipQuest;
@@ -168,10 +172,50 @@ void SWowQuestDialog::SetPresentation(FWowFrameManager& Frames, const FString& N
     NpcName->SetText(FText::FromString(Name));
 }
 
-TSharedRef<SWidget> SWowQuestDialog::PanelButton(const FString& Label,FOnClicked Action,float Width,bool bClose)
+void SWowQuestDialog::PrepareItems(FWowFrameManager& Frames, UWowConnectionManager* Connection, const FWowQuestDetails& Quest)
+{
+    ItemConnection = Connection;
+    ItemIcons.Reset();
+    auto Prepare = [&](const TArray<FWowQuestRewardItem>& Items)
+    {
+        for (const auto& Item : Items)
+        {
+            if (Connection) Connection->RequestItemTemplate(Item.ItemId);
+            if (ItemIcons.Contains(Item.DisplayId)) continue;
+            const auto* Display = FDbcStore::Get().ItemDisplayInfo().GetById(Item.DisplayId);
+            if (Display && !Display->Icon1.IsEmpty())
+                if (auto* Texture = Frames.LoadUITexture(TEXT("Interface\\Icons\\") + Display->Icon1))
+                    ItemIcons.Add(Item.DisplayId, FDeferredCleanupSlateBrush::CreateBrush(Texture));
+        }
+    };
+    if (Quest.RequestedItems.IsSet()) Prepare(Quest.RequestedItems->Items);
+    Prepare(Quest.RewardItems);
+    Prepare(Quest.ChoiceRewards);
+}
+
+TSharedRef<SWidget> SWowQuestDialog::ItemRow(const FWowQuestRewardItem& Item)
+{
+    const auto Icon = ItemIcons.FindRef(Item.DisplayId);
+    const auto Art = SNew(SOverlay)
+        +SOverlay::Slot()[SNew(SImage).Image_Lambda([Icon] { return FDeferredCleanupSlateBrush::TrySlateBrush(Icon); })];
+    if (Item.Count > 1)
+        Art->AddSlot().HAlign(HAlign_Right).VAlign(VAlign_Bottom)
+            [SNew(STextBlock).TextStyle(&RewardNumber).Text(FText::AsNumber(Item.Count))];
+    return SNew(SHorizontalBox)
+        +SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(32).HeightOverride(32)[Art]]
+        +SHorizontalBox::Slot().FillWidth(1).VAlign(VAlign_Center).Padding(6,0)
+            [SNew(STextBlock).TextStyle(&BodyText).WrapTextAt(236)
+                .Text_Lambda([this, Id = Item.ItemId]
+                {
+                    const auto* ItemTemplate = ItemConnection.IsValid() ? ItemConnection->PacketHandler.ItemTemplates.Find(Id) : nullptr;
+                    return FText::FromString(ItemTemplate ? ItemTemplate->Name : TEXT("Retrieving item information..."));
+                })];
+}
+
+TSharedRef<SWidget> SWowQuestDialog::PanelButton(const FString& Label,FOnClicked Action,float Width,bool bClose,TAttribute<bool> Enabled)
 {
     const auto Button=SNew(SButton).Tag(bClose ? FName(TEXT("CloseButton")) : NAME_None).ButtonStyle(bClose?&CloseStyle:&PanelStyle)
-        .ContentPadding(FMargin(0)).HAlign(HAlign_Fill).VAlign(VAlign_Fill).OnClicked(Action);
+        .ContentPadding(FMargin(0)).HAlign(HAlign_Fill).VAlign(VAlign_Fill).OnClicked(Action).IsEnabled(Enabled);
     const TWeakPtr<SButton> Weak=Button;
     const auto Content=SNew(SOverlay);
     Content->AddSlot()
@@ -237,7 +281,7 @@ void SWowQuestDialog::ShowQuestReward(const FWowQuestDetails& QuestDetails)
     ContentArea->ScrollToStart();
     CurrentQuest = QuestDetails;
     bIsRewardDialog = true;
-    SelectedRewardChoice = 0;
+    SelectedRewardChoice = QuestDetails.ChoiceRewards.IsEmpty() ? 0 : INDEX_NONE;
 
     RefreshContent();
     SetVisibility(EVisibility::Visible);
@@ -257,7 +301,7 @@ void SWowQuestDialog::CloseDialog()
 
 void SWowQuestDialog::AcceptCurrentQuest()
 {
-    if (!bIsRewardDialog && CurrentQuest.QuestId && GetVisibility()==EVisibility::Visible) OnAcceptClicked();
+    if (!bIsRewardDialog && !CurrentQuest.RequestedItems.IsSet() && CurrentQuest.QuestId && GetVisibility()==EVisibility::Visible) OnAcceptClicked();
 }
 
 void SWowQuestDialog::CompleteCurrentQuest()
@@ -346,7 +390,24 @@ void SWowQuestDialog::RefreshContent()
         AddParagraph(CurrentQuest.Details,BodyText,5);
     }
 
-    // Quest objectives
+    if (CurrentQuest.RequestedItems.IsSet())
+    {
+        const auto& Request = CurrentQuest.RequestedItems.GetValue();
+        if (!Request.Items.IsEmpty() || Request.Money) AddParagraph(TEXT("Required items:"), TitleText, 10);
+        for (const auto& Item : Request.Items)
+            ContentArea->AddSlot().Padding(5,5,10,0)[ItemRow(Item)];
+        if (Request.Money)
+        {
+            const FString Money = FString::Printf(TEXT("%ug %us %uc"), Request.Money / 10000, Request.Money / 100 % 100, Request.Money % 100);
+            AddParagraph(Money, BodyText, 5);
+        }
+        ButtonArea->AddSlot().AutoWidth()
+            [PanelButton(TEXT("Continue"), FOnClicked::CreateSP(this, &SWowQuestDialog::OnContinueClicked), 78.f, false, Request.bCanComplete)];
+        ButtonArea->AddSlot().FillWidth(1)[SNew(SSpacer)];
+        ButtonArea->AddSlot().AutoWidth()[PanelButton(TEXT("Goodbye"), FOnClicked::CreateSP(this, &SWowQuestDialog::OnDeclineClicked))];
+        return;
+    }
+
     if (!CurrentQuest.Objectives.IsEmpty())
     {
         AddParagraph(TEXT("Quest Objectives"),TitleText,10);
@@ -354,9 +415,11 @@ void SWowQuestDialog::RefreshContent()
     }
 
     // Rewards section
-    if (CurrentQuest.RewardMoney > 0 || CurrentQuest.RewardXP > 0 || CurrentQuest.RewardItems.Num() > 0)
+    if (CurrentQuest.RewardMoney > 0 || CurrentQuest.RewardXP > 0 || !CurrentQuest.RewardItems.IsEmpty() || !CurrentQuest.ChoiceRewards.IsEmpty())
     {
         AddParagraph(TEXT("Rewards"),TitleText,bIsRewardDialog ? 10 : 15);
+        for (const auto& Item : CurrentQuest.RewardItems)
+            ContentArea->AddSlot().Padding(5,5,10,0)[ItemRow(Item)];
 
         // XP reward
         if (CurrentQuest.RewardXP > 0)
@@ -401,36 +464,13 @@ void SWowQuestDialog::RefreshContent()
 
             ContentArea->AddSlot().Padding(5,5,10,0)
             [
-                SNew(SButton)
+                SNew(SButton).ButtonStyle(&RowStyle).ContentPadding(FMargin(0)).HAlign(HAlign_Fill)
                 .OnClicked_Lambda([this, i]() { return OnRewardItemClicked(i); })
-                .ButtonColorAndOpacity_Lambda([this, i]() {
-                    return SelectedRewardChoice == i ? FLinearColor::Blue : FLinearColor::Gray;
-                })
                 [
-                    SNew(SHorizontalBox)
-                    + SHorizontalBox::Slot()
-                    .AutoWidth()
-                    [
-                        SNew(SBox)
-                        .WidthOverride(24.0f)
-                        .HeightOverride(24.0f)
-                        [
-                            SNew(SBorder)
-                            [
-                                SNew(STextBlock)
-                                .TextStyle(&CaptionText)
-                                .Text(FText::FromString(TEXT("?")))
-                                .Justification(ETextJustify::Center)
-                            ]
-                        ]
-                    ]
-                    + SHorizontalBox::Slot()
-                    [
-                        SNew(STextBlock)
-                        .TextStyle(&CaptionText)
-                        .Text(FText::FromString(FString::Printf(TEXT("Reward Item %u (x%u)"),
-                            RewardItem.ItemId, RewardItem.Count)))
-                    ]
+                    SNew(SOverlay)
+                    +SOverlay::Slot()[SNew(SImage).Image(&RowStyle.Hovered).Visibility_Lambda([this, i]
+                        { return SelectedRewardChoice == i ? EVisibility::HitTestInvisible : EVisibility::Hidden; })]
+                    +SOverlay::Slot()[ItemRow(RewardItem)]
                 ]
             ];
         }
@@ -438,7 +478,8 @@ void SWowQuestDialog::RefreshContent()
 
     if (bIsRewardDialog)
     {
-        ButtonArea->AddSlot().AutoWidth()[PanelButton(TEXT("Complete Quest"),FOnClicked::CreateSP(this,&SWowQuestDialog::OnCompleteClicked),120)];
+        ButtonArea->AddSlot().AutoWidth()[PanelButton(TEXT("Complete Quest"),FOnClicked::CreateSP(this,&SWowQuestDialog::OnCompleteClicked),120,false,
+            TAttribute<bool>::CreateLambda([this] { return SelectedRewardChoice != INDEX_NONE; }))];
         ButtonArea->AddSlot().FillWidth(1)[SNew(SSpacer)];
         ButtonArea->AddSlot().AutoWidth()[PanelButton(TEXT("Cancel"),FOnClicked::CreateSP(this,&SWowQuestDialog::OnDeclineClicked))];
     }
@@ -464,6 +505,13 @@ FReply SWowQuestDialog::OnAcceptClicked()
     return FReply::Handled();
 }
 
+FReply SWowQuestDialog::OnContinueClicked()
+{
+    if (CurrentQuest.RequestedItems.IsSet() && CurrentQuest.RequestedItems->bCanComplete)
+        OnQuestContinue.ExecuteIfBound(CurrentQuest.QuestGiverGuid, CurrentQuest.QuestId);
+    return FReply::Handled();
+}
+
 FReply SWowQuestDialog::OnDeclineClicked()
 {
     if (OnQuestDecline.IsBound())
@@ -476,6 +524,8 @@ FReply SWowQuestDialog::OnDeclineClicked()
 
 FReply SWowQuestDialog::OnCompleteClicked()
 {
+    if (!CurrentQuest.ChoiceRewards.IsEmpty() && !CurrentQuest.ChoiceRewards.IsValidIndex(SelectedRewardChoice))
+        return FReply::Handled();
     if (OnQuestComplete.IsBound())
     {
         OnQuestComplete.Execute(CurrentQuest.QuestGiverGuid, CurrentQuest.QuestId, SelectedRewardChoice);
@@ -487,7 +537,5 @@ FReply SWowQuestDialog::OnCompleteClicked()
 FReply SWowQuestDialog::OnRewardItemClicked(int32 RewardIndex)
 {
     SelectedRewardChoice = RewardIndex;
-    // Refresh to update button colors
-    RefreshContent();
     return FReply::Handled();
 }

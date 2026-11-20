@@ -26,6 +26,7 @@ class WOWUI_API SWowQuestDialog : public SCompoundWidget
 public:
     SLATE_BEGIN_ARGS(SWowQuestDialog) {}
         SLATE_EVENT(FOnQuestDialogAccept, OnQuestAccept)
+        SLATE_EVENT(FOnQuestDialogAccept, OnQuestContinue)
         SLATE_EVENT(FOnQuestDialogComplete, OnQuestComplete)
         SLATE_EVENT(FOnQuestDialogDecline, OnQuestDecline)
         SLATE_EVENT(FOnGossipQuestSelected, OnGossipQuest)
@@ -34,6 +35,7 @@ public:
 
     void Construct(const FArguments& InArgs);
     void SetPresentation(class FWowFrameManager& Frames, const FString& Name, bool bShowTargetPortrait);
+    void PrepareItems(FWowFrameManager& Frames, class UWowConnectionManager* Connection, const FWowQuestDetails& Quest);
 
     /** Show quest details dialog (for new quest) */
     void ShowQuestDetails(const FWowQuestDetails& QuestDetails);
@@ -54,8 +56,11 @@ private:
     FSlateBrush AutoAcceptBottomRight;
     FSlateBrush PanelHighlight, CloseHighlight, AvailableIcon, ActiveIcon, GossipIcon, Book, GreetingFooter, SectionDivider;
     FButtonStyle PanelStyle, CloseStyle, RowStyle;
-    TSharedRef<SWidget> PanelButton(const FString& Label, FOnClicked Action, float Width = 78.f, bool bClose = false);
+    TSharedRef<SWidget> PanelButton(const FString& Label, FOnClicked Action, float Width = 78.f, bool bClose = false, TAttribute<bool> Enabled = true);
     TSharedRef<SWidget> GossipRow(const FString& Label, const FSlateBrush* Icon, FOnClicked Action, bool bEnabled = true);
+    TSharedRef<SWidget> ItemRow(const FWowQuestRewardItem& Item);
+    TMap<uint32,TSharedPtr<class FDeferredCleanupSlateBrush>> ItemIcons;
+    TWeakObjectPtr<class UWowConnectionManager> ItemConnection;
     TSharedRef<class STextBlock> WrappedText(const FString& Text,const FTextBlockStyle& Style,float Width) const;
     TArray<TStrongObjectPtr<UObject>> Artwork;
     FTextBlockStyle TitleText, BodyText, RowText, CaptionText, RewardNumber;
@@ -64,6 +69,7 @@ private:
     TSharedPtr<class STextBlock> GreetingText;
     TWeakObjectPtr<class UImage> Portrait;
     FOnQuestDialogAccept OnQuestAccept;
+    FOnQuestDialogAccept OnQuestContinue;
     FOnQuestDialogComplete OnQuestComplete;
     FOnQuestDialogDecline OnQuestDecline;
     FOnGossipQuestSelected OnGossipQuest;
@@ -78,6 +84,7 @@ private:
     int32 SelectedRewardChoice = 0;
 
     FReply OnAcceptClicked();
+    FReply OnContinueClicked();
     FReply OnDeclineClicked();
     FReply OnCompleteClicked();
     FReply OnRewardItemClicked(int32 RewardIndex);

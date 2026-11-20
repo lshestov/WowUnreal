@@ -188,6 +188,66 @@ bool FGameplayQuestPackets::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGameplayQuestItemTurnIn,"WowUnreal.Gameplay.QuestItemTurnIn",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FGameplayQuestItemTurnIn::RunTest(const FString&)
+{
+    constexpr uint64 Sten = 0xF130000292000011ULL;
+    FWire Header;
+    Header.Add(Sten).Add(uint32(179)).Text("Dwarven Outfitters").Text("Have you brought the meat?")
+        .Add(uint32(0)).Add(uint32(1)).Add(uint32(1)).Add(uint32(0)).Add(uint32(0)).Add(uint32(125));
+    FWire Items = Header;
+    Items.Add(uint32(1)).Add(uint32(750)).Add(uint32(8)).Add(uint32(2542));
+    FWowPacketHandler Handler;
+    int32 Dialogs = 0, Offers = 0;
+    Handler.OnQuestDialog.AddLambda([&](const FWowQuestDetails&) { ++Dialogs; });
+    Handler.OnQuestRewardDialog.AddLambda([&](const FWowQuestDetails&) { ++Offers; });
+    const uint32 CompletionFlags[] = {3, 4, 8, 16};
+    FWire Ready;
+    for (int32 MissingFlag = 0; MissingFlag <= 4; ++MissingFlag)
+    {
+        Ready = Items;
+        for (int32 Index = 0; Index < 4; ++Index) Ready.Add(Index == MissingFlag ? 0u : CompletionFlags[Index]);
+        Handler.HandlePacket(0x018B, Ready.Data);
+        const auto& Quest = Handler.QuestDetails;
+        if (!TestTrue(TEXT("Quest requirements reach the dialog"), Quest.RequestedItems.IsSet())) return false;
+        const auto& Request = Quest.RequestedItems.GetValue();
+        TestTrue(TEXT("Progress page preserves the speaker, title, and server text"), Quest.QuestGiverGuid == Sten && Quest.QuestId == 179
+            && Quest.Title == TEXT("Dwarven Outfitters") && Quest.Details == TEXT("Have you brought the meat?"));
+        TestTrue(TEXT("Required money, item quantity and display come from the server"), Request.Money == 125 && Request.Items.Num() == 1
+            && Request.Items[0].ItemId == 750 && Request.Items[0].Count == 8 && Request.Items[0].DisplayId == 2542);
+        TestEqual(TEXT("Continue requires every completion flag"), Request.bCanComplete, MissingFlag == 4);
+    }
+    for (int32 Size = 0; Size < Ready.Data.Num(); ++Size)
+    {
+        TArray<uint8> Truncated;
+        Truncated.Append(Ready.Data.GetData(), Size);
+        Handler.HandlePacket(0x018B, Truncated);
+    }
+    FWire Excess = Header;
+    Excess.Add(uint32(7));
+    for (int32 Index = 0; Index < 7; ++Index) Excess.Add(uint32(750)).Add(uint32(1)).Add(uint32(2542));
+    for (uint32 Flag : CompletionFlags) Excess.Add(Flag);
+    Handler.HandlePacket(0x018B, Excess.Data);
+    TestTrue(TEXT("Malformed progress pages leave the last valid page open"), Dialogs == 5 && Handler.QuestDetails.RequestedItems->bCanComplete);
+    TestEqual(TEXT("Showing requirements never grants or offers a reward"), Offers, 0);
+
+    FWire NoItems = Header;
+    NoItems.Add(uint32(0)).Add(uint32(0)).Add(uint32(4)).Add(uint32(8)).Add(uint32(16));
+    Handler.HandlePacket(0x018B, NoItems.Data);
+    TestTrue(TEXT("An unfinished non-collection quest can show progress without any item rows"),
+        Dialogs == 6 && Handler.QuestDetails.RequestedItems->Items.IsEmpty() && !Handler.QuestDetails.RequestedItems->bCanComplete);
+
+    FWire Offer;
+    Offer.Add(Sten).Add(uint32(179)).Text("Dwarven Outfitters").Text("Good work. Choose your reward.")
+        .Add(uint8(1)).Add(uint32(0)).Add(uint32(0)).Add(uint32(0))
+        .Add(uint32(2)).Add(uint32(719)).Add(uint32(1)).Add(uint32(10)).Add(uint32(6171)).Add(uint32(1)).Add(uint32(20))
+        .Add(uint32(0)).Add(uint32(0)).Add(uint32(170));
+    Handler.HandlePacket(0x018D, Offer.Data);
+    TestTrue(TEXT("The server offer replaces requirements with the reward choices"), Offers == 1 && !Handler.QuestDetails.RequestedItems.IsSet()
+        && Handler.QuestDetails.ChoiceRewards.Num() == 2 && Handler.QuestDetails.ChoiceRewards[1].ItemId == 6171);
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGameplayQuestTemplate,"WowUnreal.Gameplay.QuestTemplate",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FGameplayQuestTemplate::RunTest(const FString&)
 {

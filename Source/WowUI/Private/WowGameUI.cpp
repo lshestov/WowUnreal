@@ -116,7 +116,7 @@ void UWowGameUI::HideVendorWindow()
     }
 }
 
-void UWowGameUI::PrepareQuestDialog(uint64 Guid)
+void UWowGameUI::PrepareQuestDialog(uint64 Guid, const FWowQuestDetails* Details)
 {
     CreateWidgets();
     auto* GameInstance = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
@@ -125,11 +125,12 @@ void UWowGameUI::PrepareQuestDialog(uint64 Guid)
     const auto* Entity = ConnectionManager ? ConnectionManager->PacketHandler.EntityManager.Find(Guid) : nullptr;
     const FString Name = Entity ? ConnectionManager->PacketHandler.CreatureNameCache.FindRef(Entity->Entry) : FString();
     QuestDialog->SetPresentation(*UI->GetFrameManager(),Name,ConnectionManager && uint64(ConnectionManager->GetTargetGuid())==Guid);
+    if (Details) QuestDialog->PrepareItems(*UI->GetFrameManager(), ConnectionManager, *Details);
 }
 
 void UWowGameUI::ShowQuestDialog(const FWowQuestDetails& QuestDetails)
 {
-    PrepareQuestDialog(QuestDetails.QuestGiverGuid);
+    PrepareQuestDialog(QuestDetails.QuestGiverGuid, &QuestDetails);
     if (QuestDialog.IsValid())
     {
         QuestDialog->ShowQuestDetails(FormatQuest(QuestDetails,ConnectionManager));
@@ -139,7 +140,7 @@ void UWowGameUI::ShowQuestDialog(const FWowQuestDetails& QuestDetails)
 
 void UWowGameUI::ShowQuestRewardDialog(const FWowQuestDetails& QuestDetails)
 {
-    PrepareQuestDialog(QuestDetails.QuestGiverGuid);
+    PrepareQuestDialog(QuestDetails.QuestGiverGuid, &QuestDetails);
     if (QuestDialog.IsValid())
     {
         QuestDialog->ShowQuestReward(FormatQuest(QuestDetails,ConnectionManager));
@@ -242,6 +243,10 @@ void UWowGameUI::CreateWidgets()
     // Create quest dialog
     QuestDialog = SNew(SWowQuestDialog)
         .OnQuestAccept_UObject(this, &UWowGameUI::OnQuestAccept)
+        .OnQuestContinue_Lambda([this](uint64 Guid, uint32 Quest)
+        {
+            if (ConnectionManager) ConnectionManager->SendQuestRequestReward(Guid, Quest);
+        })
         .OnQuestComplete_UObject(this, &UWowGameUI::OnQuestComplete)
         .OnQuestDecline_UObject(this, &UWowGameUI::OnQuestDecline)
         .OnGossipQuest_UObject(this,&UWowGameUI::SelectGossipQuest)

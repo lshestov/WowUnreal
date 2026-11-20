@@ -251,6 +251,13 @@ struct FWowQuestRewardItem
     uint32 DisplayId = 0;
 };
 
+struct FWowQuestItemRequest
+{
+    TArray<FWowQuestRewardItem> Items;
+    uint32 Money = 0;
+    bool bCanComplete = false;
+};
+
 // Quest details for dialog
 struct FWowQuestDetails
 {
@@ -260,6 +267,7 @@ struct FWowQuestDetails
     FString Title;
     FString Details;
     FString Objectives;
+    TOptional<FWowQuestItemRequest> RequestedItems;
     TArray<FWowQuestRewardItem> RewardItems;
     TArray<FWowQuestRewardItem> ChoiceRewards;
     uint32 RewardMoney = 0;

@@ -83,6 +83,7 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(WowOpcode::SMSG_QUESTGIVER_STATUS,        &FWowPacketHandler::HandleQuestgiverStatus);
     Handlers.Add(WowOpcode::SMSG_QUEST_QUERY_RESPONSE,      &FWowPacketHandler::HandleQuestQueryResponse);
     Handlers.Add(WowOpcode::SMSG_QUESTGIVER_QUEST_DETAILS, &FWowPacketHandler::HandleQuestgiverQuestDetails);
+    Handlers.Add(WowOpcode::SMSG_QUESTGIVER_REQUEST_ITEMS, &FWowPacketHandler::HandleQuestgiverRequestItems);
     Handlers.Add(WowOpcode::SMSG_QUESTGIVER_OFFER_REWARD,  &FWowPacketHandler::HandleQuestgiverOfferReward);
     Handlers.Add(WowOpcode::SMSG_QUESTGIVER_QUEST_COMPLETE, &FWowPacketHandler::HandleQuestgiverQuestComplete);
     Handlers.Add(WowOpcode::SMSG_QUEST_UPDATE_ADD_KILL,    &FWowPacketHandler::HandleQuestUpdateAddKill);

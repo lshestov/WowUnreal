@@ -40,6 +40,17 @@ void UWowConnectionManager::SendQuestComplete(uint64 Guid, uint32 Quest)
     SendRawPacket(WowOpcode::CMSG_QUESTGIVER_COMPLETE_QUEST,Data);
 }
 
+void UWowConnectionManager::SendQuestRequestReward(uint64 Guid, uint32 Quest)
+{
+    const auto& Dialog = PacketHandler.QuestDetails;
+    if (GetState() != EWowSessionState::WorldInGame || Dialog.QuestGiverGuid != Guid || Dialog.QuestId != Quest
+        || !Dialog.RequestedItems.IsSet() || !Dialog.RequestedItems->bCanComplete) return;
+    TArray<uint8> Data;
+    Append(Data, Guid);
+    Append(Data, Quest);
+    SendRawPacket(WowOpcode::CMSG_QUESTGIVER_REQUEST_REWARD, Data);
+}
+
 void UWowConnectionManager::SendLootMoney()
 {
     if (PacketHandler.Loot.Guid && PacketHandler.Loot.Gold) SendRawPacket(WowOpcode::CMSG_LOOT_MONEY);

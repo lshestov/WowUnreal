@@ -155,6 +155,38 @@ void FWowPacketHandler::HandleQuestgiverQuestDetails(FPacketReader& R)
     OnQuestDialog.Broadcast(QuestDetails);
 }
 
+void FWowPacketHandler::HandleQuestgiverRequestItems(FPacketReader& R)
+{
+    if (!R.CanRead(12)) return;
+    FWowQuestDetails Quest;
+    Quest.QuestGiverGuid = R.ReadU64();
+    Quest.QuestId = R.ReadU32();
+    Quest.Title = R.ReadCString();
+    Quest.Details = R.ReadCString();
+    if (!Quest.QuestGiverGuid || !Quest.QuestId || !R.CanRead(28)) return;
+    R.Skip(20); // Emote delay, emote, close-on-cancel, quest flags and suggested party size.
+    auto& Request = Quest.RequestedItems.Emplace();
+    Request.Money = R.ReadU32();
+    const uint32 Count = R.ReadU32();
+    if (Count > 6 || R.Remaining() != Count * 12 + 16) return;
+    for (uint32 Index = 0; Index < Count; ++Index)
+    {
+        const FWowQuestRewardItem Item{R.ReadU32(), R.ReadU32(), R.ReadU32()};
+        if (!Item.ItemId || !Item.Count) return;
+        Request.Items.Add(Item);
+    }
+    // Build 12340 enables Continue only when all four server completion flags are set.
+    Request.bCanComplete = true;
+    for (int32 Index = 0; Index < 4; ++Index)
+    {
+        const uint32 Flag = R.ReadU32();
+        if (!Flag) Request.bCanComplete = false;
+    }
+    UE_LOG(LogWowInteraction, Log, TEXT("QuestRequestItems: id=%u items=%u canComplete=%d"), Quest.QuestId, Count, Request.bCanComplete);
+    QuestDetails = MoveTemp(Quest);
+    OnQuestDialog.Broadcast(QuestDetails);
+}
+
 void FWowPacketHandler::HandleQuestgiverOfferReward(FPacketReader& R)
 {
     if (!R.CanRead(12)) return;

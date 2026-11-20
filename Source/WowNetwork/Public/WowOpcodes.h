@@ -199,6 +199,7 @@ namespace WowOpcode
     inline constexpr uint16 CMSG_QUESTGIVER_ACCEPT_QUEST = 0x0189;
     inline constexpr uint16 CMSG_QUESTGIVER_COMPLETE_QUEST = 0x018A;
     inline constexpr uint16 SMSG_QUESTGIVER_REQUEST_ITEMS = 0x018B;
+    inline constexpr uint16 CMSG_QUESTGIVER_REQUEST_REWARD = 0x018C;
     inline constexpr uint16 SMSG_QUESTGIVER_OFFER_REWARD = 0x018D;
     inline constexpr uint16 CMSG_QUESTGIVER_CHOOSE_REWARD = 0x018E;
     inline constexpr uint16 SMSG_QUESTGIVER_QUEST_COMPLETE = 0x0191;
