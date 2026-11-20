@@ -126,6 +126,15 @@ void FocusWowGameViewport()
 	}
 }
 
+void UpdateGameplayCursor(APlayerController& Controller, EMouseCursor::Type Cursor)
+{
+    if (Controller.CurrentMouseCursor == Cursor) return;
+    Controller.CurrentMouseCursor = Cursor;
+    // Refresh the pointer under a stationary mouse as the HUD takes or gives
+    // back ownership (world entry, leaving the viewport or a UI reload).
+    if (FSlateApplication::IsInitialized()) FSlateApplication::Get().QueryCursor();
+}
+
 bool IsWowUiConsumingKeyboardInput()
 {
 	if (!FSlateApplication::IsInitialized())
@@ -1085,7 +1094,7 @@ void AWowGameplayController::Tick(float DeltaTime)
 	if(UIManager) UIManager->ProcessPendingReload();
 	if(ConnectionManager && ConnectionManager->GetState()!=EWowSessionState::WorldInGame && !bOfflineUiPreview)
 	{
-		CurrentMouseCursor = EMouseCursor::Default;
+		UpdateGameplayCursor(*this, EMouseCursor::Default);
 		return;
 	}
     if(ConnectionManager) ConnectionManager->RefreshItemCursor();
@@ -1126,7 +1135,7 @@ void AWowGameplayController::Tick(float DeltaTime)
 		const bool OverWorld = Pointer.X >= 0 && Pointer.Y >= 0 && !Frames->IsPointerOverFrame()
 			&& !OverNativeWindow;
 		UIManager->TickWorldImages(GetWorld(), OverWorld ? GetWorldUnitAtScreen(Pointer.X, Pointer.Y) : 0);
-        CurrentMouseCursor=UIManager->HasSoftwareCursor()?EMouseCursor::None:EMouseCursor::Default;
+        UpdateGameplayCursor(*this, UIManager->HasSoftwareCursor() ? EMouseCursor::None : EMouseCursor::Default);
 		LastWidgetMilliseconds=FPlatformTime::ToMilliseconds64(FPlatformTime::Cycles64()-PartStarted);
 
 

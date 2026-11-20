@@ -1,14 +1,66 @@
 #include "Misc/AutomationTest.h"
 #include "SWowLoadingScreen.h"
 #include "WowFrontendCursor.h"
+#include "WowGameplayController.h"
+#include "WowGameViewportClient.h"
 #include "Mpq/MpqManager.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
+#include "Input/CursorReply.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/SOverlay.h"
 #include "Widgets/SNullWidget.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIdleWowDialogCursorTest, "WowUnreal.Input.NativeWidgetCursor",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FIdleWowDialogCursorTest::RunTest(const FString&)
+{
+    auto* World = UWorld::CreateWorld(EWorldType::Game, false);
+    if (!TestNotNull(TEXT("Created the cursor test world"), World)) return false;
+    auto& Context = GEngine->CreateNewWorldContext(EWorldType::Game);
+    TStrongObjectPtr<UGameInstance> Instance(NewObject<UGameInstance>(GEngine));
+    TStrongObjectPtr<UWowGameViewportClient> Viewport(NewObject<UWowGameViewportClient>(GEngine));
+    Context.OwningGameInstance = Instance.Get();
+    Context.GameViewport = Viewport.Get();
+    World->SetGameInstance(Instance.Get());
+    Context.SetCurrentWorld(World);
+    Viewport->Init(Context, Instance.Get(), false);
+    const auto ConfiguredArrow = SNew(SBox);
+    Viewport->SetUseSoftwareCursorWidgets(true);
+    Viewport->SetSoftwareCursorWidget(EMouseCursor::Default, ConfiguredArrow);
+    auto* Controller = World->SpawnActor<AWowGameplayController>();
+    // Actor initialization normally registers controllers during map startup.
+    // This fixture has no level startup, so register its controller explicitly.
+    if (Controller) World->AddController(Controller);
+    TestTrue(TEXT("The viewport resolves the current game world"), Viewport->GetWorld() == World);
+    TestTrue(TEXT("The world resolves the configured game viewport"), World->GetGameViewport() == Viewport.Get());
+    if (!TestNotNull(TEXT("Spawned the gameplay cursor owner"), Controller) ||
+        !TestTrue(TEXT("The world resolves the controller driving the cursor"), World->GetFirstPlayerController() == Controller))
+    {
+        World->DestroyWorld(false);
+        GEngine->DestroyWorldContext(World);
+        return false;
+    }
+    Controller->CurrentMouseCursor = EMouseCursor::None;
+    for (auto Requested : {EMouseCursor::Default, EMouseCursor::Hand, EMouseCursor::TextEditBeam})
+    {
+        const auto Mapping = Viewport->MapCursor(nullptr, FCursorReply::Cursor(Requested));
+        TestTrue(FString::Printf(TEXT("Native cursor request %d keeps the hardware pointer hidden under the WoW cursor"), int32(Requested)),
+            Mapping.IsSet() && Mapping.GetValue() == SNullWidget::NullWidget);
+    }
+    Controller->CurrentMouseCursor = EMouseCursor::Default;
+    const auto Mapping = Viewport->MapCursor(nullptr, FCursorReply::Cursor(EMouseCursor::Default));
+    TestTrue(TEXT("Relinquishing the WoW cursor restores the viewport's configured mapping"),
+        Mapping.IsSet() && Mapping.GetValue() == ConfiguredArrow);
+    Controller->Destroy();
+    World->DestroyWorld(false);
+    GEngine->DestroyWorldContext(World);
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIdleWowFrontendPresentationTest,"WowUnreal.Login.LoadingBarAndCursor",
     EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
 bool FIdleWowFrontendPresentationTest::RunTest(const FString&)
