@@ -48,6 +48,9 @@
 #include "Engine/GameViewportClient.h"
 #include "Widgets/SViewport.h"
 #include "Widgets/Text/STextBlock.h"
+#include "Widgets/Images/SImage.h"
+#include "Rendering/DrawElements.h"
+#include "Types/PaintArgs.h"
 #include "Fonts/CompositeFont.h"
 #include "Layout/Children.h"
 #include "Layout/WidgetPath.h"
@@ -62,6 +65,10 @@
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/Application/SlateUser.h"
 #include "Framework/Application/IInputProcessor.h"
+#if PLATFORM_WINDOWS
+#include "GenericPlatform/GenericWindow.h"
+#include "Windows/WindowsHWrapper.h"
+#endif
 
 // Native probe callbacks drive the test. Consume physical input in this test
 // process so typing or moving the mouse in other apps cannot steer its player.
@@ -69,13 +76,14 @@ class FWowProbeInputGuard final : public IInputProcessor
 {
 public:
     bool SyntheticText=false;
+    bool SyntheticPointer=false;
     void Tick(float,FSlateApplication&,TSharedRef<ICursor>) override {}
     bool HandleKeyDownEvent(FSlateApplication&,const FKeyEvent&) override { return !SyntheticText; }
     bool HandleKeyUpEvent(FSlateApplication&,const FKeyEvent&) override { return !SyntheticText; }
     bool HandleAnalogInputEvent(FSlateApplication&,const FAnalogInputEvent&) override { return true; }
-    bool HandleMouseMoveEvent(FSlateApplication&,const FPointerEvent&) override { return true; }
-    bool HandleMouseButtonDownEvent(FSlateApplication&,const FPointerEvent&) override { return true; }
-    bool HandleMouseButtonUpEvent(FSlateApplication&,const FPointerEvent&) override { return true; }
+    bool HandleMouseMoveEvent(FSlateApplication&,const FPointerEvent&) override { return !SyntheticPointer; }
+    bool HandleMouseButtonDownEvent(FSlateApplication&,const FPointerEvent&) override { return !SyntheticPointer; }
+    bool HandleMouseButtonUpEvent(FSlateApplication&,const FPointerEvent&) override { return !SyntheticPointer; }
     bool HandleMouseButtonDoubleClickEvent(FSlateApplication&,const FPointerEvent&) override { return true; }
     bool HandleMouseWheelOrGestureEvent(FSlateApplication&,const FPointerEvent&,const FPointerEvent*) override { return true; }
 };
@@ -114,6 +122,14 @@ struct FWowGameplayProbe
     bool bWorldClickReleased=false;
     FVector2D SlateClickPoint=FVector2D::ZeroVector;
     TOptional<FVector2D> SavedSlateCursor;
+#if PLATFORM_WINDOWS
+    HWND DialogHwnd=nullptr, PreviousForeground=nullptr;
+    WINDOWPLACEMENT PreviousPlacement{};
+    bool RaisedDialog=false, MovedDialog=false;
+    TOptional<POINT> PreviousSystemPointer, ExpectedSystemPointer;
+    RECT ExpectedButtonRect{};
+    FVector2D ExpectedSlatePointer=FVector2D::ZeroVector;
+#endif
     FRotator BeforeMouseAxis=FRotator::ZeroRotator;
     float BeforeWheelDistance=0;
     TMap<uint64,TPair<uint32,uint32>> OfflineCorpseFields;
@@ -137,6 +153,9 @@ struct FWowGameplayProbe
     TSharedPtr<FJsonObject> Inspections=MakeShared<FJsonObject>();
     TSharedPtr<FWowProbeInputGuard> InputGuard;
     TSharedPtr<FSlateVirtualUserHandle> DialogPointerUser;
+    TOptional<FVector2D> PendingDialogRelease;
+    TWeakPtr<SWidget> PressedDialogButton;
+    uint64 DialogPressFrame=0;
     TWeakPtr<SWidget> ExpectedDialogHover;
     TUniquePtr<FWowUiTestPeer> Peers[4];
     FWowUiTestPeer* Peer=nullptr;
@@ -156,6 +175,7 @@ struct FWowGameplayProbe
     }
     ~FWowGameplayProbe()
     {
+        ReleaseNativeDialogButton();
         RestoreSlateCursor();
         if(InputGuard && FSlateApplication::IsInitialized()) FSlateApplication::Get().UnregisterInputPreProcessor(InputGuard);
     }
@@ -164,12 +184,41 @@ struct FWowGameplayProbe
     {
         if(SavedSlateCursor.IsSet() && FSlateApplication::IsInitialized()) FSlateApplication::Get().SetCursorPos(*SavedSlateCursor);
         SavedSlateCursor.Reset();
+#if PLATFORM_WINDOWS
+        if (::IsWindow(DialogHwnd))
+        {
+            if (RaisedDialog) ::SetWindowPos(DialogHwnd,HWND_NOTOPMOST,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE|SWP_NOOWNERZORDER);
+            if (MovedDialog) ::SetWindowPlacement(DialogHwnd,&PreviousPlacement);
+            if (::GetForegroundWindow()==DialogHwnd && ::IsWindow(PreviousForeground)) ::SetForegroundWindow(PreviousForeground);
+        }
+        if (PreviousSystemPointer) ::SetCursorPos(PreviousSystemPointer->x,PreviousSystemPointer->y);
+        PreviousSystemPointer.Reset();
+        ExpectedSystemPointer.Reset();
+        DialogHwnd=nullptr;
+        RaisedDialog=MovedDialog=false;
+#endif
+    }
+
+    bool ReleaseNativeDialogButton()
+    {
+        if (!PendingDialogRelease.IsSet()) return false;
+        const FVector2D Screen=PendingDialogRelease.GetValue();
+        PendingDialogRelease.Reset();
+        PressedDialogButton.Reset();
+        if (!InputGuard || !FSlateApplication::IsInitialized()) return false;
+        auto& Slate=FSlateApplication::Get();
+        const TSet<FKey> NoButtons;
+        const FPointerEvent Release(Slate.GetCursorUser()->GetUserIndex(),FSlateApplication::CursorPointerIndex,
+            Screen,Screen,NoButtons,EKeys::LeftMouseButton,0,FModifierKeysState());
+        TGuardValue<bool> AllowPointer(InputGuard->SyntheticPointer,true);
+        return Slate.ProcessMouseButtonUpEvent(Release);
     }
 
     void Finish(AWowGameplayController& Controller,bool Passed)
     {
         if (bFinished) return;
         bFinished=true;
+        ReleaseNativeDialogButton();
         RestoreSlateCursor();
         if (auto* Character=Cast<ACharacter>(Controller.GetPawn())) Character->GetCharacterMovement()->StopMovementImmediately();
         Controller.StopAutoAttack();
@@ -266,8 +315,272 @@ struct FWowGameplayProbe
             *C.GetControlRotation().ToString(),*Press.ViewRotation.ToString(),C.GetUiFrameUnderCursor(),C.IsPointerOverNativeWindow(),C.IsInputKeyDown(EKeys::LeftMouseButton));
     }
 
+#if PLATFORM_WINDOWS
+    bool PlaceNativeDialogPointer(const TSharedPtr<SWindow>& Window, const FVector2D& Screen, const FVector2D& Relative,const FSlateRect& RelativeButton)
+    {
+        auto Native=Window->GetNativeWindow();
+        const HWND Hwnd=Native?static_cast<HWND>(Native->GetOSWindowHandle()):nullptr;
+        if (!Hwnd) return false;
+        if (!DialogHwnd)
+        {
+            DialogHwnd=Hwnd;
+            PreviousForeground=::GetForegroundWindow();
+            POINT Previous{};
+            if (::GetCursorPos(&Previous)) PreviousSystemPointer=Previous;
+            PreviousPlacement.length=sizeof(PreviousPlacement);
+            const bool HavePlacement=::GetWindowPlacement(Hwnd,&PreviousPlacement)!=0;
+            if (HavePlacement && ::IsIconic(Hwnd))
+            {
+                ::ShowWindow(Hwnd,SW_RESTORE);
+                MovedDialog=true;
+            }
+            MONITORINFO Monitor{};
+            Monitor.cbSize=sizeof(Monitor);
+            RECT Bounds{};
+            if (HavePlacement && ::GetWindowRect(Hwnd,&Bounds) &&
+                ::GetMonitorInfoW(::MonitorFromWindow(Hwnd,MONITOR_DEFAULTTONEAREST),&Monitor))
+            {
+                const RECT Work=Monitor.rcWork;
+                const LONG X=FMath::Clamp(Bounds.left,Work.left,FMath::Max(Work.left,Work.right-(Bounds.right-Bounds.left)));
+                const LONG Y=FMath::Clamp(Bounds.top,Work.top,FMath::Max(Work.top,Work.bottom-(Bounds.bottom-Bounds.top)));
+                if (X!=Bounds.left || Y!=Bounds.top)
+                    MovedDialog|=::SetWindowPos(Hwnd,nullptr,X,Y,0,0,SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE)!=0;
+            }
+            Window->BringToFront(true);
+            if (!(::GetWindowLongPtrW(Hwnd,GWL_EXSTYLE)&WS_EX_TOPMOST))
+                RaisedDialog=::SetWindowPos(Hwnd,HWND_TOPMOST,0,0,0,0,SWP_NOSIZE|SWP_NOMOVE|SWP_NOOWNERZORDER)!=0;
+            ::SetForegroundWindow(Hwnd);
+            return false; // Let Slate rearrange after a possible restore or move.
+        }
+        RECT Client{};
+        if (DialogHwnd!=Hwnd || !::GetClientRect(Hwnd,&Client)) return false;
+        const LONG Width=Client.right-Client.left, Height=Client.bottom-Client.top;
+        POINT Target{FMath::RoundToInt(Relative.X*Width),FMath::RoundToInt(Relative.Y*Height)};
+        POINT Origin{};
+        if (!::PtInRect(&Client,Target) || !::ClientToScreen(Hwnd,&Origin) || !::ClientToScreen(Hwnd,&Target)) return false;
+        ExpectedButtonRect={Origin.x+FMath::FloorToInt(RelativeButton.Left*Width),Origin.y+FMath::FloorToInt(RelativeButton.Top*Height),
+            Origin.x+FMath::CeilToInt(RelativeButton.Right*Width),Origin.y+FMath::CeilToInt(RelativeButton.Bottom*Height)};
+        ExpectedSlatePointer=Screen;
+        ExpectedSystemPointer=Target;
+        FSlateApplication::Get().SetCursorPos(Screen);
+        return ::SetCursorPos(Target.x,Target.y)!=0;
+    }
+
+    static FString DescribeProbeHwnd(HWND Hwnd)
+    {
+        WCHAR Class[128]{};
+        DWORD Pid=0;
+        if (Hwnd)
+        {
+            ::GetClassNameW(Hwnd,Class,UE_ARRAY_COUNT(Class));
+            ::GetWindowThreadProcessId(Hwnd,&Pid);
+        }
+        return FString::Printf(TEXT("%p class=%s pid=%lu"),static_cast<void*>(Hwnd),Class,Pid);
+    }
+#endif
+
+    bool ProbeHardwareCursor(AWowGameplayController& C, const FString& Label, bool PositionOnly=false)
+    {
+#if PLATFORM_WINDOWS
+        auto* Viewport = C.GetWorld()->GetGameViewport();
+        auto Window = Viewport ? Viewport->GetWindow() : nullptr;
+        auto Native = Window ? Window->GetNativeWindow() : nullptr;
+        auto Hwnd = Native ? static_cast<HWND>(Native->GetOSWindowHandle()) : nullptr;
+        CURSORINFO Cursor{};
+        Cursor.cbSize = sizeof(Cursor);
+        if (!Hwnd || !::GetCursorInfo(&Cursor))
+        {
+            if (!PositionOnly) Failure = TEXT("Could not inspect the Win32 cursor for the game window");
+            return false;
+        }
+
+        const HWND UnderPointer=::WindowFromPoint(Cursor.ptScreenPos);
+        const HWND UnderRoot=::GetAncestor(UnderPointer,GA_ROOT);
+        const HWND Foreground=::GetForegroundWindow();
+        const bool InsideGame=UnderRoot==Hwnd;
+        const bool OnMonitor=::MonitorFromPoint(Cursor.ptScreenPos,MONITOR_DEFAULTTONULL)!=nullptr;
+        const bool OnTarget=ExpectedSystemPointer && ::PtInRect(&ExpectedButtonRect,Cursor.ptScreenPos);
+        RECT Bounds{},Client{};
+        POINT Local=Cursor.ptScreenPos;
+        ::GetWindowRect(Hwnd,&Bounds);
+        const bool InClient=::ScreenToClient(Hwnd,&Local) && ::GetClientRect(Hwnd,&Client) && ::PtInRect(&Client,Local);
+        const bool HardwareDrawn = (Cursor.flags & CURSOR_SHOWING) && Cursor.hCursor != nullptr;
+        const auto* Frames = C.UIManager->GetFrameManager();
+        const auto* Icon = Frames->GetNamedTexture(TEXT("IdleWowCursorIcon"));
+        const bool SoftwareDrawn = Frames->IsFrameDrawn(Frames->FindFrame(TEXT("IdleWowCursor"))) &&
+            Icon && Icon->IsVisible() && Icon->GetBrush().GetResourceObject();
+        const auto State = MakeShared<FJsonObject>();
+        State->SetBoolField(TEXT("insideGameWindow"), InsideGame);
+        State->SetBoolField(TEXT("gameInForeground"), Foreground == Hwnd);
+        State->SetBoolField(TEXT("gameWindowVisible"), ::IsWindowVisible(Hwnd) != 0);
+        State->SetBoolField(TEXT("onTarget"),OnTarget);
+        State->SetStringField(TEXT("buttonRect"),FString::Printf(TEXT("%ld,%ld to %ld,%ld"),ExpectedButtonRect.left,ExpectedButtonRect.top,ExpectedButtonRect.right,ExpectedButtonRect.bottom));
+        State->SetBoolField(TEXT("onMonitor"),OnMonitor);
+        State->SetBoolField(TEXT("inClient"),InClient);
+        State->SetNumberField(TEXT("slateDesktopX"),ExpectedSlatePointer.X);
+        State->SetNumberField(TEXT("slateDesktopY"),ExpectedSlatePointer.Y);
+        if (ExpectedSystemPointer)
+        {
+            State->SetNumberField(TEXT("expectedWin32X"),ExpectedSystemPointer->x);
+            State->SetNumberField(TEXT("expectedWin32Y"),ExpectedSystemPointer->y);
+        }
+        State->SetNumberField(TEXT("actualWin32X"),Cursor.ptScreenPos.x);
+        State->SetNumberField(TEXT("actualWin32Y"),Cursor.ptScreenPos.y);
+        State->SetStringField(TEXT("windowRect"),FString::Printf(TEXT("%ld,%ld to %ld,%ld"),Bounds.left,Bounds.top,Bounds.right,Bounds.bottom));
+        State->SetStringField(TEXT("gameWindow"),DescribeProbeHwnd(Hwnd));
+        State->SetStringField(TEXT("pointerWindow"),DescribeProbeHwnd(UnderPointer));
+        State->SetStringField(TEXT("pointerParent"),DescribeProbeHwnd(::GetParent(UnderPointer)));
+        State->SetStringField(TEXT("pointerRoot"),DescribeProbeHwnd(UnderRoot));
+        State->SetStringField(TEXT("foregroundWindow"),DescribeProbeHwnd(Foreground));
+        State->SetBoolField(TEXT("hardwareDrawn"), HardwareDrawn);
+        State->SetBoolField(TEXT("softwareDrawn"), SoftwareDrawn);
+        State->SetNumberField(TEXT("win32Flags"), Cursor.flags);
+        State->SetBoolField(TEXT("hasHardwareShape"), Cursor.hCursor != nullptr);
+        Inspections->SetObjectField(Label, State);
+        const bool PositionValid=InsideGame && InClient && OnMonitor && OnTarget;
+        if (PositionOnly) return PositionValid;
+        if (!PositionValid)
+        {
+            if (ExpectedSystemPointer && ::IsWindowVisible(Hwnd)) ::SetCursorPos(ExpectedSystemPointer->x,ExpectedSystemPointer->y);
+            return false; // Recheck after the desktop cursor has reached the button.
+        }
+        if (HardwareDrawn || !SoftwareDrawn)
+        {
+            Failure = FString::Printf(TEXT("Cursor %s: inside game=%d, Win32 visible=%d, WoW visible=%d"),
+                *Label, InsideGame, HardwareDrawn, SoftwareDrawn);
+            return false;
+        }
+        return true;
+#else
+        Failure = TEXT("Win32 cursor observation requires Windows");
+        return false;
+#endif
+    }
+
+    bool CheckQuestItemLayout(AWowGameplayController& C,const FJsonObject& Step,const TSharedPtr<SWindow>& Window,TSharedRef<SWidget> Dialog)
+    {
+        const auto State=MakeShared<FJsonObject>();
+        Inspections->SetObjectField(Step.GetStringField(TEXT("label")),State);
+        auto Tagged=[&](const FString& Tag)
+        {
+            return FindVisibleWidget(Dialog,[&](SWidget& Widget){ return Widget.GetTag()==FName(*Tag); });
+        };
+        // Measure in the dialog's FrameXML units, independent of viewport DPI.
+        auto Rect=[&](const TSharedPtr<SWidget>& Widget)
+        {
+            const auto& Geometry=Widget->GetCachedGeometry();
+            const auto& Root=Dialog->GetCachedGeometry();
+            const auto Start=Root.AbsoluteToLocal(Geometry.GetAbsolutePositionAtCoordinates(FVector2D::ZeroVector));
+            const auto End=Root.AbsoluteToLocal(Geometry.GetAbsolutePositionAtCoordinates(FVector2D(1,1)));
+            const auto Box=MakeShared<FJsonObject>();
+            Box->SetNumberField(TEXT("x"),Start.X); Box->SetNumberField(TEXT("y"),Start.Y);
+            Box->SetNumberField(TEXT("width"),End.X-Start.X); Box->SetNumberField(TEXT("height"),End.Y-Start.Y);
+            State->SetObjectField(Widget->GetTag().ToString(),Box);
+            return FSlateRect(Start,End);
+        };
+        auto Near=[](float A,float B){ return FMath::IsNearlyEqual(A,B,1.5f); };
+        const bool Required=Step.HasField(TEXT("count"));
+        const FString Prefix=Required?TEXT("QuestRequiredItem"):TEXT("QuestChoice");
+        const auto& Items=Step.GetArrayField(TEXT("items"));
+        int32 Selected=INDEX_NONE;
+        Step.TryGetNumberField(TEXT("selected"),Selected);
+        TArray<FSlateRect> Cards;
+        for (int32 I=0; I<Items.Num(); ++I)
+        {
+            const FString Suffix=FString::FromInt(I);
+            const auto Card=Tagged(Prefix+Suffix);
+            const auto Icon=Tagged(Prefix+TEXT("Icon")+Suffix);
+            if (!Card || !Icon || Icon->GetType()!=TEXT("SImage")) return false;
+            const auto Bounds=Rect(Card), Art=Rect(Icon);
+            Cards.Add(Bounds);
+            if (!Near(Bounds.GetSize().X,147) || !Near(Bounds.GetSize().Y,41) || !Near(Art.GetSize().X,39) ||
+                !Near(Art.GetSize().Y,39) || !Near(Art.Left,Bounds.Left) || !Near(Art.Top,Bounds.Top)) return false;
+            if (I>0 && (!Near(Bounds.Left,Cards[0].Left+(I%2)*(Required?149:148)) ||
+                !Near(Bounds.Top,Cards[0].Top+(I/2)*(Required?44:43)))) return false;
+
+            const uint32 ItemId=static_cast<uint32>(Items[I]->AsNumber());
+            const auto* Item=C.ConnectionManager->PacketHandler.ItemTemplates.Find(ItemId);
+            const auto* Display=Item?FDbcStore::Get().ItemDisplayInfo().GetById(Item->DisplayId):nullptr;
+            if (!Display || Display->Icon1.IsEmpty()) return false;
+            const FString Path=TEXT("Interface\\Icons\\")+Display->Icon1;
+            auto* Texture=C.UIManager->GetFrameManager()->LoadUITexture(Path);
+            if (!Texture) return false;
+            // Compare the image's actual draw command with the expected MPQ texture.
+            const auto& Geometry=Icon->GetCachedGeometry();
+            FSlateWindowElementList Draw(Window);
+            FPaintArgs Args(&Dialog.Get(),Window->GetHittestGrid(),FVector2D::ZeroVector,FPlatformTime::Seconds(),0);
+            static_cast<const SImage&>(*Icon).OnPaint(Args,Geometry,Geometry.GetRenderBoundingRect(),Draw,0,FWidgetStyle(),true);
+            const auto& Boxes=Draw.GetUncachedDrawElements().Get<static_cast<uint8>(EElementType::ET_Box)>();
+            FSlateBrush Expected;
+            Expected.SetResourceObject(Texture);
+            const auto& Handle=Expected.GetRenderingResource(Geometry.GetLocalSize(),Geometry.GetAccumulatedLayoutTransform().GetScale());
+            const auto* Proxy=Handle.IsValid()?Handle.GetResourceProxy():nullptr;
+            const bool Matches=Proxy && Boxes.Num()==1 && Boxes[0].GetResourceProxy()==Proxy;
+            auto IconData=State->GetObjectField(Icon->GetTag().ToString());
+            IconData->SetStringField(TEXT("itemTexture"),Path);
+            IconData->SetBoolField(TEXT("paintedExpectedTexture"),Matches);
+            if (!Matches) return false;
+
+            if (Required)
+            {
+                const auto Count=Tagged(Prefix+TEXT("Count")+Suffix);
+                if (!Count || Count->GetType()!=TEXT("STextBlock")) return false;
+                const auto Badge=Rect(Count);
+                const FString Text=static_cast<const STextBlock&>(*Count).GetText().ToString();
+                State->SetStringField(TEXT("badgeText"),Text);
+                if (Text!=FString::FromInt(Step.GetIntegerField(TEXT("count"))) ||
+                    !Near(Badge.Right,Art.Right-1) || !Near(Badge.Bottom,Art.Bottom-1)) return false;
+            }
+            else
+            {
+                const auto Highlight=Tagged(TEXT("QuestChoiceSelected")+Suffix);
+                if (Highlight.IsValid()!=(Selected==I)) return false;
+                if (Highlight)
+                {
+                    const auto Glow=Rect(Highlight);
+                    if (!Near(Glow.Left,Bounds.Left-8) || !Near(Glow.Top,Bounds.Top-7) ||
+                        !Near(Glow.GetSize().X,256) || !Near(Glow.GetSize().Y,64)) return false;
+                }
+            }
+        }
+        if (Required) return !Cards.IsEmpty();
+        if (Selected != INDEX_NONE)
+        {
+            auto* Frames = C.UIManager->GetFrameManager();
+            const auto* Tip = Frames->GetWidgetForHandle(Frames->FindFrame(TEXT("GameTooltip")));
+            const auto* Glove = Frames->GetWidgetForHandle(Frames->FindFrame(TEXT("IdleWowCursor")));
+            const bool AboveDialog = Tip && Glove && Tip->GetParent() && Tip->GetParent() == Glove->GetParent();
+            State->SetBoolField(TEXT("tooltipInCursorLayer"), AboveDialog);
+            if (!AboveDialog) return false;
+        }
+        const auto XP=Tagged(TEXT("QuestRewardXP"));
+        if (!XP || XP->GetType()!=TEXT("STextBlock") || Cards.IsEmpty()) return false;
+        const auto XpBounds=Rect(XP);
+        const FString Amount=static_cast<const STextBlock&>(*XP).GetText().ToString();
+        State->SetStringField(TEXT("xpText"),Amount);
+        return FCString::Atoi(*Amount)>0 && XpBounds.Top>Cards.Last().Bottom;
+    }
+
     bool ProbeDialog(AWowGameplayController& C, const FJsonObject& Step, const FString& Op)
     {
+        if (PendingDialogRelease.IsSet())
+        {
+            // Observe the cursor after Windows and Slate have had a frame with
+            // the button captured. Release even if the observation fails or
+            // the dialog changed while the button was held.
+            if (GFrameCounter==DialogPressFrame) return false;
+            const FString Inspection=Step.GetStringField(TEXT("label"));
+            const bool CursorWhileHeld=ProbeHardwareCursor(C,Inspection+TEXT("-held"));
+            if (!CursorWhileHeld && Failure.IsEmpty()) return false;
+            const auto Button=PressedDialogButton.Pin();
+            Inspections->GetObjectField(Inspection)->SetBoolField(TEXT("buttonCapturedWhileHeld"),
+                Button && Button->HasMouseCaptureByUser(FSlateApplication::Get().GetCursorUser()->GetUserIndex(),FSlateApplication::CursorPointerIndex));
+            TGuardValue<bool> AllowGameplay(C.bProbeSyntheticKeyboard,true);
+            const bool Released=ReleaseNativeDialogButton();
+            Inspections->GetObjectField(Inspection)->SetNumberField(TEXT("framesHeld"),GFrameCounter-DialogPressFrame);
+            if (CursorWhileHeld && !Released) Failure=TEXT("Dialog did not handle primary mouse release");
+            return Released && CursorWhileHeld;
+        }
         auto* Client = C.GetWorld()->GetGameViewport();
         const auto Window = Client ? Client->GetWindow() : nullptr;
         const auto Viewport = Client ? Client->GetGameViewportWidget() : nullptr;
@@ -278,6 +591,7 @@ struct FWowGameplayProbe
         });
         if (Op == TEXT("wait_dialog_closed")) return !Dialog;
         if (!Dialog) return false;
+        if (Op==TEXT("check_quest_item_layout")) return CheckQuestItemLayout(C,Step,Window,Dialog.ToSharedRef());
         FString Label, Tag;
         Step.TryGetStringField(TEXT("text"), Label);
         Step.TryGetStringField(TEXT("tag"), Tag);
@@ -292,6 +606,18 @@ struct FWowGameplayProbe
         {
             const auto Found = FindVisibleWidget(Dialog.ToSharedRef(), MatchesText);
             if (!Found) return false;
+            bool ExpectedEnabled;
+            if (Step.TryGetBoolField(TEXT("enabled"), ExpectedEnabled))
+            {
+                bool Enabled=true;
+                bool InButton=false;
+                for (auto Widget=Found; Widget.IsValid(); Widget=Widget->GetParentWidget())
+                {
+                    Enabled &= Widget->IsEnabled();
+                    InButton |= Widget->GetType()==TEXT("SButton");
+                }
+                if (!InButton || Enabled != ExpectedEnabled) return false;
+            }
             FString Face;
             if (!Step.TryGetStringField(TEXT("face"), Face)) return true;
             const auto& Text = static_cast<const STextBlock&>(*Found);
@@ -326,26 +652,61 @@ struct FWowGameplayProbe
         // hit-test grid and SButton handlers, exactly as a mouse click would.
         const FVector2D Screen = Button->GetCachedGeometry().GetAbsolutePositionAtCoordinates(FVector2D(.55,.5));
         auto& Slate = FSlateApplication::Get();
-        // Give the probe its own pointer so a stationary hardware mouse cannot
-        // undo the hovered state between the routed move and the rendered capture.
-        if (!DialogPointerUser) DialogPointerUser = Slate.FindOrCreateVirtualUser(0);
-        const uint32 User = DialogPointerUser->GetUserIndex();
+        bool NativeMouse=false;
+        Step.TryGetBoolField(TEXT("nativeMouse"), NativeMouse);
+        uint32 User=Slate.GetCursorUser()->GetUserIndex();
+        const FVector2D PreviousScreen=Slate.GetCursorPos();
+        const auto& Geometry = Viewport->GetCachedGeometry();
+        const FVector2D LocalSize = Geometry.GetLocalSize();
+        if (LocalSize.GetMin()<1) return false;
+        const FVector2D Relative=Geometry.AbsoluteToLocal(Screen)/LocalSize;
+        if (NativeMouse)
+        {
+            if (!SavedSlateCursor.IsSet()) SavedSlateCursor=PreviousScreen;
+#if PLATFORM_WINDOWS
+            const auto& Hit=Button->GetCachedGeometry();
+            const FSlateRect ButtonBounds(Geometry.AbsoluteToLocal(Hit.GetAbsolutePositionAtCoordinates(FVector2D::ZeroVector))/LocalSize,
+                Geometry.AbsoluteToLocal(Hit.GetAbsolutePositionAtCoordinates(FVector2D(1,1)))/LocalSize);
+            const bool Placed=PlaceNativeDialogPointer(Window,Screen,Relative,ButtonBounds);
+            const bool Ready=ProbeHardwareCursor(C,Step.GetStringField(TEXT("label"))+TEXT("-position"),true);
+            if (!Placed || !Ready) return false;
+#else
+            Slate.SetCursorPos(Screen);
+#endif
+        }
+        else
+        {
+            // Isolated pointer for routes that only verify visual hover state.
+            if (!DialogPointerUser) DialogPointerUser = Slate.FindOrCreateVirtualUser(0);
+            User=DialogPointerUser->GetUserIndex();
+        }
         const auto Path = Slate.LocateWindowUnderMouse(Screen, {Window.ToSharedRef()}, false, User);
         if (!Path.IsValid() || !Path.ContainsWidget(Button.Get())) return false;
         int32 Width, Height;
         C.GetViewportSize(Width, Height);
-        const auto& Geometry = Viewport->GetCachedGeometry();
-        const FVector2D LocalSize = Geometry.GetLocalSize();
-        if (LocalSize.GetMin() < 1 || Width < 1 || Height < 1) return false;
-        const FVector2D Pixel = Geometry.AbsoluteToLocal(Screen) / LocalSize * FVector2D(Width, Height);
-        C.GameplayProbePointer = Pixel;
+        if (Width < 1 || Height < 1) return false;
+        const FVector2D Pixel=Relative*FVector2D(Width,Height);
+        if (NativeMouse) C.GameplayProbePointer.Reset();
+        else C.GameplayProbePointer = Pixel;
         const TSet<FKey> NoButtons;
-        const FPointerEvent Move(User, FSlateApplication::CursorPointerIndex, Screen, Screen, NoButtons,
+        const FPointerEvent Move(User, FSlateApplication::CursorPointerIndex, Screen, NativeMouse ? PreviousScreen : Screen, NoButtons,
             EKeys::Invalid, 0, FModifierKeysState());
-        Slate.RoutePointerMoveEvent(Path, Move, false);
+        if (NativeMouse)
+        {
+            TGuardValue<bool> AllowPointer(InputGuard->SyntheticPointer,true);
+            TGuardValue<bool> AllowGameplay(C.bProbeSyntheticKeyboard,true);
+            Slate.ProcessMouseMoveEvent(Move);
+        }
+        else Slate.RoutePointerMoveEvent(Path, Move, false);
         if (!Button->IsHovered()) return false;
         bool Click = false;
         Step.TryGetBoolField(TEXT("click"), Click);
+        const auto Row = MakeShared<FJsonObject>();
+        Row->SetNumberField(TEXT("x"), Pixel.X);
+        Row->SetNumberField(TEXT("y"), Pixel.Y);
+        Row->SetBoolField(TEXT("click"), Click);
+        Row->SetBoolField(TEXT("primaryMouse"), NativeMouse);
+        Inspections->SetObjectField(Step.GetStringField(TEXT("label")), Row);
         if (Click)
         {
             const TSet<FKey> PressedButtons{EKeys::LeftMouseButton};
@@ -353,21 +714,33 @@ struct FWowGameplayProbe
                 PressedButtons, EKeys::LeftMouseButton, 0, FModifierKeysState());
             const FPointerEvent Up(User, FSlateApplication::CursorPointerIndex, Screen, Screen,
                 NoButtons, EKeys::LeftMouseButton, 0, FModifierKeysState());
-            const bool Pressed = Slate.RoutePointerDownEvent(Path, Down).IsEventHandled();
-            const bool Released = Slate.RoutePointerUpEvent(Path, Up).IsEventHandled();
+            ExpectedDialogHover.Reset();
+            if (NativeMouse)
+            {
+#if PLATFORM_WINDOWS
+                if (!ProbeHardwareCursor(C,Step.GetStringField(TEXT("label"))+TEXT("-position"),true)) return false;
+#endif
+                DialogPressFrame=GFrameCounter;
+                PendingDialogRelease=Screen;
+                PressedDialogButton=Button;
+                TGuardValue<bool> AllowPointer(InputGuard->SyntheticPointer,true);
+                TGuardValue<bool> AllowGameplay(C.bProbeSyntheticKeyboard,true);
+                if (!Slate.ProcessMouseButtonDownEvent(Window->GetNativeWindow(),Down))
+                {
+                    Failure=TEXT("Dialog did not handle primary mouse press");
+                    ReleaseNativeDialogButton();
+                }
+                return false;
+            }
+            const bool Pressed=Slate.RoutePointerDownEvent(Path,Down).IsEventHandled();
+            const bool Released=Slate.RoutePointerUpEvent(Path,Up).IsEventHandled();
             if (!Pressed || !Released)
             {
                 Failure = FString::Printf(TEXT("Dialog button did not handle click: %s"), Tag.IsEmpty() ? *Label : *Tag);
                 return false;
             }
         }
-        if (Click) ExpectedDialogHover.Reset();
         else ExpectedDialogHover = Button;
-        const auto Row = MakeShared<FJsonObject>();
-        Row->SetNumberField(TEXT("x"), Pixel.X);
-        Row->SetNumberField(TEXT("y"), Pixel.Y);
-        Row->SetBoolField(TEXT("click"), Click);
-        Inspections->SetObjectField(Step.GetStringField(TEXT("label")), Row);
         return true;
     }
 
@@ -775,6 +1148,8 @@ struct FWowGameplayProbe
             }
             Handler.EntityManager.OnEntityUpdated.Broadcast(*Entity); Done=true;
         }
+        else if(Op==TEXT("check_hardware_cursor"))
+            Done=ProbeHardwareCursor(C, Step->GetStringField(TEXT("label")));
         else if(Op==TEXT("assert_cursor"))
         {
             const FString Path=TEXT("Interface\\Cursor\\")+Step->GetStringField(TEXT("texture"));
@@ -1321,7 +1696,7 @@ struct FWowGameplayProbe
             }
         }
         else if (Op==TEXT("wait_dialog")) Done=C.GameUI->GetShownQuestId()==uint32(Step->GetIntegerField(TEXT("id")));
-        else if (Op==TEXT("dialog_button") || Op==TEXT("wait_dialog_text") || Op==TEXT("wait_dialog_closed")) Done=ProbeDialog(C,*Step,Op);
+        else if (Op==TEXT("dialog_button") || Op==TEXT("wait_dialog_text") || Op==TEXT("wait_dialog_closed") || Op==TEXT("check_quest_item_layout")) Done=ProbeDialog(C,*Step,Op);
         else if (Op==TEXT("accept")) { C.GameUI->AcceptQuest(); Done=true; }
         else if (Op==TEXT("abandon_quest")) { Connection->SendQuestAbandon(Step->GetIntegerField(TEXT("id"))); Done=true; }
         else if (Op==TEXT("complete")) { C.GameUI->CompleteQuest(); Done=true; }
