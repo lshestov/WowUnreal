@@ -342,12 +342,13 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 	// Runtime construction does not run PostLoad/editor socket-cache rebuilding.
 	// Component socket lookups use this map, not the mesh-only socket array.
 	SkelMesh->RebuildSocketMap();
+	UWowPortraitCameraData* Portrait=nullptr;
 	for(const auto& View:Data.Cameras) if(View.Type==0)
 	{
-		auto* Portrait=NewObject<UWowPortraitCameraData>(SkelMesh);
+		Portrait=NewObject<UWowPortraitCameraData>(SkelMesh);
 		Portrait->Position=FVector(View.Position.Y,View.Position.X,View.Position.Z)*FWowCoordinate::SCALE;
 		Portrait->Target=FVector(View.Target.Y,View.Target.X,View.Target.Z)*FWowCoordinate::SCALE;
-		Portrait->Fov=FMath::RadiansToDegrees(View.Fov); SkelMesh->AddAssetUserData(Portrait); break;
+		Portrait->SquareFovDegrees=View.HorizontalFovDegrees(1.f); break;
 	}
 
 	const FReferenceSkeleton& RefSkel = Skeleton->GetReferenceSkeleton();
@@ -411,6 +412,16 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 	}
 
 	const int32 NumSections = VisiblePasses.Num();
+	if (bHasRenderPasses)
+	{
+		for (int32 Slot=0; Slot<NumSections; ++Slot)
+			if (!Data.RenderPasses[VisiblePasses[Slot]].SupportsPortraitLighting())
+			{
+				if (!Portrait) Portrait=NewObject<UWowPortraitCameraData>(SkelMesh);
+				Portrait->PreserveMaterialSlots.Add(Slot);
+			}
+	}
+	if (Portrait) SkelMesh->AddAssetUserData(Portrait);
 	TArray<FPolygonGroupID> PolyGroups;
 	PolyGroups.SetNum(NumSections);
 	for (int32 i = 0; i < NumSections; ++i)

@@ -13,7 +13,7 @@ class FWowUiModelRenderer
 public:
     FWowUiModelRenderer(FWowFrameManager& Frames,FWowLuaContext& Context);
     ~FWowUiModelRenderer();
-    void Portrait(const FString& Name,uint64 Guid);
+    void Portrait(const FString& Name,class UImage* Image,uint64 Guid);
     void Model(int64 Handle,uint64 Guid);
     void Facing(int64 Handle,float Radians);
     void Scale(int64 Handle,float Value);
@@ -28,6 +28,8 @@ public:
         TConstArrayView<FTransform> StandPose={});
 private:
     struct FSlot;
+    bool SetPortraitArt(FSlot& Slot,const FString& Art);
+    void ShowTemporaryPortrait(FSlot& Slot);
     FWowFrameManager& Frames;
     FWowLuaContext& Context;
     TMap<FString,TUniquePtr<FSlot>> Slots;

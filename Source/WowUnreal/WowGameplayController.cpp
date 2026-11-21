@@ -4,6 +4,7 @@
 #include "WowPacketHandler.h"
 #include "WowEntity.h"
 #include "WowUpdateFields.h"
+#include "WowVisibleEquipment.h"
 #include "WowOpcodes.h"
 #include "WowPlayerCharacter.h"
 #include "WowUIManager.h"
@@ -2726,7 +2727,7 @@ void AWowGameplayController::SetupLocalPlayerCharacterModel(const FWowEntity& En
 	bool bMetadataReady=true;
 	for (uint8 Slot=0; Slot<19; ++Slot)
 	{
-		const uint32 Entry=Entity.GetField(PlayerField::VISIBLE_ITEM_BASE+Slot*2);
+		const uint32 Entry=WowVisibleEquipment::GetEntry(Entity,Slot);
 		Appearance.Add(Entry);
 		if (!Entry) continue;
 		const auto* Item=ConnectionManager->PacketHandler.ItemTemplates.Find(Entry);

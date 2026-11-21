@@ -12,6 +12,7 @@
 #include "Formats/Dbc/ItemDisplayInfoDbc.h"
 #include "Mpq/MpqManager.h"
 #include "WowAssetCache.h"
+#include "WowAnimationController.h"
 #include "WowCharacterBuilder.h"
 #include "WowCharacterTexture.h"
 #include "WowEquipmentManager.h"
@@ -119,10 +120,32 @@ bool FIdleWowEquipmentModels::RunTest(const FString& Parameters)
     TestTrue(TEXT("Cached base skin is immutable"), TextureBytes(Bare.Get()) == Before);
     TestEqual(TEXT("Player retains weapon after temporary model is destroyed"), EquipmentParts(Player).Num(), 1);
 
+    using Attachment = FWowEquipmentManager::EAttachmentPoint;
+    FString ModelPath, TexturePath;
+    TestTrue(TEXT("Human male guard helmet resolves"), FWowEquipmentManager::ResolveEquipmentPaths(&Mpq, 14964, Attachment::Helmet, ModelPath, &TexturePath, 1, 0));
+    TestTrue(TEXT("The human model and shared Stormwind texture come from the head directory"),
+        ModelPath.EndsWith(TEXT("Head\\Helm_Plate_B_01Stormwind_HuM.m2")) && TexturePath.EndsWith(TEXT("Head\\Helm_Plate_B_01Stormwind.blp")));
+    TestTrue(TEXT("Dwarf female uses her own geometry for the same display"), FWowEquipmentManager::ResolveEquipmentPaths(&Mpq, 14964, Attachment::Helmet, ModelPath, nullptr, 3, 1)
+        && ModelPath.EndsWith(TEXT("_DwF.m2")));
+    FWowCharacterTexture::FBodyEquipment Helmet;
+    Helmet.HelmetDisplayId = 14964;
+    Custom.RaceId = 1;
+    Custom.Gender = 0;
+    Custom.FacialHairStyle = 6;
+    const auto Visible = FWowCharacterBuilder::ComputeGeosetWithEquipment(Custom, Helmet);
+    for (uint16 Group : {0, 1, 2, 3, 7})
+        TestEqual(TEXT("Full guard helmet uses the concealed human hair, facial hair and ear variants"), Visible.FindRef(Group), uint16(1));
+    TestEqual(TEXT("Removing the helmet restores the human ears"), FWowCharacterBuilder::ComputeDefaultGeosets(Custom).FindRef(7), uint16(2));
+
     AActor* Npc = FWowCharacterBuilder::SpawnCreatureByDisplayId(World, &Mpq, &Cache, 2072, FVector(100, 200, 300));
     if (!TestNotNull(TEXT("Deputy Willem actual display model"), Npc)) { World->DestroyWorld(false); GEngine->DestroyWorldContext(World); return false; }
     auto Parts = EquipmentParts(Npc);
-    TestEqual(TEXT("Both shoulder components survive with different names"), Parts.Num(), 2);
+    TestEqual(TEXT("Both pauldrons and the helmet spawn for Deputy Willem"), Parts.Num(), 3);
+    const auto* Animation = FWowCharacterBuilder::GetAnimationController(Npc);
+    const auto* Model = Animation ? Animation->GetRuntimeModel().Get() : nullptr;
+    const FName HeadBone = Model ? FWowEquipmentManager::GetAttachmentBoneName(*Model, Attachment::Helmet) : NAME_None;
+    const UTexture2D* HelmetTexture = Cache.FindTexture(TexturePath);
+    bool bHasStormwindHelmet = false;
     TSet<FName> Sockets;
     for (auto* Part : Parts)
     {
@@ -134,16 +157,19 @@ bool FIdleWowEquipmentModels::RunTest(const FString& Parameters)
         TestFalse(TEXT("Named material binding survives Game build"), Mesh->GetStaticMaterials()[0].MaterialSlotName.IsNone());
         TestEqual(TEXT("Equipment uses a cookable material"), Part->GetMaterial(0)->GetBaseMaterial()->GetPathName(), FString(TEXT("/Game/Materials/M_WowCharacter.M_WowCharacter")));
         UTexture* Texture = nullptr;
-        TestTrue(TEXT("Shoulder has its actual BLP texture"), Part->GetMaterial(0)->GetTextureParameterValue(FMaterialParameterInfo(TEXT("BaseTexture")), Texture) && Texture);
+        TestTrue(TEXT("Equipment has its actual BLP texture"), Part->GetMaterial(0)->GetTextureParameterValue(FMaterialParameterInfo(TEXT("BaseTexture")), Texture) && Texture);
+        if (!HeadBone.IsNone() && Part->GetAttachSocketName() == HeadBone && HelmetTexture && Texture == HelmetTexture)
+            bHasStormwindHelmet = true;
     }
-    TestEqual(TEXT("Left and right shoulders follow different bones"), Sockets.Num(), 2);
+    TestTrue(TEXT("Deputy Willem wears the textured Stormwind helmet at attachment 11"), bHasStormwindHelmet);
+    TestEqual(TEXT("Head and shoulders follow three different bones"), Sockets.Num(), 3);
     auto* NpcMesh = Npc->FindComponentByClass<USkeletalMeshComponent>();
     FWowEquipmentManager::CopyEquipment(NpcMesh, Player->GetMesh());
     FWowEquipmentManager::CopyEquipment(NpcMesh, Player->GetMesh());
-    TestEqual(TEXT("Repeated transfer replaces equipment without duplication"), EquipmentParts(Player).Num(), 2);
+    TestEqual(TEXT("Repeated transfer replaces equipment without duplication"), EquipmentParts(Player).Num(), 3);
     Npc->Destroy();
     CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
-    TestEqual(TEXT("Transferred equipment survives source actor destruction and GC"), EquipmentParts(Player).Num(), 2);
+    TestEqual(TEXT("Transferred equipment survives source actor destruction and GC"), EquipmentParts(Player).Num(), 3);
     for (auto* Part : EquipmentParts(Player))
         TestTrue(TEXT("Transferred part remains registered on the player mesh"), Part->IsRegistered() && Part->GetAttachParent() == Player->GetMesh() && IsValid(Part->GetStaticMesh()) && IsValid(Part->GetMaterial(0)));
     FWowEquipmentManager::ClearEquipment(Player->GetMesh());

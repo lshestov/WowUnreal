@@ -79,6 +79,7 @@ public:
         bool bIsRobeEquipped = false;  // True if chest item is a robe (InventoryType 20)
         bool UseGuildEmblem=false;
         FWowGuildEmblem GuildEmblem;
+        uint32 HelmetDisplayId = 0;
     };
 
     /**

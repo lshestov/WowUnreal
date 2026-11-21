@@ -1,5 +1,6 @@
 #include "LuaApiRegistry.h"
 #include "WowConnectionManager.h"
+#include "WowVisibleEquipment.h"
 #include "WowEventSystem.h"
 #include "WowFrameManager.h"
 #include "WowAudioManager.h"
@@ -23,6 +24,14 @@ extern "C" {
 namespace
 {
 void Register(lua_State* L,const char* Name,lua_CFunction Function) { lua_pushcfunction(L,Function); lua_setglobal(L,Name); }
+int ShowingSlot(lua_State* L, uint8 Slot)
+{
+    const auto* Context = WowLuaApi::GetContext(L);
+    const auto* Player = Context && Context->EntityManager ? Context->EntityManager->GetLocalPlayer() : nullptr;
+    if (Player && WowVisibleEquipment::IsSlotShown(*Player,Slot)) lua_pushinteger(L,1);
+    else lua_pushnil(L);
+    return 1;
+}
 UWorld* World(lua_State* L)
 {
     auto* C=WowLuaApi::GetContext(L); if(!C || !C->ConnectionManager || !C->ResolveActor) return nullptr;
@@ -208,8 +217,8 @@ void WowLuaApi::RegisterSettingsApi(lua_State* L)
     // World playback currently has no cinematic camera mode. Stock modal
     // dialogs still query this gate before displaying their confirmation.
     Register(L,"InCinematic",[](lua_State* S)->int { lua_pushnil(S); return 1; });
-    Register(L,"ShowingHelm",[](lua_State* S)->int { const auto* P=ResolveUnitToken(S); lua_pushboolean(S,P && P->IsPlayer() && !(P->GetField(PlayerField::FLAGS)&0x400)); return 1; });
-    Register(L,"ShowingCloak",[](lua_State* S)->int { const auto* P=ResolveUnitToken(S); lua_pushboolean(S,P && P->IsPlayer() && !(P->GetField(PlayerField::FLAGS)&0x800)); return 1; });
+    Register(L,"ShowingHelm",[](lua_State* S)->int { return ShowingSlot(S,PlayerField::EQUIPMENT_SLOT_HEAD); });
+    Register(L,"ShowingCloak",[](lua_State* S)->int { return ShowingSlot(S,PlayerField::EQUIPMENT_SLOT_BACK); });
     Register(L,"ShowHelm",[](lua_State* S)->int { auto* C=GetContext(S); if(C && C->ConnectionManager) C->ConnectionManager->SendRawPacket(0x2B9,{uint8(lua_toboolean(S,1)!=0)}); return 0; });
     Register(L,"ShowCloak",[](lua_State* S)->int { auto* C=GetContext(S); if(C && C->ConnectionManager) C->ConnectionManager->SendRawPacket(0x2BA,{uint8(lua_toboolean(S,1)!=0)}); return 0; });
     lua_getglobal(L,"GetCVar"); lua_pushcclosure(L,GetCvar,1); lua_setglobal(L,"GetCVar");

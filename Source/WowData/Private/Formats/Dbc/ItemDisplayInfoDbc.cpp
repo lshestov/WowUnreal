@@ -48,3 +48,16 @@ const FItemDisplayInfoDbcEntry* FItemDisplayInfoDbc::GetById(uint32 ID) const
     const int32* Idx = IdIndex.Find(ID);
     return Idx ? &Entries[*Idx] : nullptr;
 }
+
+bool FItemDisplayInfoDbc::LoadHelmetVisibility(const FDbcParser& Parser)
+{
+    if (!Parser.IsValid() || Parser.GetFieldCount() < 8) return false;
+    HelmetVisibility.Reset();
+    for (uint32 Row = 0; Row < Parser.GetRecordCount(); ++Row)
+    {
+        auto& Visibility = HelmetVisibility.Add(Parser.GetUInt(Row, 0));
+        for (int32 Index = 0; Index < UE_ARRAY_COUNT(Visibility.HideForRaces); ++Index)
+            Visibility.HideForRaces[Index] = Parser.GetUInt(Row, 1 + Index);
+    }
+    return true;
+}

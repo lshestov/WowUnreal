@@ -67,6 +67,7 @@ bool FIdleWowCookedWorldMaterials::RunTest(const FString& Parameters)
         {TEXT("M_WowSky"), BLEND_Opaque, MSM_Unlit},
         {TEXT("M_WowCloud"), BLEND_Translucent, MSM_Unlit},
         {TEXT("M_WowCelestialDisc"), BLEND_Additive, MSM_Unlit},
+        {TEXT("M_WowPortrait"), BLEND_Masked, MSM_Unlit},
         {TEXT("M_WowDistantTerrain"), BLEND_Opaque, MSM_DefaultLit},
         {TEXT("M_WowWater"), BLEND_Masked, MSM_DefaultLit},
         {TEXT("M_WowLava"), BLEND_Opaque, MSM_DefaultLit},

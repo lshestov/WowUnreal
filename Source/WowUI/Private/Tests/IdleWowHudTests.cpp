@@ -6,6 +6,7 @@
 #include "WowLuaVM.h"
 #include "../LuaApi/LuaApiRegistry.h"
 #include "WowEntityManager.h"
+#include "WowVisibleEquipment.h"
 #include "WowConnectionManager.h"
 #include "WowMacros.h"
 #include "WowKeyBindings.h"
@@ -43,6 +44,7 @@
 #include "Coord/WowCoordinate.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "Engine/Texture2D.h"
 #include "GameFramework/GameUserSettings.h"
 #include "HAL/IConsoleManager.h"
 #include "Fonts/CompositeFont.h"
@@ -1875,6 +1877,16 @@ bool FHudDressUpApi::RunTest(const FString&)
     auto& Player=Entities.PromoteToTyped(1,WowTypeMask::OBJECT|WowTypeMask::UNIT|WowTypeMask::PLAYER);
     Player.SetField(PlayerField::INV_SLOT_HEAD+15*2,123);
     F.Context.ConnectionManager=Connection.Get(); F.Context.EntityManager=&Entities;
+    FWowPlayerEntity Remote;
+    Remote.SetField(PlayerField::VISIBLE_ITEM_BASE,21524);
+    Remote.SetField(PlayerField::VISIBLE_ITEM_BASE+2*PlayerField::EQUIPMENT_SLOT_BACK,2316);
+    TestEqual(TEXT("Remote helm uses the public visible slot"),WowVisibleEquipment::GetEntry(Remote,PlayerField::EQUIPMENT_SLOT_HEAD),21524u);
+    Remote.SetField(PlayerField::FLAGS,0x400);
+    TestEqual(TEXT("Remote hide-helm suppresses the equipped head item"),WowVisibleEquipment::GetEntry(Remote,PlayerField::EQUIPMENT_SLOT_HEAD),0u);
+    TestEqual(TEXT("Remote cloak stays visible"),WowVisibleEquipment::GetEntry(Remote,PlayerField::EQUIPMENT_SLOT_BACK),2316u);
+    TestTrue(TEXT("ShowingHelm reads the local player's setting"),F.Lua.ExecuteString(TEXT("assert(ShowingHelm() == 1 and ShowingCloak() == 1)")));
+    Player.SetField(PlayerField::FLAGS,0xC00);
+    TestTrue(TEXT("Hidden slots return nil to stock FrameXML"),F.Lua.ExecuteString(TEXT("assert(ShowingHelm() == nil and ShowingCloak() == nil)")));
     FWowItemTemplate Chest; Chest.Id=2370; Chest.InventoryType=5; Connection->PacketHandler.ItemTemplates.Add(Chest.Id,Chest);
     FWowItemTemplate Food; Food.Id=117; Connection->PacketHandler.ItemTemplates.Add(Food.Id,Food);
     uint64 Unit=0; float Facing=0,Scale=0; FVector Position=FVector::ZeroVector; TArray<uint32> Tried; TArray<bool> Dressed;
@@ -2349,6 +2361,46 @@ bool FHudCastingFeedback::RunTest(const FString&)
     Check(TEXT("Server completion stops the matching stock bar and preserves typed identity"),TEXT("assert(CastRows[#CastRows-1][1]=='UNIT_SPELLCAST_SUCCEEDED' and CastRows[#CastRows][1]=='UNIT_SPELLCAST_STOP' and CastRows[#CastRows][5]==13 and not CastProbe.casting and CastProbe.flash and CastProbe.fadeOut); local r,g,b=CastProbe:GetStatusBarColor(); assert(r==0 and g==1 and b==0)"));
     Start(255); Fail(255,40,true); Fail(255,40,false); Start(0); Fail(0,40,true); Fail(0,40,false);
     Check(TEXT("A wrapped counter zero remains a valid new cancellation"),TEXT("assert(CastRows[#CastRows][1]=='UNIT_SPELLCAST_INTERRUPTED' and CastRows[#CastRows][5]==0 and CastProbeText:GetText()==INTERRUPTED and UnitCastingInfo('player')==nil)"));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHudPortraitArt,"WowUnreal.Hud.PortraitArt",EAutomationTestFlags::EditorContext|EAutomationTestFlags::ProductFilter)
+bool FHudPortraitArt::RunTest(const FString&)
+{
+    FString Path;
+    if(!FParse::Value(FCommandLine::Get(),TEXT("wowdata="),Path)) return false;
+    FMpqManager Mpq;
+    if(!Mpq.Initialize(Path)) return false;
+    auto& Dbc=FDbcStore::Get();
+    if(!Dbc.IsLoaded()) Dbc.LoadAll(Mpq);
+    FWowAssetCache Cache;
+    FHudFixture F;
+    F.Frames.SetMpqManager(&Mpq);
+    F.Frames.SetAssetCache(&Cache);
+    TStrongObjectPtr<UWowConnectionManager> Connection(NewObject<UWowConnectionManager>());
+    F.Context.ConnectionManager=Connection.Get();
+    int32 ModelLookups=0;
+    F.Context.ResolveActor=[&ModelLookups](uint64) -> AActor* { ++ModelLookups; return nullptr; };
+    auto* World=UWorld::CreateWorld(EWorldType::Game,false);
+    FWowUiModelRenderer Renderer(F.Frames,F.Context);
+    TStrongObjectPtr<UImage> Image(NewObject<UImage>());
+    auto CheckIcon=[&](uint32 Display,const TCHAR* Icon)
+    {
+        auto& Unit=Connection->PacketHandler.EntityManager.PromoteToTyped(Display,WowTypeMask::UNIT);
+        Unit.SetField(UnitField::DISPLAYID,Display);
+        Renderer.Portrait(TEXT("IconPortrait"),Image.Get(),Display);
+        Renderer.Tick(World);
+        auto* Mat=Cast<UMaterialInstanceDynamic>(Image->GetBrush().GetResourceObject());
+        UTexture* Bound=nullptr;
+        if(Mat) Mat->GetTextureParameterValue(FMaterialParameterInfo(TEXT("Image")),Bound);
+        auto* Expected=F.Frames.LoadUITexture(FString(TEXT("Interface\\Icons\\"))+Icon);
+        TestTrue(FString::Printf(TEXT("Display %u uses its original circular icon %s"),Display,Icon),Expected && Bound==Expected);
+    };
+    CheckIcon(16213,TEXT("Spell_Nature_Web"));
+    CheckIcon(18996,TEXT("Spell_Shadow_GatherShadows"));
+    CheckIcon(16213,TEXT("Spell_Nature_Web"));
+    TestEqual(TEXT("An explicit portrait icon takes precedence over the 3D model"),ModelLookups,0);
+    World->DestroyWorld(false);
     return true;
 }
 

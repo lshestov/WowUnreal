@@ -71,7 +71,11 @@ void SWowQuestDialog::Construct(const FArguments& InArgs)
     const auto Canvas=SNew(SConstraintCanvas);
     ChildSlot[Canvas];
     Canvas->AddSlot().Alignment(FVector2D::ZeroVector).Offset(FMargin(7,6,60,60))
-        [SNew(SImage).Image_Lambda([this]()->const FSlateBrush* {return Portrait.IsValid() && Portrait->GetBrush().GetResourceObject()?&Portrait->GetBrush():&Book;})];
+        [SNew(SImage).Image_Lambda([this]() -> const FSlateBrush*
+        {
+            return Portrait.IsValid() && Portrait->GetVisibility()!=ESlateVisibility::Collapsed && Portrait->GetBrush().GetResourceObject()
+                ? &Portrait->GetBrush() : &Book;
+        })];
     // QuestFramePanelTemplate has 256/128 pixel columns and two 256 pixel rows.
     // Its hit rect omits 30 transparent pixels at the right and 70 at the bottom.
     for (int32 I=0;I<4;++I)
@@ -147,7 +151,7 @@ void SWowQuestDialog::Construct(const FArguments& InArgs)
     SetVisibility(EVisibility::Collapsed);
 }
 
-void SWowQuestDialog::SetPresentation(FWowFrameManager& Frames, const FString& Name, bool bShowTargetPortrait)
+void SWowQuestDialog::SetPresentation(FWowFrameManager& Frames, const FString& Name, uint64 QuestUnitGuid)
 {
     static const TCHAR* Tiles[]={TEXT("TopLeft"),TEXT("TopRight"),TEXT("BotLeft"),TEXT("BotRight")};
     for (int32 I=0;I<4;++I)
@@ -241,7 +245,14 @@ void SWowQuestDialog::SetPresentation(FWowFrameManager& Frames, const FString& N
         SmallQuestText.SetFont(WithQuestTracking(Font(TEXT("QuestFontNormalSmall"))));
         NpcName->SetFont(CaptionText.Font);
     }
-    Portrait=bShowTargetPortrait?Frames.GetNamedTexture(TEXT("TargetFramePortrait")):nullptr;
+    // QuestFrame_SetPortrait uses "questnpc". The target may change while the
+    // conversation stays open, and object/item quests use the book artwork.
+    if (QuestUnitGuid && Frames.OnPortrait)
+    {
+        if (!Portrait.IsValid()) Portrait.Reset(NewObject<UImage>());
+        Frames.OnPortrait(TEXT("NativeQuestGiverPortrait"), Portrait.Get(), QuestUnitGuid);
+    }
+    else if (Portrait.IsValid()) Portrait->SetVisibility(ESlateVisibility::Collapsed);
     NpcName->SetText(FText::FromString(Name));
 }
 
@@ -451,6 +462,7 @@ void SWowQuestDialog::ShowQuestReward(const FWowQuestDetails& QuestDetails)
 
 void SWowQuestDialog::CloseDialog()
 {
+    if (Portrait.IsValid()) Portrait->SetVisibility(ESlateVisibility::Collapsed);
     if (ItemUI.IsValid()) WowQuestItemTooltip::Hide(*ItemUI.Get());
     GreetingBlock.Reset();
     GreetingText.Reset();

@@ -135,7 +135,7 @@ void UWowUIManager::InitializeCore()
     }
     CursorRenderer=MakeShared<FWowUiCursorRenderer>(*FrameManager,*UIContext,*CursorCanvas);
 	FrameManager->OnMapCommand=[this](int32 Command){ MapCommand(Command); };
-	FrameManager->OnPortrait=[this](const FString& Name,uint64 Guid){ ModelRenderer->Portrait(Name,Guid); };
+	FrameManager->OnPortrait=[this](const FString& Name,UImage* Image,uint64 Guid){ ModelRenderer->Portrait(Name,Image,Guid); };
 	FrameManager->OnUnitModel=[this](int64 Handle,uint64 Guid){ ModelRenderer->Model(Handle,Guid); };
 	FrameManager->OnModelFacing=[this](int64 Handle,float Yaw){ ModelRenderer->Facing(Handle,Yaw); };
     FrameManager->OnModelScale=[this](int64 Handle,float Value){ ModelRenderer->Scale(Handle,Value); };

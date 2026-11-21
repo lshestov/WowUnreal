@@ -12,6 +12,7 @@
 #include "Components/Image.h"
 #include "Components/MeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/BoxComponent.h"
@@ -20,10 +21,66 @@
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/StaticMesh.h"
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "Rendering/SkeletalMeshLODRenderData.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/Material.h"
 #include "UObject/StrongObjectPtr.h"
+
+namespace
+{
+constexpr int32 PortraitTextureSize=64; // Wrath's unit portrait render target and mask.
+
+bool WaitingForPortraitMesh(const UMeshComponent* Mesh)
+{
+    if(!Mesh || !Mesh->IsRegistered() || !Mesh->IsVisible()) return false;
+    if(const auto* Skel=Cast<USkeletalMeshComponent>(Mesh))
+    {
+        const auto* Asset=Skel->GetSkeletalMeshAsset();
+        const auto* Data=Asset?Asset->GetResourceForRendering():nullptr;
+        if(!Data || Data->LODRenderData.IsEmpty() || !Data->LODRenderData[0].GetNumVertices()) return false;
+    }
+    else if(const auto* Static=Cast<UStaticMeshComponent>(Mesh))
+    {
+        const UStaticMesh* Asset=Static->GetStaticMesh();
+        if(!Asset || !Asset->GetNumLODs() || !Asset->GetNumVertices(0)) return false;
+    }
+    else return false;
+    return Mesh->IsRenderStateDirty() || Mesh->IsPSOPrecaching() || !Mesh->GetSceneProxy();
+}
+
+void LightPortrait(TConstArrayView<UMeshComponent*> Meshes,const FTransform& BodyTransform)
+{
+    static TWeakObjectPtr<UMaterialInterface> PortraitMaterial,CharacterMaterial;
+    if(!PortraitMaterial.IsValid()) PortraitMaterial=LoadObject<UMaterialInterface>(nullptr,TEXT("/Game/Materials/M_WowPortrait.M_WowPortrait"));
+    if(!CharacterMaterial.IsValid()) CharacterMaterial=LoadObject<UMaterialInterface>(nullptr,TEXT("/Game/Materials/M_WowCharacter.M_WowCharacter"));
+    if(!PortraitMaterial.IsValid() || !CharacterMaterial.IsValid()) return;
+
+    // The portrait's light travels (-1,0,-1) in WoW model space. The imported
+    // M2 swaps X and Y, so every attachment sees the same incoming direction.
+    const FVector TowardLight=BodyTransform.TransformVectorNoScale(FVector(0,1,1)).GetSafeNormal();
+    for(auto* Mesh:Meshes)
+    {
+        if(!Mesh || Mesh->ComponentHasTag(TEXT("WowPortraitPreserveMaterial"))) continue;
+        const auto* Skel=Cast<USkeletalMeshComponent>(Mesh);
+        auto* Asset=Skel?Skel->GetSkeletalMeshAsset():nullptr;
+        const auto* Sections=Asset?Cast<UWowPortraitCameraData>(Asset->GetAssetUserDataOfClass(UWowPortraitCameraData::StaticClass())):nullptr;
+        for(int32 Slot=0;Slot<Mesh->GetNumMaterials();++Slot)
+        {
+            if(Sections && Sections->PreserveMaterialSlots.Contains(Slot)) continue;
+            auto* Original=Mesh->GetMaterial(Slot);
+            UTexture* Texture=nullptr;
+            if(!Original || Original->GetMaterial()!=CharacterMaterial.Get() ||
+                !Original->GetTextureParameterValue(FMaterialParameterInfo(TEXT("BaseTexture")),Texture) || !Texture) continue;
+            auto* Material=UMaterialInstanceDynamic::Create(PortraitMaterial.Get(),Mesh);
+            Material->SetTextureParameterValue(TEXT("BaseTexture"),Texture);
+            Material->SetVectorParameterValue(TEXT("TowardLight"),FLinearColor(TowardLight.X,TowardLight.Y,TowardLight.Z));
+            Mesh->SetMaterial(Slot,Material);
+        }
+    }
+}
+}
 
 struct FWowUiModelRenderer::FSlot
 {
@@ -39,7 +96,7 @@ struct FWowUiModelRenderer::FSlot
     bool bLogged=false;
     bool Captured=false;
     TWeakObjectPtr<AActor> PortraitSource;
-    FString FallbackPortrait;
+    FString PortraitArt;
     TUniquePtr<FWowUiDressUpPreview> Preview;
     float ModelScale=1,BaseModelScale=1;
     FVector Position=FVector::ZeroVector;
@@ -60,12 +117,13 @@ void FWowUiModelRenderer::Configure(const FString& Key,UImage* Image,uint64 Guid
     if(!Owned)
     {
         Owned=MakeUnique<FSlot>(); auto& S=*Owned;
-        S.Image=Image; S.Handle=Handle; S.bPortrait=Portrait;
+        S.Handle=Handle; S.bPortrait=Portrait;
         if(Portrait) S.Preview=MakeUnique<FWowUiDressUpPreview>();
         S.Target.Reset(NewObject<UTextureRenderTarget2D>());
-        S.Target->RenderTargetFormat=Portrait?RTF_RGBA8:RTF_RGBA16f;
+        S.Target->RenderTargetFormat=RTF_RGBA16f;
+        if(Portrait) S.Target->TargetGamma=1.f;
         S.Target->ClearColor=Portrait?FLinearColor::Black:FLinearColor(0,0,0,1);
-        S.Target->InitAutoFormat(Portrait?128:256,Portrait?128:384);
+        S.Target->InitAutoFormat(Portrait?PortraitTextureSize:256,Portrait?PortraitTextureSize:384);
         S.Target->UpdateResourceImmediate(true);
         if(auto* Base=LoadObject<UMaterialInterface>(nullptr,Portrait?TEXT("/Game/Materials/M_WowUiImage.M_WowUiImage"):TEXT("/Game/Materials/M_WowUiModel.M_WowUiModel")))
         {
@@ -87,21 +145,55 @@ void FWowUiModelRenderer::Configure(const FString& Key,UImage* Image,uint64 Guid
     // Stock panels temporarily replace portraits with static art (e.g. buyback).
     // SetPortraitTexture must restore the capture even when the GUID is unchanged.
     auto& Slot=*Owned;
+    Slot.Image=Image;
     FSlateBrush Brush; Brush.DrawAs=ESlateBrushDrawType::Image;
     Brush.SetResourceObject(Slot.Material.IsValid()?static_cast<UObject*>(Slot.Material.Get()):static_cast<UObject*>(Slot.Target.Get()));
-    Brush.ImageSize=FVector2D(Portrait?128:256,Portrait?128:384);
+    Brush.ImageSize=FVector2D(Portrait?PortraitTextureSize:256,Portrait?PortraitTextureSize:384);
     Image->SetBrush(Brush); Image->SetRenderOpacity(1); Image->SetColorAndOpacity(FLinearColor::White);
     if(Slot.Guid!=Guid)
     {
-        Slot.Guid=Guid; Slot.NextCapture=0; Slot.bLogged=false; Slot.Captured=false; Slot.FallbackPortrait.Empty();
-        if(Portrait) Slot.Preview->SetUnit(Guid);
+        Slot.Guid=Guid; Slot.NextCapture=0; Slot.bLogged=false; Slot.Captured=false; Slot.PortraitArt.Empty();
+        if(Portrait)
+        {
+            Slot.Preview->SetUnit(Guid);
+            if(Guid) ShowTemporaryPortrait(Slot);
+        }
     }
     Image->SetVisibility(Guid?ESlateVisibility::HitTestInvisible:ESlateVisibility::Collapsed);
 }
 
-void FWowUiModelRenderer::Portrait(const FString& Name,uint64 Guid)
+void FWowUiModelRenderer::Portrait(const FString& Name,UImage* Image,uint64 Guid)
 {
-    Configure(Name,Frames.GetNamedTexture(Name),Guid,-1,true);
+    Configure(Name,Image,Guid,-1,true);
+}
+
+bool FWowUiModelRenderer::SetPortraitArt(FSlot& Slot,const FString& Art)
+{
+    if(Slot.Material.IsValid() && Slot.PortraitArt==Art) return true;
+    UTexture2D* Texture=Frames.LoadUITexture(Art);
+    if(!Texture) return false;
+    if(Slot.Material.IsValid()) Slot.Material->SetTextureParameterValue(TEXT("Image"),Texture);
+    else
+    {
+        auto Brush=Slot.Image->GetBrush();
+        Brush.SetResourceObject(Texture);
+        Slot.Image->SetBrush(Brush);
+    }
+    Slot.PortraitArt=Art;
+    Slot.Captured=false;
+    return true;
+}
+
+void FWowUiModelRenderer::ShowTemporaryPortrait(FSlot& Slot)
+{
+    const auto* Unit=Context.ConnectionManager?Context.ConnectionManager->PacketHandler.FindUiUnit(Slot.Guid):nullptr;
+    FString Art=TEXT("Interface\\CharacterFrame\\TemporaryPortrait-Pet");
+    if(Unit && Unit->IsPlayer())
+    {
+        const auto* Race=FDbcStore::Get().ChrRaces().GetById(Unit->GetFieldByte(UnitField::BYTES_0,0));
+        Art=Race?FString(TEXT("Interface\\CharacterFrame\\TemporaryPortrait-"))+(Unit->GetFieldByte(UnitField::BYTES_0,2)==1?TEXT("Female-"):TEXT("Male-"))+Race->ClientFileString:TEXT("Interface\\Icons\\INV_Misc_QuestionMark");
+    }
+    if(!SetPortraitArt(Slot,Art) && Slot.PortraitArt.IsEmpty()) Slot.Target->UpdateResourceImmediate(true);
 }
 
 void FWowUiModelRenderer::Model(int64 Handle,uint64 Guid)
@@ -183,30 +275,29 @@ void FWowUiModelRenderer::Tick(UWorld* World)
     for(auto& Pair:Slots)
     {
         auto& S=*Pair.Value;
+        if(S.bPortrait && (!S.Image.IsValid() || S.Image->GetVisibility()==ESlateVisibility::Collapsed))
+        {
+            if(S.Preview->GetActor()) S.Preview->ReleaseActor();
+            continue;
+        }
         if(S.bPortrait && !Frames.IsRegionOwnerDrawn(Pair.Key)) continue;
         if(S.Handle>=0 && !Frames.IsFrameDrawn(S.Handle)) { if(S.Preview && S.Preview->GetActor()) S.Preview->ReleaseActor(); continue; }
         if(!S.Image.IsValid() || !S.Guid || Now<S.NextCapture) continue;
         if(S.Image->GetVisibility()==ESlateVisibility::Collapsed) continue;
+        const auto* Unit=S.bPortrait && Context.ConnectionManager ? Context.ConnectionManager->PacketHandler.FindUiUnit(S.Guid) : nullptr;
+        const auto* Display=Unit ? FDbcStore::Get().CreatureDisplayInfo().GetById(Unit->GetDisplayId()) : nullptr;
+        if(Display && !Display->PortraitTextureName.IsEmpty() &&
+           SetPortraitArt(S,TEXT("Interface\\Icons\\")+Display->PortraitTextureName))
+        {
+            if(S.Preview->GetActor()) S.Preview->ReleaseActor();
+            S.NextCapture=Now+.25;
+            continue;
+        }
         auto* Actor=Context.ResolveActor(S.Guid);
         if(S.Preview) Actor=S.Preview->Rebuild(World,Context,Mpq,Cache,S.bPortrait)?S.Preview->GetActor():nullptr;
         if(!IsValid(Actor))
         {
-            if(S.bPortrait && Context.ConnectionManager)
-            {
-                const auto* Unit=Context.ConnectionManager->PacketHandler.FindUiUnit(S.Guid);
-                FString Art=TEXT("Interface\\CharacterFrame\\TemporaryPortrait-Pet");
-                if(Unit && Unit->IsPlayer())
-                {
-                    const auto* Race=FDbcStore::Get().ChrRaces().GetById(Unit->GetFieldByte(UnitField::BYTES_0,0));
-                    Art=Race?FString(TEXT("Interface\\CharacterFrame\\TemporaryPortrait-"))+(Unit->GetFieldByte(UnitField::BYTES_0,2)==1?TEXT("Female-"):TEXT("Male-"))+Race->ClientFileString:TEXT("Interface\\Icons\\INV_Misc_QuestionMark");
-                }
-                if(S.FallbackPortrait!=Art) if(auto* Texture=Frames.LoadUITexture(Art))
-                {
-                    S.FallbackPortrait=Art;
-                    if(S.Material.IsValid()) S.Material->SetTextureParameterValue(TEXT("Image"),Texture);
-                    else {auto Brush=S.Image->GetBrush(); Brush.SetResourceObject(Texture); S.Image->SetBrush(Brush);}
-                }
-            }
+            if(S.bPortrait) ShowTemporaryPortrait(S);
             S.Captured=false; S.NextCapture=Now+.2; continue;
         }
         if(S.bPortrait && S.Captured && S.PortraitSource.Get()==Actor) { S.NextCapture=Now+.25; continue; }
@@ -222,6 +313,13 @@ void FWowUiModelRenderer::Tick(UWorld* World)
             Capture->PrimitiveRenderMode=ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
             Capture->ShowFlags.SetAtmosphere(false); Capture->ShowFlags.SetFog(false); Capture->ShowFlags.SetSkyLighting(false);
             Capture->ShowFlags.SetLighting(false); Capture->ShowFlags.SetTemporalAA(false);
+            if(S.bPortrait)
+            {
+                // The portrait material supplies the original lighting. Keep it
+                // linear until the UI presents it; the world film curve is separate.
+                Capture->ShowFlags.SetTonemapper(false);
+                Capture->ShowFlags.SetBloom(false);
+            }
             Capture->PostProcessSettings.bOverride_AutoExposureMethod=true;
             Capture->PostProcessSettings.AutoExposureMethod=AEM_Manual;
         }
@@ -232,18 +330,26 @@ void FWowUiModelRenderer::Tick(UWorld* World)
         for(auto* Mesh:Meshes) if(Mesh && Mesh->IsRegistered() && Mesh->IsVisible())
         {
             Capture->ShowOnlyComponent(Mesh);
-            if(!Body) Body=Cast<USkeletalMeshComponent>(Mesh);
+            if(!Body)
+                if(auto* Candidate=Cast<USkeletalMeshComponent>(Mesh); Candidate && !Candidate->LeaderPoseComponent.IsValid())
+                    Body=Candidate;
         }
         if(!Body) continue;
-        if(S.bPortrait)
+        if(S.bPortrait && S.PortraitSource.Get()!=Actor)
         {
             // Portraits are textures. Sample the isolated model in its initial idle pose.
             Body->TickAnimation(0.f,false);
             Body->RefreshBoneTransforms();
             Body->bPauseAnims=true;
             Body->SetComponentTickEnabled(false);
+            LightPortrait(Meshes,Body->GetComponentTransform());
             S.PortraitSource=Actor;
+            S.Captured=false;
+            // SetMaterial schedules proxy replacement at the end of this frame.
+            // Capturing now can permanently cache an empty or previous unit.
+            continue;
         }
+        if(S.bPortrait && Meshes.ContainsByPredicate(WaitingForPortraitMesh)) continue;
         if(!S.bPortrait)
         {
             const FVector2D Size=S.Image->GetCachedGeometry().GetLocalSize();
@@ -301,7 +407,7 @@ void FWowUiModelRenderer::Tick(UWorld* World)
         const FVector Direction=Actor->GetActorForwardVector().RotateAngleAxis(S.Yaw,FVector::UpVector);
         if(!S.bPortrait) Focus-=FVector::CrossProduct(FVector::UpVector,Direction)*S.Position.Y*100+FVector::UpVector*S.Position.Z*100;
         FVector Position=Focus+Direction*Distance;
-        if(S.bPortrait) if(const auto* View=Cast<UWowPortraitCameraData>(Body->GetSkeletalMeshAsset()->GetAssetUserDataOfClass(UWowPortraitCameraData::StaticClass())))
+        if(S.bPortrait) if(const auto* View=Cast<UWowPortraitCameraData>(Body->GetSkeletalMeshAsset()->GetAssetUserDataOfClass(UWowPortraitCameraData::StaticClass())); View && View->SquareFovDegrees>0)
         {
             FVector LocalPosition=View->Position,LocalTarget=View->Target;
             if(Body->DoesSocketExist(TEXT("WowPortraitHead")))
@@ -313,7 +419,7 @@ void FWowUiModelRenderer::Tick(UWorld* World)
             }
             Focus=Body->GetComponentTransform().TransformPosition(LocalTarget);
             Position=Body->GetComponentTransform().TransformPosition(LocalPosition);
-            Capture->FOVAngle=View->Fov;
+            Capture->FOVAngle=View->SquareFovDegrees;
         }
         if(!S.bLogged)
         {
@@ -323,6 +429,13 @@ void FWowUiModelRenderer::Tick(UWorld* World)
         }
         Capture->SetWorldLocationAndRotation(Position,(Focus-Position).Rotation());
         if(S.Material.IsValid()) S.Material->SetTextureParameterValue(TEXT("Image"),S.Target.Get());
+        else if(!S.PortraitArt.IsEmpty())
+        {
+            auto Brush=S.Image->GetBrush();
+            Brush.SetResourceObject(S.Target.Get());
+            S.Image->SetBrush(Brush);
+        }
+        S.PortraitArt.Empty();
         Capture->CaptureScene(); S.Captured=true; S.NextCapture=Now+.1;
     }
 }

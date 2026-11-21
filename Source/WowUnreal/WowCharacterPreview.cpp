@@ -319,10 +319,7 @@ void AWowCharacterPreview::PositionCamera()
         FVector Target=SceneTarget;
         Target.Z=FMath::Lerp(SceneTarget.Z,CloseFocusZ,FMath::Clamp((1.f-ZoomFactor)/.35f,0.f,1.f));
         const float Aspect=float(RenderTarget->SizeX)/RenderTarget->SizeY;
-        // Original GxuXformCreateProjection_SG converts its diagonal-like
-        // stored angle to vertical FOV by dividing by sqrt(aspect^2+1).
-        const float Vertical=SceneModel->Cameras[0].Fov/FMath::Sqrt(Aspect*Aspect+1);
-        CaptureComponent->FOVAngle=FMath::Clamp(FMath::RadiansToDegrees(2*FMath::Atan(FMath::Tan(Vertical*.5f)*Aspect))*ZoomFactor,12.f,110.f);
+        CaptureComponent->FOVAngle=FMath::Clamp(SceneModel->Cameras[0].HorizontalFovDegrees(Aspect)*ZoomFactor,12.f,110.f);
         CaptureComponent->SetRelativeLocation(Position);
         CaptureComponent->SetRelativeRotation((Target-Position).Rotation());
         if(SceneRenderer) SceneRenderer->SetCaptureView(CaptureComponent->GetComponentLocation(),CaptureComponent->GetComponentRotation());

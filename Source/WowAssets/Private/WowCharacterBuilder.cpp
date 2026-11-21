@@ -339,6 +339,19 @@ TMap<uint16, uint16> FWowCharacterBuilder::ComputeGeosetWithEquipment(
         GeosetModifier(Item, Result);
     };
 
+    ApplyEquipmentGeoset(BodyEquipment.HelmetDisplayId, [&](const FItemDisplayInfoDbcEntry* Item, TMap<uint16, uint16>& Geosets)
+    {
+        if (Customization.Gender > 1 || Customization.RaceId >= 32 || Item->ModelNames[0].IsEmpty()) return;
+        const auto* Visibility = Dbc.ItemDisplayInfo().GetHelmetVisibility(Item->HelmetGeosetVis[Customization.Gender]);
+        if (!Visibility) return;
+        // In HelmetGeosetVisData, bits are indexed by race ID. The concealed
+        // variant is 1 for hair, beard, sideburns, moustache, ears, jewellery and eyes.
+        static constexpr uint16 Groups[] = {0, 1, 2, 3, 7, 16, 17};
+        for (int32 Index = 0; Index < UE_ARRAY_COUNT(Groups); ++Index)
+            if (Visibility->HideForRaces[Index] & (1u << Customization.RaceId))
+                Geosets.Add(Groups[Index], 1);
+    });
+
     // Check if wearing a robe (determines if pants geosets should be skipped)
     bool bIsWearingRobe = BodyEquipment.bIsRobeEquipped;
     if (!bIsWearingRobe && BodyEquipment.ChestDisplayId > 0)
@@ -648,7 +661,11 @@ AActor* FWowCharacterBuilder::SpawnCharacterWithEquipment(UWorld* World, FMpqMan
     }
 
     // Spawn base character with geoset visibility and equipment
-    AActor* Actor = SpawnM2Actor(World, Mpq, Cache, ModelPath, Location, Rotation, Params.Scale, FinalTex, &Params.Customization, &Params.BodyEquipment);
+    FBodyEquipment VisibleEquipment = Params.BodyEquipment;
+    if (const auto* Helm = Params.Equipment.FindByPredicate([](const FEquipmentSlot& Slot)
+        { return Slot.AttachPoint == FWowEquipmentManager::EAttachmentPoint::Helmet; }))
+        VisibleEquipment.HelmetDisplayId = Helm->ItemDisplayId;
+    AActor* Actor = SpawnM2Actor(World, Mpq, Cache, ModelPath, Location, Rotation, Params.Scale, FinalTex, &Params.Customization, &VisibleEquipment);
     if (!Actor) return nullptr;
 
     // Attach equipment
@@ -677,7 +694,8 @@ AActor* FWowCharacterBuilder::SpawnCharacterWithEquipment(UWorld* World, FMpqMan
                     if (Slot.ItemDisplayId == 0) continue;
 
                     USceneComponent* EquipComp = FWowEquipmentManager::AttachEquipment(
-                        Mpq, Cache, Slot.ItemDisplayId, Slot.AttachPoint, MeshComp, *CharM2);
+                        Mpq, Cache, Slot.ItemDisplayId, Slot.AttachPoint, MeshComp, *CharM2,
+                        static_cast<uint32>(Params.Race), static_cast<uint32>(Params.Gender));
 
                     if (EquipComp)
                     {

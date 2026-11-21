@@ -35,6 +35,8 @@ bool FIdleWowPortraitCameraParser::RunTest(const FString&)
         TestEqual(TEXT("Portrait type follows the preceding character camera"),Parsed.Cameras[1].Type,0);
         TestTrue(TEXT("First spline value is added to its base pivot"),Parsed.Cameras[1].Position.Equals(FVector(.8,0,1.9),.0001));
         TestTrue(TEXT("Target pivot has its own track"),Parsed.Cameras[1].Target.Equals(FVector(.1,0,1.8),.0001));
+        TestTrue(TEXT("HumanMale's 45-degree M2 angle projects to 31.82 degrees on the square portrait"),FMath::IsNearlyEqual(Parsed.Cameras[1].HorizontalFovDegrees(1.f),31.819805f,.0001f));
+        TestTrue(TEXT("Widescreen model views retain their own horizontal FOV"),FMath::IsNearlyEqual(Parsed.Cameras[1].HorizontalFovDegrees(16.f/9.f),38.228477f,.0001f));
     }
     U32(436,MAX_uint32);
     const auto BrokenTrack=FM2Parser::Parse(Bytes,Skin);
@@ -88,7 +90,7 @@ bool FIdleWowRuntimeAnimations::RunTest(const FString& Parameters)
     {
         TestTrue(TEXT("Authored camera changes model axes and metres exactly once"),Portrait->Position.Equals(FVector(-40,60,190),.001));
         TestTrue(TEXT("Authored portrait target retains its independent pivot"),Portrait->Target.Equals(FVector(3,6,186),.001));
-        TestTrue(TEXT("M2 radians become UE degrees"),FMath::IsNearlyEqual(Portrait->Fov,45.f));
+        TestTrue(TEXT("Captured portraits retain the square render target's horizontal FOV"),FMath::IsNearlyEqual(Portrait->SquareFovDegrees,31.819805f,.0001f));
     }
     auto* Player = World->SpawnActor<AWowPlayerCharacter>();
     Player->GetMesh()->SetSkeletalMesh(Mesh);

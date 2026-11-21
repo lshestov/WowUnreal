@@ -3,6 +3,7 @@
 #include "WowCharacterBuilder.h"
 #include "WowConnectionManager.h"
 #include "WowEntityManager.h"
+#include "WowVisibleEquipment.h"
 #include "Components/MeshComponent.h"
 #include "Engine/World.h"
 
@@ -43,19 +44,19 @@ bool FWowUiDressUpPreview::Rebuild(UWorld* World,FWowLuaContext& Context,FMpqMan
         return true;
     }
     if(!Player) return false;
-    uint32 CurrentHash=HashCombine(GetTypeHash(Player->GetPlayerBytes()),GetTypeHash(Player->GetPlayerBytes2()));
+    uint32 CurrentHash=HashCombine(GetTypeHash(Player->GetPlayerBytes()),GetTypeHash(Player->GetPlayerBytes2() & 255u));
     CurrentHash=HashCombine(CurrentHash,GetTypeHash(Player->GetRaceId()|(Player->GetGenderId()<<8)));
-    for(int32 Slot=0;Slot<19;++Slot) {CurrentHash=HashCombine(CurrentHash,GetTypeHash(Player->GetEquipmentItemGuid(Slot))); CurrentHash=HashCombine(CurrentHash,GetTypeHash(Player->GetField(PlayerField::VISIBLE_ITEM_BASE+Slot*2)));}
+    for (uint8 Slot=0; Slot<=PlayerField::EQUIPMENT_SLOT_TABARD; ++Slot)
+        CurrentHash=HashCombine(CurrentHash,WowVisibleEquipment::GetEntry(*Player,Slot));
     const auto* Guild=Context.ConnectionManager->PacketHandler.Guilds.Find(Player->GetField(PlayerField::GUILD_ID));
     if(Guild) for(uint32 Value:Guild->Emblem) CurrentHash=HashCombineFast(CurrentHash,Value);
     if(CurrentHash!=SourceHash) Dirty=true;
     if(!Dirty) return Actor.IsValid();
     auto* Connection=Context.ConnectionManager;
     TMap<int32,uint32> Items;
-    if(!Undressed) for(int32 Slot=0;Slot<19;++Slot)
+    if(!Undressed) for(uint8 Slot=0;Slot<=PlayerField::EQUIPMENT_SLOT_TABARD;++Slot)
     {
-        uint32 Entry=Player->GetField(PlayerField::VISIBLE_ITEM_BASE+Slot*2);
-        if(const auto* Item=Context.EntityManager->FindItem(Player->GetEquipmentItemGuid(Slot))) Entry=Item->Entry;
+        const uint32 Entry=WowVisibleEquipment::GetEntry(*Player,Slot);
         if(Entry) Items.Add(Slot,Entry);
     }
     for(const auto& Override:Overrides) Items.Add(Override.Key,Override.Value);

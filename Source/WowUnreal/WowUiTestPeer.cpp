@@ -129,6 +129,17 @@ void FWowUiTestPeer::Tick()
 bool FWowUiTestPeer::Command(const FString& Action,int32 Slot,uint32 Value)
 {
     if(!Ready()) return false;
+    if(Action==TEXT("equip_carried_item"))
+    {
+        for(const auto* Item:Client->PacketHandler.EntityManager.GetInventoryItems())
+        {
+            uint8 Bag=0,Position=0;
+            if(Item->Entry!=Value || !Client->FindCarriedItemPosition(Item->Guid,Bag,Position)) continue;
+            Client->SendAutoEquipItem(Bag,Position);
+            return true;
+        }
+        return false;
+    }
     if(Action==TEXT("cast_owned"))
     {
         if(Slot<0 || Slot>1 || !Client->PacketHandler.KnownSpells.Contains(Value)) return false;

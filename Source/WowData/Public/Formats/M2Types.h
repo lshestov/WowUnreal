@@ -22,6 +22,8 @@ struct WOWDATA_API FM2RenderPass
     int16 SecondaryTransformIndex=-1;
     uint8 Combiner=1,SecondaryCombiner=1;
     int8 PriorityPlane=0;
+
+    bool SupportsPortraitLighting() const { return !(Flags & 1) && BlendMode <= 1 && TextureCount == 1; }
 };
 
 struct WOWDATA_API FM2Bone
@@ -254,6 +256,13 @@ struct WOWDATA_API FM2Data
         float NearClip=0,FarClip=0;
         FVector PositionPivot=FVector::ZeroVector,TargetPivot=FVector::ZeroVector;
         TSplineTrack<FVector> PositionTrack,TargetTrack;TSplineTrack<float> RollTrack;
+
+        /** Convert Wrath's GxuXformCreateProjection_SG angle to a UE horizontal FOV. */
+        float HorizontalFovDegrees(float Aspect) const
+        {
+            const float Vertical = Fov / FMath::Sqrt(1.f + Aspect * Aspect);
+            return FMath::RadiansToDegrees(2.f * FMath::Atan(Aspect * FMath::Tan(Vertical * .5f)));
+        }
     };
     TArray<FCamera> Cameras;
     struct FEvent {FString Token;uint32 Data=0,Bone=0;FVector Position=FVector::ZeroVector;int16 GlobalSequence=-1;TArray<TArray<uint32>> Times;};

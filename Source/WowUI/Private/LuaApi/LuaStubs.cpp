@@ -3654,7 +3654,7 @@ static int L_SetPortraitTexture(lua_State* L)
     if(lua_istable(L,1)) { lua_getfield(L,1,"__name"); if(lua_isstring(L,-1)) Name=UTF8_TO_TCHAR(lua_tostring(L,-1)); lua_pop(L,1); }
     else if(lua_isstring(L,1)) Name=UTF8_TO_TCHAR(lua_tostring(L,1));
     auto* Entity=ResolveUnit(L,2);
-    if(!Name.IsEmpty()) C->FrameManager->OnPortrait(Name,Entity?Entity->Guid:0);
+    if(!Name.IsEmpty()) C->FrameManager->OnPortrait(Name,C->FrameManager->GetNamedTexture(Name),Entity?Entity->Guid:0);
     return 0;
 }
 static int L_SetPortraitToTexture(lua_State* L)

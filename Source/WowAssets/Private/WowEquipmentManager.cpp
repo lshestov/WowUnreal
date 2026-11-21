@@ -65,8 +65,7 @@ bool TryResolveAssetPath(FMpqManager* Mpq, const FString& FileName, const TCHAR*
 
     for (const FString& Candidate : Candidates)
     {
-        TArray<uint8> Raw;
-        if (Mpq->ReadFile(Candidate, Raw))
+        if (Mpq->FileExists(Candidate))
         {
             OutPath = Candidate;
             return true;
@@ -258,7 +257,7 @@ void FWowEquipmentManager::CopyEquipment(USkeletalMeshComponent* Source, USkelet
 }
 
 bool FWowEquipmentManager::ResolveEquipmentPaths(FMpqManager* Mpq, uint32 ItemDisplayId, EAttachmentPoint AttachPoint,
-    FString& OutModelPath, FString* OutTexturePath)
+    FString& OutModelPath, FString* OutTexturePath, uint32 RaceId, uint32 Gender)
 {
     const FItemDisplayInfoDbcEntry* DisplayInfo = FDbcStore::Get().ItemDisplayInfo().GetById(ItemDisplayId);
     if (!DisplayInfo)
@@ -303,7 +302,18 @@ bool FWowEquipmentManager::ResolveEquipmentPaths(FMpqManager* Mpq, uint32 ItemDi
     }
 
     const TArray<FString> CandidateDirs = GetCandidateDirs(AttachPoint);
-    if (!TryResolveAssetPath(Mpq, ModelFile, TEXT(".m2"), CandidateDirs, OutModelPath))
+    bool bResolved = false;
+    if (AttachPoint == EAttachmentPoint::Helmet && Gender <= 2)
+    {
+        const auto* Race = FDbcStore::Get().ChrRaces().GetById(RaceId);
+        if (Race && !Race->ClientPrefix.IsEmpty())
+        {
+            const FString Variant = FPaths::GetBaseFilename(ModelFile, false) + TEXT("_")
+                + Race->ClientPrefix + TEXT("MFU")[Gender];
+            bResolved = TryResolveAssetPath(Mpq, Variant, TEXT(".m2"), CandidateDirs, OutModelPath);
+        }
+    }
+    if (!bResolved && !TryResolveAssetPath(Mpq, ModelFile, TEXT(".m2"), CandidateDirs, OutModelPath))
     {
         return false;
     }
@@ -322,13 +332,13 @@ bool FWowEquipmentManager::ResolveEquipmentPaths(FMpqManager* Mpq, uint32 ItemDi
 
 USceneComponent* FWowEquipmentManager::AttachEquipment(FMpqManager* Mpq, FWowAssetCache* Cache,
     uint32 ItemDisplayId, EAttachmentPoint AttachPoint,
-    USkeletalMeshComponent* CharacterMesh, const FM2Data& CharacterM2)
+    USkeletalMeshComponent* CharacterMesh, const FM2Data& CharacterM2, uint32 RaceId, uint32 Gender)
 {
     if (!Mpq || !CharacterMesh) return nullptr;
 
     FString ModelPath;
     FString OverrideTexturePath;
-    if (!ResolveEquipmentPaths(Mpq, ItemDisplayId, AttachPoint, ModelPath, &OverrideTexturePath))
+    if (!ResolveEquipmentPaths(Mpq, ItemDisplayId, AttachPoint, ModelPath, &OverrideTexturePath, RaceId, Gender))
     {
         UE_LOG(LogWowEquip, Verbose, TEXT("No equipment visual for display %d at attachment %d"),
             ItemDisplayId, static_cast<uint32>(AttachPoint));
@@ -451,6 +461,9 @@ USceneComponent* FWowEquipmentManager::AttachEquipment(FMpqManager* Mpq, FWowAss
         MakeUniqueObjectName(Owner, UStaticMeshComponent::StaticClass(),
             *FString::Printf(TEXT("Equip_%u_%u"), ItemDisplayId, static_cast<uint32>(AttachPoint))));
     WeaponComp->ComponentTags.Add(TEXT("WowEquipment"));
+    // Equipment currently combines its M2 passes in a single static section.
+    if (WeaponData.RenderPasses.ContainsByPredicate([](const FM2RenderPass& Pass) { return !Pass.SupportsPortraitLighting(); }))
+        WeaponComp->ComponentTags.Add(TEXT("WowPortraitPreserveMaterial"));
     WeaponComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     WeaponComp->SetStaticMesh(WeaponMesh);
     WeaponComp->SetupAttachment(CharacterMesh, BoneName);

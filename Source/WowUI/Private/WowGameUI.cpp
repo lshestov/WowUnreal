@@ -124,7 +124,7 @@ void UWowGameUI::PrepareQuestDialog(uint64 Guid, const FWowQuestDetails* Details
     if (!UI || !UI->GetFrameManager() || !QuestDialog) return;
     const auto* Entity = ConnectionManager ? ConnectionManager->PacketHandler.EntityManager.Find(Guid) : nullptr;
     const FString Name = Entity ? ConnectionManager->PacketHandler.CreatureNameCache.FindRef(Entity->Entry) : FString();
-    QuestDialog->SetPresentation(*UI->GetFrameManager(),Name,ConnectionManager && uint64(ConnectionManager->GetTargetGuid())==Guid);
+    QuestDialog->SetPresentation(*UI->GetFrameManager(),Name,Entity && Entity->IsUnit() ? Guid : 0);
     if (Details) QuestDialog->PrepareItems(*UI, ConnectionManager, *Details);
 }
 

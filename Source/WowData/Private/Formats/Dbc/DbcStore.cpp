@@ -295,6 +295,8 @@ void FDbcStore::LoadDeferred(FMpqManager& Mpq)
     FDbcParser Parser;
     int32 Loaded = 0;
 
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\HelmetGeosetVisData.dbc"), Parser) && ItemDisplayInfoDbc.LoadHelmetVisibility(Parser))
+        ++Loaded;
     if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\ItemDisplayInfo.dbc"), Parser))
     {
         ItemDisplayInfoDbc.Load(Parser);

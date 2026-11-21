@@ -61,7 +61,7 @@ FCharacterTestEquipment FindCharacterTestEquipment(FMpqManager* Mpq)
         }
 
         if (Result.HelmetDisplayId == 0 &&
-            FWowEquipmentManager::ResolveEquipmentPaths(Mpq, Entry.ID, FWowEquipmentManager::EAttachmentPoint::Helmet, ResolvedModelPath))
+            FWowEquipmentManager::ResolveEquipmentPaths(Mpq, Entry.ID, FWowEquipmentManager::EAttachmentPoint::Helmet, ResolvedModelPath, nullptr, 1, 0))
         {
             Result.HelmetDisplayId = Entry.ID;
         }

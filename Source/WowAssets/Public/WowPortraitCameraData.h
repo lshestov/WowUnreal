@@ -3,7 +3,7 @@
 #include "Engine/AssetUserData.h"
 #include "WowPortraitCameraData.generated.h"
 
-/** Authored M2 portrait camera in skeletal-mesh coordinates, retained at runtime. */
+/** Authored M2 portrait view and material sections which use their original shading. */
 UCLASS()
 class WOWASSETS_API UWowPortraitCameraData : public UAssetUserData
 {
@@ -11,5 +11,6 @@ class WOWASSETS_API UWowPortraitCameraData : public UAssetUserData
 public:
     UPROPERTY() FVector Position=FVector::ZeroVector;
     UPROPERTY() FVector Target=FVector::ZeroVector;
-    UPROPERTY() float Fov=45;
+    UPROPERTY() float SquareFovDegrees=0;
+    UPROPERTY() TArray<int32> PreserveMaterialSlots;
 };

@@ -1,5 +1,6 @@
 #pragma once
 #include "CoreMinimal.h"
+#include "Components/Image.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Framework/SlateDelegates.h"
 #include "Styling/SlateTypes.h"
@@ -34,7 +35,7 @@ public:
     SLATE_END_ARGS()
 
     void Construct(const FArguments& InArgs);
-    void SetPresentation(class FWowFrameManager& Frames, const FString& Name, bool bShowTargetPortrait);
+    void SetPresentation(class FWowFrameManager& Frames, const FString& Name, uint64 QuestUnitGuid);
     void PrepareItems(class UWowUIManager& UI, class UWowConnectionManager* Connection, const FWowQuestDetails& Quest);
 
     /** Show quest details dialog (for new quest) */
@@ -75,7 +76,7 @@ private:
     TSharedPtr<class STextBlock> NpcName;
     TSharedPtr<class SBox> GreetingBlock;
     TSharedPtr<class STextBlock> GreetingText;
-    TWeakObjectPtr<class UImage> Portrait;
+    TStrongObjectPtr<UImage> Portrait;
     FOnQuestDialogAccept OnQuestAccept;
     FOnQuestDialogAccept OnQuestContinue;
     FOnQuestDialogComplete OnQuestComplete;

@@ -19,10 +19,17 @@ struct FItemDisplayInfoDbcEntry
     uint32 ParticleColorID = 0;     // 24
 };
 
+struct FHelmetGeosetVisibility
+{
+    uint32 HideForRaces[7]{};
+};
+
 class WOWDATA_API FItemDisplayInfoDbc
 {
 public:
     bool Load(const FDbcParser& Parser);
+    bool LoadHelmetVisibility(const FDbcParser& Parser);
+    const FHelmetGeosetVisibility* GetHelmetVisibility(uint32 ID) const { return HelmetVisibility.Find(ID); }
     const FItemDisplayInfoDbcEntry* GetById(uint32 ID) const;
     const TArray<FItemDisplayInfoDbcEntry>& GetAll() const { return Entries; }
     int32 Num() const { return Entries.Num(); }
@@ -30,4 +37,5 @@ public:
 private:
     TArray<FItemDisplayInfoDbcEntry> Entries;
     TMap<uint32, int32> IdIndex;
+    TMap<uint32, FHelmetGeosetVisibility> HelmetVisibility;
 };

@@ -277,7 +277,7 @@ public:
 	void DispatchMouseUp(int64 Handle, const FString& Button);
 	void DispatchClick(int64 Handle, const FString& Button, bool bMouseDown);
 	bool DispatchReceiveDrag(int64 Handle);
-	TFunction<void(const FString&,uint64)> OnPortrait;
+	TFunction<void(const FString&,UImage*,uint64)> OnPortrait;
 	TFunction<void(int64,uint64)> OnUnitModel;
 	TFunction<void(int64,float)> OnModelFacing;
     TFunction<void(int64,float)> OnModelScale;

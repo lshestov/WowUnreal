@@ -100,7 +100,15 @@ def main() -> int:
                         str(root / 'logs/wowunreal-ui-completion/Test-Captures.ps1'),
                         '-RunPath', str(run), '-ReportPath', str(captures)], check=True,
                        creationflags=subprocess.CREATE_NO_WINDOW)
-        runs.append({'run': str(run), 'steps': report['completedSteps'], 'captures': str(captures)})
+        evidence = {'run': str(run), 'steps': report['completedSteps'], 'captures': str(captures)}
+        if peer.read_json(specs[len(runs)]).get('qaVerifyUnitPortraits'):
+            portraits = output / f'portraits-{len(runs)}.json'
+            subprocess.run([str(peer.PWSH), '-NoProfile', '-File',
+                            str(Path(__file__).with_name('Test-UnitPortraitCapture.ps1')),
+                            '-RunPath', str(run), '-ReportPath', str(portraits)], check=True,
+                           creationflags=subprocess.CREATE_NO_WINDOW)
+            evidence['portraits'] = str(portraits)
+        runs.append(evidence)
 
     def finish_with_restarts(fixture: dict, name: str) -> None:
         try:
